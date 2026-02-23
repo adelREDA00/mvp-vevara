@@ -1,0 +1,2076 @@
+import { Plus, Zap } from 'lucide-react'
+import { uid } from '../../../utils/ids'
+import { useDispatch, useSelector } from 'react-redux'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, selectProjectTimelineInfo, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
+import { clearLayerSelection } from '../../../store/slices/selectionSlice'
+import { LAYER_TYPES } from '../../../store/models'
+
+
+// Custom hook for debouncing values
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = React.useState(value)
+
+  React.useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, 200)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
+
+const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColor }) => {
+  // Default world dimensions (16:9 aspect ratio)
+  const worldWidth = 1920
+  const worldHeight = 1080
+
+  // Calculate available space for preview
+  // The label overlays on top, so we can use the full card height
+  const availableWidth = cardWidth
+  const availableHeight = cardHeight
+
+  // Calculate scale to fit world dimensions in available space (maintaining aspect ratio)
+  const scaleX = availableWidth / worldWidth
+  const scaleY = availableHeight / worldHeight
+  const scale = Math.min(scaleX, scaleY) // Maintain aspect ratio
+
+  // Calculate actual preview dimensions
+  const scaledPreviewWidth = worldWidth * scale
+  const scaledPreviewHeight = worldHeight * scale
+
+  // Calculate offsets to center the content within the full-width container
+  const contentOffsetX = scale === scaleX ? 0 : (availableWidth - scaledPreviewWidth) / 2
+  const contentOffsetY = scale === scaleY ? 0 : (availableHeight - scaledPreviewHeight) / 2
+
+  // Convert backgroundColor from hex number to hex string for CSS
+  const getBackgroundColorString = () => {
+    if (backgroundColor !== undefined) {
+      if (typeof backgroundColor === 'number') {
+        return '#' + backgroundColor.toString(16).padStart(6, '0')
+      }
+      return backgroundColor
+    }
+    return '#ffffff' // Default to white
+  }
+
+  // Identify background layer and other layers
+  const backgroundLayer = layers && layers.length > 0
+    ? layers.find(layer => layer && layer.type === LAYER_TYPES.BACKGROUND)
+    : null
+
+  const visibleLayers = layers && layers.length > 0
+    ? layers.filter(layer => layer && layer.visible !== false && layer.type !== LAYER_TYPES.BACKGROUND)
+    : []
+
+  const backgroundColorString = getBackgroundColorString()
+  const backgroundImage = backgroundLayer?.data?.imageUrl || backgroundLayer?.data?.url || backgroundLayer?.data?.src || ''
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden rounded-lg"
+      style={{
+        width: `${cardWidth}px`,
+        height: `${cardHeight}px`,
+      }}
+    >
+      {/* Preview container that fills the entire card area to avoid white space */}
+      <div
+        style={{
+          position: 'absolute',
+          left: '0',
+          top: '0',
+          width: `${availableWidth}px`,
+          height: `${availableHeight}px`,
+          backgroundColor: backgroundColorString,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Content container that holds the scaled preview content */}
+        <div
+          style={{
+            position: 'absolute',
+            left: `${contentOffsetX}px`,
+            top: `${contentOffsetY}px`,
+            width: `${scaledPreviewWidth}px`,
+            height: `${scaledPreviewHeight}px`,
+            pointerEvents: 'none',
+          }}
+        >
+          {/* Background Image rendered inside the scaled content container for perfect alignment */}
+          {backgroundImage && (
+            <img
+              src={backgroundImage}
+              alt=""
+              crossOrigin="anonymous"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                pointerEvents: 'none',
+              }}
+              onError={(e) => {
+                console.warn('ScenesBar: Failed to load background image:', backgroundImage);
+                e.target.style.display = 'none';
+              }}
+            />
+          )}
+
+          {visibleLayers.map((layer) => {
+            if (!layer) return null
+
+            // Layer dimensions and transforms
+            const layerWidth = (layer.width || 100) * (layer.scaleX || 1)
+            const layerHeight = (layer.height || 100) * (layer.scaleY || 1)
+            const isTextLayer = layer.type === LAYER_TYPES.TEXT
+            const anchorX = isTextLayer ? 0 : (layer.anchorX !== undefined ? layer.anchorX : 0.5)
+            const anchorY = isTextLayer ? 0 : (layer.anchorY !== undefined ? layer.anchorY : 0.5)
+            const rotation = layer.rotation || 0
+            const opacity = layer.opacity !== undefined ? layer.opacity : 1
+
+            // Scale dimensions
+            const width = layerWidth * scale
+            const height = layerHeight * scale
+
+            // Layer position in world coordinates (x, y is anchor point position)
+            // World coordinates go from (0, 0) top-left to (worldWidth, worldHeight) bottom-right
+            const worldX = layer.x || 0
+            const worldY = layer.y || 0
+
+            // Convert to preview coordinates (relative to preview container)
+            // Account for anchor point offset
+            const left = (worldX * scale) - (width * anchorX)
+            const top = (worldY * scale) - (height * anchorY)
+
+            const style = {
+              position: 'absolute',
+              left: `${left}px`,
+              top: `${top}px`,
+              width: `${Math.max(1, width)}px`,
+              height: `${Math.max(1, height)}px`,
+              transform: `rotate(${rotation}deg)`,
+              transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
+              opacity,
+              pointerEvents: 'none',
+            }
+
+            if (layer.type === LAYER_TYPES.TEXT) {
+              const fontSize = Math.max(6, (layer.data?.fontSize || 16) * scale)
+              return (
+                <div
+                  key={layer.id}
+                  style={{
+                    ...style,
+                    fontSize: `${fontSize}px`,
+                    color: layer.data?.color || '#000000',
+                    fontFamily: layer.data?.fontFamily || 'Arial',
+                    fontWeight: layer.data?.fontWeight || 'normal',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {layer.data?.content || 'Text'}
+                </div>
+              )
+            } else if (layer.type === LAYER_TYPES.SHAPE) {
+              const fill = layer.data?.fill || '#3b82f6'
+              const stroke = layer.data?.stroke || 'transparent'
+              const strokeWidth = (layer.data?.strokeWidth || 0) * scale
+
+              return (
+                <div
+                  key={layer.id}
+                  style={{
+                    ...style,
+                    backgroundColor: fill,
+                    border: stroke !== 'transparent' ? `${strokeWidth}px solid ${stroke}` : 'none',
+                    borderRadius: '0',
+                  }}
+                />
+              )
+            } else if (layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO) {
+              const imageUrl = layer.type === LAYER_TYPES.IMAGE
+                ? (layer.data?.url || layer.data?.src || '')
+                : (layer.data?.thumbnail || '')
+
+              if (!imageUrl && layer.type === LAYER_TYPES.IMAGE) {
+                // Placeholder for image without URL
+                return (
+                  <div
+                    key={layer.id}
+                    style={{
+                      ...style,
+                      backgroundColor: '#e5e7eb',
+                      border: '1px solid #d1d5db',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '6px',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    IMG
+                  </div>
+                )
+              }
+
+              if (!imageUrl && layer.type === LAYER_TYPES.VIDEO) {
+                // Placeholder/Fallback for video without thumbnail
+                return (
+                  <div
+                    key={layer.id}
+                    style={{
+                      ...style,
+                      backgroundColor: '#1f2937',
+                      border: '1px solid #374151',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '6px',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    VIDEO
+                  </div>
+                )
+              }
+
+              return (
+                <img
+                  key={layer.id}
+                  src={imageUrl}
+                  alt=""
+                  style={{
+                    ...style,
+                    objectFit: 'cover',
+                  }}
+                  onError={(e) => {
+                    // Fallback to placeholder on error
+                    e.target.style.display = 'none'
+                  }}
+                />
+              )
+            }
+
+            return null
+          })}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, cardWidth, pageDuration = 5000, isMotionCaptureActive }) => {
+  const containerRef = useRef(null)
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute left-0 right-0 flex items-center z-30 overflow-hidden no-scrollbar"
+      style={{
+        top: '-30px', // Adjusted for reduced height
+        height: '24px',
+        padding: '2px 0',
+      }}
+    >
+      <div className="flex items-center gap-0.5 px-0 w-full h-full relative">
+        {/* Base Block - Distinct "Anchor" Representation */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onStepClick?.('base')
+          }}
+          data-step-id="base"
+          title="Base / 0s"
+          className={`h-5 transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-md group
+            ${(activeStepId === 'base' || !activeStepId)
+              ? 'bg-zinc-800 text-white border-zinc-700 w-4 min-w-[16px]'
+              : 'bg-zinc-100 text-zinc-500 border-zinc-200 hover:bg-zinc-200 hover:text-zinc-600 w-3 min-w-[12px]'
+            }
+            ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_20px_rgba(168,85,247,0.8)]' : ''}
+          `}
+        >
+          {/* Minimal Label or Icon if needed */}
+          <span className="text-[7px] font-bold">B</span>
+
+          {/* Tooltip */}
+          <div className="hidden group-hover:flex absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[8px] px-1.5 py-0.5 rounded shadow-xl whitespace-nowrap pointer-events-none">
+            Base / 0s
+          </div>
+        </button>
+
+        {/* Dynamic Step Blocks - Proportional Width */}
+        <div className="flex-1 flex items-center gap-px h-full overflow-hidden">
+          {steps.map((step, i) => {
+            const isActive = activeStepId === step.id
+            const stepDurationMs = step.duration || (pageDuration / (steps.length || 1))
+
+            return (
+              <button
+                key={step.id || i}
+                data-step-id={step.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onStepClick?.(step.id)
+                }}
+                className={`h-5 text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-md rounded-sm
+                  ${isActive
+                    ? 'bg-purple-600 text-white border-purple-500 z-10 shadow-md'
+                    : 'bg-purple-50 text-purple-600 border-purple-100 hover:bg-purple-100 hover:text-purple-700'
+                  }
+                  ${isActive && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_25px_rgba(168,85,247,0.9)]' : ''}
+                `}
+                style={{
+                  width: `${(stepDurationMs / pageDuration) * 100}%`,
+                  minWidth: '18px' // Enforced minimum clickable width
+                }}
+              >
+                <span className="truncate px-0.5">S{i + 1}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, isMotionCaptureActive }) => {
+  // Get responsive card dimensions
+  const getCardDimensions = () => {
+    if (typeof window === 'undefined') return { width: 112, height: 48 }
+
+    if (window.innerWidth >= 1024) {
+      return { width: 112, height: 48 }
+    } else if (window.innerWidth >= 640) {
+      return { width: 104, height: 46 }
+    } else {
+      return { width: 96, height: 44 }
+    }
+  }
+
+  const defaultDimensions = getCardDimensions()
+  const defaultWidth = defaultDimensions.width
+  const { height } = defaultDimensions
+
+  // Track drag position for floating preview - minimize React state updates
+  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 })
+  const cardElementRef = useRef(null)
+  const dragPositionRef = useRef({ x: 0, y: 0 })
+  const previewElementRef = useRef(null)
+  const isDraggingRef = useRef(false)
+
+  // Consolidate resize state for better performance and fewer re-renders
+  const [resizeState, setResizeState] = useState({
+    isResizing: false,
+    side: null,
+    leftOffset: 0,
+    gapSize: 0,
+    duration: null,
+    tooltipPosition: { top: 0, right: 0 }
+  })
+
+  const currentCardWidth = cardWidth || defaultWidth
+
+  // Refs for state values to access in event handlers
+  const isResizingRef = useRef(false)
+  const resizeSideRef = useRef(null)
+  const startXRef = useRef(0)
+  const startWidthRef = useRef(0)
+  const startLeftRef = useRef(0) // For left resize, track the left position
+  const cardRef = useRef(null) // Ref for the card element to get position
+
+  // Refs for event handlers to avoid stale closures
+  const handleMouseMoveRef = useRef(null)
+  const handleMouseUpRef = useRef(null)
+  const handleDragRef = useRef(null)
+
+  // Stable wrappers for event listeners
+  const resizeMouseMoveWrapper = useCallback((e) => {
+    if (handleMouseMoveRef.current) handleMouseMoveRef.current(e)
+  }, [])
+
+  const resizeMouseUpWrapper = useCallback((e) => {
+    if (handleMouseUpRef.current) handleMouseUpRef.current(e)
+  }, [])
+
+  const dragMoveWrapper = useCallback((e) => {
+    if (handleDragRef.current) handleDragRef.current(e)
+  }, [])
+
+  // Use cardWidth for display
+  const width = currentCardWidth
+
+  const isDropTarget = dragOverIndex === index && draggedIndex !== index
+  const isDraggedItem = draggedIndex === index
+
+  // Calculate if this card should move to make space for the dropped card
+  // Use insertionIndex for more accurate positioning
+  const shouldMoveLeft = draggedIndex !== null && insertionIndex !== null &&
+    index >= insertionIndex && index < draggedIndex
+  const shouldMoveRight = draggedIndex !== null && insertionIndex !== null &&
+    index < insertionIndex && index > draggedIndex
+
+  const handleDragStart = (e) => {
+    // Set drag data first - this is required for drag to work
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', index.toString())
+
+    // Mark as dragging
+    isDraggingRef.current = true
+
+    // Track initial mouse position
+    const initialPos = { x: e.clientX, y: e.clientY }
+    dragPositionRef.current = initialPos
+
+    // Set initial React state (only once at start)
+    setDragPosition(initialPos)
+
+    // Initialize preview position immediately
+    if (previewElementRef.current) {
+      const el = previewElementRef.current
+      el.style.transform = `translate3d(${e.clientX}px,${e.clientY}px,0) translate(-50%,-50%)`
+    }
+
+    // Call parent handler to update state (this sets draggedIndex)
+    onDragStart(index)
+  }
+
+  // Zero-lag drag tracking - immediate synchronous updates, no batching
+  useEffect(() => {
+    if (draggedIndex !== index) {
+      isDraggingRef.current = false
+      return
+    }
+
+    isDraggingRef.current = true
+    const previewEl = previewElementRef.current
+    if (!previewEl) return
+
+    handleDragRef.current = (e) => {
+      if (!isDraggingRef.current || !previewEl) return
+
+      const x = e.clientX
+      const y = e.clientY
+
+      previewEl.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%)`
+
+      dragPositionRef.current.x = x
+      dragPositionRef.current.y = y
+    }
+
+    // Use stable wrapper
+    document.addEventListener('dragover', dragMoveWrapper, { passive: true, capture: true })
+    document.addEventListener('mousemove', dragMoveWrapper, { passive: true, capture: true })
+    document.addEventListener('pointermove', dragMoveWrapper, { passive: true, capture: true })
+
+    return () => {
+      isDraggingRef.current = false
+      document.removeEventListener('dragover', dragMoveWrapper, { capture: true })
+      document.removeEventListener('mousemove', dragMoveWrapper, { capture: true })
+      document.removeEventListener('pointermove', dragMoveWrapper, { capture: true })
+    }
+  }, [draggedIndex, index, dragMoveWrapper])
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    if (onDragOver) {
+      onDragOver(index, e)
+    }
+  }
+
+  const handleDragEnter = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (onDragOver) {
+      onDragOver(index, e)
+    }
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'), 10)
+    if (draggedIndex !== index) {
+      onDrop(draggedIndex, index)
+    }
+    onDragEnd()
+  }
+
+  const handleDragEnd = () => {
+    isDraggingRef.current = false
+    dragPositionRef.current = { x: 0, y: 0 }
+    setDragPosition({ x: 0, y: 0 })
+    if (onDragEnd) onDragEnd()
+  }
+
+  // Resize handlers - support both left and right side resizing
+  const handleResizeMouseMove = (e) => {
+    if (!isResizingRef.current || !resizeSideRef.current) {
+      return
+    }
+
+    const deltaX = e.clientX - startXRef.current
+    let newWidth
+    const cardPaddingRight = 4 // Gap between cards
+    // Minimum width corresponds to 0.1 seconds duration
+    const defaultWidth = getCardDimensions().width
+    const minWidth = minCardWidth || (0.1 / 5.0) * defaultWidth
+
+    let leftOffset = 0
+    let gapSize = 0
+
+    if (resizeSideRef.current === 'right') {
+      newWidth = Math.max(minWidth, startWidthRef.current + deltaX)
+    } else {
+      newWidth = startWidthRef.current - deltaX
+      if (deltaX >= 0) {
+        newWidth = Math.max(minWidth, newWidth)
+        const widthDecrease = startWidthRef.current - newWidth
+        const maxTransform = Math.min(widthDecrease, cardPaddingRight * 1.5)
+        const actualWidthDecrease = Math.min(widthDecrease, startWidthRef.current - minWidth)
+        newWidth = startWidthRef.current - actualWidthDecrease
+        newWidth = Math.max(minWidth, newWidth)
+        const finalTransform = Math.min(actualWidthDecrease, maxTransform)
+        leftOffset = finalTransform
+        gapSize = finalTransform
+      }
+    }
+
+    if (onMotionStop) onMotionStop()
+    const newDuration = calculateDurationFromWidth(newWidth)
+
+    // Batch UI updates
+    let nextTooltipPos = resizeState.tooltipPosition
+    if (cardRef.current) {
+      const rect = cardRef.current.getBoundingClientRect()
+      nextTooltipPos = {
+        top: rect.top - 36,
+        right: window.innerWidth - rect.right,
+      }
+    }
+
+    // Consolidated ATOMIC state update
+    setResizeState(prev => {
+      // Small optimization: only update if something actually changed
+      const hasChanged =
+        prev.duration !== newDuration ||
+        prev.width !== newWidth ||
+        prev.leftOffset !== leftOffset ||
+        prev.gapSize !== gapSize ||
+        prev.tooltipPosition.top !== nextTooltipPos.top ||
+        prev.tooltipPosition.right !== nextTooltipPos.right
+
+      if (!hasChanged) return prev
+      return {
+        ...prev,
+        duration: newDuration,
+        width: newWidth,
+        tooltipPosition: nextTooltipPos,
+        leftOffset,
+        gapSize
+      }
+    })
+
+    if (onCardWidthChange) {
+      onCardWidthChange(index, newWidth, resizeSideRef.current)
+    }
+  }
+
+  const handleResizeMouseUp = () => {
+    const wasLeftResize = resizeSideRef.current === 'left'
+    const currentGapSize = resizeState.gapSize
+    const currentWidth = currentCardWidth
+    const originalWidth = startWidthRef.current
+
+    setResizeState(prev => ({
+      ...prev,
+      isResizing: false,
+      side: null,
+      duration: null,
+      width: null
+    }))
+
+    isResizingRef.current = false
+    resizeSideRef.current = null
+
+    // If there's a gap (from shrinking from left), slide the card left to fill it
+    if (currentGapSize > 0 && wasLeftResize) {
+      if (onCardWidthChange && currentWidth < originalWidth) {
+        onCardWidthChange(index, originalWidth, 'left')
+      }
+
+      setTimeout(() => {
+        setResizeState(prev => ({
+          ...prev,
+          leftOffset: 0,
+          gapSize: 0
+        }))
+      }, 10)
+    } else {
+      setResizeState(prev => ({
+        ...prev,
+        leftOffset: 0,
+        gapSize: 0
+      }))
+    }
+
+    // Final sync for absolute precision (bypasses throttle)
+    if (onCardWidthChange) {
+      onCardWidthChange(index, currentWidth, wasLeftResize ? 'left' : 'right', true)
+    }
+
+    document.removeEventListener('mousemove', resizeMouseMoveWrapper)
+    document.removeEventListener('mouseup', resizeMouseUpWrapper)
+
+    if (onResizeEnd) onResizeEnd()
+  }
+
+  // Update refs on each render to avoid stale closures
+  useEffect(() => {
+    handleMouseMoveRef.current = handleResizeMouseMove
+    handleMouseUpRef.current = handleResizeMouseUp
+    isResizingRef.current = resizeState.isResizing
+    resizeSideRef.current = resizeState.side
+  })
+
+  useEffect(() => {
+    return () => {
+      document.removeEventListener('mousemove', resizeMouseMoveWrapper)
+      document.removeEventListener('mouseup', resizeMouseUpWrapper)
+      document.removeEventListener('dragover', dragMoveWrapper, { capture: true })
+      document.removeEventListener('mousemove', dragMoveWrapper, { capture: true })
+      document.removeEventListener('pointermove', dragMoveWrapper, { capture: true })
+    }
+  }, [resizeMouseMoveWrapper, resizeMouseUpWrapper, dragMoveWrapper])
+
+  const handleResizeMouseDown = (e, side) => {
+    e.stopPropagation()
+    e.preventDefault()
+
+    const startX = e.clientX
+    const startWidth = currentCardWidth
+
+    if (side === 'left' && e.currentTarget.offsetParent) {
+      startLeftRef.current = e.currentTarget.offsetParent.offsetLeft || 0
+    }
+
+    isResizingRef.current = true
+    resizeSideRef.current = side
+    startXRef.current = startX
+    startWidthRef.current = startWidth
+
+    const initialDuration = calculateDurationFromWidth(startWidth)
+    const initialWidth = calculateWidthFromDuration(initialDuration)
+
+    let initialTooltipPos = { top: 0, right: 0 }
+    if (cardRef.current) {
+      const rect = cardRef.current.getBoundingClientRect()
+      initialTooltipPos = {
+        top: rect.top - 36,
+        right: window.innerWidth - rect.right,
+      }
+    }
+
+    setResizeState({
+      isResizing: true,
+      side,
+      duration: initialDuration,
+      width: initialWidth, // Track width locally for zero-lag UI
+      leftOffset: 0,
+      gapSize: 0,
+      tooltipPosition: initialTooltipPos
+    })
+
+    document.addEventListener('mousemove', resizeMouseMoveWrapper, { passive: false })
+    document.addEventListener('mouseup', resizeMouseUpWrapper, { passive: false })
+
+    if (onResizeStart) onResizeStart()
+  }
+
+  const handleCardClickWithResize = (e) => {
+    if (e.target.classList.contains('resize-handle') || resizeState.isResizing) {
+      return
+    }
+    if (e.target.closest('.resize-handle')) {
+      return
+    }
+    if (onClick) {
+      onClick()
+    }
+  }
+
+  // Ensure width never goes below minimum (0.1 seconds)
+  // Calculate fallback: width for 0.1s = (0.1/5) * defaultWidth
+  const minWidthFallback = minCardWidth || (0.1 / 5.0) * defaultWidth
+
+  // PERFORMANCE FIX: Use local width during interaction for 1:1 mouse tracking speed
+  const interactionWidth = resizeState.isResizing && resizeState.width !== undefined ? resizeState.width : currentCardWidth
+  const actualWidth = Math.max(interactionWidth, minWidthFallback)
+
+  return (
+    <div
+      ref={cardRef}
+      className="relative flex-shrink-0"
+      style={{
+        width: `${actualWidth}px`,
+        minWidth: `${minWidthFallback}px`,
+        overflow: 'visible',
+        transition: resizeState.isResizing ? 'none' : 'width 0.1s ease-out, transform 0.2s ease-out',
+        marginRight: '4px',
+        transform: resizeState.leftOffset !== 0 ? `translateX(${resizeState.leftOffset}px)` : 'none',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Grey placeholder at original position when dragging */}
+      {isDraggedItem && draggedIndex !== null && (
+        <div
+          className="absolute z-10 pointer-events-none"
+          style={{
+            left: '0',
+            top: '0',
+            width: `${width}px`,
+            height: `${height}px`,
+            backgroundColor: '#9ca3af',
+            borderRadius: '8px',
+            border: '2px solid #6b7280',
+            opacity: 0.6,
+          }}
+        />
+      )}
+
+      {/* Floating drag preview - rendered via portal */}
+      {isDraggedItem && draggedIndex !== null && typeof document !== 'undefined' && (
+        createPortal(
+          <div
+            ref={previewElementRef}
+            className="fixed pointer-events-none z-[9999]"
+            style={{
+              left: '0',
+              top: '0',
+              transform: `translate3d(${dragPosition.x}px,${dragPosition.y}px,0) translate(-50%,-50%)`,
+              width: `${width}px`,
+              height: `${height}px`,
+              willChange: 'transform',
+              transition: 'none',
+              backfaceVisibility: 'hidden',
+              contain: 'strict',
+              isolation: 'isolate',
+              transformOrigin: 'center center',
+              pointerEvents: 'none',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+            }}
+          >
+            <div
+              className="bg-white rounded-lg border-2 shadow-2xl"
+              style={{
+                width: '100%',
+                height: `${height}px`,
+                borderColor: isActive ? '#3b82f6' : '#e5e7eb',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 10px 15px -5px rgba(0, 0, 0, 0.3)',
+                willChange: 'transform',
+                transform: 'translateZ(0)',
+                backfaceVisibility: 'hidden',
+              }}
+            >
+              <ScenePreview
+                layers={layers}
+                cardWidth={width}
+                cardHeight={height}
+                backgroundColor={scene.backgroundColor}
+              />
+              <div className="absolute bottom-0.5 left-0.5 sm:bottom-1 sm:left-1 md:bottom-1.5 md:left-1.5 text-black text-[8px] sm:text-[8px] md:text-[9px] font-medium z-10 pointer-events-none">
+                {formatDuration(scene.duration || 0)}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      )}
+
+      <div
+        ref={cardElementRef}
+        className="relative group flex-shrink-0"
+        style={{
+          opacity: isDraggedItem ? 0 : 1,
+          transition: isDraggedItem ? 'none' : 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+          transform: shouldMoveLeft ? 'translateX(-8px)' : shouldMoveRight ? 'translateX(8px)' : 'translateX(0)',
+          overflow: 'visible', // Allow purple bars to extend above card
+        }}
+        draggable={!resizeState.isResizing}
+        onDragStart={(e) => {
+          // Don't allow drag if clicking on resize handle
+          if (e.target.classList.contains('resize-handle') || e.target.closest('.resize-handle')) {
+            e.preventDefault()
+            e.stopPropagation()
+            return false
+          }
+          // Only proceed if not resizing and handler exists
+          if (resizeState.isResizing) {
+            e.preventDefault()
+            return false
+          }
+          if (handleDragStart) {
+            handleDragStart(e)
+          }
+        }}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDrop={handleDrop}
+      >
+        <div
+          onClick={handleCardClickWithResize}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            const clickX = e.clientX - rect.left
+            const cardWidth = rect.width
+            if (clickX < 12 || clickX > cardWidth - 12) {
+              e.stopPropagation()
+            }
+          }}
+          className={`bg-white rounded-lg border-2 shadow-lg transition-colors touch-manipulation flex-shrink-0 relative ${isActive ? 'border-blue-500' : 'border-transparent hover:border-blue-500 active:border-blue-400'
+            }`}
+          style={{
+            width: '100%',
+            height: `${height}px`,
+            pointerEvents: 'auto',
+            overflow: resizeState.isResizing ? 'visible' : 'hidden', // Allow tooltip to show when resizing
+            cursor: isDraggingRef.current ? 'grabbing' : 'grab',
+          }}
+        >
+          <ScenePreview
+            layers={layers}
+            cardWidth={width}
+            cardHeight={height}
+            backgroundColor={scene.backgroundColor}
+          />
+        </div>
+        <div className="absolute bottom-0.5 left-0.5 sm:bottom-1 sm:left-1 md:bottom-1.5 md:left-1.5 text-black text-[8px] sm:text-[8px] md:text-[9px] font-medium z-10 pointer-events-none">
+          {formatDuration(scene.duration || 0)}
+        </div>
+        {/* Motion indicator - shows thunder icon when scene has motion steps */}
+        {hasMotionSteps && (
+          <div
+            className="absolute bottom-0.5 right-0.5 sm:bottom-1 sm:right-1 md:bottom-1.5 md:right-1.5 z-10 pointer-events-none"
+            title={`${motionStepCount} animation step${motionStepCount !== 1 ? 's' : ''}`}
+          >
+            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-400 fill-yellow-400" />
+          </div>
+        )}
+        {/* Interactive Motion Step Blocks - Replacement for simple purple bars */}
+        <MotionStepsBar
+          steps={motionFlow?.steps || []}
+          activeStepId={isActive ? activeStepId : null} // Only show active step if the scene itself is active
+          onStepClick={onStepClick}
+          isMotionCaptureActive={isMotionCaptureActive}
+          cardWidth={width}
+          pageDuration={scene.duration || 5000}
+        />
+      </div>
+
+      {/* Left resize handle */}
+      <div
+        className="resize-handle absolute left-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          e.nativeEvent.stopImmediatePropagation()
+          handleResizeMouseDown(e, 'left')
+        }}
+        onDragStart={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        draggable={false}
+        style={{
+          cursor: 'ew-resize',
+          width: '12px',
+          left: '0px',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none',
+          pointerEvents: 'auto',
+          zIndex: 50,
+        }}
+        onMouseEnter={(e) => {
+          if (!resizeState.isResizing) {
+            e.currentTarget.style.borderLeft = '2px solid rgba(59, 130, 246, 0.6)'
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!resizeState.isResizing) {
+            e.currentTarget.style.borderLeft = 'none'
+          }
+        }}
+        title="Drag to resize width from left"
+      >
+        {resizeState.isResizing && resizeState.side === 'left' && (
+          <div
+            style={{
+              position: 'absolute',
+              left: '-2px', // Align with outer edge
+              top: '2px', // Stay within rounded border
+              bottom: '2px',
+              width: '2px',
+              backgroundColor: 'rgba(59, 130, 246, 0.9)',
+              boxShadow: '0 0 4px rgba(59, 130, 246, 0.5)',
+              zIndex: 100,
+            }}
+          />
+        )}
+      </div>
+
+      {/* Right resize handle */}
+      <div
+        className="resize-handle absolute right-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
+        onMouseDown={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          e.nativeEvent.stopImmediatePropagation()
+          handleResizeMouseDown(e, 'right')
+        }}
+        onDragStart={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        draggable={false}
+        style={{
+          cursor: 'ew-resize',
+          width: '12px',
+          right: '0px',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none',
+          pointerEvents: 'auto',
+          zIndex: 50,
+        }}
+        onMouseEnter={(e) => {
+          if (!resizeState.isResizing) {
+            e.currentTarget.style.borderRight = '2px solid rgba(59, 130, 246, 0.6)'
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!resizeState.isResizing) {
+            e.currentTarget.style.borderRight = 'none'
+          }
+        }}
+        title="Drag to resize width from right"
+      >
+        {resizeState.isResizing && resizeState.side === 'right' && (
+          <div
+            style={{
+              position: 'absolute',
+              right: '-2px', // Align with outer edge
+              top: '2px', // Stay within rounded border
+              bottom: '2px',
+              width: '2px',
+              backgroundColor: 'rgba(59, 130, 246, 0.9)',
+              boxShadow: '0 0 4px rgba(59, 130, 246, 0.5)',
+              zIndex: 100,
+            }}
+          />
+        )}
+      </div>
+
+      {/* Duration tooltip - rendered outside container using portal */}
+      {resizeState.isResizing && resizeState.duration !== null && typeof document !== 'undefined'
+        ? createPortal(
+          <div
+            className="fixed pointer-events-none"
+            style={{
+              top: `${resizeState.tooltipPosition.top}px`,
+              right: `${resizeState.tooltipPosition.right}px`,
+              transform: 'translateX(50%)',
+              zIndex: 9999,
+            }}
+          >
+            <div
+              className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+              style={{
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+              }}
+            >
+              {formatDuration(resizeState.duration)}
+            </div>
+            {/* Arrow pointing down to the right border */}
+            <div
+              className="absolute left-1/2 top-full transform -translate-x-1/2"
+              style={{
+                width: '0',
+                height: '0',
+                borderLeft: '5px solid transparent',
+                borderRight: '5px solid transparent',
+                borderTop: '5px solid rgb(39, 39, 42)',
+              }}
+            />
+          </div>,
+          document.body
+        )
+        : null}
+    </div>
+  )
+})
+
+const ScenesBar = React.memo(({
+  currentTime = 0,
+  totalTime = 12,
+  worldWidth = 1920,
+  worldHeight = 1080,
+  onSeek,
+  onMotionStop,
+  currentTimeStepId = null,
+  isMotionCaptureActive,
+  onStepClick,
+  bottomSectionHeight = null // Dynamic height from EditorPage
+}) => {
+  const dispatch = useDispatch()
+  const scenes = useSelector(selectScenes)
+  const currentSceneId = useSelector(selectCurrentSceneId)
+  const timelineInfo = useSelector(selectProjectTimelineInfo)
+  const allLayers = useSelector(state => state.project.layers)
+  const sceneMotionFlows = useSelector(selectSceneMotionFlows)
+
+  // [PERFORMANCE] Debounce layers update to prevent live re-renders of all scene cards
+  // during active transforms on the canvas. Previews will catch up after 500ms of inactivity.
+  const debouncedLayers = useDebounce(allLayers, 500)
+
+  const [draggedIndex, setDraggedIndex] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+  const [insertionIndex, setInsertionIndex] = useState(null) // More precise: where to insert
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false)
+  const [isHoveringPlayhead, setIsHoveringPlayhead] = useState(false)
+  const [playheadTooltipTime, setPlayheadTooltipTime] = useState(null)
+  const [playheadTooltipPosition, setPlayheadTooltipPosition] = useState({ top: 0, left: 0 })
+  const timelineRef = useRef(null)
+  const cardsContainerRef = useRef(null)
+  const playheadElementRef = useRef(null) // Ref for direct DOM manipulation
+
+  // Track card widths - initialize with default widths
+  const getDefaultCardWidth = useCallback(() => {
+    if (typeof window === 'undefined') return 112
+    if (window.innerWidth >= 1024) return 112
+    if (window.innerWidth >= 640) return 104
+    return 96
+  }, [])
+
+  // Calculate duration from width (default width = 5 seconds)
+  const calculateDurationFromWidth = useCallback((width) => {
+    const defaultWidth = getDefaultCardWidth()
+    const defaultDuration = 5.0 // 5 seconds for default width
+    return (width / defaultWidth) * defaultDuration
+  }, [getDefaultCardWidth])
+
+  // Calculate width from duration (default width = 5 seconds)
+  const calculateWidthFromDuration = useCallback((duration) => {
+    const defaultWidth = getDefaultCardWidth()
+    const defaultDuration = 5.0 // 5 seconds for default width
+    return (duration / defaultDuration) * defaultWidth
+  }, [getDefaultCardWidth])
+
+  const getDefaultCardHeight = useCallback(() => {
+    if (typeof window === 'undefined') return 48
+    if (window.innerWidth >= 1024) return 48
+    if (window.innerWidth >= 640) return 46
+    return 44
+  }, [])
+
+  // Utility Formatters
+  const formatTimeLabel = useCallback((seconds) => {
+    if (seconds === 0) return '0'
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    if (mins === 0) {
+      return `0:${secs.toString().padStart(2, '0')}`
+    }
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }, [])
+
+  const formatDuration = useCallback((seconds) => {
+    return `${seconds.toFixed(1)}s`
+  }, [])
+
+  const formatTime = useCallback((seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }, [])
+
+  // Get minimum width based on 0.1 seconds minimum duration
+  const getMinCardWidth = useCallback(() => {
+    return calculateWidthFromDuration(0.1)
+  }, [calculateWidthFromDuration])
+
+  // Track scene IDs to preserve widths across reordering/deletion
+  const [sceneIdToWidth, setSceneIdToWidth] = useState(() => {
+    const mapping = {}
+    scenes.forEach((scene) => {
+      mapping[scene.id] = calculateWidthFromDuration(scene.duration || 5.0)
+    })
+    return mapping
+  })
+
+  // Track last dispatched duration to avoid Redux updates
+  const lastDispatchedDurationRef = useRef({})
+
+  // Track which scene is currently being resized to skip Redux -> local sync for it
+  const resizingSceneIdRef = useRef(null)
+
+  // Update scene ID to width mapping when scenes change
+  useEffect(() => {
+    setSceneIdToWidth(prev => {
+      const newMapping = { ...prev }
+      let changed = false
+
+      // Add/Update mappings for scenes
+      scenes.forEach(scene => {
+        // SKIP if this scene is currently being resized by the user
+        // (we prioritize local interaction state over store state during resize)
+        if (resizingSceneIdRef.current === scene.id) return
+
+        const expectedWidth = calculateWidthFromDuration(scene.duration || 5.0)
+        // Only update if the width is meaningfully different (> 0.5px)
+        // to prevent rounding noise loops
+        if (newMapping[scene.id] === undefined || Math.abs(newMapping[scene.id] - expectedWidth) > 0.5) {
+          newMapping[scene.id] = expectedWidth
+          changed = true
+        }
+      })
+
+      // Remove mappings for deleted scenes
+      const sceneIds = new Set(scenes.map(s => s.id))
+      Object.keys(newMapping).forEach(sceneId => {
+        if (!sceneIds.has(sceneId)) {
+          delete newMapping[sceneId]
+          changed = true
+        }
+      })
+
+      return changed ? newMapping : prev
+    })
+  }, [scenes, calculateWidthFromDuration])
+
+  // Consolidated source of truth for card widths
+  const cardWidths = useMemo(() => {
+    const defaultWidth = getDefaultCardWidth()
+    const widths = {}
+    scenes.forEach((scene, index) => {
+      widths[index] = sceneIdToWidth[scene.id] || calculateWidthFromDuration(scene.duration || 5.0)
+    })
+    return widths
+  }, [scenes, sceneIdToWidth, calculateWidthFromDuration, getDefaultCardWidth])
+
+  // Throttle Redux updates during interaction
+  const lastDispatchTimeRef = useRef(0)
+  const lastLocalUpdateTimeRef = useRef(0)
+  const THROTTLE_MS = 100 // 10 Redux updates per second max during resize
+  const LOCAL_THROTTLE_MS = 32 // ~30fps for parent layout during resize
+
+
+  // Handle card width change - update the card and calculate duration
+  const handleCardWidthChange = useCallback((index, newWidth, side = 'right', isFinal = false) => {
+    const minWidth = getMinCardWidth()
+    const clampedWidth = Math.max(newWidth, minWidth)
+
+    const scene = scenes[index]
+    if (!scene) return
+
+    // Update local state for visual responsiveness (throttled for parent layout)
+    const nowLocal = Date.now()
+    const shouldUpdateLocal = isFinal || (nowLocal - lastLocalUpdateTimeRef.current >= LOCAL_THROTTLE_MS)
+
+    if (shouldUpdateLocal) {
+      setSceneIdToWidth(prev => {
+        if (prev[scene.id] === clampedWidth) return prev
+        return { ...prev, [scene.id]: clampedWidth }
+      })
+      lastLocalUpdateTimeRef.current = nowLocal
+    }
+
+    // Throttle Redux dispatch to avoid overwhelming the store
+    const now = Date.now()
+    const timeSinceLastDispatch = now - lastDispatchTimeRef.current
+
+    // Calculate new duration
+    const newDuration = calculateDurationFromWidth(clampedWidth)
+    const roundedDuration = Math.round(newDuration * 10) / 10
+
+    const lastDispatched = lastDispatchedDurationRef.current[scene.id] || scene.duration
+    const durationDelta = Math.abs(lastDispatched - roundedDuration)
+
+    // Dispatch if:
+    // 1. Duration changed enough (>= 0.1s) AND enough time passed (100ms)
+    // 2. OR it's the final update
+    // 3. OR if it's been a while since last update and there's ANY change
+    if (isFinal || (durationDelta >= 0.1 && timeSinceLastDispatch >= THROTTLE_MS) || durationDelta >= 1.0) {
+      lastDispatchTimeRef.current = now
+      lastDispatchedDurationRef.current[scene.id] = roundedDuration
+
+      let trimStartDelta = 0
+      if (side === 'left') {
+        const oldWidth = calculateWidthFromDuration(scene.duration)
+        const widthDelta = oldWidth - clampedWidth
+        trimStartDelta = calculateDurationFromWidth(widthDelta)
+      }
+
+      dispatch(updateScene({
+        id: scene.id,
+        duration: roundedDuration,
+        trimStartDelta
+      }))
+    }
+  }, [scenes, dispatch, getMinCardWidth, calculateDurationFromWidth, calculateWidthFromDuration])
+
+  const handleResizeStart = useCallback((index) => {
+    const scene = scenes[index]
+    if (scene) {
+      resizingSceneIdRef.current = scene.id
+    }
+  }, [scenes])
+
+  const handleResizeEnd = useCallback(() => {
+    resizingSceneIdRef.current = null
+    // Trigger a final sync to ensure exact values
+    if (onMotionStop) onMotionStop()
+  }, [onMotionStop])
+
+  // Calculate offsets for fast lookups
+  const cumulativeOffsets = useMemo(() => {
+    const offsets = []
+    let accumulatedTime = 0
+    let accumulatedWidth = 0
+    const cardPaddingRight = 4
+
+    scenes.forEach((scene, i) => {
+      const duration = scene.duration || 5.0
+      const width = cardWidths[i] || getDefaultCardWidth()
+
+      offsets.push({
+        startTime: accumulatedTime,
+        startWidth: accumulatedWidth,
+        duration,
+        width
+      })
+
+      accumulatedTime += duration
+      accumulatedWidth += width + (i < scenes.length - 1 ? cardPaddingRight : 0)
+    })
+
+    return {
+      scenes: offsets,
+      totalTime: accumulatedTime,
+      totalWidth: accumulatedWidth
+    }
+  }, [scenes, cardWidths, getDefaultCardWidth])
+
+  const totalCardsWidth = cumulativeOffsets.totalWidth
+
+  // Calculate playhead position based on actual card widths and current time
+  const calculatePlayheadPosition = (time) => {
+    const { scenes: sceneOffsets, totalTime: tTime, totalWidth: tWidth } = cumulativeOffsets
+    if (tTime <= 0 || sceneOffsets.length === 0) return 0
+
+    const clampedTime = Math.max(0, Math.min(time, tTime))
+
+    // Find the scene containing this time
+    const sceneIndex = sceneOffsets.findIndex(s => clampedTime <= s.startTime + s.duration)
+    const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+    if (!targetScene) return 0
+
+    const timeInScene = clampedTime - targetScene.startTime
+    const progressInScene = targetScene.duration > 0 ? timeInScene / targetScene.duration : 0
+    return targetScene.startWidth + (targetScene.width * progressInScene)
+  }
+
+  const playheadPositionPx = useMemo(() => {
+    return calculatePlayheadPosition(currentTime)
+  }, [currentTime, cumulativeOffsets])
+
+  // Clamp playhead position to never exceed the end of the last card
+  const playheadPosition = useMemo(() => {
+    return Math.min(playheadPositionPx, totalCardsWidth)
+  }, [playheadPositionPx, totalCardsWidth])
+
+  // Calculate pixel position for a given time
+  const calculateTimePosition = useCallback((time) => {
+    return calculatePlayheadPosition(time)
+  }, [cumulativeOffsets])
+
+  // Grouped Memoized Markers for performance
+  const markersData = useMemo(() => {
+    const major = []
+    const minor = []
+    const maxMarkersTime = Math.max(Math.ceil(totalTime / 5) * 5, 5)
+
+    for (let i = 0; i <= maxMarkersTime; i += 5) {
+      if (i > totalTime) break
+
+      const pos = calculateTimePosition(i)
+      major.push({
+        time: i,
+        position: pos,
+        label: formatTimeLabel(i)
+      })
+
+      // Add minor markers for this major interval
+      if (i < totalTime) {
+        for (let j = 1; j <= 4; j++) {
+          const mTime = i + j
+          if (mTime >= totalTime) break
+          minor.push({
+            time: mTime,
+            position: calculateTimePosition(mTime)
+          })
+        }
+      }
+    }
+    return { major, minor }
+  }, [totalTime, calculateTimePosition, formatTimeLabel])
+
+  const majorMarkers = markersData.major
+  const minorMarkers = markersData.minor
+
+  // Sync playhead position when dragging (for smooth dragging)
+  useEffect(() => {
+    if (isDraggingPlayhead && playheadElementRef.current) {
+      // During drag, update position directly for instant feedback
+      const newLeft = `${16 + playheadPosition}px`
+      playheadElementRef.current.style.left = newLeft
+    }
+  }, [playheadPosition, isDraggingPlayhead])
+
+
+  const handleTimelineClick = (e) => {
+    if (!timelineRef.current || !onSeek || isDraggingPlayhead) return
+
+    const rect = timelineRef.current.getBoundingClientRect()
+    const padding = 16 // 16px padding on each side
+    const clickX = e.clientX - rect.left - padding
+    const availableWidth = rect.width - (padding * 2)
+    const percentage = Math.max(0, Math.min(1, clickX / availableWidth))
+    const seekTime = percentage * totalTime
+    onSeek(seekTime)
+  }
+
+  const handlePlayheadMouseDown = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingPlayhead(true)
+  }
+
+  // Add global mouse event listeners for dragging
+  useEffect(() => {
+    if (!isDraggingPlayhead) return
+
+    const handleMouseMove = (e) => {
+      if (!cardsContainerRef.current || !onSeek) return
+
+      // Calculate position based on actual card container, not timeline ruler
+      const containerRect = cardsContainerRef.current.getBoundingClientRect()
+      const mouseX = e.clientX - containerRect.left
+
+      // Clamp to container bounds
+      const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+
+      // Convert pixel position to time using cumulative offsets (no loop)
+      const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
+      let seekTime = 0
+
+      // Find which scene the mouse is over
+      const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+      const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+      if (targetScene) {
+        const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+        const progressInCard = Math.min(1, positionInCard / targetScene.width)
+        seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+      } else {
+        seekTime = tTime
+      }
+
+      // Update playhead position directly for instant feedback
+      if (playheadElementRef.current) {
+        playheadElementRef.current.style.left = `${16 + clampedX}px`
+      }
+
+      // Update tooltip time and position
+      setPlayheadTooltipTime(seekTime)
+      if (timelineRef.current) {
+        const timelineRect = timelineRef.current.getBoundingClientRect()
+        // Position tooltip above the caret tip (caret is -1.5rem = -6px, plus caret height ~10px = -16px from top)
+        setPlayheadTooltipPosition({
+          top: timelineRect.top - 16 - 28, // 16px for caret tip, 28px for tooltip height + spacing
+          left: timelineRect.left + 16 + clampedX, // 16px padding + playhead position
+        })
+      }
+
+      // Update time state
+      onSeek(seekTime)
+    }
+
+    const handleMouseUp = () => {
+      setIsDraggingPlayhead(false)
+      setPlayheadTooltipTime(null)
+    }
+
+    // Prevent text selection while dragging
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'grabbing'
+
+    document.addEventListener('mousemove', handleMouseMove, { passive: false })
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+  }, [isDraggingPlayhead, totalTime, totalCardsWidth, onSeek, scenes, cardWidths])
+
+  const handleAddScene = () => {
+    const newSceneId = uid()
+    dispatch(addScene({
+      id: newSceneId,
+      name: `Scene ${scenes.length + 1}`,
+      duration: 5.0, // Default duration is 5 seconds
+      transition: 'None',
+      width: worldWidth,
+      height: worldHeight,
+    }))
+
+    // Auto-switch to the new scene (behavior similar to handleSwitchScene)
+    // This triggers the scene switch effect in EditorPage that cancels motion capture
+    if (onMotionStop) onMotionStop()
+    dispatch(clearLayerSelection())
+    dispatch(setCurrentScene(newSceneId))
+  }
+
+  const handleSwitchScene = (sceneId) => {
+    // Stop playback if switching scenes manually
+    if (onMotionStop) onMotionStop()
+
+    // Clear layer selection when switching scenes to prevent selection box flash
+    dispatch(clearLayerSelection())
+    dispatch(setCurrentScene(sceneId))
+
+    // Automatically seek the playhead to the global start time of the selected scene
+    // This ensures that the engine and UI are perfectly synced to the new scene
+    if (timelineInfo && onSeek) {
+      const sceneInfo = timelineInfo.find(s => s.id === sceneId)
+      if (sceneInfo) {
+        console.log(`🎯 [ScenesBar] Manually switching to scene: ${sceneId}, startTime: ${sceneInfo.startTime}s. TimelineInfo length: ${timelineInfo.length}`)
+        onSeek(sceneInfo.startTime)
+      } else {
+        console.error(`❌ [ScenesBar] FAILED to find sceneInfo for sceneId: ${sceneId}. Available IDs:`, timelineInfo.map(s => s.id))
+      }
+    }
+  }
+
+  // Get layers for each scene
+  const getSceneLayers = (sceneId) => {
+    const scene = scenes.find(s => s.id === sceneId)
+    if (!scene) return []
+    // Use debounced layers for the preview content
+    return scene.layers.map(layerId => debouncedLayers[layerId]).filter(Boolean)
+  }
+
+  // Simplified and robust insertion index calculation
+  // Uses the center of the dragged card (mouse position) to determine drop position
+  // Much larger drop zones for first/last positions to make them easy to target
+  const calculateInsertionIndex = (clientX) => {
+    if (!cardsContainerRef.current || draggedIndex === null) {
+      return null
+    }
+
+    const container = cardsContainerRef.current
+    const containerRect = container.getBoundingClientRect()
+    const cardCenterX = clientX - containerRect.left
+
+    const gap = 4
+    const firstLastDropZone = 200 // Large drop zone for first/last positions
+
+    // Build positions array excluding dragged card
+    const positions = []
+    let currentX = 0
+
+    for (let i = 0; i < scenes.length; i++) {
+      if (i === draggedIndex) continue
+
+      const cardWidth = cardWidths[i] || getDefaultCardWidth()
+      positions.push({
+        originalIndex: i,
+        leftEdge: currentX,
+        rightEdge: currentX + cardWidth,
+        center: currentX + (cardWidth / 2)
+      })
+
+      currentX += cardWidth + gap
+    }
+
+    if (positions.length === 0) {
+      return 0
+    }
+
+    const firstPos = positions[0]
+    const lastPos = positions[positions.length - 1]
+    const tolerance = 2
+
+    // FIRST: Check middle positions (cards and gaps between them)
+    // This must happen BEFORE first/last checks to avoid false positives
+    for (let i = 0; i < positions.length; i++) {
+      const pos = positions[i]
+      const nextPos = positions[i + 1]
+
+      // Check if center is in gap between cards (with tolerance)
+      if (nextPos) {
+        const gapStart = pos.rightEdge - tolerance
+        const gapEnd = nextPos.leftEdge + tolerance
+
+        if (cardCenterX >= gapStart && cardCenterX < gapEnd) {
+          // In gap - use gap center to decide
+          const gapCenter = pos.rightEdge + (gap / 2)
+          if (cardCenterX < gapCenter) {
+            // Insert before next card
+            return draggedIndex < nextPos.originalIndex ? nextPos.originalIndex - 1 : nextPos.originalIndex
+          } else {
+            // Insert after current card
+            return draggedIndex < pos.originalIndex ? pos.originalIndex : pos.originalIndex + 1
+          }
+        }
+      }
+
+      // Check if center is over a card (with tolerance)
+      const cardStart = pos.leftEdge - tolerance
+      const cardEnd = pos.rightEdge + tolerance
+
+      if (cardCenterX >= cardStart && cardCenterX < cardEnd) {
+        // Use card center as threshold
+        if (cardCenterX < pos.center) {
+          // Insert before this card
+          return draggedIndex < pos.originalIndex ? pos.originalIndex - 1 : pos.originalIndex
+        } else {
+          // Insert after this card
+          if (draggedIndex < pos.originalIndex) {
+            // Dragging from left: after removal, this card moves left by 1, insert after it
+            return pos.originalIndex
+          } else {
+            // Dragging from right: this card's index doesn't change
+            // After removal, we want to insert after this card
+            // If this is the last card in positions array, we want to insert at the end
+            // Otherwise, insert at the next position
+            if (i === positions.length - 1) {
+              // This is the last visible card, insert at the end
+              return scenes.length - 1
+            } else {
+              // Insert after this card
+              return pos.originalIndex + 1
+            }
+          }
+        }
+      }
+    }
+
+    // SECOND: Check first/last positions with extended drop zones
+    // Only trigger if card center is clearly outside the middle card area
+    // Use extended zones to make first/last positions easy to target
+
+    // First position: extended zone to the left of first card
+    // If center is to the left of first card (even slightly), and within extended zone
+    if (cardCenterX < firstPos.leftEdge + firstLastDropZone) {
+      return 0
+    }
+
+    // Last position: extended zone to the right of last card
+    // If center is to the right of last card (even slightly), trigger last position
+    // Use tolerance to make it easy to trigger when near the right edge
+    if (cardCenterX > lastPos.rightEdge - tolerance) {
+      return scenes.length - 1
+    }
+
+    // Fallback - if we somehow didn't match anything, use last position
+    return scenes.length - 1
+  }
+
+  // Use mouse events to track drag position and handle drop via dragend
+  useEffect(() => {
+    if (draggedIndex === null) return
+
+    const handleMouseMove = (e) => {
+      // Calculate insertion index based on mouse position during drag
+      const newIndex = calculateInsertionIndex(e.clientX)
+      if (newIndex !== insertionIndex) {
+        setInsertionIndex(newIndex)
+      }
+    }
+
+    const handleMouseUp = (e) => {
+      // Calculate the final insertion index based on current mouse position
+      const finalInsertionIndex = calculateInsertionIndex(e.clientX)
+
+      // Perform the drop operation if we have a valid insertion index
+      if (finalInsertionIndex !== null && finalInsertionIndex !== draggedIndex) {
+        handleDrop(draggedIndex, finalInsertionIndex)
+      }
+
+      // Always reset drag state
+      handleDragEnd()
+    }
+
+    // Listen for mouse events during drag
+    document.addEventListener('mousemove', handleMouseMove, { passive: true })
+    document.addEventListener('mouseup', handleMouseUp, { passive: false })
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggedIndex])
+
+  const handleDragStart = (index) => {
+    setDraggedIndex(index)
+    setInsertionIndex(null)
+  }
+
+  const handleDragOver = (index, e) => {
+    if (draggedIndex === null) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+
+    // Immediate calculation - no delays
+    const newInsertionIndex = calculateInsertionIndex(e.clientX)
+
+    if (newInsertionIndex !== null && newInsertionIndex !== draggedIndex) {
+      setDragOverIndex(index)
+      setInsertionIndex(newInsertionIndex)
+    } else if (draggedIndex === index) {
+      setDragOverIndex(null)
+      setInsertionIndex(null)
+    }
+  }
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+    setInsertionIndex(null)
+  }
+
+  const handleDrop = (fromIndex, toIndex) => {
+    // Always use insertionIndex if available (most accurate), otherwise use toIndex
+    let finalIndex = insertionIndex !== null ? insertionIndex : toIndex
+
+    // Clamp finalIndex to valid range (reorderScene requires toIndex < scenes.length)
+    if (finalIndex >= scenes.length) {
+      finalIndex = scenes.length - 1
+    }
+
+    // Ensure we have valid indices and they're different
+    if (fromIndex !== null && finalIndex !== null &&
+      fromIndex !== finalIndex &&
+      fromIndex >= 0 && finalIndex >= 0 &&
+      fromIndex < scenes.length && finalIndex < scenes.length) {
+
+      // Stop playback on reorder
+      if (onMotionStop) onMotionStop()
+
+      dispatch(reorderScene({
+        fromIndex,
+        toIndex: finalIndex
+      }))
+
+      // Update sceneIdToWidth mapping to match new scene order
+      // The widths stay with their respective scenes during reordering
+      setSceneIdToWidth(prev => ({ ...prev }))
+    }
+
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+    setInsertionIndex(null)
+  }
+
+  return (
+    <div
+      className="relative flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
+      style={{
+        minWidth: '100%',
+        width: `${Math.max(totalCardsWidth + 32, 100)}px`,
+      }}
+    >
+      {/* Timeline Ruler - Overlay on top, scrolls with content */}
+      <div
+        className="absolute top-0 left-0 z-20"
+        ref={timelineRef}
+        style={{
+          height: '12px', // Very compact height to strictly clear blocks below
+          pointerEvents: 'none',
+          width: `${totalCardsWidth + 32}px`,
+          minWidth: '100%',
+        }}
+      >
+        {/* Time markers - vertical lines with numbers, positioned accurately based on actual timeline */}
+        {majorMarkers.map((marker) => (
+          <div
+            key={`major-${marker.time}`}
+            className="absolute top-0 flex items-center justify-center h-full"
+            style={{
+              left: `${16 + marker.position}px`,
+              transform: 'translateX(-50%)'
+            }}
+          >
+            {/* Time label - Takes the point position directly */}
+            <div
+              className="text-white text-[10px] sm:text-[11px] font-bold whitespace-nowrap opacity-90 drop-shadow-sm"
+              style={{
+                color: '#ffffff',
+                fontFamily: 'Inter, sans-serif',
+              }}
+            >
+              {marker.label}
+            </div>
+          </div>
+        ))}
+
+        {minorMarkers.map((marker) => (
+          <div
+            key={`minor-${marker.time}`}
+            className="absolute bottom-1" // Align to baseline area
+            style={{
+              left: `${16 + marker.position}px`,
+              transform: 'translateX(-50%)',
+              width: '1px',
+              height: '3px',
+              backgroundColor: 'rgba(255, 255, 255, 0.25)'
+            }}
+          />
+        ))}
+
+        {/* Clickable overlay for seeking - only when not dragging or hovering playhead */}
+        {!isDraggingPlayhead && !isHoveringPlayhead && (
+          <div
+            className="absolute top-0 left-0 right-0 cursor-pointer"
+            onClick={handleTimelineClick}
+            style={{
+              zIndex: 10,
+              height: '20px',
+              pointerEvents: 'auto',
+            }}
+          />
+        )}
+      </div>
+
+      {/* Playhead - Draggable area (outside pointer-events-none container) */}
+      {/* Position playhead based on actual card widths in pixels */}
+      <div
+        ref={playheadElementRef}
+        className="absolute top-0 bottom-0"
+        style={{
+          left: `${16 + playheadPosition}px`, // Initial position, updated by useEffect during playback
+          transform: 'translateX(-50%)',
+          cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
+          zIndex: 50,
+          width: '40px',
+          userSelect: 'none',
+          touchAction: 'none',
+          pointerEvents: 'auto',
+          // Optimize for smooth animation
+          willChange: 'transform, left',
+        }}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setIsDraggingPlayhead(true)
+
+          // Initialize tooltip with current time
+          setPlayheadTooltipTime(currentTime)
+          if (timelineRef.current) {
+            const timelineRect = timelineRef.current.getBoundingClientRect()
+            // Position tooltip above the caret tip (caret is -1.5rem = -6px, plus caret height ~10px = -16px from top)
+            setPlayheadTooltipPosition({
+              top: timelineRect.top - 16 - 28, // 16px for caret tip, 28px for tooltip height + spacing
+              left: timelineRect.left + 16 + playheadPosition, // 16px padding + playhead position
+            })
+          }
+        }}
+        onMouseEnter={() => {
+          setIsHoveringPlayhead(true)
+        }}
+        onMouseLeave={() => {
+          setIsHoveringPlayhead(false)
+        }}
+      >
+        {/* Playhead line - extends all the way down */}
+        <div
+          className="absolute top-0 bottom-0 left-1/2 transform -translate-x-1/2 transition-all pointer-events-none"
+          style={{
+            backgroundColor: '#ffffff',
+            width: isHoveringPlayhead || isDraggingPlayhead ? '4px' : '3px',
+          }}
+        />
+
+      </div>
+
+      {/* Scene Cards Section - Horizontally scrollable */}
+      <div
+        ref={cardsContainerRef}
+        className="flex flex-shrink-0 relative z-10 items-center"
+        style={{
+          gap: 0,
+          // Dynamically increase marginTop based on bottomSectionHeight
+          // Base height is approx 180px, base marginTop is 42px.
+          marginTop: bottomSectionHeight ? `${Math.max(42, 42 + (bottomSectionHeight - 146))}px` : '42px',
+          paddingBottom: '8px',
+          minWidth: 'max-content',
+          width: 'max-content',
+        }}
+      >
+        {scenes.map((scene, index) => {
+          const sceneLayers = getSceneLayers(scene.id)
+          const isCurrentScene = currentSceneId === scene.id
+
+          // Calculate position for button at the center of gap between cards
+          // Card wrapper: width = cardWidth (content), marginRight = 4px
+          // The gap is the 4px marginRight between cards
+          const cardPaddingRight = 4 // Gap size between cards (marginRight)
+
+          // Calculate the right edge of the current card's content (before gap)
+          let rightEdgeOfContent = 0
+          for (let i = 0; i <= index; i++) {
+            if (i < scenes.length) {
+              // Add card content width
+              rightEdgeOfContent += cardWidths[i] || getDefaultCardWidth()
+              // Add gap for previous cards (marginRight between cards)
+              if (i < index) {
+                rightEdgeOfContent += cardPaddingRight
+              }
+            }
+          }
+          // Center of gap = right edge of content + half of gap (2px)
+          // This positions the button exactly in the middle of the 4px gap
+          const buttonPosition = rightEdgeOfContent + (cardPaddingRight / 2)
+
+          return (
+            <React.Fragment key={scene.id}>
+              <div
+                data-scene-card-wrapper
+                className="transition-all duration-300 ease-out"
+              >
+                <SceneCard
+                  key={scene.id}
+                  index={index}
+                  scene={scene}
+                  isActive={isCurrentScene}
+                  onClick={() => handleSwitchScene(scene.id)}
+                  layers={getSceneLayers(scene.id)}
+                  isDragging={draggedIndex === index}
+                  draggedIndex={draggedIndex}
+                  dragOverIndex={dragOverIndex}
+                  insertionIndex={insertionIndex}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd}
+                  onDrop={handleDrop}
+                  cardWidth={cardWidths[index]}
+                  onCardWidthChange={handleCardWidthChange}
+                  onResizeStart={() => handleResizeStart(index)}
+                  onResizeEnd={handleResizeEnd}
+                  previousCardWidths={cardWidths}
+                  minCardWidth={getMinCardWidth()}
+                  calculateDurationFromWidth={calculateDurationFromWidth}
+                  calculateWidthFromDuration={calculateWidthFromDuration}
+                  formatDuration={formatDuration}
+                  onMotionStop={onMotionStop}
+                  hasMotionSteps={sceneMotionFlows?.[scene.id]?.steps?.length > 0}
+                  motionStepCount={sceneMotionFlows?.[scene.id]?.steps?.length || 0}
+                  motionFlow={sceneMotionFlows?.[scene.id]}
+                  activeStepId={isCurrentScene ? currentTimeStepId : null}
+                  onStepClick={isCurrentScene ? (stepId) => onStepClick(stepId) : null}
+                  isMotionCaptureActive={isMotionCaptureActive && isCurrentScene}
+                />
+              </div>
+              {/* Transition button - always visible at bottom of gap between cards */}
+              {index < scenes.length - 1 && (
+                <div
+                  key={`gap-button-${index}`}
+                  className="absolute z-40"
+                  style={{
+                    left: `${buttonPosition}px`,
+                    bottom: '2px',
+                    transform: 'translateX(-50%)',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  <button
+                    className="w-5 h-5 rounded-full bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 border border-zinc-600 flex items-center justify-center shadow-lg transition-all duration-150"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // TODO: Add transition functionality
+                    }}
+                    title="Add transition"
+                  >
+                    <Plus className="h-3 w-3 text-zinc-300" strokeWidth={2.5} />
+                  </button>
+                </div>
+              )}
+            </React.Fragment>
+          )
+        })}
+
+        {/* Drop indicator - precise positioning based on insertionIndex */}
+        {draggedIndex !== null && insertionIndex !== null && insertionIndex !== draggedIndex && (
+          <div
+            className="absolute z-30 pointer-events-none"
+            style={{
+              left: (() => {
+                const gap = 4
+
+                // Build the layout of cards excluding the dragged card
+                // This matches exactly how calculateInsertionIndex builds positions
+                const positions = []
+                let currentX = 0
+
+                for (let i = 0; i < scenes.length; i++) {
+                  if (i === draggedIndex) continue
+
+                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
+                  positions.push({
+                    originalIndex: i,
+                    leftEdge: currentX,
+                    rightEdge: currentX + cardWidth
+                  })
+
+                  currentX += cardWidth + gap
+                }
+
+                if (positions.length === 0) return '0px'
+
+                // insertionIndex is where we insert in the original array AFTER removing dragged card
+                // We need to calculate the exact position by going through all cards in order
+                // This ensures accuracy regardless of card sizes
+
+                // Special case: inserting at position 0 (beginning)
+                if (insertionIndex === 0) {
+                  return '0px'
+                }
+
+                // Calculate position by iterating through cards and counting
+                // insertionIndex is where we insert in the array (after removing dragged card)
+                // Count visible cards until we reach insertionIndex
+                let x = 0
+                let visibleCardCount = 0
+
+                for (let i = 0; i < scenes.length; i++) {
+                  if (i === draggedIndex) continue
+
+                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
+
+                  // When we've counted enough cards, this is where we insert
+                  if (visibleCardCount === insertionIndex) {
+                    return `${x}px`
+                  }
+
+                  // Move past this card
+                  x += cardWidth + gap
+                  visibleCardCount++
+                }
+
+                // If we get here, insertionIndex is after all visible cards
+                // Place line at the right edge of the last card
+                return `${x}px`
+              })(),
+              top: '0',
+              bottom: '0',
+              width: '3px',
+              backgroundColor: '#3b82f6',
+              borderRadius: '2px',
+              boxShadow: '0 0 8px rgba(59, 130, 246, 0.6)',
+              transition: 'left 0.1s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          />
+        )}
+
+        {/* Add Scene Button - aligned with cards */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            handleAddScene()
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+          }}
+          className="text-zinc-400 hover:text-white active:text-white hover:bg-zinc-800 active:bg-zinc-700 rounded-lg border border-zinc-700 flex-shrink-0 transition-colors flex items-center justify-center touch-manipulation relative ml-1"
+          title="Add Scene"
+          style={{
+            cursor: 'pointer',
+            zIndex: 30,
+            position: 'relative',
+            pointerEvents: 'auto',
+            width: `${getDefaultCardWidth()}px`,
+            height: `${getDefaultCardHeight()}px`,
+          }}
+        >
+          <Plus className="h-4 w-4 pointer-events-none" />
+        </button>
+      </div>
+
+      {/* Playhead time tooltip - rendered outside container using portal */}
+      {isDraggingPlayhead && playheadTooltipTime !== null && typeof document !== 'undefined'
+        ? createPortal(
+          <div
+            className="fixed pointer-events-none"
+            style={{
+              top: `${playheadTooltipPosition.top}px`,
+              left: `${playheadTooltipPosition.left}px`,
+              transform: 'translateX(-50%)',
+              zIndex: 9999,
+            }}
+          >
+            <div
+              className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+              style={{
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+              }}
+            >
+              {formatTime(playheadTooltipTime)}
+            </div>
+            {/* Arrow pointing down to the playhead */}
+            <div
+              className="absolute left-1/2 top-full transform -translate-x-1/2"
+              style={{
+                width: '0',
+                height: '0',
+                borderLeft: '5px solid transparent',
+                borderRight: '5px solid transparent',
+                borderTop: '5px solid rgb(39, 39, 42)',
+              }}
+            />
+          </div>,
+          document.body
+        )
+        : null}
+    </div>
+  )
+})
+
+export default ScenesBar
