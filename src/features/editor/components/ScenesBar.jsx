@@ -277,11 +277,11 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, card
   return (
     <div
       ref={containerRef}
-      className="absolute left-0 right-0 flex items-center z-30 overflow-hidden no-scrollbar"
+      className="absolute left-0 right-0 flex items-start z-60 overflow-hidden no-scrollbar"
       style={{
-        top: '-30px', // Adjusted for reduced height
-        height: '24px',
-        padding: '2px 0',
+        top: '-36px',
+        height: '36px',
+        padding: '0',
       }}
     >
       <div className="flex items-center gap-0.5 px-0 w-full h-full relative">
@@ -293,12 +293,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, card
           }}
           data-step-id="base"
           title="Base / 0s"
-          className={`h-5 transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-md group
+          className={`h-[22px] transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-lg group
             ${(activeStepId === 'base' || !activeStepId)
               ? 'bg-zinc-800 text-white border-zinc-700 w-4 min-w-[16px]'
               : 'bg-zinc-100 text-zinc-500 border-zinc-200 hover:bg-zinc-200 hover:text-zinc-600 w-3 min-w-[12px]'
             }
-            ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_20px_rgba(168,85,247,0.8)]' : ''}
+            ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_20px_rgba(168,85,247,0.8)] animate-pulse-glow' : ''}
           `}
         >
           {/* Minimal Label or Icon if needed */}
@@ -324,12 +324,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, card
                   e.stopPropagation()
                   onStepClick?.(step.id)
                 }}
-                className={`h-5 text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-md rounded-sm
+                className={`h-[22px] text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-lg rounded-sm
                   ${isActive
                     ? 'bg-purple-600 text-white border-purple-500 z-10 shadow-md'
                     : 'bg-purple-50 text-purple-600 border-purple-100 hover:bg-purple-100 hover:text-purple-700'
                   }
-                  ${isActive && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_25px_rgba(168,85,247,0.9)]' : ''}
+                  ${isActive && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_25px_rgba(168,85,247,0.9)] animate-pulse-glow' : ''}
                 `}
                 style={{
                   width: `${(stepDurationMs / pageDuration) * 100}%`,
@@ -352,11 +352,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
     if (typeof window === 'undefined') return { width: 112, height: 48 }
 
     if (window.innerWidth >= 1024) {
-      return { width: 112, height: 48 }
+      return { width: 112, height: 36 }
     } else if (window.innerWidth >= 640) {
-      return { width: 104, height: 46 }
+      return { width: 104, height: 34 }
     } else {
-      return { width: 96, height: 44 }
+      return { width: 96, height: 32 }
     }
   }
 
@@ -1087,9 +1087,9 @@ const ScenesBar = React.memo(({
 
   const getDefaultCardHeight = useCallback(() => {
     if (typeof window === 'undefined') return 48
-    if (window.innerWidth >= 1024) return 48
-    if (window.innerWidth >= 640) return 46
-    return 44
+    if (window.innerWidth >= 1024) return 36
+    if (window.innerWidth >= 640) return 34
+    return 32
   }, [])
 
   // Utility Formatters
@@ -1789,7 +1789,7 @@ const ScenesBar = React.memo(({
           transform: 'translateX(-50%)',
           cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
           zIndex: 50,
-          width: '40px',
+          width: '12px',
           userSelect: 'none',
           touchAction: 'none',
           pointerEvents: 'auto',

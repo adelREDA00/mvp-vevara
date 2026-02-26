@@ -2,9 +2,12 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Layers } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
+import { saveAs } from 'file-saver'
+import { exportVideo } from '../utils/videoExport'
+import { Loader2 } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import TopToolbar from '../components/TopToolbar'
@@ -62,6 +65,68 @@ function EditorPage() {
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
+
+  // Export State
+  const sceneMotionFlows = useSelector(selectSceneMotionFlows)
+  const timelineInfo = useSelector(selectProjectTimelineInfo)
+  const [exportState, setExportState] = useState({
+    isActive: false,
+    status: 'rendering', // 'rendering', 'encoding', 'completed', 'error'
+    progress: 0,
+    error: null
+  })
+
+  const handleExport = useCallback(async (resolution) => {
+    if (exportState.isActive) return
+
+    setExportState({
+      isActive: true,
+      status: 'initializing',
+      progress: 0,
+      error: null
+    })
+
+    try {
+      const videoBlob = await exportVideo({
+        scenes,
+        layers,
+        sceneMotionFlows,
+        timelineInfo,
+        aspectRatio,
+        resolution,
+        fps: 30,
+        onProgress: (update) => {
+          setExportState(prev => ({
+            ...prev,
+            status: update.status,
+            progress: update.progress
+          }))
+        }
+      })
+
+      saveAs(videoBlob, `${projectName || 'video'}_${resolution}.mp4`)
+
+      setExportState(prev => ({
+        ...prev,
+        status: 'completed',
+        progress: 100
+      }))
+
+      // Close overlay after a short delay
+      setTimeout(() => {
+        setExportState(prev => ({ ...prev, isActive: false }))
+      }, 2000)
+
+    } catch (error) {
+      console.error('Export failed:', error)
+      setExportState({
+        isActive: true,
+        status: 'error',
+        progress: 0,
+        error: error.message
+      })
+    }
+  }, [scenes, layers, sceneMotionFlows, timelineInfo, projectName, exportState.isActive])
 
   const handleFinishEditing = useCallback(() => {
     setEditingTextLayerId(null)
@@ -226,7 +291,7 @@ function EditorPage() {
   )
 
   // Get timeline info for seeking
-  const timelineInfo = useSelector(selectProjectTimelineInfo)
+
   const currentSceneTimelineInfo = useMemo(() => {
     if (!timelineInfo || !currentSceneId) return null
     return timelineInfo.find(s => s.id === currentSceneId)
@@ -508,7 +573,7 @@ function EditorPage() {
           if (data.cropHeight !== undefined) nextEntry.cropHeight = data.cropHeight
           if (data.mediaWidth !== undefined) nextEntry.mediaWidth = data.mediaWidth
           if (data.mediaHeight !== undefined) nextEntry.mediaHeight = data.mediaHeight
-          
+
           // [CONTROL POINTS FIX] Only update control points if explicitly provided (not undefined/null)
           // This preserves existing control points when updating position/scale/rotate without curve edits
           // Control points are arrays, so we check for array type to distinguish from undefined
@@ -774,8 +839,8 @@ function EditorPage() {
 
       // Build updated flow for transition preview
       // [PERFORMANCE] Use structured clone for better performance than JSON.parse/stringify
-      const updatedSteps = (typeof structuredClone !== 'undefined') 
-        ? structuredClone(motionFlow) 
+      const updatedSteps = (typeof structuredClone !== 'undefined')
+        ? structuredClone(motionFlow)
         : JSON.parse(JSON.stringify(motionFlow))
       const targetStep = updatedSteps[stepIndex]
       if (targetStep) {
@@ -789,12 +854,12 @@ function EditorPage() {
           const originalStep = motionFlow[stepIndex]
           const originalMoveAction = originalStep?.layerActions?.[layerId]?.find(a => a.type === 'move')
           const existingMoveAction = actions.find(a => a.type === 'move')
-          
+
           // Priority: layerData.controlPoints > originalMoveAction.controlPoints > existingMoveAction.controlPoints
-          const preservedControlPoints = layerData.controlPoints?.length > 0 
-            ? layerData.controlPoints 
-            : (originalMoveAction?.values?.controlPoints?.length > 0 
-              ? originalMoveAction.values.controlPoints 
+          const preservedControlPoints = layerData.controlPoints?.length > 0
+            ? layerData.controlPoints
+            : (originalMoveAction?.values?.controlPoints?.length > 0
+              ? originalMoveAction.values.controlPoints
               : (existingMoveAction?.values?.controlPoints || []))
 
           const targetX = (initialTransform?.x || 0) + (deltaX || 0)
@@ -855,14 +920,14 @@ function EditorPage() {
             const initialScaleY = initialTransform?.scaleY || 1
             if (Math.abs(scaleX - initialScaleX) > 0.001 || Math.abs(scaleY - initialScaleY) > 0.001) {
               const scaleIdx = actions.findIndex(a => a.type === 'scale')
-              const action = { 
-                type: 'scale', 
-                values: { 
-                  dsx: scaleX / (initialTransform?.scaleX || 1), 
-                  dsy: scaleY / (initialTransform?.scaleY || 1), 
-                  duration: stepDuration, 
-                  easing: 'power4.out' 
-                } 
+              const action = {
+                type: 'scale',
+                values: {
+                  dsx: scaleX / (initialTransform?.scaleX || 1),
+                  dsy: scaleY / (initialTransform?.scaleY || 1),
+                  duration: stepDuration,
+                  easing: 'power4.out'
+                }
               }
               if (scaleIdx !== -1) actions[scaleIdx] = action; else actions.push(action)
             }
@@ -872,13 +937,13 @@ function EditorPage() {
           const initialRotation = initialTransform?.rotation || 0
           if (rotation !== undefined && Math.abs(rotation - initialRotation) > 0.1) {
             const rotateIdx = actions.findIndex(a => a.type === 'rotate')
-            const action = { 
-              type: 'rotate', 
-              values: { 
-                dangle: rotation - (initialTransform?.rotation || 0), 
-                duration: stepDuration, 
-                easing: 'power4.out' 
-              } 
+            const action = {
+              type: 'rotate',
+              values: {
+                dangle: rotation - (initialTransform?.rotation || 0),
+                duration: stepDuration,
+                easing: 'power4.out'
+              }
             }
             if (rotateIdx !== -1) actions[rotateIdx] = action; else actions.push(action)
           }
@@ -933,7 +998,7 @@ function EditorPage() {
           // 3. Then seek to maintain position
           // This prevents the engine from rebuilding with stale data and causing snap-back
           console.log(`✅ [EditorPage] Fast-play complete, waiting for Redux update then seeking to ${stepEndTimeSeconds}s`)
-          
+
           // Use setTimeout to wait for Redux update to propagate through the store
           // Redux Toolkit updates are synchronous, but React re-renders are async
           setTimeout(() => {
@@ -942,7 +1007,7 @@ function EditorPage() {
               console.log(`🔄 [EditorPage] Forcing engine rebuild with updated Redux state`)
               motionControls.prepareEngine(true)
             }
-            
+
             // Now seek to maintain position with the updated engine
             // This ensures we're using the correct flow data, not the stale preview flow
             motionControls.seek(stepEndTimeSeconds)
@@ -1203,7 +1268,7 @@ function EditorPage() {
             if (data.cropHeight !== undefined) entry.cropHeight = data.cropHeight
             if (data.mediaWidth !== undefined) entry.mediaWidth = data.mediaWidth
             if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
-            
+
             // [CONTROL POINTS FIX] Only update control points if explicitly provided (not undefined/null)
             // This preserves existing control points when updating position/scale/rotate without curve edits
             // Control points are arrays, so we check for array type to distinguish from undefined
@@ -1629,7 +1694,7 @@ function EditorPage() {
 
   return (
     <div
-      className="h-screen sm:h-dvh flex flex-col text-white overflow-hidden relative"
+      className="h-screen sm:h-dvh flex flex-col text-white overflow-hidden relative bg-[#0d1216]"
       data-editor-container
       style={{ touchAction: 'none' }}
       onDragStart={(e) => {
@@ -1638,11 +1703,14 @@ function EditorPage() {
       }}
     >
       {/* Top Toolbar */}
-      <div ref={topToolbarRef} className="absolute top-0 left-0 right-0 z-50">
+      <div
+        ref={topToolbarRef}
+        className="absolute top-0 left-0 right-0 z-50 transition-all duration-300"
+      >
         <TopToolbar
           projectName={projectName}
           onShare={() => { }}
-          onExport={() => { }}
+          onExport={handleExport}
           onPreview={() => {
             // Mobile Menu Toggle: if any panel is open, close it. Otherwise open Elements.
             if (activeSidebarItem) {
@@ -1657,11 +1725,10 @@ function EditorPage() {
         />
       </div>
 
-      {/* Left Sidebar - Hidden on mobile by default */}
       <div
         className="hidden lg:block absolute left-0 z-50 transition-all duration-300"
         style={{
-          top: topToolbarHeight,
+          top: `${topToolbarHeight}px`,
           height: `calc(100vh - ${topToolbarHeight}px)`
         }}
       >
@@ -1818,11 +1885,14 @@ function EditorPage() {
               }}
             >
               <div
-                className="absolute left-0 top-0 bottom-0 right-0 bg-[#0d1216] shadow-2xl flex flex-row overflow-hidden transition-transform duration-300"
+                className="absolute left-0 top-0 bottom-0 right-0 shadow-2xl flex flex-row overflow-hidden transition-transform duration-300 border-r border-white/10"
                 onClick={(e) => e.stopPropagation()}
                 style={{
                   top: topToolbarHeight,
-                  height: `calc(100vh - ${topToolbarHeight}px)`
+                  height: `calc(100vh - ${topToolbarHeight}px)`,
+                  backgroundColor: 'rgba(13, 18, 22, 0.6)',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
                 }}
               >
                 {/* Embedded Sidebar for Mobile */}
@@ -1933,56 +2003,54 @@ function EditorPage() {
         {/* Canvas and Bottom Sections */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
           {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
-          {(() => {
-            const shouldShowControls = (selectedLayerIds[0] && layers[selectedLayerIds[0]]) || selectedCanvas
-            return shouldShowControls ? (
-              <div ref={topControlsRef} className="absolute left-1/2 transform -translate-x-1/2 z-30 pointer-events-none" style={{ top: `${topToolbarHeight + 8}px` }}>
-                <CanvasControls
-                  duration={`${totalTime.toFixed(1)}s`}
-                  selectedLayer={selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null}
-                  selectedCanvas={selectedCanvas}
-                  currentScene={currentSceneData}
-                  onLayerUpdate={(updates) => {
-                    if (selectedLayerIds[0]) {
-                      dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
-                    }
-                  }}
-                  onCanvasUpdate={(updates) => {
-                    if (currentSceneId) {
-                      dispatch(updateScene({ id: currentSceneId, ...updates }))
-                    }
-                  }}
-                  onToggleAdvanced={() => {
-                    if (activeSidebarItem === 'Advanced') {
-                      setActiveSidebarItem(null)
-                    } else {
-                      setActiveSidebarItem('Advanced')
-                    }
-                  }}
-                  onOpenColorPicker={(type = 'fill') => {
-                    setColorPickerType(type)
-                    setActiveSidebarItem('Color') // Open color panel in sidebar
-                  }}
-                  onToggleMotionPanel={() => {
-                    setIsMotionPanelOpen(!isMotionPanelOpen)
-                  }}
-                  isMotionCaptureActive={isMotionCaptureActive}
-                  onStartMotionCapture={handleStartMotionCapture}
-                  onApplyMotion={handleApplyMotion}
-                  onCancelMotion={handleCancelMotion}
-                />
-              </div>
-            ) : null
-          })()}
+          <div ref={topControlsRef} className="absolute left-1/2 transform -translate-x-1/2 z-30 pointer-events-none" style={{ top: `${topToolbarHeight + 8}px` }}>
+            <CanvasControls
+              duration={`${totalTime.toFixed(1)}s`}
+              selectedLayer={selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null}
+              selectedCanvas={selectedCanvas}
+              currentScene={currentSceneData}
+              onLayerUpdate={(updates) => {
+                if (selectedLayerIds[0]) {
+                  dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
+                }
+              }}
+              onCanvasUpdate={(updates) => {
+                if (currentSceneId) {
+                  dispatch(updateScene({ id: currentSceneId, ...updates }))
+                }
+              }}
+              onToggleAdvanced={() => {
+                if (activeSidebarItem === 'Advanced') {
+                  setActiveSidebarItem(null)
+                } else {
+                  setActiveSidebarItem('Advanced')
+                }
+              }}
+              onOpenColorPicker={(type = 'fill') => {
+                setColorPickerType(type)
+                setActiveSidebarItem('Color') // Open color panel in sidebar
+              }}
+              onToggleMotionPanel={() => {
+                setIsMotionPanelOpen(!isMotionPanelOpen)
+              }}
+              isMotionCaptureActive={isMotionCaptureActive}
+              onStartMotionCapture={handleStartMotionCapture}
+              onApplyMotion={handleApplyMotion}
+              onCancelMotion={handleCancelMotion}
+            />
+          </div>
 
           {/* Canvas - Takes all available space */}
           <div
             ref={canvasScrollRef}
-            className="flex-1 min-h-0 w-full flex items-center justify-center"
+            className="flex-1 min-h-0 w-full flex items-center justify-center bg-[#0d1216]"
             style={useMemo(() => ({
               position: 'relative',
               zIndex: 1,
-            }), [])}
+              paddingTop: `${topToolbarHeight}px`,
+              paddingBottom: `${bottomSectionHeight}px`,
+              paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 1024 ? sidebarWidth : '0px',
+            }), [topToolbarHeight, bottomSectionHeight, sidebarWidth])}
           >
             <Stage
               aspectRatio={aspectRatio}
@@ -2022,9 +2090,10 @@ function EditorPage() {
             style={{
               left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
               borderTop: '1px solid rgba(13, 18, 22, 0.8)',
+              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
               ...(customBottomHeight !== null ? {
-                height: `${customBottomHeight}px`,
-                maxHeight: `${customBottomHeight}px`
+                height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
+                maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
               } : {})
             }}
           >
@@ -2048,10 +2117,7 @@ function EditorPage() {
                 minHeight: 0 // Allow flex item to shrink
               }}>
                 {/* Playback Controls - Top Section */}
-                <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative" style={{
-                  marginLeft: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0' : `-${sidebarWidth}`,
-                  width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `calc(100% + ${sidebarWidth})`
-                }}>
+                <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
                   <PlaybackControls
                     isPlaying={isPlaying}
                     currentTime={playheadTime}
@@ -2081,7 +2147,7 @@ function EditorPage() {
                     overflowX: 'auto',
                     overflowY: 'visible',
                     WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
-                    paddingBottom: '8px',
+                    paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))',
                     paddingTop: '0px',
                     paddingLeft: '16px',
                     paddingRight: '16px',
@@ -2119,6 +2185,96 @@ function EditorPage() {
         isMotionCaptureActive={isMotionCaptureActive}
         editingStepId={editingStepId}
       />
+      {/* Export Progress Overlay */}
+      {exportState.isActive && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-white">
+          <div className="w-full max-w-md bg-[#1a1f24] rounded-xl p-8 border border-white/10 shadow-2xl relative overflow-hidden">
+            {/* Animated Background Pulse */}
+            <div className="absolute inset-0 bg-purple-600/5 animate-pulse" />
+
+            <div className="relative z-10 flex flex-col items-center w-full">
+              {exportState.status !== 'error' && exportState.status !== 'completed' && (
+                <div className="mb-6 relative">
+                  <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
+                  <Loader2 className="h-12 w-12 text-purple-400 animate-spin relative z-10" />
+                </div>
+              )}
+
+              {exportState.status === 'completed' && (
+                <div className="h-12 w-12 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
+                  <svg className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              )}
+
+              {exportState.status === 'error' && (
+                <div className="h-12 w-12 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+                  <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              )}
+
+              <h3 className="text-xl font-bold mb-2 tracking-tight">
+                {exportState.status === 'initializing' && 'Preparing Export...'}
+                {exportState.status === 'rendering' && 'Rendering Frames...'}
+                {exportState.status === 'encoding' && 'Finalizing Video...'}
+                {exportState.status === 'completed' && 'Export Successful!'}
+                {exportState.status === 'error' && 'Export Failed'}
+              </h3>
+
+              <p className="text-gray-400 text-sm mb-8 text-center max-w-[280px] leading-relaxed">
+                {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
+                {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
+                {exportState.status === 'completed' && 'Your download has started automatically.'}
+                {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
+              </p>
+
+              {exportState.status !== 'error' && exportState.status !== 'completed' && (
+                <div className="w-full">
+                  <div className="flex justify-between items-end mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400/80">Progress</span>
+                    <span className="text-lg font-mono font-medium">{exportState.progress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                    <div
+                      className="h-full bg-gradient-to-r from-purple-600 to-indigo-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 ease-out"
+                      style={{ width: `${exportState.progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {exportState.status === 'completed' && (
+                <button
+                  onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
+                  className="mt-2 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  Close Window
+                </button>
+              )}
+
+              {exportState.status === 'error' && (
+                <div className="w-full flex flex-col gap-3 mt-2">
+                  <button
+                    onClick={() => handleExport('1080p')} // Default retry
+                    className="w-full py-2.5 bg-white/10 hover:bg-white/20 rounded-lg font-medium transition-colors"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
+                    className="w-full py-2.5 bg-transparent border border-white/10 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

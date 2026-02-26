@@ -208,6 +208,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
   const latestSceneMotionFlowRef = useRef(sceneMotionFlow)
 
+  // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
+  // Backgrounds are static elements and should not have interactive handles
+  if (layer?.type === 'background') {
+    return null
+  }
+
   // Track previous drag state to detect drag end transitions
   const previousIsMovingRef = useRef(false)
   const previousIsResizingRef = useRef(false) // Track resizing state
@@ -676,9 +682,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     outline.clear()
     outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
 
-    // Scale stroke width with zoom - thinner when zoomed in, thicker when zoomed out
-    const strokeWidth = Math.max(1, 2 * (1 / zoomScale))
-    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale }) // Match selection box width scaling
+    // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
+    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
     hoverBox.visible = true
   }, [layersContainer, isPlaying])
 
@@ -1190,7 +1195,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
       const viewportScale = latestViewportRef.current?.scale?.x || 1
-      const zoomScale = Math.min(2.0, Math.max(0.1, 1 / viewportScale))
+      const zoomScale = 1 / viewportScale
 
       const scaledWidth = currentWidth * scaleX
       const scaledHeight = currentHeight * scaleY
@@ -1202,7 +1207,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (outline && !outline.destroyed) {
         outline.clear()
         outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
-        outline.stroke({ color: 0x8B5CF6, width: 2 })
+
+        // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
+        outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
       }
 
       // Update handle positions and rotation handle
@@ -1566,7 +1573,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
               // The scale should remain as it was set during previous scale operations
               const preservedScaleX = liveLayer?.scaleX ?? (state.scaleX ?? 1)
               const preservedScaleY = liveLayer?.scaleY ?? (state.scaleY ?? 1)
-              
+
               currentMotionCaptureMode.onPositionUpdate({
                 layerId: currentLayer.id, x: newX, y: newY, cropX: newCropX, cropY: newCropY,
                 cropWidth: newCropWidth, cropHeight: newCropHeight, mediaWidth: state.startMediaWidth, mediaHeight: state.startMediaHeight,
@@ -1653,12 +1660,14 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       if (hoverBoxRef.current?.visible) {
+        const viewportScale = latestViewportRef.current.scale.x
+        const zoomScale = 1 / viewportScale
         if (isCaptureMode && !isMediaEdgeResize) {
           const currentScaleX = (newWidth / state.startWidth) * (state.scaleX || 1)
           const currentScaleY = (newHeight / state.startHeight) * (state.scaleY || 1)
-          updateHoverBox(newX, newY, state.startWidth, state.initialTextHeight || state.startHeight, state.rotation, 0.5, 0.5, currentScaleX, currentScaleY, latestViewportRef.current.scale.x)
+          updateHoverBox(newX, newY, state.startWidth, state.initialTextHeight || state.startHeight, state.rotation, 0.5, 0.5, currentScaleX, currentScaleY, zoomScale)
         } else {
-          updateHoverBox(newX, newY, newWidth, hoverBoxHeight, state.rotation, state.anchorX, state.anchorY, state.scaleX || 1, state.scaleY || 1, latestViewportRef.current.scale.x)
+          updateHoverBox(newX, newY, newWidth, hoverBoxHeight, state.rotation, state.anchorX, state.anchorY, state.scaleX || 1, state.scaleY || 1, zoomScale)
         }
       }
 
@@ -1833,16 +1842,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (!isCorner) return
 
       const maxCurrentScale = Math.max(currentSessionScaleX, currentSessionScaleY)
-      let targetResolution = 4
-      if (maxCurrentScale > 1.2) {
-        targetResolution = Math.max(4, 4 * maxCurrentScale)
+      let targetResolution = 2 // Match base resolution
+      if (maxCurrentScale > 1.1) {
+        targetResolution = Math.max(2, 2 * maxCurrentScale)
       }
 
+      // [SCALING FIX] Cap resolution to 4 and check against MAX_TEXTURE_SIZE
+      const MAX_SAFE_RESOLUTION = 4
       const textureWidth = initialState.startWidth
       const textureHeight = initialState.startHeight
-      const maxPixels = 16000000
-      const maxSafeRes = Math.sqrt(maxPixels / (textureWidth * textureHeight))
-      targetResolution = Math.min(12, Math.min(targetResolution, maxSafeRes))
+      const MAX_TEXTURE_SIZE = 4096 // Safe default for most GPUs
+      const maxSafeResByPixels = MAX_TEXTURE_SIZE / Math.max(textureWidth, textureHeight)
+
+      targetResolution = Math.min(MAX_SAFE_RESOLUTION, Math.min(targetResolution, maxSafeResByPixels))
 
       if (currentLayerObject.resolution < targetResolution) {
         currentLayerObject.resolution = targetResolution
@@ -1914,7 +1926,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       initialState.anchorY,
       initialState.scaleX,
       initialState.scaleY,
-      currentViewport.scale.x
+      1 / currentViewport.scale.x
     )
 
     if (!currentLayerObject.destroyed) {
@@ -2038,7 +2050,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       startRotation, anchorX, anchorY,
       capturedLayer?.scaleX ?? currentLayer.scaleX ?? 1,
       capturedLayer?.scaleY ?? currentLayer.scaleY ?? 1,
-      currentViewport.scale.x
+      1 / currentViewport.scale.x
     )
 
     interactionStateRef.current.rotate = {
@@ -2123,7 +2135,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           width: captured?.cropWidth ?? (isMedia ? (latestL.cropWidth ?? latestL.width ?? 100) : (latestL.width ?? 100)),
           height: captured?.cropHeight ?? (isMedia ? (latestL.cropHeight ?? latestL.height ?? 100) : (latestL.height ?? 100))
         }
-        updateHoverBox(latestObj.x, latestObj.y, dims.width, dims.height, newRotation, 0.5, 0.5, captured?.scaleX ?? latestL.scaleX ?? 1, captured?.scaleY ?? latestL.scaleY ?? 1, v.scale.x)
+        updateHoverBox(latestObj.x, latestObj.y, dims.width, dims.height, newRotation, 0.5, 0.5, captured?.scaleX ?? latestL.scaleX ?? 1, captured?.scaleY ?? latestL.scaleY ?? 1, 1 / v.scale.x)
       }
 
       if (isCapture) {
@@ -2574,7 +2586,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Get viewport zoom to keep handles at consistent screen size
     const viewportScale = viewport?.scale?.x || 1
-    const zoomScale = Math.min(2.0, Math.max(0.1, 1 / viewportScale))
+    const zoomScale = 1 / viewportScale
 
     // Clear and redraw
     selectionBox.removeChildren()
@@ -2589,7 +2601,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const outline = new PIXI.Graphics()
     outline.label = 'selection-outline'
     outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
-    outline.stroke({ color: 0x8B5CF6, width: 2 }) // Purple color
+    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale }) // Purple color
     outline.eventMode = 'none'
     selectionBox.addChild(outline)
 

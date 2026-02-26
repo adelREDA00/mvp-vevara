@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Search, Wand2, Sparkles, Palette, Layers } from 'lucide-react'
+import { X, Search, Wand2, Sparkles, Palette, Layers, AlertTriangle } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 
 function ToolsPanel({ onClose }) {
@@ -7,21 +7,36 @@ function ToolsPanel({ onClose }) {
   const [width, setWidth] = useState(320)
 
   const tools = [
-    { icon: Sparkles, name: 'Magic Eraser', description: 'Remove objects automatically' },
+    {
+      icon: Sparkles,
+      name: 'Background Removal',
+      description: 'Remove backgrounds from images instantly',
+      isComingSoon: true
+    },
+    {
+      icon: Wand2,
+      name: 'Quality Enhancement',
+      description: 'Upscale and improve image clarity',
+      isComingSoon: true
+    },
     { icon: Palette, name: 'Color Picker', description: 'Extract colors from images' },
     { icon: Layers, name: 'Layer Manager', description: 'Organize and manage layers' },
-    { icon: Wand2, name: 'Auto Enhance', description: 'Improve quality automatically' },
   ]
+
+  const filteredTools = tools.filter(tool =>
+    tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    tool.description.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   return (
     <div
       className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: 'rgba(13, 18, 22, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderRight: '0.5px solid rgba(255, 255, 255, 0.1)',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : 'rgba(13, 18, 22, 0.85)',
+        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '0.5px solid rgba(255, 255, 255, 0.1)',
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
@@ -53,19 +68,30 @@ function ToolsPanel({ onClose }) {
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-2">
-          {tools.map((tool, index) => {
+          {filteredTools.map((tool, index) => {
             const Icon = tool.icon
             return (
               <button
                 key={index}
-                className="w-full text-left px-4 py-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 transition-colors border border-zinc-800"
+                title={tool.isComingSoon ? "This is currently under development coming soon" : ""}
+                className={`w-full text-left px-4 py-3 rounded-lg bg-zinc-900 transition-colors border border-zinc-800 ${tool.isComingSoon ? 'opacity-80 cursor-not-allowed' : 'hover:bg-zinc-800'}`}
               >
                 <div className="flex items-start gap-3">
-                  <div className="p-2 bg-purple-500/10 rounded-md flex-shrink-0">
+                  <div className="p-2 bg-purple-500/10 rounded-md flex-shrink-0 relative">
                     <Icon className="h-5 w-5 text-purple-400" strokeWidth={1.5} />
+                    {tool.isComingSoon && (
+                      <div className="absolute -top-1 -right-1 bg-yellow-500 rounded-full p-0.5 border border-zinc-900 shadow-sm">
+                        <AlertTriangle className="h-2.5 w-2.5 text-zinc-900" fill="currentColor" strokeWidth={3} />
+                      </div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white">{tool.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-white">{tool.name}</p>
+                      {tool.isComingSoon && (
+                        <span className="text-[10px] text-yellow-500/80 font-bold uppercase tracking-wider">Soon</span>
+                      )}
+                    </div>
                     <p className="text-xs text-zinc-400 mt-0.5">{tool.description}</p>
                   </div>
                 </div>
@@ -79,4 +105,3 @@ function ToolsPanel({ onClose }) {
 }
 
 export default ToolsPanel
-

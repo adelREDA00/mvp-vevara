@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@pixi/filter-blur": "^7.4.3",
     "@pixi/filter-drop-shadow": "^5.2.0",
     "@pixi/filter-glow": "^5.2.1",

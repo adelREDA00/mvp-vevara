@@ -82,7 +82,9 @@ function CanvasControls({
   // Get font size for text
   const getFontSize = () => {
     if (!selectedLayer || selectedLayer.type !== LAYER_TYPES.TEXT) return 16
-    return selectedLayer.data?.fontSize || 16
+    const baseFontSize = selectedLayer.data?.fontSize || 16
+    const scale = selectedLayer.scaleX || 1
+    return Math.round(baseFontSize * scale)
   }
 
 
@@ -101,6 +103,7 @@ function CanvasControls({
   // List of artistic and standard fonts
   const fonts = [
     'Arial',
+    'Inter',
     'Poppins',
     'Montserrat',
     'Outfit',
@@ -111,6 +114,15 @@ function CanvasControls({
     'Righteous',
     'Bungee',
     'Playfair Display',
+    'Cormorant Garamond',
+    'Bodoni Moda',
+    'Cinzel',
+    'Philosopher',
+    'Tenor Sans',
+    'Prata',
+    'EB Garamond',
+    'Manrope',
+    'Space Grotesk',
     'Georgia',
     'Times New Roman',
     'Verdana',
@@ -208,7 +220,11 @@ function CanvasControls({
               value={getFontSize()}
               onChange={(e) => {
                 const newSize = parseInt(e.target.value, 10)
-                handleLayerUpdate({ data: { ...selectedLayer.data, fontSize: newSize } })
+                handleLayerUpdate({
+                  data: { ...selectedLayer.data, fontSize: newSize },
+                  scaleX: 1,
+                  scaleY: 1
+                })
               }}
               className="h-7 px-2 rounded-md bg-transparent text-white text-xs border-0 outline-none hover:bg-zinc-700 focus:bg-zinc-700 cursor-pointer flex-shrink-0"
               style={{ minWidth: '60px' }}

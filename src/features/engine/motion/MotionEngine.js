@@ -144,20 +144,20 @@ export class MotionEngine {
       objectsToUse.forEach((obj, id) => {
         const baseLayer = allLayers[id]
         layerStateTracker.set(id, {
-          x: baseLayer?.x !== undefined ? baseLayer.x : obj.x,
-          y: baseLayer?.y !== undefined ? baseLayer.y : obj.y,
-          scaleX: baseLayer?.scaleX !== undefined ? baseLayer.scaleX : obj.scale.x,
-          scaleY: baseLayer?.scaleY !== undefined ? baseLayer.scaleY : obj.scale.y,
-          rotation: baseLayer?.rotation !== undefined ? baseLayer.rotation : (obj.rotation * 180) / Math.PI,
+          x: baseLayer?.x ?? obj.x,
+          y: baseLayer?.y ?? obj.y,
+          scaleX: baseLayer?.scaleX ?? obj.scale.x,
+          scaleY: baseLayer?.scaleY ?? obj.scale.y,
+          rotation: baseLayer?.rotation ?? (obj.rotation * 180) / Math.PI,
           // Track crop state
-          cropX: baseLayer?.cropX !== undefined ? baseLayer.cropX : (obj._storedCropX ?? 0),
-          cropY: baseLayer?.cropY !== undefined ? baseLayer.cropY : (obj._storedCropY ?? 0),
-          cropWidth: baseLayer?.cropWidth !== undefined ? baseLayer.cropWidth : (obj._storedCropWidth ?? obj._originalWidth ?? obj.width),
-          cropHeight: baseLayer?.cropHeight !== undefined ? baseLayer.cropHeight : (obj._storedCropHeight ?? obj._originalHeight ?? obj.height),
-          mediaWidth: baseLayer?.mediaWidth !== undefined ? baseLayer.mediaWidth : (obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width),
-          mediaHeight: baseLayer?.mediaHeight !== undefined ? baseLayer.mediaHeight : (obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height),
-          trimStart: baseLayer?.data?.trimStart !== undefined ? baseLayer.data.trimStart : (obj._storedTrimStart ?? 0),
-          trimEnd: baseLayer?.data?.trimEnd !== undefined ? baseLayer.data.trimEnd : (obj._storedTrimEnd ?? 0)
+          cropX: baseLayer?.cropX ?? (obj._storedCropX ?? 0),
+          cropY: baseLayer?.cropY ?? (obj._storedCropY ?? 0),
+          cropWidth: baseLayer?.cropWidth ?? (obj._storedCropWidth ?? obj._originalWidth ?? obj.width),
+          cropHeight: baseLayer?.cropHeight ?? (obj._storedCropHeight ?? obj._originalHeight ?? obj.height),
+          mediaWidth: baseLayer?.mediaWidth ?? (obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width),
+          mediaHeight: baseLayer?.mediaHeight ?? (obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height),
+          trimStart: baseLayer?.data?.trimStart ?? (obj._storedTrimStart ?? 0),
+          trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0)
         })
       })
     }

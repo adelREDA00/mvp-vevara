@@ -1072,7 +1072,7 @@ const projectSlice = createSlice({
     },
 
     setBackgroundImage: (state, action) => {
-      const { sceneId, imageUrl } = action.payload
+      const { sceneId, imageUrl, originalWidth, originalHeight, originalScaleX, originalScaleY } = action.payload
       const scene = state.scenes.find(s => s.id === sceneId)
       if (scene) {
         const backgroundLayerId = scene.layers.find(layerId => {
@@ -1083,7 +1083,14 @@ const projectSlice = createSlice({
         if (backgroundLayerId) {
           const backgroundLayer = state.layers[backgroundLayerId]
           if (backgroundLayer) {
-            backgroundLayer.data = { ...backgroundLayer.data, imageUrl }
+            backgroundLayer.data = {
+              ...backgroundLayer.data,
+              imageUrl,
+              originalWidth,
+              originalHeight,
+              originalScaleX,
+              originalScaleY
+            }
             backgroundLayer.updatedAt = Date.now()
           }
         }
@@ -1111,7 +1118,7 @@ const projectSlice = createSlice({
     },
 
     detachBackgroundImage: (state, action) => {
-      const { sceneId } = action.payload
+      const { sceneId, worldWidth = 1920, worldHeight = 1080 } = action.payload
       const scene = state.scenes.find(s => s.id === sceneId)
       if (scene) {
         const backgroundLayerId = scene.layers.find(layerId => {
@@ -1121,11 +1128,19 @@ const projectSlice = createSlice({
 
         if (backgroundLayerId) {
           const backgroundLayer = state.layers[backgroundLayerId]
-          const imageUrl = backgroundLayer?.data?.imageUrl
+          const data = backgroundLayer?.data
+          const imageUrl = data?.imageUrl
 
           if (imageUrl) {
             // Create a new image layer
             const newLayerId = uid()
+
+            // Restore original dimensions if available, otherwise default to 80% of canvas
+            const width = data.originalWidth || (worldWidth * 0.8)
+            const height = data.originalHeight || (worldHeight * 0.8)
+            const scaleX = data.originalScaleX !== undefined ? data.originalScaleX : 1
+            const scaleY = data.originalScaleY !== undefined ? data.originalScaleY : 1
+
             const newLayer = {
               id: newLayerId,
               sceneId,
@@ -1134,13 +1149,13 @@ const projectSlice = createSlice({
               visible: true,
               locked: false,
               opacity: 1.0,
-              x: backgroundLayer.width / 2,
-              y: backgroundLayer.height / 2,
-              width: backgroundLayer.width * 0.5,
-              height: backgroundLayer.height * 0.5,
+              x: worldWidth / 2,
+              y: worldHeight / 2,
+              width: width,
+              height: height,
               rotation: 0,
-              scaleX: 1,
-              scaleY: 1,
+              scaleX: scaleX,
+              scaleY: scaleY,
               anchorX: 0.5,
               anchorY: 0.5,
               data: {
@@ -1151,11 +1166,18 @@ const projectSlice = createSlice({
             }
 
             state.layers[newLayerId] = newLayer
-            scene.layers.push(newLayerId)
 
-            // Remove image from background
-            const { imageUrl: oldUrl, ...remainingData } = backgroundLayer.data
-            backgroundLayer.data = remainingData
+            // Insert after background layer (which is usually at index 0)
+            const bgIndex = scene.layers.indexOf(backgroundLayerId)
+            scene.layers.splice(bgIndex + 1, 0, newLayerId)
+
+            // Clear background image after detaching
+            backgroundLayer.data = { ...data }
+            delete backgroundLayer.data.imageUrl
+            delete backgroundLayer.data.originalWidth
+            delete backgroundLayer.data.originalHeight
+            delete backgroundLayer.data.originalScaleX
+            delete backgroundLayer.data.originalScaleY
             backgroundLayer.updatedAt = Date.now()
           }
         }

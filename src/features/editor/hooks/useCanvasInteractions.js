@@ -531,7 +531,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (layer && layerObject && !layerObject.destroyed) {
         // [FIX] Only include layers from the current scene to prevent cross-scene snapping
         if (layer.sceneId !== currentSceneId) return
-        
+
         // [FIX] Exclude background layers from spatial index to prevent snapping to them
         if (layer.type === LAYER_TYPES.BACKGROUND) return
 
@@ -628,7 +628,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       const layer = currentLayers[layerId]
       const layerObject = currentLayerObjectsMap.get(layerId)
       if (!layer || !layerObject || layerObject.destroyed) return
-      
+
       // [FIX] Only include layers from the current scene to prevent cross-scene snapping
       if (layer.sceneId !== currentSceneId) return
 
@@ -928,6 +928,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
     }
 
+    // [FIX] BACKGROUND PROTECTION: Never show hover box for background layers
+    if (layer.type === 'background') {
+      if (hoverBox) hoverBox.visible = false
+      return
+    }
+
     // [PERFORMANCE] Hide entirely during playback
     if (isPlaying) {
       if (hoverBox) hoverBox.visible = false
@@ -968,7 +974,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // Reuse existing graphics object - just clear and redraw
     outlineGraphics.clear()
     outlineGraphics.rect(localBoundsX, localBoundsY, boundsWidth, boundsHeight)
-    outlineGraphics.stroke({ color: 0x8B5CF6, width: 2 })
+
+    // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
+    const viewportScale = viewport.scale?.x || 1
+    const zoomScale = 1 / viewportScale
+    outlineGraphics.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
 
     hoverBox.visible = true
   }, [layersContainer, motionCaptureMode, isPlaying])
@@ -1011,7 +1021,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // Clear and redraw the outline (much faster than recreating the graphics object)
     outline.clear()
     outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
-    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale }) // Match selection box width scaling
+
+    // [FIX] ZOOM ADAPTIVE: Use the provided zoomScale for consistency with selection box
+    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
     dragHoverBox.visible = true
   }, [layersContainer])
 
@@ -1250,10 +1262,10 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       const engine = getGlobalMotionEngine()
       const sceneStartTime = sceneMotionFlows[currentSceneId]?.startTime || 0
       const step = sceneMotionFlows[currentSceneId]?.steps?.find(s => s.id === actualStepId)
-      
+
       if (step) {
         const startState = engine.predictLayerStateAtTime(layerId, currentSceneId, step.startTime || sceneStartTime)
-        
+
         if (startState && startState.x !== undefined && startState.y !== undefined) {
           stepStartAnchor = { x: startState.x, y: startState.y }
           stepAnchorPositionsRef.current.set(anchorKey, stepStartAnchor)
@@ -2477,7 +2489,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // [MULTI-LAYER FIX] Use layer+step key to prevent overwrites when multiple layers share the same step
     // We only clear the entire map during group sync (syncArrows) to avoid wiping data from other selected layers.
     // For individual updates, we just overwrite the relevant entries for this layer.
-    
+
     for (const step of (sceneMotionFlow?.steps || [])) {
       const layerActions = step.layerActions?.[layerId] || []
       const moveAction = layerActions.find(a => a.type === 'move')
@@ -2853,6 +2865,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // Find layer ID from the clicked object
       let layerId = findLayerIdFromObject(target, layerObjectsMap, stageContainer, viewport)
+
+      // [FIX] BACKGROUND PROTECTION: Never select background layers via pointer interaction
+      if (layerId && latestLayersRef.current[layerId]?.type === 'background') {
+        layerId = null
+      }
 
       // CRITICAL: Verify the clicked layer belongs to the current scene
       if (layerId && latestLayersRef.current[layerId]?.sceneId !== currentSceneId) {
@@ -3563,7 +3580,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
                 liveLayer.currentPosition = { x: newX, y: newY }
               }
             }
-            
+
             // [MULTI-LAYER FIX] Recalculate anchor positions after multi-move to ensure they're up-to-date
             // This is critical for proper control point calculation when curving paths
             if (motionCaptureMode?.isActive && motionCaptureMode.stepId) {
@@ -4106,11 +4123,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       const isVisibleInScene = layer && layer.sceneId === currentSceneId
 
       if (pixiObject && !pixiObject.destroyed) {
-        // CRITICAL: Only make layers interactive if they belong to the current scene
-        pixiObject.eventMode = isVisibleInScene ? 'static' : 'none'
-        pixiObject.cursor = isVisibleInScene ? 'pointer' : 'default'
+        // [FIX] BACKGROUND PROTECTION: Background layers are never interactive
+        const isBackground = layer?.type === 'background'
 
-        if (!isVisibleInScene) return
+        // CRITICAL: Only make layers interactive if they belong to the current scene and are NOT backgrounds
+        pixiObject.eventMode = (isVisibleInScene && !isBackground) ? 'static' : 'none'
+        pixiObject.cursor = (isVisibleInScene && !isBackground) ? 'pointer' : 'default'
+
+        if (!isVisibleInScene || isBackground) return
 
         // Add hover effect for layer objects
         const handleLayerHoverEnter = () => {

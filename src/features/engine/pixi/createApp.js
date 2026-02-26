@@ -46,18 +46,23 @@ export async function createApp(config = {}) {
   } catch (error) {
     console.warn('PixiJS primary init failed, trying fallback:', error)
     try {
-      // Fallback init
+      // Fallback init: Lower resolution and no antialias
+      // Pixi v8 does NOT have a CanvasRenderer, so we just try with safer WebGL/WebGPU settings
       await app.init({
         width,
         height,
         backgroundColor: 0x0d1216,
         antialias: false,
-        resolution: 1, // Force low resolution on fallback
+        resolution: 1,
         autoDensity: false,
         preference: 'webgl',
       })
     } catch (fallbackError) {
-      if (app) app.destroy(true, { children: true, texture: true })
+      console.error('PixiJS fallback init also failed:', fallbackError)
+      // [FIX] Safety check: Only destroy if renderer exists, otherwise just null out
+      if (app.renderer) {
+        app.destroy(true, { children: true, texture: true })
+      }
       throw new Error(`Failed to initialize PixiJS: ${fallbackError.message}`)
     }
   }

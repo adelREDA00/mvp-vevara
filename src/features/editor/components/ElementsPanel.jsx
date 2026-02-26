@@ -290,10 +290,10 @@ function ElementsPanel({ onClose, aspectRatio }) {
       className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: 'rgba(13, 18, 22, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderRight: '0.5px solid rgba(255, 255, 255, 0.1)',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : 'rgba(13, 18, 22, 0.85)',
+        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '0.5px solid rgba(255, 255, 255, 0.1)',
       }}
     >
       {/* Resize Handle - Drag left to close */}

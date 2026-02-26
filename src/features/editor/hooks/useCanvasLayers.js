@@ -321,6 +321,15 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     return
   }
 
+  // [FIX] BACKGROUND PROTECTION: Skip geometric transforms for background layers.
+  // Their dimensions and positioning are managed separately to ensure "cover" fit
+  // and non-interactivity.
+  if (layer.type === 'background') {
+    // Sync opacity only
+    if (layer.opacity !== undefined) displayObject.alpha = layer.opacity
+    return
+  }
+
   // Check for motion capture overrides
   const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layerId)
 
@@ -1098,7 +1107,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
         // REINFORCE SCENE ISOLATION: Explicitly disable interaction for off-scene layers
         // This prevents invisible layers from other scenes from responding to events
-        pixiObject.eventMode = layerData.visible ? 'static' : 'none'
+        // [FIX] BACKGROUND PROTECTION: Never set background layers to 'static'
+        if (layer.type === LAYER_TYPES.BACKGROUND) {
+          pixiObject.eventMode = 'none'
+        } else {
+          pixiObject.eventMode = layerData.visible ? 'static' : 'none'
+        }
 
       }
 

@@ -72,10 +72,16 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         if (containerRef.current && app.canvas && containerRef.current.contains(app.canvas)) {
           containerRef.current.removeChild(app.canvas)
         }
-        app.destroy({ children: true, texture: true })
+        // [FIX] Safety check before destroy
+        if (app.renderer && !app.destroyed) {
+          app.destroy({ children: true, texture: true })
+        }
         appRef.current = null
       } else if (pendingApp) {
-        pendingApp.destroy({ children: true, texture: true })
+        // [FIX] Safety check for pending app
+        if (pendingApp.renderer && !pendingApp.destroyed) {
+          pendingApp.destroy({ children: true, texture: true })
+        }
       }
       setIsReady(false)
     }

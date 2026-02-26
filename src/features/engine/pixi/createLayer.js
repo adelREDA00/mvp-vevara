@@ -37,12 +37,18 @@ export function createTextLayer(config) {
       breakWords: true,
       lineHeight: (data.fontSize || 24) * 1.2,
       letterSpacing: 0, // [SYNC FIX] Explicitly zero to match browser default
-      resolution: 4, // Higher base resolution for crisp text and scaling headroom
+      resolution: 2, // [SCALING FIX] Reduced from 4 to 2 to provide more headroom for scaling before hitting GPU limits
       antialias: true, // Maximized edges
       align: data.textAlign || 'left',
     },
-
   })
+
+  // PERFORMANCE: Enable mipmapping for text textures to prevent aliasing when zoomed out
+  if (text.texture?.source) {
+    text.texture.source.autoGenerateMipmaps = true
+    text.texture.source.mipMap = 'on'
+    text.texture.source.scaleMode = 'linear'
+  }
 
   // CRITICAL FIX: Force text update BEFORE setting pivot to get accurate dimensions
   text.updateText?.(true)
@@ -267,6 +273,13 @@ export async function createImageLayer(config) {
   const container = new PIXI.Container()
   const sprite = new PIXI.Sprite(texture)
 
+  // PERFORMANCE: Enable mipmapping for images to prevent aliasing when zoomed out
+  if (texture.source) {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.mipMap = 'on'
+    texture.source.scaleMode = 'linear'
+  }
+
   container._imageSprite = sprite
   container.addChild(sprite)
 
@@ -439,10 +452,24 @@ export async function createVideoLayer(config) {
   const sprite = new PIXI.Sprite(texture)
   const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
 
+  // PERFORMANCE: Enable mipmapping for videos if possible
+  if (texture.source) {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.mipMap = 'on'
+    texture.source.scaleMode = 'linear'
+  }
+
   container._videoSprite = sprite
   container._videoTexture = texture
   container._videoElement = videoElement
   container.addChild(sprite)
+
+  // PERFORMANCE: Enable mipmapping for videos if possible
+  if (texture.source) {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.mipMap = 'on'
+    texture.source.scaleMode = 'linear'
+  }
 
   // CROP SYSTEM: Store intrinsic media dimensions
   const texWidth = videoElement?.videoWidth || texture.width || data.width || 300

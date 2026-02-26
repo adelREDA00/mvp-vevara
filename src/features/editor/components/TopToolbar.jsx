@@ -53,32 +53,6 @@ function TopToolbar({
             />
           </div>
 
-          {/* File Button with Dropdown */}
-          <DropdownMenu
-            trigger={
-              <button className="text-white hover:bg-white/20 active:bg-white/30 h-8 px-3 rounded-md transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-xs font-medium">
-                <FileText className="h-4 w-4" strokeWidth={1.5} />
-                <span className="hidden sm:inline">File</span>
-                <ChevronDown className="h-3 w-3" strokeWidth={1.5} />
-              </button>
-            }
-          >
-            <DropdownMenuItem onClick={() => { }}>
-              New Project
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { }}>
-              Open Project
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { }}>
-              Save
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { }}>
-              Save As
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { }}>
-              Export
-            </DropdownMenuItem>
-          </DropdownMenu>
 
           {/* Resize Button with Dropdown */}
           <DropdownMenu
@@ -150,26 +124,37 @@ function TopToolbar({
           </button>
 
 
-          {/* Preview Button */}
-          <button
-            onClick={onPreview}
-            className="text-white hover:bg-white/20 active:bg-white/30 h-8 px-3 rounded-md transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-xs font-medium"
-            title="Preview"
-          >
-            <Eye className="h-4 w-4" strokeWidth={1.5} />
-            <span className="hidden sm:inline">Preview</span>
-          </button>
 
 
-          {/* Export Button */}
-          <button
-            onClick={onExport}
-            className="bg-white text-purple-600 hover:bg-white/90 active:bg-white/80 font-medium gap-1.5 h-8 px-3 text-xs rounded-md transition-colors flex items-center touch-manipulation whitespace-nowrap"
-            title="Export"
+          {/* Export Button with Resolution Dropdown */}
+          <DropdownMenu
+            trigger={
+              <button
+                className="bg-white text-purple-600 hover:bg-white/90 active:bg-white/80 font-medium gap-1.5 h-8 px-3 text-xs rounded-md transition-colors flex items-center touch-manipulation whitespace-nowrap"
+                title="Export"
+              >
+                <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+                <span className="hidden sm:inline">Export</span>
+                <ChevronDown className="h-3 w-3 ml-0.5 opacity-60" strokeWidth={1.5} />
+              </button>
+            }
           >
-            <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
-            <span className="hidden sm:inline">Export</span>
-          </button>
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1">
+              Select Resolution
+            </div>
+            <DropdownMenuItem onClick={() => onExport && onExport('720p')}>
+              720p (HD)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExport && onExport('1080p')}>
+              1080p (Full HD)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExport && onExport('1440p')}>
+              2K (QHD)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
+              4K (Ultra HD)
+            </DropdownMenuItem>
+          </DropdownMenu>
 
         </div>
       </div>

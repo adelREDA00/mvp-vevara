@@ -335,28 +335,26 @@ function Stage({
     selectedLayerObject
   }), [selectedLayerId, selectedLayer, belongsToCurrentScene, effectiveSelectedLayer, selectedLayerObject])
 
+  // [FIX] BACKGROUND OPTIMIZATION: Memoize background layer lookup to avoid finding it on every render/effect run
+  const backgroundLayer = useMemo(() => {
+    if (!currentScene?.layers || !layers) return null
+    const bgId = currentScene.layers.find(id => layers[id]?.type === 'background')
+    return bgId ? layers[bgId] : null
+  }, [currentScene?.layers, layers])
+
   // Update background layer dimensions when world dimensions change
   useEffect(() => {
-    if (!isReady || !currentSceneId || !layers) return
+    if (!isReady || !backgroundLayer) return
 
-    // Find the background layer for the current scene
-    const backgroundLayerId = currentScene?.layers?.find(layerId => {
-      const layer = layers[layerId]
-      return layer && layer.type === 'background'
-    })
-
-    if (backgroundLayerId) {
-      const backgroundLayer = layers[backgroundLayerId]
-      if (backgroundLayer && (backgroundLayer.width !== worldWidth || backgroundLayer.height !== worldHeight)) {
-        // Update background layer dimensions to match world dimensions
-        dispatch(updateLayer({
-          id: backgroundLayerId,
-          width: worldWidth,
-          height: worldHeight
-        }))
-      }
+    // Ensure background matches world dimensions exactly
+    if (Math.abs(backgroundLayer.width - worldWidth) > 0.1 || Math.abs(backgroundLayer.height - worldHeight) > 0.1) {
+      dispatch(updateLayer({
+        id: backgroundLayer.id,
+        width: worldWidth,
+        height: worldHeight
+      }))
     }
-  }, [worldWidth, worldHeight, currentSceneId, currentScene, isReady, dispatch, layers])
+  }, [worldWidth, worldHeight, backgroundLayer?.id, backgroundLayer?.width, backgroundLayer?.height, isReady, dispatch])
 
   // =============================================================================
   // CANVAS RENDERING & MASKS
@@ -733,7 +731,11 @@ function Stage({
                     if (selectedLayerIds[0] && imageUrl) {
                       dispatch(setBackgroundImage({
                         sceneId: currentSceneId,
-                        imageUrl: imageUrl
+                        imageUrl: imageUrl,
+                        originalWidth: selectedLayer.width,
+                        originalHeight: selectedLayer.height,
+                        originalScaleX: selectedLayer.scaleX,
+                        originalScaleY: selectedLayer.scaleY
                       }))
                       dispatch(deleteLayer(selectedLayerIds[0]))
                       dispatch(clearLayerSelection())
@@ -813,7 +815,11 @@ function Stage({
                 <>
                   <button
                     onClick={() => {
-                      dispatch(detachBackgroundImage({ sceneId: currentSceneId }))
+                      dispatch(detachBackgroundImage({
+                        sceneId: currentSceneId,
+                        worldWidth,
+                        worldHeight
+                      }))
                       setContextMenu(null)
                     }}
                     className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"

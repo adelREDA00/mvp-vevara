@@ -25,6 +25,12 @@ export const loadTextureRobust = async (imageUrl) => {
             img.onload = () => {
                 try {
                     const texture = PIXI.Texture.from(img)
+                    // PERFORMANCE: Enable mipmapping for blob images
+                    if (texture.source) {
+                        texture.source.autoGenerateMipmaps = true
+                        texture.source.mipMap = 'on'
+                        texture.source.scaleMode = 'linear'
+                    }
                     // Add to cache so subsequent PIXI.Assets.load calls for this blob URL work
                     PIXI.Assets.cache.set(imageUrl, texture)
                     resolve(texture)

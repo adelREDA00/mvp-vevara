@@ -83,52 +83,54 @@ function TextPanel({ onClose, aspectRatio }) {
     {
       id: 'title',
       name: 'Title',
-      preview: 'Title',
+      preview: 'Add a heading',
       onClick: () => handleAddText('text', {
         type: 'text',
-        width: 400,
-        height: 80,
+        width: 600,
+        height: 100,
         data: {
-          content: 'Title',
-          fontSize: 48,
+          content: 'Add a heading',
+          fontSize: 64,
           color: '#000000',
-          fontFamily: 'Arial',
+          fontFamily: 'Inter',
           fontWeight: 'bold',
+          textAlign: 'center',
         }
       })
     },
     {
       id: 'subtitle',
       name: 'Subtitle',
-      preview: 'Subtitle',
+      preview: 'Add a subheading',
       onClick: () => handleAddText('text', {
         type: 'text',
-        width: 350,
-        height: 50,
+        width: 500,
+        height: 80,
         data: {
-          content: 'Subtitle',
-          fontSize: 32,
+          content: 'Add a subheading',
+          fontSize: 42,
           color: '#000000',
-          fontFamily: 'Arial',
+          fontFamily: 'Inter',
           fontWeight: '600',
+          textAlign: 'center',
         }
       })
     },
     {
-      id: 'text',
-      name: 'Text',
-      preview: 'Text',
+      id: 'body',
+      name: 'Body text',
+      preview: 'Add a little bit of body text',
       onClick: () => handleAddText('text', {
         type: 'text',
-        width: 300,
-        height: 40,
+        width: 400,
+        height: 60,
         data: {
-          content: 'Text',
-          fontSize: 72,
+          content: 'Add a little bit of body text',
+          fontSize: 24,
           color: '#000000',
-          fontFamily: 'Arial',
+          fontFamily: 'Inter',
           fontWeight: 'normal',
-          textAlign: 'left',
+          textAlign: 'center',
         }
       })
     },
@@ -143,10 +145,10 @@ function TextPanel({ onClose, aspectRatio }) {
       className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: 'rgba(13, 18, 22, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderRight: '0.5px solid rgba(255, 255, 255, 0.1)',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : 'rgba(13, 18, 22, 0.85)',
+        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '0.5px solid rgba(255, 255, 255, 0.1)',
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
@@ -189,9 +191,10 @@ function TextPanel({ onClose, aspectRatio }) {
                 <span
                   className="text-white"
                   style={{
-                    fontSize: element.id === 'title' ? '48px' : element.id === 'subtitle' ? '32px' : '24px',
+                    fontSize: element.id === 'title' ? '28px' : element.id === 'subtitle' ? '20px' : '16px',
                     fontWeight: element.id === 'title' ? 'bold' : element.id === 'subtitle' ? '600' : 'normal',
                     lineHeight: '1.2',
+                    fontFamily: 'Inter'
                   }}
                 >
                   {element.preview}
