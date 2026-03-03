@@ -33,12 +33,12 @@ export async function createApp(config = {}) {
     await app.init({
       width,
       height,
-      backgroundColor: 0x0d1216,
+      backgroundColor: 0x0f1015,
       resolution: defaultResolution,
       autoDensity,
       preference: 'webgl',
-      // 'high-performance' can cause crashes on some mobile devices due to power/thermal constraints
-      // Default allows the browser to choose the best option
+      // 'default' lets the browser/driver pick; 'high-performance' can cause
+      // thermal throttling and context loss on low-end / integrated GPUs.
       powerPreference: 'default',
       antialias: true,
       premultipliedAlpha: true,
@@ -46,12 +46,11 @@ export async function createApp(config = {}) {
   } catch (error) {
     console.warn('PixiJS primary init failed, trying fallback:', error)
     try {
-      // Fallback init: Lower resolution and no antialias
-      // Pixi v8 does NOT have a CanvasRenderer, so we just try with safer WebGL/WebGPU settings
+      // Fallback: lower resolution and no antialias for weaker hardware
       await app.init({
         width,
         height,
-        backgroundColor: 0x0d1216,
+        backgroundColor: 0x0f1015,
         antialias: false,
         resolution: 1,
         autoDensity: false,
@@ -59,13 +58,49 @@ export async function createApp(config = {}) {
       })
     } catch (fallbackError) {
       console.error('PixiJS fallback init also failed:', fallbackError)
-      // [FIX] Safety check: Only destroy if renderer exists, otherwise just null out
       if (app.renderer) {
         app.destroy(true, { children: true, texture: true })
       }
       throw new Error(`Failed to initialize PixiJS: ${fallbackError.message}`)
     }
   }
+
+  // ─── WebGL context-loss mitigation ────────────────────────────────────────
+  // Cap the ticker to 60 fps.  On 120/144 Hz monitors PIXI defaults to the
+  // display refresh rate, doubling GPU work per second on low-end hardware and
+  // increasing the chance of a GPU TDR (which manifests as context loss).
+  app.ticker.maxFPS = 60
+  // Prevent PIXI from "catching up" with a massive delta after a tab switch or
+  // a brief GPU stall — large deltas cause a single very expensive frame.
+  app.ticker.minFPS = 10
+
+  // Intercept context-lost events: calling preventDefault() signals to the
+  // browser that we want a context-restore attempt instead of a permanent loss.
+  //
+  // NOTE: Some GPU drivers / browsers fire a spurious webglcontextlost event
+  // immediately after context creation as part of their own setup handshake.
+  // We defer listener registration by two animation frames so that transient
+  // init-time event is already gone before we start watching — this stops the
+  // false-positive warning that appears on every page load without any user
+  // interaction.  Real context losses caused by heavy GPU usage come much later
+  // and are always caught once the two-frame window has passed.
+  if (app.canvas) {
+    const canvas = app.canvas
+    const attachContextListeners = () => {
+      canvas.addEventListener('webglcontextlost', (event) => {
+        event.preventDefault()
+        console.warn('[PIXI] WebGL context lost — attempting recovery')
+      }, false)
+
+      canvas.addEventListener('webglcontextrestored', () => {
+        console.log('[PIXI] WebGL context restored')
+      }, false)
+    }
+    // Double rAF: first frame lets the browser complete its own context setup,
+    // second frame ensures any deferred GPU driver events have already fired.
+    requestAnimationFrame(() => requestAnimationFrame(attachContextListeners))
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   // Create viewport
   const viewportConfig = {

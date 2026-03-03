@@ -75,7 +75,7 @@ function MotionInspector({
   if (!selectedLayer) {
     return (
       <div className="w-[340px] h-full flex flex-col overflow-hidden backdrop-blur-md" style={{
-        backgroundColor: 'rgba(13, 18, 22, 0.75)',
+        backgroundColor: '#0f1015',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)'
       }}>
@@ -540,7 +540,7 @@ function MotionInspector({
       className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '340px',
-        backgroundColor: 'rgba(13, 18, 22, 0.75)',
+        backgroundColor: '#0f1015',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
         borderRight: '1px solid rgba(255,255,255,0.08)',

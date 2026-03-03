@@ -1,13 +1,11 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { X, Square, Circle, Triangle, Hexagon, Minus } from 'lucide-react'
+import { X, Square, Circle, Triangle, Hexagon, Minus, Star } from 'lucide-react'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
-import { DragToCloseHandle } from './DragToCloseHandle'
 
 function ElementsPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
-  const [width, setWidth] = useState(320)
 
   // Use the aspect ratio prop passed from parent (same as Stage.jsx)
   const getCurrentAspectRatio = () => {
@@ -124,6 +122,24 @@ function ElementsPanel({ onClose, aspectRatio }) {
       })
     },
     {
+      id: 'line',
+      name: 'Line',
+      icon: Minus,
+      onClick: () => handleAddElement('shape', {
+        type: 'shape',
+        width: 200,
+        height: 4,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        data: {
+          shapeType: 'line',
+          fill: '#e5e5e5',
+          stroke: '',
+          strokeWidth: 0,
+        }
+      })
+    },
+    {
       id: 'triangle',
       name: 'Triangle',
       icon: Triangle,
@@ -160,24 +176,6 @@ function ElementsPanel({ onClose, aspectRatio }) {
       })
     },
     {
-      id: 'line',
-      name: 'Line',
-      icon: Minus,
-      onClick: () => handleAddElement('shape', {
-        type: 'shape',
-        width: 200,
-        height: 4,
-        anchorX: 0.5,
-        anchorY: 0.5,
-        data: {
-          shapeType: 'line',
-          fill: '#e5e5e5',
-          stroke: '',
-          strokeWidth: 0,
-        }
-      })
-    },
-    {
       id: 'square',
       name: 'Square',
       icon: Square,
@@ -195,26 +193,31 @@ function ElementsPanel({ onClose, aspectRatio }) {
         }
       })
     },
+    {
+      id: 'star',
+      name: 'Star',
+      icon: Star,
+      onClick: () => handleAddElement('shape', {
+        type: 'shape',
+        width: 140,
+        height: 140,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        data: {
+          shapeType: 'star',
+          fill: '#e5e5e5',
+          stroke: '',
+          strokeWidth: 0,
+        }
+      })
+    },
   ]
 
-  // Sample data for different sections - include all elements for UI demonstration
-  const recentlyUsed = [
-    { id: '1', element: allElements[0], onClick: allElements[0].onClick }, // Rectangle
-    { id: '2', element: allElements[1], onClick: allElements[1].onClick }, // Circle
-    { id: '3', element: allElements[2], onClick: allElements[2].onClick }, // Triangle
-    { id: '4', element: allElements[3], onClick: allElements[3].onClick }, // Hexagon
-    { id: '5', element: allElements[4], onClick: allElements[4].onClick }, // Line
-    { id: '6', element: allElements[5], onClick: allElements[5].onClick }, // Square
-  ]
-
-  const magicRecommendations = [
-    { id: 'f1', element: allElements[4], onClick: allElements[4].onClick }, // Line
-    { id: 'f2', element: allElements[5], onClick: allElements[5].onClick }, // Square
-    { id: 'f3', element: allElements[0], onClick: allElements[0].onClick }, // Rectangle
-    { id: 'f4', element: allElements[1], onClick: allElements[1].onClick }, // Circle
-    { id: 'f5', element: allElements[2], onClick: allElements[2].onClick }, // Triangle
-    { id: 'f6', element: allElements[3], onClick: allElements[3].onClick }, // Hexagon
-  ]
+  const elementItems = allElements.map((element) => ({
+    id: element.id,
+    element,
+    onClick: element.onClick,
+  }))
 
   const renderElementPreview = (item) => {
     if (item.element) {
@@ -223,10 +226,10 @@ function ElementsPanel({ onClose, aspectRatio }) {
       return (
         <button
           onClick={item.onClick}
-          className="flex-shrink-0 w-[88px] h-[88px] flex items-center justify-center hover:bg-zinc-800/20 rounded-lg transition-all duration-200 group relative"
+          className="w-full aspect-square flex items-center justify-center hover:bg-zinc-800/20 rounded-lg transition-all duration-200 group relative"
           title={item.element.name}
         >
-          <svg width="56" height="56" viewBox="0 0 56 56" className="flex-shrink-0">
+          <svg viewBox="0 0 56 56" className="w-[56px] h-[56px] flex-shrink-0">
             {shapeId === 'circle' && (
               <circle cx="28" cy="28" r="20" fill="#e5e5e5" />
             )}
@@ -245,6 +248,12 @@ function ElementsPanel({ onClose, aspectRatio }) {
             {shapeId === 'line' && (
               <rect x="8" y="26" width="40" height="4" rx="2" fill="#e5e5e5" />
             )}
+            {shapeId === 'star' && (
+              <path
+                d="M28 8l5.09 10.32 11.39 1.65-8.24 8.03 1.95 11.3L28 33.8l-10.19 5.5 1.95-11.3-8.24-8.03 11.39-1.65L28 8z"
+                fill="#e5e5e5"
+              />
+            )}
           </svg>
         </button>
       )
@@ -253,29 +262,15 @@ function ElementsPanel({ onClose, aspectRatio }) {
     return null
   }
 
-  // Scrollable section component
-  const ScrollableSection = ({ items, sectionName }) => {
-    const scrollContainerRef = useRef(null)
-
+  const GridSection = ({ items, sectionName }) => {
     return (
       <div className="mb-6">
         <div className="flex items-center justify-between px-4 mb-3">
           <h3 className="text-sm font-medium text-white">{sectionName}</h3>
-          <button className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer">
-            See all
-          </button>
+          <span className="text-xs text-zinc-500">{items.length} items</span>
         </div>
-        <div className="relative px-4">
-          {/* Scrollable container */}
-          <div
-            ref={scrollContainerRef}
-            className="flex gap-3 overflow-x-auto scrollbar-hide"
-            style={{
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none',
-              WebkitOverflowScrolling: 'touch'
-            }}
-          >
+        <div className="px-4">
+          <div className="grid grid-cols-3 gap-3">
             {items.map((item) => (
               <div key={item.id}>{renderElementPreview(item)}</div>
             ))}
@@ -287,18 +282,15 @@ function ElementsPanel({ onClose, aspectRatio }) {
 
   return (
     <div
-      className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300"
       style={{
-        width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : 'rgba(13, 18, 22, 0.85)',
-        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
-        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(12px)',
-        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '0.5px solid rgba(255, 255, 255, 0.1)',
+        width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#0f1015',
+        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
       }}
     >
-      {/* Resize Handle - Drag left to close */}
-      <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} maxWidth={500} />
-
       {/* Header */}
       <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
         <div className="flex items-center justify-between mb-3">
@@ -317,13 +309,9 @@ function ElementsPanel({ onClose, aspectRatio }) {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="py-4">
-          <ScrollableSection
-            items={recentlyUsed}
-            sectionName="Recently used"
-          />
-          <ScrollableSection
-            items={magicRecommendations}
-            sectionName="Magic recommendations"
+          <GridSection
+            items={elementItems}
+            sectionName="Elements"
           />
         </div>
       </div>

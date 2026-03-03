@@ -36,10 +36,12 @@ function TopToolbar({
     <div className="relative z-50">
       {/* Main Header Bar */}
       <div
-        className="h-10 md:h-12 flex items-center justify-between px-2 sm:px-3 md:px-4 gap-1 sm:gap-2 md:gap-4 flex-shrink-0 overflow-x-auto overflow-y-visible relative z-50 backdrop-blur-md"
+        className="h-10 md:h-12 flex items-center justify-between px-2 sm:px-3 md:px-4 gap-1 sm:gap-2 md:gap-4 flex-shrink-0 overflow-x-auto overflow-y-visible relative z-50"
         style={{
-          backgroundColor: '#7c3aed',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+          backgroundColor: 'rgba(124, 74, 240, 0.82)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
         }}
       >
         {/* Left Section: Logo, File and Resize buttons with dropdowns */}
@@ -57,10 +59,10 @@ function TopToolbar({
           {/* Resize Button with Dropdown */}
           <DropdownMenu
             trigger={
-              <button className="text-white hover:bg-white/20 active:bg-white/30 h-8 px-3 rounded-md transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-xs font-medium">
-                <Maximize2 className="h-4 w-4" strokeWidth={1.5} />
+              <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5">
+                <Maximize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">Resize</span>
-                <ChevronDown className="h-3 w-3" strokeWidth={1.5} />
+                <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={1.5} />
               </button>
             }
           >
@@ -106,20 +108,20 @@ function TopToolbar({
           {/* Mobile Menu Toggle - Visible only on mobile/tablet */}
           <button
             onClick={() => onPreview && onPreview()} // Use a prop to signify menu toggle if needed, or I'll just update EditorPage to handle it
-            className="lg:hidden text-white hover:bg-white/20 active:bg-white/30 h-8 w-8 rounded-md transition-colors flex items-center justify-center touch-manipulation"
+            className="lg:hidden text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation border border-white/5"
             title="Menu"
             id="mobile-menu-button"
           >
-            <Layers className="h-5 w-5" strokeWidth={2} />
+            <Layers className="h-4.5 w-4.5" strokeWidth={1.5} />
           </button>
 
           {/* Share Button */}
           <button
             onClick={onShare}
-            className="hidden xs:flex text-white hover:bg-white/20 active:bg-white/30 h-8 px-3 rounded-md transition-colors items-center gap-1.5 touch-manipulation whitespace-nowrap text-xs font-medium"
+            className="hidden xs:flex text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-3 rounded-lg transition-all items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5"
             title="Share"
           >
-            <Share2 className="h-4 w-4" strokeWidth={1.5} />
+            <Share2 className="h-3.5 w-3.5" strokeWidth={1.5} />
             <span className="hidden sm:inline">Share</span>
           </button>
 
@@ -130,12 +132,12 @@ function TopToolbar({
           <DropdownMenu
             trigger={
               <button
-                className="bg-white text-purple-600 hover:bg-white/90 active:bg-white/80 font-medium gap-1.5 h-8 px-3 text-xs rounded-md transition-colors flex items-center touch-manipulation whitespace-nowrap"
+                className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-8 px-3 text-[11px] rounded-lg transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
                 title="Export"
               >
                 <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">Export</span>
-                <ChevronDown className="h-3 w-3 ml-0.5 opacity-60" strokeWidth={1.5} />
+                <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" strokeWidth={1.5} />
               </button>
             }
           >

@@ -9,16 +9,17 @@ import { useEffect, useRef, useState } from 'react'
 import { useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
+import { drawShapePath } from '../../engine/pixi/createLayer'
 import { getLayerWorldBounds, getCombinedLayerBounds, getRotatedAABB } from '../utils/geometry'
 import { updateLayer } from '../../../store/slices/projectSlice'
 import { calculateCombinedBounds, getInitialLayerState } from '../utils/layerUtils'
 import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/viewportUtils'
 import { createDimensionsBadge, updateDimensionsBadge, removeDimensionsBadge, createRotationBadge, updateRotationBadge, removeRotationBadge } from '../utils/badgeUtils'
-import { createResizeHandle, createRotateHandle } from '../utils/handleUtils'
+import { createResizeHandle, createRotateHandle, calculateAdaptedScale } from '../utils/handleUtils'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 
-export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null) {
+export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null, onLockedInteraction = null) {
   const dispatch = useDispatch()
   const selectionBoxRef = useRef(null)
   const [forceUpdate, setForceUpdate] = useState(0)
@@ -79,25 +80,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       return
     }
 
-    // [FIX] Hide multi-selection box in Normal Mode if ANY selected layer has started its animation
-    const isCapture = motionCaptureMode?.isActive
-    if (!isPlaying && !isCapture && sceneMotionFlow && selectedLayerIds?.length > 0) {
-      const engine = getGlobalMotionEngine()
-      const currentTime = engine?.masterTimeline?.time() || 0
-
-      // Check if any layer has already started its animation
-      const anyLayerAnimated = selectedLayerIds.some(layerId => {
-        const firstActionTime = getLayerFirstActionTime(layerId, sceneMotionFlow)
-        return currentTime > 0.01 && currentTime >= firstActionTime
-      })
-
-      if (anyLayerAnimated) {
-        if (selectionBoxRef.current) {
-          selectionBoxRef.current.visible = false
-        }
-        return
-      }
-    }
+    // Visibility is now handled by always showing the box, but locking it if necessary
 
     // Clear bounds cache when selected layers change to ensure fresh calculations
     // This fixes the issue where multi-selection stops working after the first drag operation
@@ -159,7 +142,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       box.interactiveChildren = true
       box.cursor = 'move' // Show move cursor
       box.zIndex = 10001 // Above single selection box
-      stageContainer.addChild(box)
+      layersContainer.addChild(box)
       selectionBoxRef.current = box
 
       // Ensure the container itself can receive events by setting a hit area
@@ -202,9 +185,24 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       graphics.clear()
     }
 
+    const engine = getGlobalMotionEngine()
+    const currentTime = engine?.masterTimeline?.time() || 0
+    const sceneStartTime = sceneMotionFlow?.sceneStartOffset || 0
+    const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
+
+    // Check if any selected layer is animated
+    const anyLayerAnimated = selectedLayerIds.some(layerId => {
+      return getLayerFirstActionTime(layerId, sceneMotionFlow) !== Infinity
+    })
+
+    const isLocked = !motionCaptureMode?.isActive && isPastBaseStep && anyLayerAnimated
+
     // drawDashedRect signature: (graphics, x, y, width, height, cornerRadius, strokeColor, strokeWidth, dashLength, gapLength)
     const zoomScale = 1 / (viewport?.scale?.x || 1)
-    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.5 * zoomScale, 10, 5)
+    const baseScale = calculateAdaptedScale(zoomScale)
+    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.5 * baseScale, 10, 5)
+
+    graphics.alpha = isLocked ? 0.4 : 1.0
 
     box.addChild(graphics)
     box.x = minX
@@ -236,7 +234,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       // [MOTION CAPTURE FIX] Use tracked state when in motion capture mode
       const initialLayerStates = new Map()
       const isMotionCapture = motionCaptureMode?.isActive
-      
+
       selectedLayerIds.forEach((layerId) => {
         const layer = layers[layerId]
         const layerObject = layerObjectsMap?.get(layerId)
@@ -253,12 +251,12 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             const currentScaleX = trackedLayer.scaleX ?? 1
             const currentScaleY = trackedLayer.scaleY ?? 1
             const currentRotation = trackedLayer.rotation ?? layer.rotation ?? 0
-            
+
             // Calculate bounds from tracked state
             const isTextElement = layerObject instanceof PIXI.Text
             const anchorX = isTextElement ? 0 : (layer.anchorX ?? 0.5)
             const anchorY = isTextElement ? 0 : (layer.anchorY ?? 0.5)
-            
+
             const bounds = getRotatedAABB(
               currentX, currentY, currentWidth, currentHeight,
               currentScaleX, currentScaleY, currentRotation, anchorX, anchorY
@@ -325,16 +323,19 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             onResizeStart: (handleType, cursor, e) => {
               handleMultiResizeStart(handleType, cursor, e, minX, minY, width, height, initialLayerStates)
             },
-            zoomScale: 1 / (viewport?.scale?.x || 1)
+            zoomScale: 1 / (viewport?.scale?.x || 1),
+            isLocked,
+            onLockedInteraction
           })
           pooledObjectsRef.current.handles[index] = handle
         } else {
           // Update existing handle properties and visually scale if needed
           handle.x = hx
           handle.y = hy
-          handle.cursor = cursor
+          handle.cursor = isLocked ? 'not-allowed' : cursor
           handle.handleType = handleType
           handle.visible = true
+          handle.alpha = isLocked ? 0.4 : 1.0
           // Update visual scaling to stay consistent on screen
           const currentZoom = 1 / (viewport?.scale?.x || 1)
           // Handle sizing is normally baked into Graphics by handleUtils, 
@@ -366,10 +367,11 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         handles.forEach(handle => box.addChild(handle))
       }
 
-      // Create rotation handle (only if not currently resizing/rotating)
       if (!resizeStateRef.current && !rotateStateRef.current) {
         const zoomScale = 1 / (viewport?.scale?.x || 1)
-        const rotationYPosition = height + (40 * zoomScale) // Positioned 40px below the box, matching single-selection
+        const baseScale = calculateAdaptedScale(zoomScale)
+        const rotateRadius = 18 * baseScale
+        const rotationYPosition = height + rotateRadius + (45 * baseScale)
 
         // Check if we need to recreate the handle (if missing, destroyed, or zoom changed)
         let rotateHandle = pooledObjectsRef.current.rotateHandle
@@ -384,7 +386,9 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             onRotateStart: (e) => {
               handleMultiRotateStart(e)
             },
-            zoomScale: zoomScale
+            zoomScale: zoomScale,
+            isLocked,
+            onLockedInteraction
           })
           rotateHandle._cachedZoom = zoomScale
           pooledObjectsRef.current.rotateHandle = rotateHandle
@@ -394,6 +398,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
           rotateHandle.x = width / 2
           rotateHandle.y = rotationYPosition
           rotateHandle.visible = true
+          rotateHandle.alpha = isLocked ? 0.4 : 1.0
           rotateHandle.scale.set(1) // Ensure scale is 1, as sizing is baked into graphics
 
           // Ensure it's part of the box
@@ -405,9 +410,9 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
     }
 
     // Ensure box is on top
-    if (box.parent === stageContainer) {
-      const topIndex = stageContainer.children.length - 1
-      stageContainer.setChildIndex(box, topIndex)
+    if (box.parent === layersContainer) {
+      const topIndex = layersContainer.children.length - 1
+      layersContainer.setChildIndex(box, topIndex)
     }
 
     // Multi-resize handler
@@ -524,12 +529,12 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         lastWorldPos: { x: startWorldPos.x, y: startWorldPos.y },
       }
 
-      // Ensure selection box is visible and in the stage container
+      // Ensure selection box is visible and in the layers container
       const box = selectionBoxRef.current
       if (box && !box.destroyed) {
         box.visible = true
-        if (!box.parent && latestStageContainerRef.current) {
-          latestStageContainerRef.current.addChild(box)
+        if (!box.parent && latestLayersContainerRef.current) {
+          latestLayersContainerRef.current.addChild(box)
         }
 
         // Update box position and size to match fresh bounds
@@ -545,7 +550,9 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         if (outline) {
           outline.visible = true
           outline.clear()
-          drawDashedRect(outline, 0, 0, freshBoxWidth, freshBoxHeight, 0, 0x8B5CF6, 1.5 * (1 / (latestViewportRef.current?.scale?.x || 1)), 10, 5)
+          const zoomScale = 1 / (latestViewportRef.current?.scale?.x || 1)
+          const baseScale = calculateAdaptedScale(zoomScale)
+          drawDashedRect(outline, 0, 0, freshBoxWidth, freshBoxHeight, 0, 0x8B5CF6, 1.5 * baseScale, 10, 5)
         }
 
         // Update handle positions
@@ -939,15 +946,11 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
           layerObject.clear()
 
           // Draw the shape path based on type (needed for fill)
-          if (isCircle) {
-            // For circles, use ellipse() to allow elliptical shapes during live resizing
-            const halfWidth = newWidth / 2
-            const halfHeight = newHeight / 2
-            layerObject.ellipse(anchorOffsetX + newWidth / 2, anchorOffsetY + newHeight / 2, halfWidth, halfHeight)
-          } else {
-            // For rectangles and other shapes, use roundRect
-            layerObject.roundRect(anchorOffsetX, anchorOffsetY, newWidth, newHeight, shapeData.cornerRadius || 0)
-          }
+          const centerX = anchorOffsetX + newWidth / 2
+          const centerY = anchorOffsetY + newHeight / 2
+
+          // drawShapePath fills exactly newWidth × newHeight — keeps PIXI bbox in sync with layer dims
+          drawShapePath(layerObject, shapeType, centerX, centerY, newWidth, newHeight, shapeData.cornerRadius || 0)
 
           // Apply fill
           if (fill !== null) {
@@ -962,26 +965,14 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             const isDotted = strokeStyle === 'dotted'
 
             if (isDashed || isDotted) {
-              // For dashed/dotted, we'd need to use drawDashedRect
-              // For now, just use solid stroke during resize for performance
+              // Dashed circles fall back to solid; others use dashed bounding rect
               if (isCircle) {
-                // For ellipses, fall back to solid stroke (dashed ellipse not implemented)
-                const halfWidth = newWidth / 2
-                const halfHeight = newHeight / 2
-                layerObject.ellipse(anchorOffsetX + newWidth / 2, anchorOffsetY + newHeight / 2, halfWidth, halfHeight)
-                layerObject.stroke({ color: stroke, width: strokeWidth })
-              } else {
-                layerObject.stroke({ color: stroke, width: strokeWidth })
+                layerObject.ellipse(centerX, centerY, newWidth / 2, newHeight / 2)
               }
+              layerObject.stroke({ color: stroke, width: strokeWidth })
             } else {
-              // Solid stroke - need to redraw the path since fill() consumed it
-              if (isCircle) {
-                const halfWidth = newWidth / 2
-                const halfHeight = newHeight / 2
-                layerObject.ellipse(anchorOffsetX + newWidth / 2, anchorOffsetY + newHeight / 2, halfWidth, halfHeight)
-              } else {
-                layerObject.roundRect(anchorOffsetX, anchorOffsetY, newWidth, newHeight, shapeData.cornerRadius || 0)
-              }
+              // Redraw path so solid stroke follows the exact shape outline
+              drawShapePath(layerObject, shapeType, centerX, centerY, newWidth, newHeight, shapeData.cornerRadius || 0)
               layerObject.stroke({ color: stroke, width: strokeWidth })
             }
           }
@@ -1085,7 +1076,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
           if (isNaN(newX) || isNaN(finalY) || isNaN(newWidth) || isNaN(finalHeight)) {
             console.error('UseMultiSelectionBox: Invalid resize values for motion capture:', { newX, finalY, newWidth, finalHeight })
           }
-          
+
           // [CONTROL POINTS FIX] Preserve existing control points during resize
           // Control points are relative to initialTransform, so they remain valid after resize
           const trackedLayer = motionCaptureMode.trackedLayers?.get(layerId)
@@ -1240,11 +1231,12 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         }
       })
 
-      // Update Rotation Handle Position to stay fixed at bottom
       const rotateHandle = box.children.find(child => child.label === 'rotate-handle')
       if (rotateHandle && !rotateHandle.destroyed) {
+        const baseScale = calculateAdaptedScale(zoomScale)
+        const rotateRadius = 18 * baseScale
         rotateHandle.x = finalBoxWidth / 2
-        rotateHandle.y = finalBoxHeight + (40 * zoomScale)
+        rotateHandle.y = finalBoxHeight + rotateRadius + (45 * baseScale)
       }
 
       // Update bodyHit dimensions (custom hit area)

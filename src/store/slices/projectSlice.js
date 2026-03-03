@@ -38,6 +38,7 @@ const syncSceneMotionDuration = (state, sceneId) => {
   const stepDurationMs = sceneDurationMs / steps.length
 
   steps.forEach(step => {
+    step.duration = stepDurationMs
     if (!step.layerActions) step.layerActions = {}
     // Iterate over each layer's actions within this step
     Object.keys(step.layerActions).forEach(layerId => {
@@ -68,10 +69,10 @@ const syncSceneVideoDuration = (state, sceneId) => {
     // Find the longest video duration (in seconds)
     const maxDuration = Math.max(...videoLayers.map(l => l.data?.duration || 0))
 
-    // [FIX] Anti-Snap: ONLY auto-expand scene duration if it's still at default 5s
-    // OR if we're explicitly adding the very first video layer.
-    // We do NOT truncate or expand if the user has already manually adjusted the duration (not 5s).
-    if (maxDuration > 0 && scene.duration === 5.0) {
+    // [FIX] Expand-only strategy: Only auto-expand scene duration if a video is longer.
+    // We do NOT auto-shrink here to avoid clashing with manual user adjustments.
+    // Shrinking is handled explicitly by deleteLayer if the longest video is removed.
+    if (maxDuration > 0 && maxDuration > scene.duration) {
       scene.duration = maxDuration
       // Sync motion flow duration to match updated scene duration
       syncSceneMotionDuration(state, sceneId)
@@ -157,13 +158,14 @@ const projectSlice = createSlice({
         }
 
         // [FIX] Apply trimming delta to all video layers in the scene
+        // Bidirectional trimming: leftTrimDelta (starts later) or rightTrimDelta (ends earlier)
         if (trimStartDelta !== undefined && trimStartDelta !== 0) {
           scene.layers.forEach(layerId => {
             const layer = state.layers[layerId]
             if (layer && layer.type === 'video') {
               if (!layer.data) layer.data = {}
-              const currentTrim = layer.data.trimStart || 0
-              layer.data.trimStart = Math.max(0, currentTrim + trimStartDelta)
+              const currentStart = layer.data.sourceStartTime || 0
+              layer.data.sourceStartTime = Math.max(0, currentStart + trimStartDelta)
             }
           })
         }
@@ -216,6 +218,114 @@ const projectSlice = createSlice({
       }
     },
 
+    /**
+     * Split a scene at a specific time point.
+     * Creates a new scene, duplicates layers, and splits video playback ranges.
+     */
+    splitScene: (state, action) => {
+      const { sceneId, splitTime } = action.payload // splitTime in seconds relative to scene start
+      const sceneIndex = state.scenes.findIndex(s => s.id === sceneId)
+      if (sceneIndex === -1) return
+
+      const originalScene = state.scenes[sceneIndex]
+      const originalDuration = originalScene.duration
+
+      // Ensure split time is within bounds
+      const rawSplitTime = Math.max(0.1, Math.min(splitTime, originalDuration - 0.1))
+      // [FIX] Frame Snapping: Round to nearest 60fps boundary to avoid repeated frames in videos
+      // This ensures that video offsets and scene durations are perfectly frame-aligned.
+      const safeSplitTime = Math.round(rawSplitTime * 60) / 60
+
+      const newSceneId = generateId()
+      const newSceneDuration = originalDuration - safeSplitTime
+
+      // 1. Create the new scene (second segment)
+      const newScene = {
+        ...originalScene,
+        id: newSceneId,
+        name: `${originalScene.name} (Part 2)`,
+        duration: newSceneDuration,
+        layers: [], // Will be populated below
+      }
+
+      // 2. Adjust original scene duration (first segment)
+      originalScene.duration = safeSplitTime
+
+      // 3. Handle layers
+      originalScene.layers.forEach(layerId => {
+        const layer = state.layers[layerId]
+        if (!layer) return
+
+        // Duplicate the layer for the new scene
+        const newLayerId = generateId()
+        const newLayer = JSON.parse(JSON.stringify(layer))
+        newLayer.id = newLayerId
+        newLayer.sceneId = newSceneId
+        newLayer.sourceId = layer.sourceId || layer.id // Preservation for seamless transitions
+
+        // Split logic for video layers
+        if (layer.type === 'video') {
+          // Original layer (first segment): ends at split point
+          const originalSourceStart = layer.data.sourceStartTime || 0
+          layer.data.sourceEndTime = originalSourceStart + safeSplitTime
+
+          // New layer (second segment): starts at split point
+          newLayer.data.sourceStartTime = originalSourceStart + safeSplitTime
+          // sourceEndTime remains the same as original's original sourceEndTime
+        }
+
+        state.layers[newLayerId] = newLayer
+        newScene.layers.push(newLayerId)
+      })
+
+      // 4. Split motion flows
+      const originalFlow = state.sceneMotionFlows[sceneId]
+      if (originalFlow && originalFlow.steps) {
+        const steps = originalFlow.steps
+        const numSteps = steps.length
+        const totalDurationBeforeSplit = safeSplitTime + newSceneDuration
+        const stepDuration = totalDurationBeforeSplit / Math.max(1, numSteps)
+
+        // Find split point in terms of steps
+        const splitStepIndex = Math.floor(safeSplitTime / stepDuration)
+
+        // Split the steps array
+        const firstHalfSteps = steps.slice(0, Math.max(1, splitStepIndex))
+        const secondHalfSteps = steps.slice(Math.max(1, splitStepIndex))
+
+        // Update original scene's steps
+        originalFlow.steps = firstHalfSteps
+        originalFlow.pageDuration = safeSplitTime * 1000
+
+        // Ensure both flows are definitely initialized with correct metadata
+        if (!state.sceneMotionFlows[sceneId]) {
+          state.sceneMotionFlows[sceneId] = { steps: [], pageDuration: safeSplitTime * 1000 }
+        }
+        if (!state.sceneMotionFlows[newSceneId]) {
+          state.sceneMotionFlows[newSceneId] = { steps: [], pageDuration: newSceneDuration * 1000 }
+        }
+
+        // Sync both to be safe
+        syncSceneMotionDuration(state, sceneId)
+        syncSceneMotionDuration(state, newSceneId)
+      } else {
+        // [FIX] CRITICAL: Even if there was no original flow, we MUST initialize 
+        // motion flows for both scenes to ensure interactions (selection/hover/steps) work.
+        state.sceneMotionFlows[sceneId] = {
+          steps: [],
+          pageDuration: safeSplitTime * 1000
+        }
+        state.sceneMotionFlows[newSceneId] = {
+          steps: [],
+          pageDuration: newSceneDuration * 1000
+        }
+      }
+
+      // 5. Insert the new scene into the project
+      state.scenes.splice(sceneIndex + 1, 0, newScene)
+      state.currentSceneId = newSceneId
+    },
+
     // Layer actions
     addLayer: (state, action) => {
       const { sceneId, type, id, ...layerData } = action.payload
@@ -240,7 +350,9 @@ const projectSlice = createSlice({
         anchorX: layerData.anchorX !== undefined ? layerData.anchorX : (type === 'text' ? 0 : 0.5),
         anchorY: layerData.anchorY !== undefined ? layerData.anchorY : (type === 'text' ? 0 : 0.5),
         // Layer-specific data
-        data: type === 'video' ? { trimStart: 0, ...layerData.data } : (layerData.data || {}),
+        data: type === 'video'
+          ? { sourceStartTime: 0, sourceEndTime: layerData.data?.duration || 0, ...layerData.data }
+          : (layerData.data || {}),
 
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -278,6 +390,8 @@ const projectSlice = createSlice({
 
         // Only re-sync scene duration if the duration was NEWLY discovered (e.g., first metadata load)
         if (layer.type === 'video' && isMetadataLoad) {
+          if (!layer.data) layer.data = {}
+          layer.data.sourceEndTime = updates.data.duration
           syncSceneVideoDuration(state, layer.sceneId)
         }
       }
@@ -1192,6 +1306,7 @@ export const {
   deleteScene,
   setCurrentScene,
   reorderScene,
+  splitScene,
   addLayer,
   updateLayer,
   deleteLayer,

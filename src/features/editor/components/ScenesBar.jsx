@@ -3,7 +3,7 @@ import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, selectProjectTimelineInfo, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep } from '../../../store/slices/projectSlice'
 import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 
@@ -23,6 +23,16 @@ function useDebounce(value, delay) {
   }, [value, delay])
 
   return debouncedValue
+}
+
+// Normalize layer fill/stroke to CSS color. Returns null for transparent/empty so we can show outline only.
+function normalizeShapeColor(value) {
+  if (value === undefined || value === null || value === '') return null
+  if (value === 'transparent') return null
+  if (typeof value === 'number') {
+    return '#' + value.toString(16).padStart(6, '0').slice(-6)
+  }
+  return typeof value === 'string' ? value : null
 }
 
 const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColor }) => {
@@ -184,19 +194,71 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
                 </div>
               )
             } else if (layer.type === LAYER_TYPES.SHAPE) {
-              const fill = layer.data?.fill || '#3b82f6'
-              const stroke = layer.data?.stroke || 'transparent'
+              const fillCss = normalizeShapeColor(layer.data?.fill)
+              const strokeCss = normalizeShapeColor(layer.data?.stroke)
               const strokeWidth = (layer.data?.strokeWidth || 0) * scale
+              const shapeType = layer.data?.shapeType || 'rect'
+              const cornerRadius = (layer.data?.cornerRadius || 0) * scale
+
+              // Transparent fill: show outline only so the shape is visible (no blue fallback)
+              const hasFill = fillCss != null
+              const hasStroke = strokeCss != null && strokeWidth > 0
+              const outlineForTransparent = !hasFill && !hasStroke
+                ? { border: '1px dashed rgba(156,163,175,0.7)', backgroundColor: 'transparent' }
+                : {}
+
+              // Triangle, hexagon, star: use SVG so stroke follows the shape outline (clip-path + div border fails for stroke-only)
+              const svgShapes = ['triangle', 'hexagon', 'star']
+              if (svgShapes.includes(shapeType)) {
+                const polygonPoints = {
+                  triangle: '50,0 100,100 0,100',
+                  hexagon: '50,0 100,25 100,75 50,100 0,75 0,25',
+                  star: '50,0 61,38 98,38 68,60 79,98 50,75 21,98 32,60 2,38 39,38',
+                }
+                const svgFill = hasFill ? fillCss : 'none'
+                const svgStroke = hasStroke ? strokeCss : (outlineForTransparent.border ? 'rgba(156,163,175,0.7)' : 'none')
+                const svgStrokeDasharray = outlineForTransparent.border ? '2,2' : 'none'
+                // Stroke in viewBox units so it scales with the shape; min 2 for visibility
+                const strokeInUnits = Math.max(2, 100 * (strokeWidth / Math.max(1, width)))
+
+                return (
+                  <div key={layer.id} style={{ ...style, overflow: 'hidden' }}>
+                    <svg
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      <polygon
+                        points={polygonPoints[shapeType]}
+                        fill={svgFill}
+                        stroke={svgStroke}
+                        strokeWidth={hasStroke || outlineForTransparent.border ? strokeInUnits : 0}
+                        strokeDasharray={svgStrokeDasharray}
+                      />
+                    </svg>
+                  </div>
+                )
+              }
+
+              // Rect, square, circle, line: use div (border works correctly for these)
+              const baseShapeStyle = {
+                ...style,
+                ...outlineForTransparent,
+                ...(hasFill ? { backgroundColor: fillCss } : {}),
+                ...(hasStroke ? { border: `${Math.max(0.5, strokeWidth)}px solid ${strokeCss}` } : outlineForTransparent.border ? {} : { border: 'none' }),
+                borderRadius: shapeType === 'circle' ? '50%' : (cornerRadius ? `${cornerRadius}px` : '0'),
+              }
 
               return (
                 <div
                   key={layer.id}
-                  style={{
-                    ...style,
-                    backgroundColor: fill,
-                    border: stroke !== 'transparent' ? `${strokeWidth}px solid ${stroke}` : 'none',
-                    borderRadius: '0',
-                  }}
+                  style={baseShapeStyle}
                 />
               )
             } else if (layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO) {
@@ -271,32 +333,49 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
   )
 })
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, cardWidth, pageDuration = 5000, isMotionCaptureActive }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive }) => {
   const containerRef = useRef(null)
 
   return (
     <div
       ref={containerRef}
-      className="absolute left-0 right-0 flex items-start z-60 overflow-hidden no-scrollbar"
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      onMouseDown={(e) => {
+        e.stopPropagation()
+      }}
+      className="absolute left-0 right-0 flex items-start z-[120] overflow-hidden no-scrollbar"
       style={{
-        top: '-36px',
-        height: '36px',
+        top: '-44px', // Slightly more space for the blocks and hit area
+        height: '44px',
         padding: '0',
+        pointerEvents: 'auto',
       }}
     >
       <div className="flex items-center gap-0.5 px-0 w-full h-full relative">
         {/* Base Block - Distinct "Anchor" Representation */}
         <button
           onClick={(e) => {
+            e.preventDefault()
             e.stopPropagation()
             onStepClick?.('base')
           }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onStepContextMenu?.(e, 'base')
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+          }}
           data-step-id="base"
           title="Base / 0s"
-          className={`h-[22px] transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-lg group
+          className={`h-[24px] transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-lg group cursor-pointer
             ${(activeStepId === 'base' || !activeStepId)
-              ? 'bg-zinc-800 text-white border-zinc-700 w-4 min-w-[16px]'
-              : 'bg-zinc-100 text-zinc-500 border-zinc-200 hover:bg-zinc-200 hover:text-zinc-600 w-3 min-w-[12px]'
+              ? 'bg-zinc-800 text-white border-zinc-700 w-5 min-w-[20px] hover:bg-zinc-750'
+              : 'bg-zinc-100 text-zinc-500 border-zinc-200 hover:bg-zinc-700 hover:text-white hover:border-zinc-500 w-4 min-w-[16px]'
             }
             ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_20px_rgba(168,85,247,0.8)] animate-pulse-glow' : ''}
           `}
@@ -321,19 +400,28 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, card
                 key={step.id || i}
                 data-step-id={step.id}
                 onClick={(e) => {
+                  e.preventDefault()
                   e.stopPropagation()
                   onStepClick?.(step.id)
                 }}
-                className={`h-[22px] text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-lg rounded-sm
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onStepContextMenu?.(e, step.id)
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                }}
+                className={`h-[24px] text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-lg rounded-sm cursor-pointer
                   ${isActive
                     ? 'bg-purple-600 text-white border-purple-500 z-10 shadow-md'
-                    : 'bg-purple-50 text-purple-600 border-purple-100 hover:bg-purple-100 hover:text-purple-700'
+                    : 'bg-purple-50 text-purple-600 border-purple-100 hover:bg-purple-600 hover:text-white hover:border-purple-500 hover:ring-1 hover:ring-purple-400'
                   }
                   ${isActive && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_25px_rgba(168,85,247,0.9)] animate-pulse-glow' : ''}
                 `}
                 style={{
                   width: `${(stepDurationMs / pageDuration) * 100}%`,
-                  minWidth: '18px' // Enforced minimum clickable width
+                  minWidth: '22px' // Increased minimum clickable width
                 }}
               >
                 <span className="truncate px-0.5">S{i + 1}</span>
@@ -346,7 +434,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, card
   )
 })
 
-const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, isMotionCaptureActive }) => {
+const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
   // Get responsive card dimensions
   const getCardDimensions = () => {
     if (typeof window === 'undefined') return { width: 112, height: 48 }
@@ -424,8 +512,10 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
 
   const handleDragStart = (e) => {
     // Set drag data first - this is required for drag to work
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', index.toString())
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', index.toString())
+    }
 
     // Mark as dragging
     isDraggingRef.current = true
@@ -607,26 +697,12 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
     isResizingRef.current = false
     resizeSideRef.current = null
 
-    // If there's a gap (from shrinking from left), slide the card left to fill it
-    if (currentGapSize > 0 && wasLeftResize) {
-      if (onCardWidthChange && currentWidth < originalWidth) {
-        onCardWidthChange(index, originalWidth, 'left')
-      }
-
-      setTimeout(() => {
-        setResizeState(prev => ({
-          ...prev,
-          leftOffset: 0,
-          gapSize: 0
-        }))
-      }, 10)
-    } else {
-      setResizeState(prev => ({
-        ...prev,
-        leftOffset: 0,
-        gapSize: 0
-      }))
-    }
+    // If there's a gap (from shrinking from left), we just clear the visual offset
+    setResizeState(prev => ({
+      ...prev,
+      leftOffset: 0,
+      gapSize: 0
+    }))
 
     // Final sync for absolute precision (bypasses throttle)
     if (onCardWidthChange) {
@@ -725,6 +801,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
     <div
       ref={cardRef}
       className="relative flex-shrink-0"
+      onContextMenu={onContextMenu}
       style={{
         width: `${actualWidth}px`,
         minWidth: `${minWidthFallback}px`,
@@ -810,6 +887,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
           transition: isDraggedItem ? 'none' : 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
           transform: shouldMoveLeft ? 'translateX(-8px)' : shouldMoveRight ? 'translateX(8px)' : 'translateX(0)',
           overflow: 'visible', // Allow purple bars to extend above card
+          pointerEvents: 'auto', // Explicitly enable for steps interactivity
         }}
         draggable={!resizeState.isResizing}
         onDragStart={(e) => {
@@ -835,15 +913,33 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
       >
         <div
           onClick={handleCardClickWithResize}
+          onContextMenu={onContextMenu}
           onMouseDown={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
             const clickX = e.clientX - rect.left
             const cardWidth = rect.width
+
             if (clickX < 12 || clickX > cardWidth - 12) {
               e.stopPropagation()
             }
           }}
-          className={`bg-white rounded-lg border-2 shadow-lg transition-colors touch-manipulation flex-shrink-0 relative ${isActive ? 'border-blue-500' : 'border-transparent hover:border-blue-500 active:border-blue-400'
+          onTouchStart={(e) => {
+            // Long press for context menu on mobile
+            const touch = e.touches[0]
+            const timer = setTimeout(() => {
+              onContextMenu({
+                preventDefault: () => { },
+                stopPropagation: () => { },
+                clientX: touch.clientX,
+                clientY: touch.clientY
+              })
+            }, 600)
+
+            const cleanup = () => clearTimeout(timer)
+            e.currentTarget.addEventListener('touchend', cleanup, { once: true })
+            e.currentTarget.addEventListener('touchmove', cleanup, { once: true })
+          }}
+          className={`bg-white rounded-lg border-2 shadow-lg transition-all duration-200 touch-manipulation flex-shrink-0 relative ${isActive ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-transparent hover:border-blue-500/60 active:border-blue-600'
             }`}
           style={{
             width: '100%',
@@ -877,9 +973,10 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
           steps={motionFlow?.steps || []}
           activeStepId={isActive ? activeStepId : null} // Only show active step if the scene itself is active
           onStepClick={onStepClick}
+          onStepContextMenu={onStepContextMenu}
           isMotionCaptureActive={isMotionCaptureActive}
           cardWidth={width}
-          pageDuration={scene.duration || 5000}
+          pageDuration={scene.duration ? scene.duration * 1000 : 5000}
         />
       </div>
 
@@ -924,13 +1021,16 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
           <div
             style={{
               position: 'absolute',
-              left: '-2px', // Align with outer edge
-              top: '2px', // Stay within rounded border
-              bottom: '2px',
-              width: '2px',
-              backgroundColor: 'rgba(59, 130, 246, 0.9)',
-              boxShadow: '0 0 4px rgba(59, 130, 246, 0.5)',
+              left: '-2px',
+              top: '-2px',
+              bottom: '-2px',
+              width: '8px',
+              borderLeft: '2px solid #3b82f6',
+              borderRadius: '6px 0 0 6px',
+              boxShadow: '-1px 0 6px rgba(59, 130, 246, 0.3)', // Softer glow
+              backgroundColor: 'rgba(59, 130, 246, 0.02)', // Minimal fill
               zIndex: 100,
+              pointerEvents: 'none',
             }}
           />
         )}
@@ -977,55 +1077,60 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, layers, index,
           <div
             style={{
               position: 'absolute',
-              right: '-2px', // Align with outer edge
-              top: '2px', // Stay within rounded border
-              bottom: '2px',
-              width: '2px',
-              backgroundColor: 'rgba(59, 130, 246, 0.9)',
-              boxShadow: '0 0 4px rgba(59, 130, 246, 0.5)',
+              right: '-2px',
+              top: '-2px',
+              bottom: '-2px',
+              width: '8px',
+              borderRight: '2px solid #3b82f6',
+              borderRadius: '0 6px 6px 0',
+              boxShadow: '1px 0 6px rgba(59, 130, 246, 0.3)', // Softer glow
+              backgroundColor: 'rgba(59, 130, 246, 0.02)', // Minimal fill
               zIndex: 100,
+              pointerEvents: 'none',
             }}
           />
         )}
       </div>
 
       {/* Duration tooltip - rendered outside container using portal */}
-      {resizeState.isResizing && resizeState.duration !== null && typeof document !== 'undefined'
-        ? createPortal(
-          <div
-            className="fixed pointer-events-none"
-            style={{
-              top: `${resizeState.tooltipPosition.top}px`,
-              right: `${resizeState.tooltipPosition.right}px`,
-              transform: 'translateX(50%)',
-              zIndex: 9999,
-            }}
-          >
+      {
+        resizeState.isResizing && resizeState.duration !== null && typeof document !== 'undefined'
+          ? createPortal(
             <div
-              className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+              className="fixed pointer-events-none"
               style={{
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
+                top: `${resizeState.tooltipPosition.top}px`,
+                right: `${resizeState.tooltipPosition.right}px`,
+                transform: 'translateX(50%)',
+                zIndex: 9999,
               }}
             >
-              {formatDuration(resizeState.duration)}
-            </div>
-            {/* Arrow pointing down to the right border */}
-            <div
-              className="absolute left-1/2 top-full transform -translate-x-1/2"
-              style={{
-                width: '0',
-                height: '0',
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '5px solid rgb(39, 39, 42)',
-              }}
-            />
-          </div>,
-          document.body
-        )
-        : null}
-    </div>
+              <div
+                className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+                style={{
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                }}
+              >
+                {formatDuration(resizeState.duration)}
+              </div>
+              {/* Arrow pointing down to the right border */}
+              <div
+                className="absolute left-1/2 top-full transform -translate-x-1/2"
+                style={{
+                  width: '0',
+                  height: '0',
+                  borderLeft: '5px solid transparent',
+                  borderRight: '5px solid transparent',
+                  borderTop: '5px solid rgb(39, 39, 42)',
+                }}
+              />
+            </div>,
+            document.body
+          )
+          : null
+      }
+    </div >
   )
 })
 
@@ -1039,9 +1144,13 @@ const ScenesBar = React.memo(({
   currentTimeStepId = null,
   isMotionCaptureActive,
   onStepClick,
-  bottomSectionHeight = null // Dynamic height from EditorPage
+  bottomSectionHeight = null, // Dynamic height from EditorPage
+  onPlay, // Optional: to resume playback after split
+  onPause // Optional: to pause during split
 }) => {
   const dispatch = useDispatch()
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null })
+  const [stepContextMenu, setStepContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null, stepId: null })
   const scenes = useSelector(selectScenes)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const timelineInfo = useSelector(selectProjectTimelineInfo)
@@ -1104,7 +1213,7 @@ const ScenesBar = React.memo(({
   }, [])
 
   const formatDuration = useCallback((seconds) => {
-    return `${seconds.toFixed(1)}s`
+    return `${seconds.toFixed(2)}s`
   }, [])
 
   const formatTime = useCallback((seconds) => {
@@ -1132,6 +1241,83 @@ const ScenesBar = React.memo(({
 
   // Track which scene is currently being resized to skip Redux -> local sync for it
   const resizingSceneIdRef = useRef(null)
+
+  const handleContextMenu = useCallback((e, sceneId) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Explicitly close the other menu type to ensure exclusivity
+    setStepContextMenu(prev => ({ ...prev, visible: false }))
+
+    // Position menu at top-right of cursor
+    setContextMenu({
+      visible: true,
+      x: e.clientX + 5,
+      y: e.clientY - 120, // Adjusted offset for taller menu
+      sceneId
+    })
+  }, [])
+
+  const handleStepContextMenu = useCallback((e, sceneId, stepId) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Explicitly close the other menu type to ensure exclusivity
+    setContextMenu(prev => ({ ...prev, visible: false }))
+
+    // Position menu at top-right of cursor
+    setStepContextMenu({
+      visible: true,
+      x: e.clientX + 5,
+      y: e.clientY - 120,
+      sceneId,
+      stepId
+    })
+  }, [])
+
+  const handleCutPage = useCallback(() => {
+    if (!contextMenu.sceneId) return
+
+    const sceneInfo = timelineInfo.find(s => s.id === contextMenu.sceneId)
+    if (!sceneInfo) return
+
+    // Calculate time relative to the scene being cut
+    const timeInScene = currentTime - sceneInfo.startTime
+
+    // [FIX] Frame Snapping: Align split to 60fps boundary
+    // This ensures that video offsets and scene durations are perfectly frame-aligned.
+    const snappedSplitTime = Math.round(timeInScene * 60) / 60
+    const snappedPlayheadTime = sceneInfo.startTime + snappedSplitTime
+
+    // Safety: Only split if within bounds
+    if (timeInScene <= 0.1 || timeInScene >= sceneInfo.endTime - sceneInfo.startTime - 0.1) {
+      alert("Move playhead inside the page to split it.")
+      setContextMenu(prev => ({ ...prev, visible: false }))
+      return
+    }
+
+    if (onPause) onPause()
+
+    dispatch(splitScene({
+      sceneId: contextMenu.sceneId,
+      splitTime: snappedSplitTime
+    }))
+
+    // [FIX] Auto-seek 0.001s past split point (using snapped time)
+    // This ensures we land on the first frame of the new scene
+    if (onSeek) onSeek(snappedPlayheadTime + 0.001)
+
+    setContextMenu(prev => ({ ...prev, visible: false }))
+  }, [contextMenu, currentTime, timelineInfo, dispatch, onPause, onSeek])
+
+  useEffect(() => {
+    const handleClick = () => {
+      setContextMenu(prev => ({ ...prev, visible: false }))
+      setStepContextMenu(prev => ({ ...prev, visible: false }))
+    }
+    if (contextMenu.visible || stepContextMenu.visible) {
+      window.addEventListener('click', handleClick)
+    }
+    return () => window.removeEventListener('click', handleClick)
+  }, [contextMenu.visible, stepContextMenu.visible])
 
   // Update scene ID to width mapping when scenes change
   useEffect(() => {
@@ -1437,10 +1623,14 @@ const ScenesBar = React.memo(({
 
     document.addEventListener('mousemove', handleMouseMove, { passive: false })
     document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('touchmove', (e) => handleMouseMove({ clientX: e.touches[0].clientX }), { passive: false })
+    document.addEventListener('touchend', handleMouseUp)
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('touchmove', handleMouseMove)
+      document.removeEventListener('touchend', handleMouseUp)
       document.body.style.userSelect = ''
       document.body.style.cursor = ''
     }
@@ -1610,21 +1800,25 @@ const ScenesBar = React.memo(({
     return scenes.length - 1
   }
 
-  // Use mouse events to track drag position and handle drop via dragend
+  // Use mouse and touch events to track drag position and handle drop via move/end events
   useEffect(() => {
     if (draggedIndex === null) return
 
-    const handleMouseMove = (e) => {
-      // Calculate insertion index based on mouse position during drag
-      const newIndex = calculateInsertionIndex(e.clientX)
+    const handleMove = (e) => {
+      // Handle both MouseEvent and TouchEvent
+      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX
+      // Calculate insertion index based on position during drag
+      const newIndex = calculateInsertionIndex(clientX)
       if (newIndex !== insertionIndex) {
         setInsertionIndex(newIndex)
       }
     }
 
-    const handleMouseUp = (e) => {
-      // Calculate the final insertion index based on current mouse position
-      const finalInsertionIndex = calculateInsertionIndex(e.clientX)
+    const handleEnd = (e) => {
+      // For touch, we may need to look at changedTouches
+      const clientX = e.type.startsWith('touch') ? (e.changedTouches[0]?.clientX || 0) : e.clientX
+      // Calculate the final insertion index based on final position
+      const finalInsertionIndex = calculateInsertionIndex(clientX)
 
       // Perform the drop operation if we have a valid insertion index
       if (finalInsertionIndex !== null && finalInsertionIndex !== draggedIndex) {
@@ -1635,16 +1829,20 @@ const ScenesBar = React.memo(({
       handleDragEnd()
     }
 
-    // Listen for mouse events during drag
-    document.addEventListener('mousemove', handleMouseMove, { passive: true })
-    document.addEventListener('mouseup', handleMouseUp, { passive: false })
+    // Listen for mouse and touch events during drag
+    document.addEventListener('mousemove', handleMove, { passive: true })
+    document.addEventListener('mouseup', handleEnd, { passive: false })
+    document.addEventListener('touchmove', handleMove, { passive: false })
+    document.addEventListener('touchend', handleEnd, { passive: false })
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mousemove', handleMove)
+      document.removeEventListener('mouseup', handleEnd)
+      document.removeEventListener('touchmove', handleMove)
+      document.removeEventListener('touchend', handleEnd)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draggedIndex])
+  }, [draggedIndex, insertionIndex])
 
   const handleDragStart = (index) => {
     setDraggedIndex(index)
@@ -1715,6 +1913,7 @@ const ScenesBar = React.memo(({
       style={{
         minWidth: '100%',
         width: `${Math.max(totalCardsWidth + 32, 100)}px`,
+        backgroundColor: '#0f1015',
       }}
     >
       {/* Timeline Ruler - Overlay on top, scrolls with content */}
@@ -1766,14 +1965,21 @@ const ScenesBar = React.memo(({
         ))}
 
         {/* Clickable overlay for seeking - only when not dragging or hovering playhead */}
+        {/* Clickable overlay for seeking - only when not dragging or hovering playhead */}
         {!isDraggingPlayhead && !isHoveringPlayhead && (
           <div
             className="absolute top-0 left-0 right-0 cursor-pointer"
             onClick={handleTimelineClick}
+            onTouchStart={(e) => {
+              // Extract clientX from touch for mobile seeking
+              const touch = e.touches[0]
+              handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
+            }}
             style={{
               zIndex: 10,
-              height: '20px',
+              height: '30px', // Slightly larger hit area for mobile
               pointerEvents: 'auto',
+              touchAction: 'none',
             }}
           />
         )}
@@ -1818,6 +2024,21 @@ const ScenesBar = React.memo(({
         onMouseLeave={() => {
           setIsHoveringPlayhead(false)
         }}
+        onTouchStart={(e) => {
+          // mobile dragging support
+          e.preventDefault()
+          e.stopPropagation()
+          setIsDraggingPlayhead(true)
+          const touch = e.touches[0]
+          setPlayheadTooltipTime(currentTime)
+          if (timelineRef.current) {
+            const timelineRect = timelineRef.current.getBoundingClientRect()
+            setPlayheadTooltipPosition({
+              top: timelineRect.top - 16 - 28,
+              left: touch.clientX,
+            })
+          }
+        }}
       >
         {/* Playhead line - extends all the way down */}
         <div
@@ -1834,16 +2055,22 @@ const ScenesBar = React.memo(({
       <div
         ref={cardsContainerRef}
         className="flex flex-shrink-0 relative z-10 items-center"
+        onContextMenu={(e) => {
+          // Pre-emptively stop browser context menu on the whole bar section
+          e.preventDefault()
+        }}
         style={{
           gap: 0,
           // Dynamically increase marginTop based on bottomSectionHeight
           // Base height is approx 180px, base marginTop is 42px.
-          marginTop: bottomSectionHeight ? `${Math.max(42, 42 + (bottomSectionHeight - 146))}px` : '42px',
+          // [FIX] Increase base marginTop from 42px to 60px to prevent timeline overlap with steps
+          marginTop: bottomSectionHeight ? `${Math.max(60, 60 + (bottomSectionHeight - 170))}px` : '60px',
           paddingBottom: '8px',
           minWidth: 'max-content',
           width: 'max-content',
         }}
       >
+
         {scenes.map((scene, index) => {
           const sceneLayers = getSceneLayers(scene.id)
           const isCurrentScene = currentSceneId === scene.id
@@ -1904,8 +2131,20 @@ const ScenesBar = React.memo(({
                   motionStepCount={sceneMotionFlows?.[scene.id]?.steps?.length || 0}
                   motionFlow={sceneMotionFlows?.[scene.id]}
                   activeStepId={isCurrentScene ? currentTimeStepId : null}
-                  onStepClick={isCurrentScene ? (stepId) => onStepClick(stepId) : null}
+                  onStepClick={(stepId) => {
+                    if (!isCurrentScene) {
+                      handleSwitchScene(scene.id)
+                    }
+                    if (onStepClick) onStepClick(stepId)
+                  }}
+                  onStepContextMenu={(e, stepId) => {
+                    if (!isCurrentScene) {
+                      handleSwitchScene(scene.id)
+                    }
+                    handleStepContextMenu(e, scene.id, stepId)
+                  }}
                   isMotionCaptureActive={isMotionCaptureActive && isCurrentScene}
+                  onContextMenu={(e) => handleContextMenu(e, scene.id)}
                 />
               </div>
               {/* Transition button - always visible at bottom of gap between cards */}
@@ -1943,68 +2182,37 @@ const ScenesBar = React.memo(({
             style={{
               left: (() => {
                 const gap = 4
-
-                // Build the layout of cards excluding the dragged card
-                // This matches exactly how calculateInsertionIndex builds positions
-                const positions = []
-                let currentX = 0
-
-                for (let i = 0; i < scenes.length; i++) {
-                  if (i === draggedIndex) continue
-
-                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
-                  positions.push({
-                    originalIndex: i,
-                    leftEdge: currentX,
-                    rightEdge: currentX + cardWidth
-                  })
-
-                  currentX += cardWidth + gap
-                }
-
-                if (positions.length === 0) return '0px'
-
-                // insertionIndex is where we insert in the original array AFTER removing dragged card
-                // We need to calculate the exact position by going through all cards in order
-                // This ensures accuracy regardless of card sizes
-
-                // Special case: inserting at position 0 (beginning)
-                if (insertionIndex === 0) {
-                  return '0px'
-                }
-
-                // Calculate position by iterating through cards and counting
-                // insertionIndex is where we insert in the array (after removing dragged card)
-                // Count visible cards until we reach insertionIndex
+                // Calculate position by iterating through card widths
+                // We need to account for the gap and the absolute position within the scrollable container
                 let x = 0
                 let visibleCardCount = 0
 
                 for (let i = 0; i < scenes.length; i++) {
                   if (i === draggedIndex) continue
 
-                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
-
-                  // When we've counted enough cards, this is where we insert
+                  // If this is the spot where we want to insert, return the current x
                   if (visibleCardCount === insertionIndex) {
-                    return `${x}px`
+                    // Adjust by half gap to center it (except at the very start)
+                    return visibleCardCount === 0 ? '0px' : `${x - (gap / 2)}px`
                   }
 
-                  // Move past this card
+                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
                   x += cardWidth + gap
                   visibleCardCount++
                 }
 
-                // If we get here, insertionIndex is after all visible cards
-                // Place line at the right edge of the last card
-                return `${x}px`
+                // If we reach the end, return the final x - adjustment
+                return `${x - (gap / 2)}px`
               })(),
               top: '0',
-              bottom: '0',
-              width: '3px',
+              bottom: '8px',
+              width: '2px',
               backgroundColor: '#3b82f6',
-              borderRadius: '2px',
-              boxShadow: '0 0 8px rgba(59, 130, 246, 0.6)',
-              transition: 'left 0.1s cubic-bezier(0.4, 0, 0.2, 1)',
+              borderRadius: '1px',
+              boxShadow: '0 0 6px rgba(59, 130, 246, 0.5)',
+              transform: 'translateX(-50%)', // Center the line on the gap
+              transition: 'left 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              zIndex: 100,
             }}
           />
         )}
@@ -2069,6 +2277,102 @@ const ScenesBar = React.memo(({
           document.body
         )
         : null}
+
+      {/* Context Menu for Scene Cards */}
+      {contextMenu.visible && createPortal(
+        <div
+          className="fixed border border-white/10 rounded-xl shadow-2xl py-1 z-[10005] min-w-[180px] overflow-hidden"
+          style={{
+            top: `${contextMenu.y}px`,
+            left: `${contextMenu.x}px`,
+            backgroundColor: 'rgba(24, 24, 27, 0.75)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+            onClick={handleCutPage}
+          >
+            <Plus className="h-3.5 w-3.5 rotate-45 text-purple-400" /> {/* Use Plus as a cross for Split symbol */}
+            <span>Split Page at Playhead</span>
+          </button>
+
+          <div className="h-px bg-white/5 my-1 mx-2" />
+
+          <button
+            className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300 flex items-center gap-2 transition-colors mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+            onClick={() => {
+              dispatch(deleteScene(contextMenu.sceneId))
+              setContextMenu(prev => ({ ...prev, visible: false }))
+            }}
+          >
+            <span>Delete Page</span>
+          </button>
+        </div>,
+        document.body
+      )}
+
+      {/* Context Menu for Motion Steps */}
+      {stepContextMenu.visible && createPortal(
+        <div
+          className="fixed border border-white/10 rounded-xl shadow-2xl py-1 z-[10005] min-w-[180px] overflow-hidden"
+          style={{
+            top: `${stepContextMenu.y}px`,
+            left: `${stepContextMenu.x}px`,
+            backgroundColor: 'rgba(24, 24, 27, 0.75)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {stepContextMenu.stepId !== 'base' && (
+            <button
+              className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+              onClick={() => {
+                if (onStepClick) onStepClick(stepContextMenu.stepId)
+                setStepContextMenu(prev => ({ ...prev, visible: false }))
+              }}
+            >
+              <Zap className="h-3.5 w-3.5 text-purple-400" />
+              <span>Update Step</span>
+            </button>
+          )}
+
+          {stepContextMenu.stepId === 'base' && (
+            <button
+              className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+              onClick={() => {
+                if (onStepClick) onStepClick('base')
+                setStepContextMenu(prev => ({ ...prev, visible: false }))
+              }}
+            >
+              <Zap className="h-3.5 w-3.5 text-purple-400" />
+              <span>Select Base State</span>
+            </button>
+          )}
+
+          {stepContextMenu.stepId !== 'base' && (
+            <>
+              <div className="h-px bg-white/5 my-1 mx-2" />
+              <button
+                className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+                onClick={() => {
+                  dispatch(deleteSceneMotionStep({
+                    sceneId: stepContextMenu.sceneId,
+                    stepId: stepContextMenu.stepId
+                  }))
+                  setStepContextMenu(prev => ({ ...prev, visible: false }))
+                }}
+              >
+                <span>Delete Step</span>
+              </button>
+            </>
+          )}
+        </div>,
+        document.body
+      )}
     </div>
   )
 })

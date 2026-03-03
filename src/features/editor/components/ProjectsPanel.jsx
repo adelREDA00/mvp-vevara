@@ -15,13 +15,13 @@ function ProjectsPanel({ onClose }) {
 
   return (
     <div
-      className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: 'rgba(13, 18, 22, 0.85)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderRight: '0.5px solid rgba(255, 255, 255, 0.1)',
+        backgroundColor: '#0f1015',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderRight: '1px solid rgba(255, 255, 255, 0.05)',
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />

@@ -267,10 +267,10 @@ function MotionPanel({
       style={{
         top: `${topToolbarHeight}px`,
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
-        backgroundColor: 'rgba(13, 18, 22, 0.95)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+        backgroundColor: '#0f1015',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        borderLeft: '1px solid rgba(255, 255, 255, 0.05)',
       }}
     >
       {/* Header */}

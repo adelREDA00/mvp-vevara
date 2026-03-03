@@ -31,14 +31,19 @@ import { getLayerWorldBounds } from './geometry'
 export function findLayerIdFromObject(object, layerObjectsMap, stageContainer, viewport) {
   if (!object || !layerObjectsMap) return null
 
-  // Check if object has layer label
-  if (object.label && object.label.startsWith('layer-')) {
-    return object.label.replace('layer-', '')
-  }
-
-  // Search through map - traverse up the parent chain
+  // Search up the parent chain
   let current = object
   while (current && current !== stageContainer && current !== viewport) {
+    // 1. Check for layer label (most direct)
+    // Support multiple formats: 'layer-ID', 'layer-layer-ID', etc.
+    if (current.label && typeof current.label === 'string') {
+      const match = current.label.match(/layer-([a-zA-Z0-9_-]+)$/)
+      if (match && match[1]) {
+        return match[1]
+      }
+    }
+
+    // 2. Exact match in the map
     for (const [layerId, pixiObject] of layerObjectsMap.entries()) {
       if (pixiObject === current) {
         return layerId

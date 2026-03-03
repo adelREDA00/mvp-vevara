@@ -8,6 +8,7 @@
 import * as PIXI from 'pixi.js'
 import { drawDashedRect } from './dashUtils'
 import { loadTextureRobust } from './textureUtils'
+import { getGlobalMotionEngine } from '../motion/index'
 
 /**
  * Create a Pixi Text object from layer config
@@ -86,6 +87,98 @@ export function createTextLayer(config) {
 }
 
 /**
+ * Draws a shape path into a PIXI.Graphics object.
+ * Every shape is drawn to fill EXACTLY its width × height bounding box so that
+ * PIXI's own bounding-box width/height always equals the layer dimensions.
+ * This is critical: applyTransformInline sets displayObject.width/height from
+ * Redux, which would otherwise scale a shape whose visual extent doesn't match,
+ * causing jitter/shake during and after resize operations.
+ *
+ * @param {PIXI.Graphics} graphics
+ * @param {string}  shapeType  - 'rect'|'square'|'circle'|'triangle'|'hexagon'|'star'|'line'
+ * @param {number}  centerX    - local X of the shape's geometric centre
+ * @param {number}  centerY    - local Y of the shape's geometric centre
+ * @param {number}  width      - full bounding-box width
+ * @param {number}  height     - full bounding-box height
+ * @param {number}  [cornerRadius=0] - only used for rect/square
+ */
+export function drawShapePath(graphics, shapeType, centerX, centerY, width, height, cornerRadius = 0) {
+  const rx = width / 2   // half-width  == outer X radius
+  const ry = height / 2  // half-height == outer Y radius
+
+  switch (shapeType) {
+    case 'circle':
+      // Ellipse that fills the full width × height box (matches rect behaviour for transforms)
+      graphics.ellipse(centerX, centerY, rx, ry)
+      break
+
+    case 'triangle':
+      graphics.moveTo(centerX, centerY - ry)
+      graphics.lineTo(centerX + rx, centerY + ry)
+      graphics.lineTo(centerX - rx, centerY + ry)
+      graphics.closePath()
+      break
+
+    case 'hexagon':
+      // Flat-top pointy-bottom hexagon that fills the bbox
+      graphics.moveTo(centerX, centerY - ry)
+      graphics.lineTo(centerX + rx, centerY - ry / 3)
+      graphics.lineTo(centerX + rx, centerY + ry / 3)
+      graphics.lineTo(centerX, centerY + ry)
+      graphics.lineTo(centerX - rx, centerY + ry / 3)
+      graphics.lineTo(centerX - rx, centerY - ry / 3)
+      graphics.closePath()
+      break
+
+    case 'star': {
+      // Make ALL four extreme points of the star touch the bbox edges exactly.
+      //
+      // For a 5-point upward star (first outer point at -90°, i.e. top):
+      //   - Widest outer points at angles ±(90°−72°) = ±18° from horizontal
+      //       x-extent = cos(18°)·outerRx  →  outerRx = halfW / cos(18°) = halfW / cos(π/10)
+      //   - Top point at -90°: y-extent = -outerRy
+      //   - Bottom outer points at 54°/126°: y-extent = sin(54°)·outerRy
+      //       Solving top+bottom simultaneously: (1 + sin(54°))·outerRy = height
+      //       →  outerRy = height / (1 + sin(3π/10))
+      //   - Vertical shift to center the result: yOffset = outerRy − halfH
+      const halfW = width / 2
+      const halfH = height / 2
+      const outerRx = halfW / Math.cos(Math.PI / 10)              // halfW / cos(18°) ≈ halfW × 1.0514
+      const outerRy = height / (1 + Math.sin(3 * Math.PI / 10))  // height / (1+sin54°) ≈ halfH × 1.1055
+      const innerRx = outerRx * 0.4
+      const innerRy = outerRy * 0.4
+      const yOffset = outerRy - halfH  // shifts star down so top AND bottom touch their edges
+      const pts = 5
+      const start = -Math.PI / 2
+      graphics.moveTo(
+        centerX + Math.cos(start) * outerRx,
+        centerY + Math.sin(start) * outerRy + yOffset
+      )
+      for (let i = 1; i < pts * 2; i++) {
+        const angle = start + (i * Math.PI) / pts
+        const ex = i % 2 === 0 ? outerRx : innerRx
+        const ey = i % 2 === 0 ? outerRy : innerRy
+        graphics.lineTo(
+          centerX + Math.cos(angle) * ex,
+          centerY + Math.sin(angle) * ey + yOffset
+        )
+      }
+      graphics.closePath()
+      break
+    }
+
+    case 'line':
+      // A line is just a thin filled rect — fill handles the colour
+      graphics.rect(centerX - rx, centerY - ry, width, height)
+      break
+
+    default:
+      // rect / square and any unknown type
+      graphics.roundRect(centerX - rx, centerY - ry, width, height, cornerRadius || 0)
+  }
+}
+
+/**
  * Create a Pixi Graphics object (rectangle) from layer config
  * @param {Object} config - Layer configuration
  * @param {Object} config.data - Rectangle data { fill, stroke, strokeWidth, cornerRadius, etc. }
@@ -149,12 +242,7 @@ export function createShapeLayer(config) {
   const isDotted = strokeStyle === 'dotted' && stroke !== null && strokeWidth > 0
 
   // Draw shape outline (path needed before fill)
-  if (isCircle) {
-    // For circles, use ellipse() to allow elliptical shapes
-    graphics.ellipse(shapeCenterX, shapeCenterY, halfWidth, halfHeight)
-  } else {
-    graphics.roundRect(shapeCenterX - halfWidth, shapeCenterY - halfHeight, width, height, data.cornerRadius || 0)
-  }
+  drawShapePath(graphics, shapeType, shapeCenterX, shapeCenterY, width, height, data.cornerRadius || 0)
 
   // Apply fill color (or transparent fill for clickability)
   if (fill !== null) {
@@ -176,7 +264,7 @@ export function createShapeLayer(config) {
           alignment: 0.5
         })
       } else {
-        // Use custom dashed rectangle drawing
+        // Use custom dashed rectangle drawing for all non-circular shapes
         const dashLen = isDotted ? 0 : strokeWidth * 4
         const gapLen = strokeWidth * 2
 
@@ -195,11 +283,7 @@ export function createShapeLayer(config) {
       }
     } else {
       // Redraw path and apply solid stroke
-      if (isCircle) {
-        graphics.ellipse(shapeCenterX, shapeCenterY, halfWidth, halfHeight)
-      } else {
-        graphics.roundRect(shapeCenterX - halfWidth, shapeCenterY - halfHeight, width, height, data.cornerRadius || 0)
-      }
+      drawShapePath(graphics, shapeType, shapeCenterX, shapeCenterY, width, height, data.cornerRadius || 0)
       graphics.stroke({
         color: stroke,
         width: strokeWidth,
@@ -345,6 +429,11 @@ export async function createImageLayer(config) {
   return container
 }
 
+
+// GLOABL VIDEO ELEMENT CACHE: Recycles HTMLVideoElements for the same URL
+// This prevents the 1s "freeze" when a video is split across scenes
+const videoElementCache = new Map()
+
 /**
  * Create a Pixi Container with a Video Sprite from layer config
  * @param {Object} config - Layer configuration
@@ -359,53 +448,78 @@ export async function createVideoLayer(config) {
   }
 
   let texture
+  let videoElement = videoElementCache.get(videoUrl)
+  if (videoElement) {
+    videoElement.pause() // Safeguard: ensure it's not playing when pulled from cache
+  }
 
   try {
     if (videoUrl.startsWith('blob:')) {
-      // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
-      const videoElement = document.createElement('video')
-      videoElement.src = videoUrl
-      videoElement.muted = true
-      videoElement.loop = false
-      videoElement.playsInline = true
-      videoElement.preload = 'auto'
-      videoElement.autoplay = false
-      videoElement.setAttribute('autoplay', 'false')
-      videoElement.pause()
+      // If NOT in cache, create and prepare
+      if (!videoElement) {
+        console.log(`[createVideoLayer] Creating new video element for blob: ${videoUrl}`)
+        // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
+        videoElement = document.createElement('video')
+        videoElement.src = videoUrl
+        videoElement.muted = true
+        videoElement.loop = false
+        videoElement.playsInline = true
+        videoElement.preload = 'auto'
+        videoElement.autoplay = false
+        videoElement.setAttribute('autoplay', 'false')
+        videoElement.pause()
 
-
-      // SECURITY FIX: Do NOT set crossOrigin for blob URLs. 
-      // This causes SecurityError 'Failed to execute texSubImage2D' in some browsers
-      // because blobs don't have CORS headers.
-      // videoElement.crossOrigin = 'anonymous' (REMOVED)
-
-      // WEBGL FIX: We must wait for the video to have enough data (readyState 3 or 4) 
-      // and metadata (dimensions) before creating the PIXI texture.
-      await new Promise((resolve) => {
-        const onMetadata = () => {
-          videoElement.removeEventListener('loadedmetadata', onMetadata)
-          if (videoElement.readyState >= 3) resolve()
+        // [SCENE CUT FIX] Intercept play() to prevent PIXI VideoSource from auto-playing
+        // PIXI v8 VideoSource often ignores autoPlay: false and calls play() when media is ready.
+        // We block these accidental calls if the MotionEngine is currently paused.
+        const originalPlay = videoElement.play
+        videoElement.play = function () {
+          const engine = getGlobalMotionEngine()
+          if (engine && !engine.isPlaying) {
+            // console.log("🛑 [createVideoLayer] Blocking accidental video.play() because engine is paused")
+            return Promise.resolve()
+          }
+          return originalPlay.apply(this, arguments)
         }
 
-        const onCanPlay = () => {
-          videoElement.removeEventListener('canplay', onCanPlay)
-          videoElement.removeEventListener('canplaythrough', onCanPlay)
-          if (videoElement.videoWidth > 0) resolve()
-        }
+        // Cache it immediately
+        videoElementCache.set(videoUrl, videoElement)
 
-        if (videoElement.readyState >= 3 && videoElement.videoWidth > 0) {
-          resolve()
-        } else {
-          videoElement.addEventListener('loadedmetadata', onMetadata)
-          videoElement.addEventListener('canplay', onCanPlay)
-          videoElement.addEventListener('canplaythrough', onCanPlay)
-          // Fallback timeout
-          setTimeout(resolve, 5000)
-        }
-      })
+        // WEBGL FIX: We must wait for metadata and data
+        const startTime = Date.now()
+        await new Promise((resolve) => {
+          let timeoutId
+          const onMetadata = () => {
+            videoElement.removeEventListener('loadedmetadata', onMetadata)
+            if (videoElement.readyState >= 3) {
+              if (timeoutId) clearTimeout(timeoutId)
+              resolve()
+            }
+          }
 
-      // Explicitly Ensure video is paused after initialization
-      videoElement.pause()
+          const onCanPlay = () => {
+            videoElement.removeEventListener('canplay', onCanPlay)
+            videoElement.removeEventListener('canplaythrough', onCanPlay)
+            if (videoElement.videoWidth > 0) {
+              if (timeoutId) clearTimeout(timeoutId)
+              resolve()
+            }
+          }
+
+          if (videoElement.readyState >= 3 && videoElement.videoWidth > 0) {
+            resolve()
+          } else {
+            videoElement.addEventListener('loadedmetadata', onMetadata)
+            videoElement.addEventListener('canplay', onCanPlay)
+            videoElement.addEventListener('canplaythrough', onCanPlay)
+            timeoutId = setTimeout(() => {
+              console.warn(`[createVideoLayer] readiness timeout (10s) for: ${videoUrl}`)
+              resolve()
+            }, 10000)
+          }
+        })
+        videoElement.pause()
+      }
 
       texture = PIXI.Texture.from(videoElement, {
         resourceOptions: {
@@ -415,9 +529,10 @@ export async function createVideoLayer(config) {
           playsinline: true
         }
       })
-      texture._nativeVideo = videoElement // Store for easier access
+      texture._nativeVideo = videoElement
+      videoElement.pause() // Ensure it's paused after texture assignment
     } else {
-      // PIXI v8: Assets.load is preferred for network URLs
+      // Network URL handle
       texture = await PIXI.Assets.load({
         src: videoUrl,
         data: {
@@ -432,8 +547,6 @@ export async function createVideoLayer(config) {
     }
   } catch (loadError) {
     console.warn(`Assets.load failed for video: ${videoUrl}, trying fallback...`, loadError)
-
-    // Fallback: Try Texture.from as a last resort (often works for already-cached or simple assets)
     try {
       texture = PIXI.Texture.from(videoUrl)
     } catch (fallbackError) {
@@ -450,7 +563,7 @@ export async function createVideoLayer(config) {
   // Create container to normalize transforms (similar to Image layers)
   const container = new PIXI.Container()
   const sprite = new PIXI.Sprite(texture)
-  const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
+  videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
 
   // PERFORMANCE: Enable mipmapping for videos if possible
   if (texture.source) {

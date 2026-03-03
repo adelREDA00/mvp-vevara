@@ -18,6 +18,17 @@
 import * as PIXI from 'pixi.js'
 
 /**
+ * Calculates a dampened scale factor for UI elements based on zoom level.
+ * Ensures handles remain visible but don't become overwhelmingly large.
+ */
+export function calculateAdaptedScale(zoomScale) {
+  // If zooming out (zoomScale > 1), dampen the growth
+  const scale = zoomScale > 1 ? 1 + (zoomScale - 1) * 0.45 : zoomScale
+  // Clamp to reasonable range for extreme zoom levels
+  return Math.min(4.0, Math.max(0.5, scale))
+}
+
+/**
  * Creates a resize handle (corner or side).
  *
  * @param {Object} options - Handle options
@@ -33,11 +44,12 @@ import * as PIXI from 'pixi.js'
  */
 export function createResizeHandle({
   x, y, handleType, cursor,
-  onResizeStart, onHoverEnter, onHoverLeave, zoomScale = 1
+  onResizeStart, onHoverEnter, onHoverLeave, zoomScale = 1,
+  isLocked = false, onLockedInteraction = null
 }) {
   const handle = new PIXI.Graphics()
-  // Scaled handle dimensions - more conservative scaling for extreme zoom
-  const baseScale = Math.min(1.8, Math.max(0.5, zoomScale))
+  handle.alpha = isLocked ? 0.4 : 1.0
+  const baseScale = calculateAdaptedScale(zoomScale)
   const dims = {
     cornerRadius: 12 * baseScale,
     sideWidth: 32 * baseScale,
@@ -60,20 +72,22 @@ export function createResizeHandle({
 
   // Set hit area - more generous for easier interaction
   if (isCorner) {
-    const hitAreaRadius = Math.max(20, 32 * zoomScale)
+    const hitAreaRadius = Math.max(20, 32 * baseScale)
     handle.hitArea = new PIXI.Circle(0, 0, hitAreaRadius)
   } else {
-    const hitAreaSize = Math.max(32, 56 * zoomScale)
+    const hitAreaSize = Math.max(32, 56 * baseScale)
     handle.hitArea = new PIXI.Rectangle(-hitAreaSize / 2, -hitAreaSize / 2, hitAreaSize, hitAreaSize)
   }
 
   // Hover events
   handle.on('pointerenter', () => {
+    if (isLocked) return
     drawHandle(handle, handleType, dims, true, zoomScale)
     onHoverEnter?.()
   })
 
   handle.on('pointerleave', () => {
+    if (isLocked) return
     drawHandle(handle, handleType, dims, false, zoomScale)
     onHoverLeave?.()
   })
@@ -82,6 +96,10 @@ export function createResizeHandle({
   handle.on('pointerdown', (e) => {
     e.stopPropagation()
     e.stopImmediatePropagation?.()
+    if (isLocked) {
+      if (onLockedInteraction) onLockedInteraction(e)
+      return
+    }
     onResizeStart(handleType, cursor, e)
   })
 
@@ -107,15 +125,15 @@ function drawHandle(handle, handleType, dims, isHovered, zoomScale = 1) {
   handle.clear()
 
   if (isCorner) {
-    const radius = isHovered ? dims.cornerRadius + 4 * zoomScale : dims.cornerRadius
+    const radius = isHovered ? dims.cornerRadius + 4 * baseScale : dims.cornerRadius
     handle.circle(0, 0, radius)
     handle.fill({ color: isHovered ? 0x9370db : 0xffffff })
-    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 2 * zoomScale) })
+    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 1.5 * baseScale) })
   } else if (isSide) {
     const isHorizontal = handleType === 'n' || handleType === 's'
     const w = isHorizontal ? dims.sideWidth : dims.sideWidthVertical
     const h = isHorizontal ? dims.sideHeight : dims.sideHeightVertical
-    const extra = isHovered ? 6 * zoomScale : 0
+    const extra = isHovered ? 6 * baseScale : 0
 
     handle.roundRect(-(w + extra) / 2, -(h + extra) / 2, w + extra, h + extra, 5 * (zoomScale < 1 ? zoomScale : 1))
     handle.fill({ color: isHovered ? 0x9370db : 0xffffff })
@@ -179,10 +197,12 @@ export function getRotatedCursor(handleType, rotationDeg) {
  * @returns {PIXI.Container} The handle container
  */
 export function createRotateHandle({
-  x, y, onRotateStart, zoomScale = 1
+  x, y, onRotateStart, zoomScale = 1,
+  isLocked = false, onLockedInteraction = null
 }) {
   const handle = new PIXI.Container()
-  const baseScale = Math.min(1.8, Math.max(0.7, zoomScale))
+  handle.alpha = isLocked ? 0.4 : 1.0
+  const baseScale = calculateAdaptedScale(zoomScale)
   const radius = 18 * baseScale
 
   // Draw white circle background
@@ -257,12 +277,12 @@ export function createRotateHandle({
   handle.cursor = 'grab'
   handle.zIndex = 10003
 
-  // Hit area - make it generous (approx 44px on screen for comfort)
-  const hitAreaRadius = Math.max(20, 32 * zoomScale)
-  handle.hitArea = new PIXI.Circle(0, 0, hitAreaRadius)
+  // Hit area - match visual radius for precision
+  handle.hitArea = new PIXI.Circle(0, 0, radius)
 
   // Hover animations
   handle.on('pointerenter', () => {
+    if (isLocked) return
     handle.cursor = 'grabbing'
     background.clear()
     background.circle(0, 0, radius + 2 * baseScale)
@@ -273,6 +293,7 @@ export function createRotateHandle({
   })
 
   handle.on('pointerleave', () => {
+    if (isLocked) return
     background.clear()
     background.circle(0, 0, radius)
     background.fill({ color: 0xffffff })
@@ -285,6 +306,10 @@ export function createRotateHandle({
   handle.on('pointerdown', (e) => {
     e.stopPropagation()
     e.stopImmediatePropagation?.()
+    if (isLocked) {
+      if (onLockedInteraction) onLockedInteraction(e)
+      return
+    }
     onRotateStart(e)
   })
 

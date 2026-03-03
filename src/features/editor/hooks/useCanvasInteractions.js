@@ -47,6 +47,7 @@ import { filterBackgroundLayers as filterBgLayers, findLayerIdFromObject } from 
 import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/viewportUtils'
 import { getScaledBadgeDimensions } from '../utils/badgeUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
+import { getLayerFirstActionTime } from '../utils/animationUtils'
 
 
 // Polyfill for requestIdleCallback (needed for Safari/iOS)
@@ -86,7 +87,7 @@ const cancelIdleCallback = (typeof window !== 'undefined' && window.cancelIdleCa
  * @param {number} worldHeight - Canvas world height
  * @param {number} [zoom=100] - Current zoom level (percentage, e.g., 100 = 100%)
  */
-export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null) {
+export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, onLockedInteraction = null, layerObjectsVersion = 0) {
   const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId } = interactionParams
   const dispatch = useDispatch()
 
@@ -502,6 +503,24 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     return () => clearInterval(interval)
   }, [getPerformanceStats])
+
+  // Helper to determine if a layer should be locked for interaction
+  const isLayerLocked = useCallback((layerId) => {
+    if (!layerId || motionCaptureMode?.isActive) return false
+
+    const engine = getGlobalMotionEngine()
+    const currentTime = engine?.masterTimeline?.time() || 0
+
+    // Get flow for the current scene
+    const sceneFlow = sceneMotionFlows?.[currentSceneId]
+    const sceneStartTime = sceneFlow?.sceneStartOffset || 0
+    const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
+
+    if (!isPastBaseStep) return false
+
+    const firstActionTime = getLayerFirstActionTime(layerId, sceneFlow)
+    return firstActionTime !== Infinity
+  }, [motionCaptureMode, sceneMotionFlows, currentSceneId])
 
   // Spatial index for fast position-based queries
   const spatialIndexRef = useRef(new Map()) // layerId -> { x, y, width, height, bounds }
@@ -2753,6 +2772,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // If clicked on multi-selection box and we have multiple layers selected, start multi-drag
       if (clickedOnMultiSelectionBox && hasMultiSelect) {
+        // [FIX] Block multi-drag if ANY selected layer is animated and we are past base step
+        const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
+        if (anyLocked) {
+          event.stopPropagation()
+          event.stopImmediatePropagation?.()
+          if (onLockedInteraction) onLockedInteraction(event)
+          return
+        }
+
         // Ensure we stop propagation to prevent other handlers from interfering
         event.stopPropagation()
         event.stopImmediatePropagation?.()
@@ -2827,6 +2855,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         if (selectedLayerId && latestLayersRef.current[selectedLayerId]) {
           // Start drag for this single layer
+          // [FIX] Block single-layer drag if it's animated and we are past base step
+          // Only show modal if the layer was ALREADY selected (prevents showing on initial selection)
+          if (isLayerLocked(selectedLayerId) && currentSelectedLayerIds.includes(selectedLayerId)) {
+            event.stopPropagation()
+            event.stopImmediatePropagation?.()
+            if (onLockedInteraction) onLockedInteraction(event)
+            return
+          }
+
           event.stopPropagation()
           event.stopImmediatePropagation?.()
 
@@ -2944,6 +2981,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (hasMultiSelect) {
         // If clicking on a selected element or selection box, preserve multi-select
         if (clickedLayerInMultiSelect) {
+          // [FIX] Block multi-drag from element click if ANY selected layer is locked
+          const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
+          if (anyLocked) {
+            event.stopPropagation()
+            event.stopImmediatePropagation?.()
+            if (onLockedInteraction) onLockedInteraction(event)
+            return
+          }
 
 
           // Filter out background layers from multi-select operations
@@ -3041,6 +3086,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // Prepare for drag if using select tool
       if (activeTool === 'select' || activeTool === 'move') {
+        // [FIX] Block single-layer drag from element click if locked
+        // Only show modal if the layer was ALREADY selected
+        if (!hasMultiSelect && isLayerLocked(layerId) && currentSelectedLayerIds.includes(layerId)) {
+          event.stopPropagation()
+          event.stopImmediatePropagation?.()
+          if (onLockedInteraction) onLockedInteraction(event)
+          return
+        }
+
         const currentLayers = latestLayersRef.current
         const layer = currentLayers[layerId]
         if (!layer) return
@@ -4252,7 +4306,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // NOTE: Aggressive guide cleanup moved to separate decoupled useEffect for stability
     }
-  }, [stageContainer, layerObjectsMap, layersCount, selectedIdsStr, activeTool, viewport, dispatch, worldWidth, worldHeight, hideGuideLines, removeGuideLines, hideAlignmentGuides, removeAlignmentGuides, hideSpacingGuides, removeSpacingGuides, getCachedOtherObjectsForAlignment, updateAlignmentGuides, updateSpacingGuides, motionCaptureMode, currentSceneId])
+  }, [stageContainer, layerObjectsMap, layersCount, selectedIdsStr, activeTool, viewport, dispatch, worldWidth, worldHeight, hideGuideLines, removeGuideLines, hideAlignmentGuides, removeAlignmentGuides, hideSpacingGuides, removeSpacingGuides, getCachedOtherObjectsForAlignment, updateAlignmentGuides, updateSpacingGuides, motionCaptureMode, currentSceneId, layerObjectsVersion])
 
   // =============================================================================
   // ADDITIONAL USE EFFECT HOOKS - Side effects and cleanup

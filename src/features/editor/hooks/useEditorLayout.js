@@ -103,7 +103,7 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
   }, [customBottomHeight])
 
   useEffect(() => {
-    setMinBottomHeight(135)
+    setMinBottomHeight(170)
 
     const handleResize = () => {
       setTimeout(() => centerCanvas(), 150)

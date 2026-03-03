@@ -3,6 +3,7 @@
 // =============================================================================
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import * as PIXI from 'pixi.js'
 // TODO: Consider lazy loading PIXI.js for better initial bundle size:
 // const PIXI = React.lazy(() => import('pixi.js'))
@@ -31,8 +32,8 @@ import { useDragSelectionBox } from '../hooks/useDragSelectionBox'
 import { useMultiSelectionBox } from '../hooks/useMultiSelectionBox'
 import TextEditOverlay from './TextEditOverlay'
 import { isLayerCompletelyOutside } from '../utils/geometry'
-import { clearLayerSelection } from '../../../store/slices/selectionSlice'
-import { selectSelectedLayerIds } from '../../../store/slices/selectionSlice'
+import { findLayerIdFromObject } from '../utils/layerUtils'
+import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
 
 // =============================================================================
@@ -106,7 +107,10 @@ function Stage({
   onRightClick,
   zoom = 100,
   onZoomChange,
+  onViewportChange, // Add onViewportChange prop
   bottomSectionHeight = 0,
+  topToolbarHeight = 0,
+  isResizingBottom = false,
   //motion capture mode & playback controls
   motionCaptureMode = null,
   onMotionStateChange,
@@ -117,15 +121,18 @@ function Stage({
   onFinishEditing,
   onStartTextEditing,
   totalTime = 0,
-}) {
+}, ref) { // Add ref parameter
   // =============================================================================
   // STATE MANAGEMENT
   // =============================================================================
 
   const dispatch = useDispatch()
 
+
   // Component state
   const [contextMenu, setContextMenu] = useState(null)
+  const [lockedTooltip, setLockedTooltip] = useState(null) // { x, y }
+  const lockedTooltipTimeoutRef = useRef(null)
 
   // Refs
   const containerRef = useRef(null)
@@ -174,6 +181,20 @@ function Stage({
         : { width: 800, height: 600 } // Fallback for initial render
   }, [containerDimensions.width, containerDimensions.height])
 
+  // [FIX] Freeze canvas dimensions during bottom section resize to prevent flicker.
+  // PIXI renderer.resize() during rapid layout changes causes dark flashes.
+  const frozenDimensionsRef = useRef(null)
+  const effectiveStageSize = useMemo(() => {
+    if (isResizingBottom) {
+      if (frozenDimensionsRef.current && frozenDimensionsRef.current.width > 0 && frozenDimensionsRef.current.height > 0) {
+        return frozenDimensionsRef.current
+      }
+      frozenDimensionsRef.current = { width: stageSize.width, height: stageSize.height }
+      return frozenDimensionsRef.current
+    }
+    frozenDimensionsRef.current = { width: stageSize.width, height: stageSize.height }
+    return stageSize
+  }, [isResizingBottom, stageSize.width, stageSize.height])
 
   // =============================================================================
   // ZOOM & CAMERA MANAGEMENT
@@ -198,14 +219,28 @@ function Stage({
   // =============================================================================
 
   // Initialize Pixi canvas
-  // Screen dimensions match container, world dimensions are fixed
+  // Screen dimensions match container, world dimensions are fixed.
+  // During bottom resize we use frozen dimensions to avoid PIXI resize flicker.
   const { viewport, stageContainer, layersContainer, pixiApp, isReady, error, retry } = usePixiCanvas(containerRef, {
-    width: stageSize.width || 800,
-    height: stageSize.height || 600,
+    width: effectiveStageSize.width || 800,
+    height: effectiveStageSize.height || 600,
     worldWidth,
     worldHeight,
     zoom: effectiveZoom, // Pass zoom for camera scaling
   })
+
+  // Expose viewport controls to parent
+  React.useImperativeHandle(ref, () => ({
+    setViewportPosition: (x, y) => {
+      if (viewport) {
+        viewport.moveCenter(x, y)
+        triggerViewportChange()
+      }
+    },
+    getViewportData: () => {
+      return getViewportSyncData()
+    }
+  }), [viewport, worldWidth, worldHeight, onViewportChange])
 
   // Create shared drag state API for both canvas interactions and selection box
   const dragStateAPI = useDragState()
@@ -224,12 +259,12 @@ function Stage({
 
 
   // Sync layers from Redux store to canvas
-  const { layerObjects } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId)
+  const { layerObjects, layerObjectsVersion } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId)
 
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying } = useSimpleMotion(layerObjects, currentSceneId, totalTime)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -257,6 +292,42 @@ function Stage({
     return transforms
   }, [layerObjects])
 
+  // Helper to handle locked interaction feedback
+  const handleLockedInteraction = useCallback((e) => {
+    // Show tooltip at mouse position
+    const x = e.data?.global?.x || e.clientX || 0
+    const y = e.data?.global?.y || e.clientY || 0
+    setLockedTooltip({ x, y })
+
+    // Auto-hide after 3 seconds - clear existing timeout to prevent flickering
+    if (lockedTooltipTimeoutRef.current) {
+      clearTimeout(lockedTooltipTimeoutRef.current)
+    }
+    lockedTooltipTimeoutRef.current = setTimeout(() => {
+      setLockedTooltip(null)
+      lockedTooltipTimeoutRef.current = null
+    }, 3000)
+  }, [])
+
+  // Close locked tooltip on any click outside
+  useEffect(() => {
+    if (!lockedTooltip) return
+
+    const handleGlobalClick = (e) => {
+      // Check if clicking inside the tooltip - if so, don't close here, let the button's onClick handle it
+      if (e.target.closest('.locked-interaction-tooltip')) return
+
+      setLockedTooltip(null)
+      if (lockedTooltipTimeoutRef.current) {
+        clearTimeout(lockedTooltipTimeoutRef.current)
+        lockedTooltipTimeoutRef.current = null
+      }
+    }
+
+    window.addEventListener('pointerdown', handleGlobalClick, { capture: true })
+    return () => window.removeEventListener('pointerdown', handleGlobalClick, { capture: true })
+  }, [lockedTooltip])
+
   // Pass motion controls up to parent
   useEffect(() => {
     if (onMotionStateChange) {
@@ -268,18 +339,40 @@ function Stage({
         seek,
         tweenTo,
         isPlaying,
+        isBuffering,
         getLayerCurrentTransforms, // Expose this new helper
         layerObjects
       })
     }
-  }, [onMotionStateChange, playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, getLayerCurrentTransforms, layerObjects])
+  }, [onMotionStateChange, playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, layerObjects])
+
+  // [FIX] REFINE AUTO-PAUSE: Track previous selection to only pause on NEW selection events.
+  // This prevents pre-selected layers from blocking automated transitions (like add/update step).
+  const prevSelectedLayerIdsRef = useRef(selectedLayerIds)
+  // [PREVIEW FIX] Track motion capture state transitions to avoid auto-pausing during apply/cancel previews
+  const wasMotionCaptureActiveRef = useRef(false)
 
   // Pause playback when selecting layers/canvas while playing
   useEffect(() => {
-    if (selectedLayerIds && selectedLayerIds.length > 0 && isPlaying && !motionCaptureMode?.isActive) {
-      // If there's a selection change while playing and NOT in motion capture, pause playback
+    const isCurrentlyActive = !!motionCaptureMode?.isActive
+    const selectionChanged = selectedLayerIds && selectedLayerIds.length > 0
+
+    // Only pause if: 
+    // 1. We are playing
+    // 2. We are NOT in motion capture mode
+    // 3. Something is selected
+    // 4. The selection set has actually CHANGED since the last check
+    const selectionSetIdentical =
+      prevSelectedLayerIdsRef.current.length === selectedLayerIds.length &&
+      prevSelectedLayerIdsRef.current.every((id, index) => id === selectedLayerIds[index])
+
+    if (isPlaying && !isCurrentlyActive && selectionChanged && !selectionSetIdentical) {
       pausePlayback()
     }
+
+    // Always update ref for next run
+    prevSelectedLayerIdsRef.current = selectedLayerIds
+    wasMotionCaptureActiveRef.current = isCurrentlyActive
   }, [selectedLayerIds, isPlaying, motionCaptureMode, pausePlayback])
 
   // Clear selection boxes when playback starts for clean animation preview
@@ -381,7 +474,7 @@ function Stage({
     // This is highly performant (only 8 triangles) and stable on all hardware.
     overlay.clear()
     const margin = 50000 // Large margin to cover screen during zoom/pan
-    const bgColor = 0x0d1216 // Match app background color
+    const bgColor = 0x0f1015 // Match app background color
 
     // Top
     overlay.rect(-margin, -margin, worldWidth + margin * 2, margin)
@@ -457,7 +550,8 @@ function Stage({
     motionCaptureMode, // Pass motion capture mode for real-time updates
     interactionsAPIRef, // Pass interactions API ref for direct arrow synchronization
     currentSceneId, // Pass current scene ID for filtering
-    currentSceneMotionFlow // Pass scene motion flow for visibility logic
+    currentSceneMotionFlow, // Pass scene motion flow for visibility logic
+    handleLockedInteraction // Pass locked interaction callback
   )
 
   // =============================================================================
@@ -488,7 +582,9 @@ function Stage({
     motionCaptureMode,
     pausePlayback,
     isPlaying,
-    multiSelectionAPI
+    multiSelectionAPI,
+    handleLockedInteraction, // Pass locked interaction callback
+    layerObjectsVersion // [Bug 3 Fix] Force rebind when async layers resolve
   )
 
   // Store interaction API in ref for use by other hooks
@@ -552,7 +648,8 @@ function Stage({
     layersContainer, // Pass layersContainer so selection/hover boxes aren't clipped by stageContainer mask
     motionCaptureMode,
     isPlaying, // Pass playing state to hide selection box during playback
-    currentSceneMotionFlow // Pass scene motion flow for visibility logic
+    currentSceneMotionFlow, // Pass scene motion flow for visibility logic
+    handleLockedInteraction // Pass locked interaction callback
   )
 
   // =============================================================================
@@ -575,6 +672,40 @@ function Stage({
     onZoomChangeRef.current = onZoomChange
   }, [onZoomChange])
 
+
+  const getViewportSyncData = useCallback(() => {
+    if (!viewportRef.current) return null
+    const vp = viewportRef.current
+
+    // Explicitly calculate world coordinates
+    const calculatedLeft = (0 - vp.x) / vp.scale.x
+    const calculatedTop = (0 - vp.y) / vp.scale.y
+    const calculatedRight = calculatedLeft + vp.screenWidth / vp.scale.x
+    const calculatedBottom = calculatedTop + vp.screenHeight / vp.scale.y
+
+    const data = {
+      x: vp.x,
+      y: vp.y,
+      scale: vp.scale.x,
+      worldWidth,
+      worldHeight,
+      screenWidth: vp.screenWidth,
+      screenHeight: vp.screenHeight,
+      left: calculatedLeft,
+      top: calculatedTop,
+      right: calculatedRight,
+      bottom: calculatedBottom
+    }
+
+    return data
+  }, [worldWidth, worldHeight])
+
+  const triggerViewportChange = useCallback(() => {
+    if (onViewportChange && viewportRef.current) {
+      const data = getViewportSyncData()
+      if (data) onViewportChange(data)
+    }
+  }, [onViewportChange, getViewportSyncData])
 
   const handleWheel = useCallback((e) => {
     e.preventDefault()
@@ -608,8 +739,11 @@ function Stage({
         // Wheel alone = vertical pan
         if (viewportRef.current) viewportRef.current.y -= e.deltaY * panSpeed
       }
+
+      // Explicitly trigger sync after manual pan
+      triggerViewportChange()
     }
-  }, []) // No dependencies needed - using refs instead
+  }, [triggerViewportChange]) // No dependencies needed - using refs instead
 
   // Stable camera control handlers - use refs to avoid recreation
   const cameraControlStateRef = useRef({
@@ -665,6 +799,8 @@ function Stage({
         if (viewport) {
           viewport.x -= deltaX * panSpeed
           viewport.y -= deltaY * panSpeed
+          // Explicitly trigger sync after manual pan
+          triggerViewportChange()
         }
 
         state.lastMousePos = { x: e.clientX, y: e.clientY }
@@ -672,7 +808,7 @@ function Stage({
 
       e.preventDefault()
     }
-  }, [viewport])
+  }, [viewport, triggerViewportChange])
 
   const mouseUpHandler = useCallback((e) => {
     const state = cameraControlStateRef.current
@@ -703,10 +839,10 @@ function Stage({
   }, [currentScene, layers])
 
   const contextMenuElement = useMemo(() => (
-    contextMenu && (
+    contextMenu && createPortal(
       <>
         <div
-          className="fixed z-50 bg-gray-900 rounded-lg shadow-xl border border-gray-800 py-1 min-w-[160px]"
+          className="fixed z-[10010] bg-[#0f1015]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] overflow-hidden transition-all duration-200 animate-in fade-in zoom-in-95"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={() => setContextMenu(null)}
         >
@@ -719,9 +855,9 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
               >
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-3.5 w-3.5 opacity-60" />
                 Duplicate
               </button>
               {selectedLayer?.type === 'image' && (
@@ -742,9 +878,9 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
                 >
-                  <ImageIcon className="h-3.5 w-3.5" />
+                  <ImageIcon className="h-3.5 w-3.5 opacity-60" />
                   Set as Background
                 </button>
               )}
@@ -755,9 +891,9 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5 border-t border-white/5 mt-1 pt-2.5"
               >
-                <Layers className="h-3.5 w-3.5" />
+                <Layers className="h-3.5 w-3.5 opacity-60" />
                 Bring to Front
               </button>
               <button
@@ -767,9 +903,9 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
               >
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp className="h-3.5 w-3.5 opacity-60" />
                 Bring Forward
               </button>
               <button
@@ -779,9 +915,9 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
               >
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                 Send Backward
               </button>
               <button
@@ -791,21 +927,21 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
               >
-                <Layers3 className="h-3.5 w-3.5" />
+                <Layers3 className="h-3.5 w-3.5 opacity-60" />
                 Send to Back
               </button>
-              <div className="h-px bg-gray-800 my-1 mx-2" />
+              <div className="h-px bg-white/10 my-1.5 mx-3" />
               <button
                 onClick={() => {
                   selectedLayerIds.forEach(id => dispatch(deleteLayer(id)))
                   dispatch(clearLayerSelection())
                   setContextMenu(null)
                 }}
-                className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-gray-800 flex items-center gap-2"
+                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center gap-2.5"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5 opacity-70" />
                 Delete
               </button>
             </>
@@ -822,9 +958,9 @@ function Stage({
                       }))
                       setContextMenu(null)
                     }}
-                    className="w-full px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-gray-800 flex items-center gap-2"
+                    className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
                   >
-                    <Unlink className="h-3.5 w-3.5" />
+                    <Unlink className="h-3.5 w-3.5 opacity-60" />
                     Detach Background Image
                   </button>
                   <button
@@ -832,9 +968,9 @@ function Stage({
                       dispatch(removeBackgroundImage({ sceneId: currentSceneId }))
                       setContextMenu(null)
                     }}
-                    className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-gray-800 flex items-center gap-2"
+                    className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center gap-2.5"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-3.5 w-3.5 opacity-70" />
                     Remove Background Image
                   </button>
                 </>
@@ -849,10 +985,11 @@ function Stage({
           )}
         </div>
         <div
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-[10005]"
           onClick={() => setContextMenu(null)}
         />
-      </>
+      </>,
+      document.body
     )
   ), [contextMenu, selectedLayerIds, dispatch, selectedLayer, currentSceneId, currentSceneBackgroundLayer])
   // Camera controls for Canva-like behavior - optimized to reduce re-attachments
@@ -927,6 +1064,33 @@ function Stage({
     }
   }, [aspectRatio, fitZoom, onZoomChange])
 
+  // Consolidate viewport event listeners
+  useEffect(() => {
+    if (!viewport || !onViewportChange) return
+
+    const handleViewportChange = () => {
+      onViewportChange(getViewportSyncData())
+    }
+
+    viewport.on('moved', handleViewportChange)
+    viewport.on('zoomed', handleViewportChange)
+
+    // Initial sync
+    handleViewportChange()
+
+    return () => {
+      viewport.off('moved', handleViewportChange)
+      viewport.off('zoomed', handleViewportChange)
+    }
+  }, [viewport, onViewportChange, getViewportSyncData])
+
+  // Sync on Resize: Ensure scrollbars update when container size changes
+  useEffect(() => {
+    if (isReady && viewport) {
+      triggerViewportChange()
+    }
+  }, [stageSize.width, stageSize.height, isReady, viewport, triggerViewportChange])
+
   // Zoom handling effect - handles zoom changes from slider/keyboard and fit-to-viewport requests
   useEffect(() => {
     // Handle fit-to-viewport request (zoom === -1)
@@ -958,9 +1122,39 @@ function Stage({
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault()
+
+    // Select layer if hovering over one
+    if (pixiApp && viewport && containerRef.current && layerObjects) {
+      const rect = containerRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+
+      // Use Pixi's hit testing system to find the object under the cursor
+      // In PixiJS v8, the hit testing logic is on the rootBoundary of the event system
+      const hitObject = pixiApp.renderer.events.rootBoundary.hitTest(x, y)
+
+      if (hitObject) {
+        const foundLayerId = findLayerIdFromObject(hitObject, layerObjects, stageContainer, viewport)
+        const layer = layers[foundLayerId]
+
+        // Don't select background layers on right click (consistent with left click)
+        if (foundLayerId && layer?.type !== 'background' && layer?.sceneId === currentSceneId) {
+          if (!selectedLayerIds.includes(foundLayerId)) {
+            dispatch(setSelectedLayer(foundLayerId))
+          }
+        } else {
+          // Clicked background or empty space on stage
+          dispatch(clearLayerSelection())
+        }
+      } else {
+        // Did not hit any Pixi object
+        dispatch(clearLayerSelection())
+      }
+    }
+
     setContextMenu({ x: e.clientX, y: e.clientY })
     if (onRightClick) onRightClick(e)
-  }, [onRightClick])
+  }, [pixiApp, viewport, layerObjects, stageContainer, selectedLayerIds, layers, currentSceneId, dispatch, onRightClick])
 
 
 
@@ -1060,10 +1254,40 @@ function Stage({
       </div>
 
       {/* Right-Click Context Menu */}
+      {/* Locked Layer Tooltip */}
+      {lockedTooltip && createPortal(
+        <div
+          className="locked-interaction-tooltip fixed z-[10020] bg-[#0f1015]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-3.5 flex flex-col gap-4 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-300 min-w-[200px] max-w-[240px] origin-top-left"
+          style={{
+            left: Math.min(window.innerWidth - 240, lockedTooltip.x + 20),
+            top: Math.min(window.innerHeight - 160, lockedTooltip.y + 20),
+            transform: `scale(${Math.max(0.7, Math.min(1, window.innerWidth / 1440))})`
+          }}
+        >
+          <div className="text-white/90 text-[11px] font-medium leading-relaxed">
+            “This element is animated. Edit it from the start of the scene.”
+          </div>
+          <button
+            onClick={() => {
+              stopAndSeekToSceneStart()
+              if (lockedTooltipTimeoutRef.current) {
+                clearTimeout(lockedTooltipTimeoutRef.current)
+                lockedTooltipTimeoutRef.current = null
+              }
+              setLockedTooltip(null)
+            }}
+            className="w-full h-8 bg-white/10 hover:bg-white/15 border border-white/20 text-white text-[10px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center tracking-wider uppercase active:scale-95"
+          >
+            Go to Start
+          </button>
+        </div>,
+        document.body
+      )}
+
       {contextMenuElement}
     </div>
   )
 }
 
-export default React.memo(Stage)
+export default React.memo(React.forwardRef(Stage))
 

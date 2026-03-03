@@ -1,10 +1,10 @@
 import {
   Minus, ChevronDown,
-  Settings, Activity, X, MoreVertical
+  Settings, Activity, X, MoreVertical, Layers
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
-import { DropdownMenu } from './DropdownMenu'
+import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 
 function CanvasControls({
   duration = '4.4s',
@@ -15,6 +15,7 @@ function CanvasControls({
   onCanvasUpdate,
   onToggleAdvanced,
   onOpenColorPicker,
+  onOpenPositionPanel,
   onToggleMotionPanel,
   isMotionCaptureActive = false,
   onStartMotionCapture,
@@ -137,10 +138,11 @@ function CanvasControls({
       <div
         className="h-9 flex items-center gap-1.5 px-2 rounded-lg max-w-[calc(100vw-24px)] overflow-x-auto scrollbar-hide backdrop-blur-md"
         style={{
-          backgroundColor: 'rgba(13, 18, 22, 0.85)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          pointerEvents: 'auto'
+          backgroundColor: 'rgba(15, 16, 21, 0.8)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          pointerEvents: 'auto',
         }}
       >
         {/* Canvas Background Color Picker - Specific UI */}
@@ -192,47 +194,53 @@ function CanvasControls({
         {/* Font Selection - Only for text */}
         {selectedLayer?.type === LAYER_TYPES.TEXT && (
           <>
-            <select
-              value={getFontFamily()}
-              onChange={(e) => {
-                handleLayerUpdate({ data: { ...selectedLayer.data, fontFamily: e.target.value } })
-              }}
-              className="h-7 px-2 rounded-md bg-transparent text-white text-xs border-0 outline-none hover:bg-zinc-700 focus:bg-zinc-700 cursor-pointer flex-shrink-0"
-              style={{ minWidth: '120px' }}
+            <DropdownMenu
+              trigger={
+                <button className="h-7 px-2 rounded-md bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-1.5 transition-all outline-none min-w-[120px]">
+                  <span className="truncate flex-1 text-left">{getFontFamily()}</span>
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </button>
+              }
             >
-              {fonts.map(font => (
-                <option
-                  key={font}
-                  value={font}
-                  style={{
-                    backgroundColor: '#2a2a2a',
-                    fontFamily: font,
-                    fontSize: '14px'
-                  }}
-                >
-                  {font}
-                </option>
-              ))}
-            </select>
+              <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
+                {fonts.map(font => (
+                  <DropdownMenuItem
+                    key={font}
+                    onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, fontFamily: font } })}
+                  >
+                    <span style={{ fontFamily: font }}>{font}</span>
+                  </DropdownMenuItem>
+                ))}
+              </div>
+            </DropdownMenu>
 
             {/* Font Size Dropdown */}
-            <select
-              value={getFontSize()}
-              onChange={(e) => {
-                const newSize = parseInt(e.target.value, 10)
-                handleLayerUpdate({
-                  data: { ...selectedLayer.data, fontSize: newSize },
-                  scaleX: 1,
-                  scaleY: 1
-                })
-              }}
-              className="h-7 px-2 rounded-md bg-transparent text-white text-xs border-0 outline-none hover:bg-zinc-700 focus:bg-zinc-700 cursor-pointer flex-shrink-0"
-              style={{ minWidth: '60px' }}
+            <DropdownMenu
+              trigger={
+                <button className="h-7 px-2 rounded-md bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-1.5 transition-all outline-none min-w-[60px]">
+                  <span className="flex-1 text-left">{getFontSize()}</span>
+                  <ChevronDown className="h-3 w-3 opacity-60" />
+                </button>
+              }
             >
-              {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
-                <option key={size} value={size} style={{ backgroundColor: '#2a2a2a' }}>{size}</option>
-              ))}
-            </select>
+              <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
+                {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
+                  <DropdownMenuItem
+                    key={size}
+                    onClick={() => {
+                      const newSize = parseInt(size, 10)
+                      handleLayerUpdate({
+                        data: { ...selectedLayer.data, fontSize: newSize },
+                        scaleX: 1,
+                        scaleY: 1
+                      })
+                    }}
+                  >
+                    {size}
+                  </DropdownMenuItem>
+                ))}
+              </div>
+            </DropdownMenu>
 
             {/* Alignment Toggle */}
             <button
@@ -255,7 +263,7 @@ function CanvasControls({
                   }
                 })
               }}
-              className="text-white hover:bg-zinc-700 active:bg-zinc-600 h-7 px-2 rounded-md transition-colors flex items-center justify-center min-w-[32px]"
+              className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center justify-center min-w-[32px] border border-transparent hover:border-white/10"
               title={`Align: ${selectedLayer.data?.textAlign || 'left'}`}
             >
               <div className="flex flex-col gap-0.5 items-center">
@@ -275,12 +283,12 @@ function CanvasControls({
             <DropdownMenu
               trigger={
                 <button
-                  className="text-white hover:bg-zinc-700 active:bg-zinc-600 h-7 px-2 rounded-md transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap flex-shrink-0"
+                  className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
                   title="Stroke Style"
                 >
-                  <Minus className="h-4 w-4 flex-shrink-0" />
+                  <Minus className="h-4 w-4 flex-shrink-0 opacity-60" />
                   <span className="text-sm">Stroke</span>
-                  <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                  <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-60" />
                 </button>
               }
             >
@@ -352,8 +360,8 @@ function CanvasControls({
                           handleLayerUpdate({ data: { ...selectedLayer.data, strokeStyle: style } })
                         }}
                         className={`flex-1 px-3 py-2 rounded text-xs font-medium transition-colors ${getStrokeStyle() === style
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-zinc-700 text-gray-300 hover:bg-zinc-600'
+                          ? 'bg-purple-600 text-white shadow-[0_4px_12px_rgba(168,85,247,0.4)]'
+                          : 'bg-white/5 text-gray-300 hover:bg-white/10'
                           }`}
                       >
                         {style.charAt(0).toUpperCase() + style.slice(1)}
@@ -365,6 +373,16 @@ function CanvasControls({
             </DropdownMenu>
           </>
         )}
+
+        {/* Position panel opener */}
+        <button
+          onClick={() => onOpenPositionPanel?.()}
+          className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+          title="Reorder layers"
+        >
+          <Layers className="h-4 w-4 flex-shrink-0 opacity-70" />
+          <span className="text-sm">Position</span>
+        </button>
 
         {/* Motion Controls Group */}
         <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -379,7 +397,7 @@ function CanvasControls({
             }}
             className={`h-7 px-2 rounded-md transition-all flex items-center gap-1 touch-manipulation whitespace-nowrap ${isMotionCaptureActive
               ? 'bg-purple-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.8)] ring-1 ring-purple-400 animate-pulse-glow'
-              : 'text-white hover:bg-zinc-700 active:bg-zinc-600'
+              : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10'
               }`}
             title={isMotionCaptureActive ? "Apply Animation" : "Start Animation Capture"}
           >
@@ -401,10 +419,10 @@ function CanvasControls({
           {/* Motion Panel Menu - 3 dots to access MotionPanel for managing steps */}
           <button
             onClick={() => onToggleMotionPanel?.()}
-            className="text-white hover:bg-zinc-700 active:bg-zinc-600 h-7 w-7 rounded-md transition-colors flex items-center justify-center"
+            className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10"
             title="Animation Steps"
           >
-            <MoreVertical className="h-4 w-4" />
+            <MoreVertical className="h-4 w-4 opacity-70" />
           </button>
         </div>
 

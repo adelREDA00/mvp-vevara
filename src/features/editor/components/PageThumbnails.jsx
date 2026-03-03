@@ -1,11 +1,11 @@
 import { Plus, ChevronDown } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 
-function PageThumbnail({ 
-  duration, 
-  isActive = false, 
-  onClick, 
-  pageIndex, 
+function PageThumbnail({
+  duration,
+  isActive = false,
+  onClick,
+  pageIndex,
   width = null,
   onWidthChange,
   defaultWidth = 96
@@ -18,7 +18,7 @@ function PageThumbnail({
   const [leftOffset, setLeftOffset] = useState(0) // Track permanent left offset for left-side resizing
   const [startLeftOffset, setStartLeftOffset] = useState(0) // Track starting offset when beginning resize
   const cardRef = useRef(null)
-  
+
   // Refs for event handlers to ensure cleanup works correctly
   const handleMouseMoveRef = useRef(null)
   const handleMouseUpRef = useRef(null)
@@ -79,7 +79,7 @@ function PageThumbnail({
     setStartX(e.clientX)
     setStartWidth(cardWidth)
     setStartLeftOffset(leftOffset) // Capture current offset when starting resize
-    
+
     // Add global mouse event listeners
     if (handleMouseMoveRef.current) {
       document.addEventListener('mousemove', handleMouseMoveRef.current)
@@ -111,10 +111,10 @@ function PageThumbnail({
   }
 
   return (
-    <div 
+    <div
       className="relative group flex-shrink-0"
       ref={cardRef}
-      style={{ 
+      style={{
         width: `${cardWidth}px`,
         marginLeft: `${leftOffset}px`,
         transition: isResizing ? 'none' : 'margin-left 0.1s ease-out, width 0.1s ease-out',
@@ -163,16 +163,15 @@ function PageThumbnail({
           const rect = e.currentTarget.getBoundingClientRect()
           const clickX = e.clientX - rect.left
           const cardWidth = rect.width
-          
+
           // If clicking within 12px of left or right edge, don't trigger card click
           if (clickX < 12 || clickX > cardWidth - 12) {
             e.stopPropagation()
           }
         }}
-        className={`h-10 sm:h-11 md:h-14 bg-white rounded-lg border-2 cursor-pointer shadow-lg transition-colors touch-manipulation flex-shrink-0 relative ${
-          isActive ? 'border-blue-500' : 'border-transparent hover:border-blue-500 active:border-blue-400'
-        }`}
-        style={{ 
+        className={`h-10 sm:h-11 md:h-14 bg-white rounded-lg border-2 cursor-pointer shadow-lg transition-colors touch-manipulation flex-shrink-0 relative ${isActive ? 'border-blue-500' : 'border-transparent hover:border-blue-500 active:border-blue-400'
+          }`}
+        style={{
           width: '100%',
           minWidth: '48px',
           pointerEvents: 'auto',
@@ -182,7 +181,7 @@ function PageThumbnail({
           {duration}
         </div>
       </div>
-      
+
       {/* Right resize handle - extends into card area for easier grabbing */}
       <div
         className="resize-handle absolute right-0 top-0 bottom-0 cursor-ew-resize z-30 select-none"
@@ -256,10 +255,10 @@ function PageThumbnails({ pages = [], currentPage = 0, onPageClick, onAddPage, o
   }
 
   return (
-    <div 
-      className="flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 flex-shrink-0 overflow-x-auto scrollbar-hide touch-pan-x backdrop-blur-md" 
-      style={{ 
-        backgroundColor: 'rgba(13, 18, 22, 0.75)',
+    <div
+      className="flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 flex-shrink-0 overflow-x-auto scrollbar-hide touch-pan-x backdrop-blur-md"
+      style={{
+        backgroundColor: '#0f1015',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
       }}

@@ -55,9 +55,9 @@ function DropdownMenu({ trigger, children }) {
           className="fixed shadow-2xl min-w-[200px] py-1 border border-white/10 rounded-xl overflow-hidden"
           style={{
             zIndex: 9999,
-            backgroundColor: 'rgba(24, 24, 27, 0.75)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            backgroundColor: 'rgba(15, 16, 21, 0.8)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
           }}
         >
           {typeof children === 'function'

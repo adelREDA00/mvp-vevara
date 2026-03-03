@@ -39,6 +39,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     const motionEngine = getGlobalMotionEngine()
     const [isPlayingInternal, setIsPlayingInternal] = useState(false)
     const [playheadTime, setPlayheadTime] = useState(0)
+    const [isBuffering, setIsBuffering] = useState(false)
 
     // Wrapper for setIsPlaying to support external synchronization
     const setIsPlaying = useCallback((val) => {
@@ -79,9 +80,10 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // This prevents Redux state updates (from dispatching actions) 
         // from clearing the engine right as a preview starts.
         if (!force && lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string' && lastPreparedDataRef.current.startsWith('preview-override-')) {
-            console.log('⏭️ [useSimpleMotion] Skipping prepareEngine - manual override in progress')
             return
         }
+
+
         const flowsMap = sceneMotionFlowsRef.current // We need access to all flows
 
         if (!objects || !timelineInfo || !flowsMap) return
@@ -108,33 +110,12 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         // Skip prepare if the data hasn't changed (unless forced)
         if (!force && lastPreparedDataRef.current === currentDataSignature) {
-            console.log('⏭️ [prepareEngine] Skipping - data signature unchanged')
             return
         }
-        
-        console.log('🔄 [prepareEngine] Data signature changed, rebuilding engine')
-        // Safely extract hash from old signature (might be a string like "preview-override-...")
-        let oldHash = 'none'
-        if (lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string') {
-            try {
-                if (lastPreparedDataRef.current.startsWith('{')) {
-                    const parsed = JSON.parse(lastPreparedDataRef.current)
-                    oldHash = parsed?.layerPositionsHash?.substring(0, 50) || 'none'
-                } else {
-                    oldHash = lastPreparedDataRef.current.substring(0, 50)
-                }
-            } catch (e) {
-                oldHash = lastPreparedDataRef.current.substring(0, 50)
-            }
-        }
-        const newHash = JSON.parse(currentDataSignature)?.layerPositionsHash?.substring(0, 50) || 'unknown'
-        console.log('   Old hash:', oldHash)
-        console.log('   New hash:', newHash)
-        console.log('🎬 [useSimpleMotion] Preparing project-wide motion engine...')
+
 
         // CRITICAL: Save current playhead position for resume after rebuild
         const currentPlayheadTime = motionEngine.masterTimeline?.time() || 0
-        console.log(`💾 [prepareEngine] Saving playhead position: ${currentPlayheadTime}s`)
 
         // 1. Unload all to avoid leaking timelines
         motionEngine.unloadAllMotions()
@@ -167,7 +148,6 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         if (currentPlayheadTime > 0) {
             motionEngine.seek(currentPlayheadTime)
             setPlayheadTime(currentPlayheadTime)
-            console.log(`♻️ [prepareEngine] Restored playhead position: ${currentPlayheadTime}s`)
         }
 
         // Remember what we prepared
@@ -199,19 +179,29 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // If we're currently playing, we defer the rebuild to avoid visual jumps
         // But we MUST re-prepare once playback stops to sync with the latest Redux state
         if (isPlayingInternal) {
-            console.log('⏭️ [useSimpleMotion] Deferring engine prepare because it is playing')
             return
         }
 
         // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
         // This is critical because prepareEngine uses layersRef.current for hash calculation
         layersRef.current = layers
-        
-        console.log('🔄 [useSimpleMotion] Triggering prepareEngine due to state change, layersBaseStateHash:', layersBaseStateHash.substring(0, 50))
+
         prepareEngine(false)
     }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers])
 
     // ... (Listen for engine events and sync isPlaying state - no changes needed)
+    useEffect(() => {
+        // [FIX] Never trigger this timeout rebuild while playing or during a preview 
+        if (isPlayingInternal) {
+            return
+        }
+
+        // Use a single frame delay (16ms) instead of 100ms to ensure faster sync after splits
+        const timer = setTimeout(() => {
+            prepareEngine()
+        }, 16)
+        return () => clearTimeout(timer)
+    }, [prepareEngine, currentSceneId, isPlayingInternal])
     useEffect(() => {
         const handleMotionComplete = () => {
             setIsPlaying(false)
@@ -247,18 +237,46 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         return () => clearInterval(interval)
     }, [motionEngine, isPlayingInternal])
 
+    // Track video buffering state
+    useEffect(() => {
+        let bufferedVideos = new Set()
+        let didSetBuffering = false
+
+        const handleWaiting = (e) => {
+            bufferedVideos.add(e.target)
+            if (!didSetBuffering) {
+                setIsBuffering(true)
+                didSetBuffering = true
+            }
+        }
+        const handleReady = (e) => {
+            bufferedVideos.delete(e.target)
+            if (bufferedVideos.size === 0) {
+                setIsBuffering(false)
+                didSetBuffering = false
+            }
+        }
+
+        document.addEventListener('waiting', handleWaiting, true)
+        document.addEventListener('canplay', handleReady, true)
+        document.addEventListener('playing', handleReady, true)
+
+        return () => {
+            document.removeEventListener('waiting', handleWaiting, true)
+            document.removeEventListener('canplay', handleReady, true)
+            document.removeEventListener('playing', handleReady, true)
+        }
+    }, [])
 
     // ============================================================================
     // PLAYBACK CONTROLS
     // ============================================================================
 
-    // Play all motions (stable function - uses refs internally)
     const playAll = useCallback(() => {
-        console.log('🎬 Play requested')
-
-        // [BASE EDITING FIX] Force rebuild when play is requested to ensure latest base state is used
-        // This is critical when user edits base state and then clicks play
-        prepareEngine(true)
+        // [FIX] Use force=false here. A forced rebuild can race with the pause
+        // state set by a scene cut, causing the video to restart unexpectedly.
+        // The engine should only rebuild if the data has genuinely changed.
+        prepareEngine(false)
 
         // Let the engine handle play/resume/restart logic
         motionEngine.playAll()
@@ -267,7 +285,6 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
     // Pause all motions
     const pauseAll = useCallback(() => {
-        console.log('⏸️ Pause requested - keeping marker at current position')
         motionEngine.pauseAll()
         setIsPlaying(false)
         // Do NOT seek - marker should stay at the pause point for resume
@@ -275,7 +292,6 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
     // Stop and seek to scene start (used when clicking canvas or selecting layers)  
     const stopAndSeekToSceneStart = useCallback(() => {
-        console.log('⏹️ Stop and reset to scene start')
         motionEngine.pauseAll()
         setIsPlaying(false)
 
@@ -290,27 +306,32 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
      * This is the preferred behavior for canvas clicks and selection changes.
      */
     const pausePlayback = useCallback(() => {
-        console.log('⏸️ Pause at current time')
         motionEngine.pauseAll()
         setIsPlaying(false)
+        // [FIX] Clear marker on pause to ensure next rebuild isn't blocked 
+        // if this was an interrupted transition
+        if (lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string' && lastPreparedDataRef.current.startsWith('preview-override-')) {
+            lastPreparedDataRef.current = null
+        }
     }, [motionEngine])
 
     // Stop all motions (reset to beginning)
     const stopAll = useCallback(() => {
-        console.log('⏹️ Stop requested')
         motionEngine.stopAll()
         setIsPlaying(false)
         setPlayheadTime(0)
+        // [FIX] Clear marker on stop to ensure next rebuild isn't blocked
+        if (lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string' && lastPreparedDataRef.current.startsWith('preview-override-')) {
+            lastPreparedDataRef.current = null
+        }
     }, [motionEngine])
 
     // Seek to specific time
     const seek = useCallback((time) => {
-        // [SEEK FIX] Ensure engine is prepared before seeking
-        // This is critical when seeking without playing first, especially after adding new steps
-        // Force rebuild to ensure all steps are properly initialized (even if hash matches)
-        // This prevents issues where step-2 might be skipped during scrubbing
-        prepareEngine(true)
-        
+        // [SEEK OPTIMIZATION] Use signature-based preparation (prepareEngine(false)) 
+        // to avoid heavy rebuilding during rapid scrubbing if state hasn't changed.
+        prepareEngine(false)
+
         // Seek immediately - prepareEngine is synchronous and timelines are ready
         motionEngine.seek(time)
         setPlayheadTime(time)
@@ -324,12 +345,9 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine 
         // but with the OVERRIDDEN flow for the specific scene.
         if (options.flow && currentSceneIdRef.current) {
-            console.log('🔄 [useSimpleMotion] Reloading engine with overridden flow for transition...')
 
             // Force engine state to playing EARLY so applyTransformInline knows to stop overrides
             motionEngine.isPlaying = true
-
-            // Reset PIXI objects to their base Redux state before rebuilding timelines
             const currentLayers = layersRef.current
             if (objects && currentLayers) {
                 objects.forEach((pixiObject, layerId) => {
@@ -372,7 +390,8 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
             // Update signature to match the temporary override state
             // [FIX] Anti-Reset: Use a recognizable marker that prepareEngine can skip
-            lastPreparedDataRef.current = 'preview-override-' + Date.now()
+            const newMarker = 'preview-override-' + Date.now()
+            lastPreparedDataRef.current = newMarker
         } else {
             // Just ensure it's prepared with whatever it has
             prepareEngine(false)
@@ -384,7 +403,20 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }
 
         setIsPlaying(true)
-        return motionEngine.tweenTo(time, options)
+
+        // [FIX] Cleanup marker on transition complete
+        const originalOnComplete = options.onComplete
+        const wrappedOptions = {
+            ...options,
+            onComplete: () => {
+                if (lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string' && lastPreparedDataRef.current.startsWith('preview-override-')) {
+                    lastPreparedDataRef.current = null
+                }
+                if (originalOnComplete) originalOnComplete()
+            }
+        }
+
+        return motionEngine.tweenTo(time, wrappedOptions)
     }, [motionEngine, prepareEngine, setIsPlaying, timelineInfo, totalProjectDuration])
 
     /**
@@ -428,6 +460,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         prepareEngine, // [EXPOSE] Allow external code to force engine rebuild
         layerObjects,
         isPlaying: isPlayingInternal,
+        isBuffering,
         playheadTime
     }
 }

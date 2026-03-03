@@ -106,13 +106,13 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
   return (
     <>
       <div
-        className="flex flex-col h-full relative backdrop-blur-md transition-all duration-300"
+        className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
         style={{
-          width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-          backgroundColor: 'rgba(13, 18, 22, 0.75)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          borderRight: '0.5px solid rgba(255, 255, 255, 0.1)',
+          width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
+          backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#0f1015',
+          backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+          WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+          borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
         }}
       >
         <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />

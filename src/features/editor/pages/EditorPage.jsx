@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Layers } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -11,7 +11,7 @@ import { Loader2 } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import TopToolbar from '../components/TopToolbar'
-import LeftSidebar from '../components/LeftSidebar'
+import LeftSidebar, { SIDEBAR_ITEMS } from '../components/LeftSidebar'
 import ScenesBar from '../components/ScenesBar'
 import CanvasControls from '../components/CanvasControls'
 import PlaybackControls from '../components/PlaybackControls'
@@ -23,6 +23,7 @@ import ToolsPanel from '../components/ToolsPanel'
 import ProjectsPanel from '../components/ProjectsPanel'
 import AppsPanel from '../components/AppsPanel'
 import ColorPickerPanel from '../components/ColorPickerPanel'
+import PositionPanel from '../components/PositionPanel'
 import { useEditorSidebar } from '../hooks/useEditorSidebar'
 import { useEditorPlayback } from '../hooks/useEditorPlayback'
 import { useEditorLayout } from '../hooks/useEditorLayout'
@@ -65,6 +66,150 @@ function EditorPage() {
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
+  const stageRef = useRef(null)
+  const viewportDataRef = useRef(null)
+  const isDraggingScrollbar = useRef(false)
+  const scrollbarDragType = useRef(null) // 'vertical' or 'horizontal'
+  const lastMousePos = useRef({ x: 0, y: 0 })
+
+  // Refs for direct DOM manipulation to guarantee sync and performance
+  const canvasContainerRef = useRef(null)
+  const vTrackRef = useRef(null)
+  const hTrackRef = useRef(null)
+  const vThumbRef = useRef(null)
+  const hThumbRef = useRef(null)
+
+  // Calculate world dimensions
+  const { worldWidth, worldHeight } = useWorldDimensions(aspectRatio)
+
+  const handleViewportChange = useCallback((data) => {
+    if (!data) return
+    viewportDataRef.current = data
+
+    // Use values from data with reliable fallbacks
+    const scale = data.scale || 1
+    const sw = data.screenWidth || 0
+    const sh = data.screenHeight || 0
+    const ww = data.worldWidth || worldWidth
+    const wh = data.worldHeight || worldHeight
+    const l = data.left !== undefined ? data.left : 0
+    const t = data.top !== undefined ? data.top : 0
+
+
+    if (sw <= 0 || sh <= 0) return
+
+    const totalWorldWidth = ww * scale
+    const totalWorldHeight = wh * scale
+
+    const needsV = totalWorldHeight > (sh + 2)
+    const needsH = totalWorldWidth > (sw + 2)
+
+    if (vTrackRef.current) vTrackRef.current.style.display = needsV ? 'block' : 'none'
+    if (hTrackRef.current) hTrackRef.current.style.display = needsH ? 'block' : 'none'
+
+    if (needsV && vThumbRef.current) {
+      const vTrackH = sh - 23 // top 8 + bottom 15
+      const thumbH = Math.max(40, Math.min(vTrackH, (sh / totalWorldHeight) * vTrackH))
+      const maxT = wh - sh / scale
+      const ratio = maxT <= 1 ? 0 : Math.max(0, Math.min(1, t / maxT))
+
+      const pos = ratio * (vTrackH - thumbH)
+      vThumbRef.current.style.height = `${thumbH}px`
+      vThumbRef.current.style.top = `${pos}px`
+    }
+
+    if (needsH && hThumbRef.current) {
+      const hTrackW = sw - 23 // left 8 + right 15
+      const thumbW = Math.max(40, Math.min(hTrackW, (sw / totalWorldWidth) * hTrackW))
+      const maxL = ww - sw / scale
+      const ratio = maxL <= 1 ? 0 : Math.max(0, Math.min(1, l / maxL))
+
+      const pos = ratio * (hTrackW - thumbW)
+      hThumbRef.current.style.width = `${thumbW}px`
+      hThumbRef.current.style.left = `${pos}px`
+    }
+  }, [worldWidth, worldHeight])
+
+  const handleScrollbarMouseDown = useCallback((e, type) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isDraggingScrollbar.current = true
+    scrollbarDragType.current = type
+    lastMousePos.current = { x: e.clientX, y: e.clientY }
+  }, [])
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      const viewportData = viewportDataRef.current
+      if (!isDraggingScrollbar.current || !viewportData || !stageRef.current) return
+
+      const deltaX = e.clientX - lastMousePos.current.x
+      const deltaY = e.clientY - lastMousePos.current.y
+      lastMousePos.current = { x: e.clientX, y: e.clientY }
+
+      const { scale, screenWidth, screenHeight, worldWidth, worldHeight } = viewportData
+      const totalWorldWidth = worldWidth * scale
+      const totalWorldHeight = worldHeight * scale
+
+      if (scrollbarDragType.current === 'vertical') {
+        const vTrackHeight = screenHeight - 23
+        const thumbHeight = Math.max(40, Math.min(vTrackHeight, (screenHeight / totalWorldHeight) * vTrackHeight))
+        const scrollableTrack = vTrackHeight - thumbHeight
+
+        if (scrollableTrack <= 0) return
+
+        const scrollableWorldRange = worldHeight - screenHeight / scale
+        const panAmount = (deltaY / scrollableTrack) * scrollableWorldRange
+
+        const currentCenter = stageRef.current.getViewportData()
+        if (currentCenter) {
+          const newCenterY = (currentCenter.top + currentCenter.bottom) / 2 + panAmount
+          stageRef.current.setViewportPosition((currentCenter.left + currentCenter.right) / 2, newCenterY)
+        }
+      } else {
+        const hTrackWidth = screenWidth - 23
+        const thumbWidth = Math.max(40, Math.min(hTrackWidth, (screenWidth / totalWorldWidth) * hTrackWidth))
+        const scrollableTrack = hTrackWidth - thumbWidth
+
+        if (scrollableTrack <= 0) return
+
+        const scrollableWorldRange = worldWidth - screenWidth / scale
+        const panAmount = (deltaX / scrollableTrack) * scrollableWorldRange
+
+        const currentCenter = stageRef.current.getViewportData()
+        if (currentCenter) {
+          const newCenterX = (currentCenter.left + currentCenter.right) / 2 + panAmount
+          stageRef.current.setViewportPosition(newCenterX, (currentCenter.top + currentCenter.bottom) / 2)
+        }
+      }
+    }
+
+    const handleMouseUp = () => {
+      isDraggingScrollbar.current = false
+      scrollbarDragType.current = null
+      document.body.style.userSelect = ''
+    }
+
+    const onWindowMouseMove = (e) => {
+      if (isDraggingScrollbar.current) {
+        handleMouseMove(e)
+      }
+    }
+
+    const onWindowMouseUp = () => {
+      if (isDraggingScrollbar.current) {
+        handleMouseUp()
+      }
+    }
+
+    window.addEventListener('mousemove', onWindowMouseMove)
+    window.addEventListener('mouseup', onWindowMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove)
+      window.removeEventListener('mouseup', onWindowMouseUp)
+    }
+  }, [])
 
   // Export State
   const sceneMotionFlows = useSelector(selectSceneMotionFlows)
@@ -239,6 +384,24 @@ function EditorPage() {
   // Get current scene data from Redux
   const currentSceneData = useSelector(selectCurrentScene)
 
+  const sceneLayersOrdered = useMemo(() => {
+    if (!currentSceneData?.layers) return []
+    return currentSceneData.layers.map(id => layers[id]).filter(Boolean)
+  }, [currentSceneData, layers])
+
+  const handlePositionReorder = useCallback((fromIndex, toIndex) => {
+    if (!currentSceneId) return
+    if (fromIndex === toIndex) return
+    if (fromIndex === 0 || toIndex === 0) return
+    dispatch(reorderLayer({ sceneId: currentSceneId, fromIndex, toIndex }))
+  }, [dispatch, currentSceneId])
+
+  const handleSelectFromPositionPanel = useCallback((layerId) => {
+    if (layerId) {
+      dispatch(setSelectedLayer(layerId))
+    }
+  }, [dispatch])
+
   // Calculate aspect ratio from width and height (simplified to lowest terms)
   const calculateAspectRatio = (width, height) => {
     const gcd = (a, b) => b === 0 ? a : gcd(b, a % b)
@@ -254,8 +417,6 @@ function EditorPage() {
     setAspectRatio(newAspectRatio)
   }
 
-  // Calculate current world dimensions based on aspect ratio
-  const { worldWidth, worldHeight } = useWorldDimensions(aspectRatio)
 
 
 
@@ -981,11 +1142,11 @@ function EditorPage() {
         })
       }
 
-      console.log(`🎬 [EditorPage] Fast-play step (${stepIndex + 1}): ${stepStartTimeSeconds}s -> ${stepEndTimeSeconds}s`)
-
       // [RACE CONDITION FIX] Build optimistic flow that matches what we just dispatched to Redux
       // This ensures preview uses the exact same data structure that will be in Redux after update
       const optimisticFlow = { ...currentFlow, steps: updatedSteps }
+
+      console.log(`🎬 [EditorPage] Fast-play trigger: ${stepStartTimeSeconds.toFixed(2)}s -> ${stepEndTimeSeconds.toFixed(2)}s. Flow steps: ${optimisticFlow.steps.length}`)
 
       motionControls.tweenTo(stepEndTimeSeconds, {
         duration: 1,
@@ -1031,6 +1192,43 @@ function EditorPage() {
   }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo])
 
   /**
+   * Cancel motion capture: delete the auto-created step and exit
+   * CRITICAL: Reset all PIXI objects to their base Redux state to prevent crop value leaks
+   */
+  const handleCancelMotion = useCallback(() => {
+    if (editingStepId && currentSceneId) {
+      // Delete the step ONLY if it was NEWLY created in this session
+      if (isNewStepRef.current) {
+        dispatch(deleteSceneMotionStep({
+          sceneId: currentSceneId,
+          stepId: editingStepId
+        }))
+      }
+    }
+
+    // [CROP FIX] Reset all PIXI objects to their base Redux state before exiting capture mode
+    // This prevents crop values (and other transform values) from persisting on PIXI objects
+    // after canceling, which would then be read as initial state in the next capture session
+    if (motionControls && motionControls.layerObjects && layers) {
+      const layerObjects = motionControls.layerObjects
+      layerObjects.forEach((pixiObject, layerId) => {
+        const baseLayerData = layers[layerId]
+        if (baseLayerData && pixiObject && !pixiObject.destroyed) {
+          // Force reset to base Redux state (force=true ensures visual alignment)
+          // This resets crop values, position, rotation, scale, etc. to match Redux
+          applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
+        }
+      })
+    }
+
+    // Exit capture mode
+    setMotionCaptureMode(null)
+    setEditingStepId(null)
+    motionCaptureRef.current = null
+    isNewStepRef.current = false
+  }, [editingStepId, currentSceneId, dispatch, motionControls, layers])
+
+  /**
    * Edit an existing motion step (Centralized logic for both Panel and Timeline)
    */
   const handleEditStep = useCallback((stepId) => {
@@ -1038,6 +1236,11 @@ function EditorPage() {
     if (isMotionCaptureActive && editingStepId === stepId) {
       handleApplyMotion()
       return
+    }
+
+    // [STABILITY] If clicking on an already active step but not in capture mode, just ensure we're there
+    if (!isMotionCaptureActive && editingStepId === stepId && stepId !== 'base') {
+      // Re-trigger capture for this step if it lost focus but is still active
     }
 
     // 2. SAVE OR DISCARD PREVIOUS EDITS: 
@@ -1054,18 +1257,24 @@ function EditorPage() {
 
     if (!currentSceneId) return
 
+    // INSTANT FEEDBACK: Glow the block immediately regardless of state
+    setEditingStepId(stepId)
+
     // 3. BASE CASE: Snap playhead to scene start
     if (stepId === 'base') {
       // Seek UI and Engine together
-      if (seek) seek(startTimeOffset)
+      if (seek) {
+        seek(startTimeOffset)
+      } else {
+        setPlayheadTime(startTimeOffset)
+        playheadTimeRef.current = startTimeOffset
+      }
 
       // Ensure state is clean
       setMotionCaptureMode(null)
-      setEditingStepId('base')
       motionCaptureRef.current = null
       return
     }
-
 
     // Mark as EXISTING step being edited
     isNewStepRef.current = false
@@ -1073,9 +1282,6 @@ function EditorPage() {
     const motionFlow = currentSceneMotionFlow?.steps || []
     const stepIndex = motionFlow.findIndex(s => s.id === stepId)
     if (stepIndex === -1) return
-
-    // INSTANT FEEDBACK: Glow the block immediately
-    setEditingStepId(stepId)
 
     const step = motionFlow[stepIndex]
     const initialTrackedLayers = new Map()
@@ -1099,7 +1305,6 @@ function EditorPage() {
       let currentMediaHeight = layer.mediaHeight || layerObject?._mediaHeight || layerObject?._originalHeight || layer.height || 100
 
       // Accumulate transforms from previous steps using RELATIVE values
-      // This matches how data is stored in Redux (dx, dy, dsx, dsy, dangle)
       for (let i = 0; i < stepIndex; i++) {
         const prevStep = motionFlow[i]
         const actions = prevStep.layerActions?.[layerId] || []
@@ -1122,7 +1327,6 @@ function EditorPage() {
           currentRotation += (rotateAction.values?.dangle ?? 0)
         }
         if (cropAction) {
-          // Crop is absolute per step, but might shift the layer
           if (cropAction.values?.x !== undefined) currentX = cropAction.values.x
           if (cropAction.values?.y !== undefined) currentY = cropAction.values.y
 
@@ -1163,32 +1367,22 @@ function EditorPage() {
       const deltaX = currentTargetX - sessionStartTransform.x
       const deltaY = currentTargetY - sessionStartTransform.y
 
-      // [CROP FIX] CRITICAL: initialTransform must ALWAYS represent the state BEFORE this step
-      // (sessionStartTransform), NOT the state after applying this step's actions.
-      // This ensures that when editing, comparisons are made against the correct baseline.
-      // The current values (cropX, cropY, etc.) represent the state AFTER this step's actions.
       initialTrackedLayers.set(layerId, {
-        initialTransform: sessionStartTransform, // State BEFORE this step - this is the baseline for comparisons
+        initialTransform: sessionStartTransform,
         currentPosition: { x: currentTargetX, y: currentTargetY },
         deltaX,
         deltaY,
         width: sessionStartTransform.width,
         height: sessionStartTransform.height,
-        // Current values AFTER applying this step's actions
         scaleX: currentScale?.values?.dsx !== undefined ? sessionStartTransform.scaleX * currentScale.values.dsx : sessionStartTransform.scaleX,
         scaleY: currentScale?.values?.dsy !== undefined ? sessionStartTransform.scaleY * currentScale.values.dsy : sessionStartTransform.scaleY,
         rotation: currentRotate?.values?.dangle !== undefined ? sessionStartTransform.rotation + currentRotate.values.dangle : sessionStartTransform.rotation,
-        // [CROP FIX] Current crop values AFTER this step's crop action (if it exists)
-        // These are used for display/editing, but initialTransform.cropX/Y/etc. are used for comparison
         cropX: currentCrop?.values?.cropX ?? sessionStartTransform.cropX,
         cropY: currentCrop?.values?.cropY ?? sessionStartTransform.cropY,
         cropWidth: currentCrop?.values?.cropWidth ?? sessionStartTransform.cropWidth,
         cropHeight: currentCrop?.values?.cropHeight ?? sessionStartTransform.cropHeight,
         mediaWidth: currentCrop?.values?.mediaWidth ?? sessionStartTransform.mediaWidth,
         mediaHeight: currentCrop?.values?.mediaHeight ?? sessionStartTransform.mediaHeight,
-        // [CONTROL POINTS FIX] Initialize control points from existing move action when editing
-        // This ensures that when editing a step with a curved path, the control points are
-        // properly loaded and can be edited/updated
         controlPoints: currentMove?.values?.controlPoints || [],
         didMove: false,
         interactionType: null
@@ -1197,31 +1391,18 @@ function EditorPage() {
 
     // 2. Prepare capture session
     const enableEditCapture = () => {
-      // Synchronize initialTrackedLayers with ACTUAL visual state from PIXI
-      // This ensures that after the fast-play stops, we snap the logical state to the visual state, 
-      // preventing a visual jump/snap-back to the scene start.
       if (motionControls && motionControls.getLayerCurrentTransforms) {
         const currentTransforms = motionControls.getLayerCurrentTransforms()
         currentTransforms.forEach((transform, layerId) => {
           if (initialTrackedLayers.has(layerId)) {
             const entry = initialTrackedLayers.get(layerId)
-
-            // Sync current state from visual engine
             entry.currentPosition.x = transform.x
             entry.currentPosition.y = transform.y
             entry.rotation = transform.rotation
             entry.scaleX = transform.scaleX
             entry.scaleY = transform.scaleY
-
-            // CRITICAL FIX: Recalculate deltas relative to the original step start (initialTransform)
-            // DO NOT overwrite initialTransform, as it is the anchor point for the step actions.
             entry.deltaX = transform.x - entry.initialTransform.x
             entry.deltaY = transform.y - entry.initialTransform.y
-
-            // [CROP FIX] Sync crop values from visual state when editing existing steps
-            // This ensures the current crop values match what's visually displayed, so editing works correctly.
-            // initialTransform.cropX/Y/etc. remain unchanged (they represent state BEFORE this step).
-            // entry.cropX/Y/etc. represent the current state AFTER this step's crop action.
             if (transform.cropX !== undefined) entry.cropX = transform.cropX
             if (transform.cropY !== undefined) entry.cropY = transform.cropY
             if (transform.cropWidth !== undefined) {
@@ -1248,14 +1429,11 @@ function EditorPage() {
         onPositionUpdate: (data) => {
           const capture = motionCaptureRef.current
           if (!capture) return
-
           const entry = capture.trackedLayers.get(data.layerId)
           if (entry) {
-            // Update mutable ref data directly for high performance
             if (data.interactionType === 'move') entry.didMove = true
             if (data.x !== undefined && data.y !== undefined) {
               entry.currentPosition = { x: data.x, y: data.y }
-              // Delta is relative to the START of the current step
               entry.deltaX = data.x - entry.initialTransform.x
               entry.deltaY = data.y - entry.initialTransform.y
             }
@@ -1268,23 +1446,16 @@ function EditorPage() {
             if (data.cropHeight !== undefined) entry.cropHeight = data.cropHeight
             if (data.mediaWidth !== undefined) entry.mediaWidth = data.mediaWidth
             if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
-
-            // [CONTROL POINTS FIX] Only update control points if explicitly provided (not undefined/null)
-            // This preserves existing control points when updating position/scale/rotate without curve edits
-            // Control points are arrays, so we check for array type to distinguish from undefined
             if (data.controlPoints !== undefined && Array.isArray(data.controlPoints)) {
               entry.controlPoints = data.controlPoints
             } else if (data.controlPoints === null) {
-              // Explicitly clear control points if null is passed
               entry.controlPoints = []
             }
-            // If controlPoints is undefined, preserve existing value (don't overwrite)
           }
         },
         trackedLayers: initialTrackedLayers,
         layerActions: step?.layerActions || {}
       })
-      setEditingStepId(stepId)
     }
 
     // 3. Sequential Playback / Fast-Preview
@@ -1300,52 +1471,20 @@ function EditorPage() {
       const hasActions = step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)
       const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
 
+      // Immediately seek to a near-target position if it's very close or if we want faster feedback
+      // For now, let GSAP handle the 0.3s transition which is already quite fast.
+      console.log(`🎬 [EditorPage] Transitioning to step for edit: -> ${targetTime.toFixed(2)}s`)
       motionControls.tweenTo(targetTime, {
-        duration: 0.3, // Even snappier (0.3s)
+        duration: 0.3,
         startTime: startTimeOffset,
         onComplete: enableEditCapture
       })
     } else {
       enableEditCapture()
     }
-  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek])
+  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek, handleCancelMotion])
 
-  /**
-   * Cancel motion capture: delete the auto-created step and exit
-   * CRITICAL: Reset all PIXI objects to their base Redux state to prevent crop value leaks
-   */
-  const handleCancelMotion = useCallback(() => {
-    if (editingStepId && currentSceneId) {
-      // Delete the step ONLY if it was NEWLY created in this session
-      if (isNewStepRef.current) {
-        dispatch(deleteSceneMotionStep({
-          sceneId: currentSceneId,
-          stepId: editingStepId
-        }))
-      }
-    }
 
-    // [CROP FIX] Reset all PIXI objects to their base Redux state before exiting capture mode
-    // This prevents crop values (and other transform values) from persisting on PIXI objects
-    // after canceling, which would then be read as initial state in the next capture session
-    if (motionControls && motionControls.layerObjects && layers) {
-      const layerObjects = motionControls.layerObjects
-      layerObjects.forEach((pixiObject, layerId) => {
-        const baseLayerData = layers[layerId]
-        if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-          // Force reset to base Redux state (force=true ensures visual alignment)
-          // This resets crop values, position, rotation, scale, etc. to match Redux
-          applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
-        }
-      })
-    }
-
-    // Exit capture mode
-    setMotionCaptureMode(null)
-    setEditingStepId(null)
-    motionCaptureRef.current = null
-    isNewStepRef.current = false
-  }, [editingStepId, currentSceneId, dispatch, motionControls, layers])
 
 
 
@@ -1445,6 +1584,12 @@ function EditorPage() {
           // If no layers selected, delete the current scene (if more than one scene exists)
           dispatch(deleteScene(currentSceneId))
         }
+      }
+
+      // 'S' key — Split Page at playhead
+      if (e.key.toLowerCase() === 's' && !isTyping && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        handleSplitScene()
       }
 
       // Cmd/Ctrl+C — Copy selected layers or current scene
@@ -1558,44 +1703,44 @@ function EditorPage() {
 
 
 
-  // Prevent text selection across the entire editor during interactions
-  // useEffect(() => {
-  //   const preventTextSelection = (e) => {
-  //     // Only prevent text selection on the canvas area, not globally
-  //     const canvasContainer = document.querySelector('#pixi-container')
-  //     if (canvasContainer && canvasContainer.contains(e.target)) {
-  //       e.preventDefault()
-  //       return false
-  //     }
-  //   }
+  // [UI FIX] Global Browser Interruption Control
+  // Prevent browser context menu and text selection from interfering with the editor
+  useEffect(() => {
+    const handleGlobalContextMenu = (e) => {
+      // Allow context menu on inputs, textareas, and contenteditable elements
+      const isInput = e.target.tagName === 'INPUT' ||
+        e.target.tagName === 'TEXTAREA' ||
+        e.target.isContentEditable ||
+        e.target.closest('[contenteditable="true"]')
 
+      if (!isInput) {
+        e.preventDefault()
+        return false
+      }
+    }
 
+    const handleGlobalSelectStart = (e) => {
+      // Allow selection inside inputs and textareas
+      const isInput = e.target.tagName === 'INPUT' ||
+        e.target.tagName === 'TEXTAREA' ||
+        e.target.isContentEditable ||
+        e.target.closest('[contenteditable="true"]')
 
-  //   // Add aggressive text selection prevention
-  //   document.addEventListener('selectstart', preventTextSelection, true)
-  //   document.addEventListener('dragstart', preventTextSelection, true)
+      if (!isInput) {
+        e.preventDefault()
+        return false
+      }
+    }
 
-  //   // Only prevent mousedown on canvas area to avoid text selection during interactions
-  //   const handleMouseDown = (e) => {
-  //     const canvasContainer = document.querySelector('#pixi-container')
-  //     if (canvasContainer && canvasContainer.contains(e.target)) {
-  //       // Check if this is a potential drag operation (not just a click)
-  //       const isInteractive = e.target.closest('button, input, select, textarea, a, [role="button"], [role="tab"], [role="menuitem"], [role="dialog"]')
-  //       if (!isInteractive) {
-  //         // Prevent text selection for potential drag operations on canvas
-  //         e.preventDefault()
-  //       }
-  //     }
-  //   }
+    // Add listeners with capture: true to ensure we catch them before browser defaults
+    document.addEventListener('contextmenu', handleGlobalContextMenu, true)
+    document.addEventListener('selectstart', handleGlobalSelectStart, true)
 
-  //   document.addEventListener('mousedown', handleMouseDown, true)
-
-  //   return () => {
-  //     document.removeEventListener('selectstart', preventTextSelection, true)
-  //     document.removeEventListener('dragstart', preventTextSelection, true)
-  //     document.removeEventListener('mousedown', handleMouseDown, true)
-  //   }
-  // }, [])
+    return () => {
+      document.removeEventListener('contextmenu', handleGlobalContextMenu, true)
+      document.removeEventListener('selectstart', handleGlobalSelectStart, true)
+    }
+  }, [])
 
 
   // Handle mouse wheel zoom with Ctrl key (works anywhere in the app)
@@ -1692,11 +1837,38 @@ function EditorPage() {
     return motionCaptureMode
   }, [motionCaptureMode, editingStepId, currentSceneMotionFlow])
 
+  const handleSplitScene = useCallback(() => {
+    if (!currentSceneId) return
+    const sceneInfo = timelineInfo.find(s => s.id === currentSceneId)
+    if (!sceneInfo) return
+
+    const timeInScene = playheadTime - sceneInfo.startTime
+    // [FIX] Frame Snapping: Align split to 60fps boundary
+    const snappedSplitTime = Math.round(timeInScene * 60) / 60
+    const snappedPlayheadTime = sceneInfo.startTime + snappedSplitTime
+
+    if (timeInScene > 0.1 && timeInScene < (sceneInfo.endTime - sceneInfo.startTime - 0.1)) {
+      if (motionControls) motionControls.pauseAll()
+      setIsPlaying(false) // Immediate UI feedback
+      dispatch(splitScene({
+        sceneId: currentSceneId,
+        splitTime: snappedSplitTime
+      }))
+      // Auto-seek past split point (using snapped time)
+      seek(snappedPlayheadTime + 0.001)
+    } else {
+      alert("Move playhead inside a page to split it.")
+    }
+  }, [currentSceneId, timelineInfo, playheadTime, motionControls, dispatch, seek])
+
   return (
     <div
-      className="h-screen sm:h-dvh flex flex-col text-white overflow-hidden relative bg-[#0d1216]"
+      className="h-dvh flex flex-col text-white overflow-hidden relative select-none"
       data-editor-container
-      style={{ touchAction: 'none' }}
+      style={{
+        touchAction: 'none',
+        backgroundColor: '#0f1015'
+      }}
       onDragStart={(e) => {
         // Prevent drag operations that might trigger text selection
         e.preventDefault()
@@ -1729,7 +1901,7 @@ function EditorPage() {
         className="hidden lg:block absolute left-0 z-50 transition-all duration-300"
         style={{
           top: `${topToolbarHeight}px`,
-          height: `calc(100vh - ${topToolbarHeight}px)`
+          height: `calc(100vh - ${topToolbarHeight}px - ${bottomSectionHeight}px)`
         }}
       >
         <LeftSidebar
@@ -1764,6 +1936,15 @@ function EditorPage() {
               )}
               {activeSidebarItem === 'Tools' && (
                 <ToolsPanel onClose={handleClosePanel} />
+              )}
+              {activeSidebarItem === 'Position' && (
+                <PositionPanel
+                  onClose={handleClosePanel}
+                  layers={sceneLayersOrdered}
+                  selectedLayerId={selectedLayerIds[0]}
+                  onSelectLayer={handleSelectFromPositionPanel}
+                  onReorder={handlePositionReorder}
+                />
               )}
               {activeSidebarItem === 'Color' && (
                 <ColorPickerPanel
@@ -1872,130 +2053,150 @@ function EditorPage() {
             </div>
           )}
 
-          {/* Mobile Panels - Redesigned full screen overlay with sidebar navigation */}
+          {/* Mobile: bottom sheet (~40% height) with horizontal nav at bottom */}
           {activeSidebarItem && (
-            <div
-              className="lg:hidden fixed inset-0 z-[60] bg-black/60 backdrop-blur-md transition-opacity duration-300"
-              onClick={() => setActiveSidebarItem(null)}
-              style={{
-                top: 0,
-                bottom: 0,
-                left: 0,
-                right: '35%'
-              }}
-            >
+            <>
               <div
-                className="absolute left-0 top-0 bottom-0 right-0 shadow-2xl flex flex-row overflow-hidden transition-transform duration-300 border-r border-white/10"
-                onClick={(e) => e.stopPropagation()}
+                className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
+                style={{ top: 0 }}
+                onClick={() => setActiveSidebarItem(null)}
+                aria-hidden
+              />
+              <div
+                className="lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t border-white/10 shadow-2xl mobile-sheet-in"
                 style={{
-                  top: topToolbarHeight,
-                  height: `calc(100vh - ${topToolbarHeight}px)`,
-                  backgroundColor: 'rgba(13, 18, 22, 0.6)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
+                  height: '80vh',
+                  minHeight: '360px',
+                  maxHeight: '90vh',
+                  backgroundColor: '#0f1015',
+                  paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
+                onClick={(e) => e.stopPropagation()}
               >
-                {/* Embedded Sidebar for Mobile */}
-                <div className="w-16 h-full border-r border-white/5 bg-black/20 flex-shrink-0">
-                  <LeftSidebar
-                    activeItem={activeSidebarItem}
-                    onItemClick={handleSidebarItemClick}
-                  />
+                {/* Drag handle */}
+                <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+                  <div className="w-10 h-1 rounded-full bg-white/20" aria-hidden />
                 </div>
-
-                {/* Panel Content for Mobile */}
-                <div className="flex-1 h-full overflow-hidden flex flex-col relative">
-                  <div className="flex-1 overflow-y-auto">
-                    {activeSidebarItem === 'Design' && (
-                      <DesignPanel onClose={handleClosePanel} />
-                    )}
-                    {activeSidebarItem === 'Elements' && (
-                      <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                    )}
-                    {activeSidebarItem === 'Text' && (
-                      <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                    )}
-                    {activeSidebarItem === 'Uploads' && (
-                      <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                    )}
-                    {activeSidebarItem === 'Tools' && (
-                      <ToolsPanel onClose={handleClosePanel} />
-                    )}
-                    {activeSidebarItem === 'Color' && (
-                      <ColorPickerPanel
-                        onClose={handleClosePanel}
-                        selectedColor={
-                          colorPickerType === 'canvas'
-                            ? (currentSceneData?.backgroundColor !== undefined
-                              ? (typeof currentSceneData.backgroundColor === 'number'
-                                ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
-                                : currentSceneData.backgroundColor)
-                              : '#ffffff')
-                            : selectedLayerIds[0] && layers[selectedLayerIds[0]]
-                              ? (layers[selectedLayerIds[0]].type === 'background'
-                                ? (layers[selectedLayerIds[0]].data?.color !== undefined
-                                  ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
-                                    ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
-                                    : layers[selectedLayerIds[0]].data.color)
-                                  : '#ffffff')
-                                : colorPickerType === 'fill'
-                                  ? (layers[selectedLayerIds[0]].type === 'shape'
-                                    ? layers[selectedLayerIds[0]].data?.fill
-                                    : layers[selectedLayerIds[0]].data?.color)
-                                  : colorPickerType === 'text'
-                                    ? layers[selectedLayerIds[0]].data?.color
-                                    : layers[selectedLayerIds[0]].data?.stroke)
-                              : '#ffffff'
+                {/* Panel content - scrollable, same bg as sheet */}
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: '#0f1015' }}>
+                  {activeSidebarItem === 'Design' && (
+                    <DesignPanel onClose={handleClosePanel} />
+                  )}
+                  {activeSidebarItem === 'Elements' && (
+                    <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                  )}
+                  {activeSidebarItem === 'Text' && (
+                    <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                  )}
+                  {activeSidebarItem === 'Uploads' && (
+                    <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                  )}
+                  {activeSidebarItem === 'Tools' && (
+                    <ToolsPanel onClose={handleClosePanel} />
+                  )}
+                  {activeSidebarItem === 'Position' && (
+                    <PositionPanel
+                      onClose={handleClosePanel}
+                      layers={sceneLayersOrdered}
+                      selectedLayerId={selectedLayerIds[0]}
+                      onSelectLayer={handleSelectFromPositionPanel}
+                      onReorder={handlePositionReorder}
+                    />
+                  )}
+                  {activeSidebarItem === 'Color' && (
+                    <ColorPickerPanel
+                      onClose={handleClosePanel}
+                      selectedColor={
+                        colorPickerType === 'canvas'
+                          ? (currentSceneData?.backgroundColor !== undefined
+                            ? (typeof currentSceneData.backgroundColor === 'number'
+                              ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
+                              : currentSceneData.backgroundColor)
+                            : '#ffffff')
+                          : selectedLayerIds[0] && layers[selectedLayerIds[0]]
+                            ? (layers[selectedLayerIds[0]].type === 'background'
+                              ? (layers[selectedLayerIds[0]].data?.color !== undefined
+                                ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
+                                  ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
+                                  : layers[selectedLayerIds[0]].data.color)
+                                : '#ffffff')
+                              : colorPickerType === 'fill'
+                                ? (layers[selectedLayerIds[0]].type === 'shape'
+                                  ? layers[selectedLayerIds[0]].data?.fill
+                                  : layers[selectedLayerIds[0]].data?.color)
+                                : colorPickerType === 'text'
+                                  ? layers[selectedLayerIds[0]].data?.color
+                                  : layers[selectedLayerIds[0]].data?.stroke)
+                            : '#ffffff'
+                      }
+                      onColorSelect={(color) => {
+                        if (colorPickerType === 'canvas' && currentSceneId) {
+                          const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
+                          dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
+                        } else if (selectedLayerIds && selectedLayerIds.length > 0) {
+                          selectedLayerIds.forEach((layerId) => {
+                            const layer = layers[layerId]
+                            if (!layer) return
+                            const updates = { data: { ...layer.data } }
+                            if (colorPickerType === 'fill' && layer.type === 'shape') {
+                              updates.data.fill = color === 'transparent' ? null : color
+                            } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
+                              updates.data.color = color === 'transparent' ? '#ffffff' : color
+                            } else if (colorPickerType === 'stroke') {
+                              updates.data.stroke = color === 'transparent' ? null : color
+                            }
+                            dispatch(updateLayer({ id: layerId, ...updates }))
+                          })
                         }
-                        onColorSelect={(color) => {
-                          if (colorPickerType === 'canvas' && currentSceneId) {
-                            const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
-                            dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
-                          } else if (selectedLayerIds && selectedLayerIds.length > 0) {
-                            selectedLayerIds.forEach((layerId) => {
-                              const layer = layers[layerId]
-                              if (!layer) return
-                              const updates = { data: { ...layer.data } }
-                              if (colorPickerType === 'fill' && layer.type === 'shape') {
-                                updates.data.fill = color === 'transparent' ? null : color
-                              } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
-                                updates.data.color = color === 'transparent' ? '#ffffff' : color
-                              } else if (colorPickerType === 'stroke') {
-                                updates.data.stroke = color === 'transparent' ? null : color
-                              }
-                              dispatch(updateLayer({ id: layerId, ...updates }))
-                            })
-                          }
-                        }}
-                        colorType={colorPickerType}
-                      />
-                    )}
-                    {activeSidebarItem === 'Projects' && (
-                      <ProjectsPanel onClose={handleClosePanel} />
-                    )}
-                    {activeSidebarItem === 'Apps' && (
-                      <AppsPanel onClose={handleClosePanel} />
-                    )}
-                    {activeSidebarItem === 'Advanced' && (
-                      <MotionInspector
-                        onClose={handleClosePanel}
-                        segments={segments}
-                        onAddSegment={handleAddSegment}
-                        onUpdateSegment={handleUpdateSegment}
-                        onDeleteSegment={handleDeleteSegment}
-                        onDuplicateSegment={handleDuplicateSegment}
-                        onToggleSegmentBypass={handleToggleSegmentBypass}
-                        onLayerUpdate={(updates) => {
-                          if (selectedLayerIds[0]) {
-                            dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
-                          }
-                        }}
-                      />
-                    )}
-                  </div>
+                      }}
+                      colorType={colorPickerType}
+                    />
+                  )}
+                  {activeSidebarItem === 'Projects' && (
+                    <ProjectsPanel onClose={handleClosePanel} />
+                  )}
+                  {activeSidebarItem === 'Apps' && (
+                    <AppsPanel onClose={handleClosePanel} />
+                  )}
+                  {activeSidebarItem === 'Advanced' && (
+                    <MotionInspector
+                      onClose={handleClosePanel}
+                      segments={segments}
+                      onAddSegment={handleAddSegment}
+                      onUpdateSegment={handleUpdateSegment}
+                      onDeleteSegment={handleDeleteSegment}
+                      onDuplicateSegment={handleDuplicateSegment}
+                      onToggleSegmentBypass={handleToggleSegmentBypass}
+                      onLayerUpdate={(updates) => {
+                        if (selectedLayerIds[0]) {
+                          dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+                {/* Horizontal minimal nav at bottom of sheet */}
+                <div
+                  className="flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t border-white/5 bg-black/20"
+                  style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+                >
+                  {SIDEBAR_ITEMS.map((item) => {
+                    const Icon = item.icon
+                    const isActive = activeSidebarItem === item.label
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => handleSidebarItemClick(item.label)}
+                        className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${isActive ? 'bg-white/10 text-white' : 'text-zinc-400 active:bg-white/5'}`}
+                      >
+                        <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />
+                        <span className="text-[10px] font-medium">{item.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
-            </div>
+            </>
           )}
         </div>
 
@@ -2030,6 +2231,9 @@ function EditorPage() {
                 setColorPickerType(type)
                 setActiveSidebarItem('Color') // Open color panel in sidebar
               }}
+              onOpenPositionPanel={() => {
+                setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
+              }}
               onToggleMotionPanel={() => {
                 setIsMotionPanelOpen(!isMotionPanelOpen)
               }}
@@ -2042,17 +2246,19 @@ function EditorPage() {
 
           {/* Canvas - Takes all available space */}
           <div
-            ref={canvasScrollRef}
-            className="flex-1 min-h-0 w-full flex items-center justify-center bg-[#0d1216]"
-            style={useMemo(() => ({
-              position: 'relative',
-              zIndex: 1,
-              paddingTop: `${topToolbarHeight}px`,
-              paddingBottom: `${bottomSectionHeight}px`,
-              paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 1024 ? sidebarWidth : '0px',
-            }), [topToolbarHeight, bottomSectionHeight, sidebarWidth])}
+            ref={canvasContainerRef}
+            className="absolute flex-1 overflow-hidden select-none"
+            style={{
+              top: topToolbarHeight,
+              bottom: bottomSectionHeight,
+              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+              right: 0,
+              backgroundColor: '#0f1015', // Darker background for the canvas area
+              zIndex: 10
+            }}
           >
             <Stage
+              ref={stageRef}
               aspectRatio={aspectRatio}
               showGrid={showGrid}
               showSafeArea={showSafeArea}
@@ -2066,8 +2272,10 @@ function EditorPage() {
               onSetCameraEnd={() => { }}
               zoom={zoom}
               onZoomChange={setZoom}
+              onViewportChange={handleViewportChange}
               bottomSectionHeight={bottomSectionHeight}
               topToolbarHeight={topToolbarHeight}
+              isResizingBottom={isResizingBottom}
               //motion capture mode & playback controls
               motionCaptureMode={effectiveMotionCaptureMode}
               onMotionStateChange={setMotionControls}
@@ -2080,99 +2288,165 @@ function EditorPage() {
               totalTime={totalTime}
             />
 
-            {/* Removed floating mobile menu button */}
+            {/* Vertical Scrollbar Container */}
+            <div
+              ref={vTrackRef}
+              className="absolute right-1.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
+              style={{
+                top: 8,
+                bottom: 15, // Clear vertical overlap even more
+                width: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                display: 'none',
+                pointerEvents: 'none'
+              }}
+            >
+              <div
+                ref={vThumbRef}
+                className="w-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                style={{ pointerEvents: 'auto', left: 0 }}
+                onMouseDown={(e) => {
+                  handleScrollbarMouseDown(e, 'vertical')
+                  document.body.style.userSelect = 'none'
+                }}
+              />
+            </div>
+
+            {/* Horizontal Scrollbar Container */}
+            <div
+              ref={hTrackRef}
+              className="absolute bottom-2.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
+              style={{
+                left: 8,
+                right: 15, // Clear horizontal overlap even more
+                height: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                display: 'none',
+                pointerEvents: 'none',
+              }}
+            >
+              <div
+                ref={hThumbRef}
+                className="h-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                style={{ pointerEvents: 'auto', top: 0 }}
+                onMouseDown={(e) => {
+                  handleScrollbarMouseDown(e, 'horizontal')
+                  document.body.style.userSelect = 'none'
+                }}
+              />
+            </div>
           </div>
 
-          {/* Bottom Sections - Overlay at bottom with glass effect */}
-          <div
-            ref={bottomSectionRef}
-            className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
-            style={{
-              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-              borderTop: '1px solid rgba(13, 18, 22, 0.8)',
-              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-              ...(customBottomHeight !== null ? {
-                height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
-                maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
-              } : {})
-            }}
-          >
-            {/* Height Resize Handle - Invisible but wide enough for easy grabbing */}
-            <div
-              className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
-              onMouseDown={handleBottomResizeMouseDown}
-              style={{ top: '-1px' }}
-            >
-              {/* Visible Indicator: Solid purple line that fades out at ends */}
-              <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-purple-500 to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
-            </div>
-            {/* Content Container - Scrollable if content overflows */}
-            <div className="flex flex-col flex-1" style={{
-              minHeight: 0, // Allow flex item to shrink
-              position: 'relative',
-              paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
-            }}>
-              {/* Scrollable Content Area - REMOVED overflow-y-auto for cleaner look */}
-              <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide" style={{
-                minHeight: 0 // Allow flex item to shrink
-              }}>
-                {/* Playback Controls - Top Section */}
-                <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
-                  <PlaybackControls
-                    isPlaying={isPlaying}
-                    currentTime={playheadTime}
-                    totalTime={totalTime}
-                    onPlayPause={() => {
-                      if (motionControls) {
-                        if (isPlaying) {
-                          motionControls.pauseAll()
-                        } else {
-                          motionControls.playAll()
-                        }
-                      }
-                    }}
-                  />
-                </div>
+          {/* Removed floating mobile menu button */}
+        </div>
 
-                {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
-                <div
-                  ref={scenesBarRef}
-                  className="pointer-events-auto flex-shrink-0"
-                  style={{
-                    width: '100%',
-                    minWidth: 0, // Allow shrinking
-                    backgroundColor: 'rgba(13, 18, 22, 0.85)',
-                    backdropFilter: 'blur(12px)',
-                    WebkitBackdropFilter: 'blur(12px)',
-                    overflowX: 'auto',
-                    overflowY: 'visible',
-                    WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
-                    paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))',
-                    paddingTop: '0px',
-                    paddingLeft: '16px',
-                    paddingRight: '16px',
+        {/* Bottom Sections - Overlay at bottom with glass effect */}
+        <div
+          ref={bottomSectionRef}
+          className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+          style={{
+            left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+            backgroundColor: '#0f1015',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+            ...(customBottomHeight !== null ? {
+              height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
+              maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
+            } : {})
+          }}
+        >
+          {/* Height Resize Handle - Invisible but wide enough for easy grabbing */}
+          <div
+            className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
+            onMouseDown={handleBottomResizeMouseDown}
+            style={{ top: '-1px' }}
+          >
+            {/* Visible Indicator: Solid purple line that fades out at ends */}
+            <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
+          </div>
+          {/* Content Container - Scrollable if content overflows */}
+          <div className="flex flex-col flex-1" style={{
+            minHeight: 0, // Allow flex item to shrink
+            position: 'relative',
+            paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
+          }}>
+            {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
+            <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-auto" style={{
+              minHeight: 0
+            }}>
+              {/* Playback Controls - Top Section */}
+              <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
+                <PlaybackControls
+                  isPlaying={isPlaying}
+                  isBuffering={motionControls?.isBuffering || false}
+                  currentTime={playheadTime}
+                  totalTime={totalTime}
+                  onPlayPause={() => {
+                    if (motionControls) {
+                      if (isPlaying) {
+                        motionControls.pauseAll()
+                        setIsPlaying(false)
+                      } else {
+                        motionControls.playAll()
+                        setIsPlaying(true)
+                      }
+                    }
                   }}
-                >
-                  <ScenesBar
-                    currentTime={Math.min(playheadTime, totalTime)}
-                    totalTime={totalTime}
-                    worldWidth={worldWidth}
-                    worldHeight={worldHeight}
-                    currentTimeStepId={editingStepId}
-                    isMotionCaptureActive={isMotionCaptureActive}
-                    onStepClick={handleEditStep} // Pass centralized handler
-                    bottomSectionHeight={customBottomHeight} // Pass height for dynamic spacing
-                    onSeek={seek}
-                    onMotionStop={handleMotionStop}
-                  />
-                </div>
+                  onSplit={handleSplitScene}
+                />
+              </div>
+
+              {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
+              <div
+                ref={scenesBarRef}
+                className="pointer-events-auto flex-shrink-0"
+                style={{
+                  width: '100%',
+                  minWidth: 0,
+                  backgroundColor: 'transparent',
+                  overflowX: 'auto',
+                  overflowY: 'visible',
+                  WebkitOverflowScrolling: 'touch',
+                  paddingBottom: '8px',
+                  paddingTop: '0px',
+                  paddingLeft: '16px',
+                  paddingRight: '16px',
+                }}
+              >
+                <ScenesBar
+                  currentTime={Math.min(playheadTime, totalTime)}
+                  totalTime={totalTime}
+                  worldWidth={worldWidth}
+                  worldHeight={worldHeight}
+                  currentTimeStepId={editingStepId}
+                  isMotionCaptureActive={isMotionCaptureActive}
+                  onStepClick={handleEditStep}
+                  bottomSectionHeight={customBottomHeight}
+                  onSeek={seek}
+                  onMotionStop={handleMotionStop}
+                />
               </div>
             </div>
 
+            {/* Zoom slider - fixed at bottom, outside scroll; minimal height, simple white */}
+            <div className="pointer-events-auto flex-shrink-0 flex justify-center lg:justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
+              <input
+                type="range"
+                min={10}
+                max={300}
+                value={zoom === -1 ? 100 : Math.min(300, Math.max(10, zoom))}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none bg-white/20 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+              />
+              <span className="text-[10px] font-mono text-white/60 tabular-nums w-8">
+                {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
+              </span>
+            </div>
           </div>
 
         </div>
-
       </div>
 
       {/* Motion Panel - Right side overlay */}
@@ -2185,6 +2459,7 @@ function EditorPage() {
         isMotionCaptureActive={isMotionCaptureActive}
         editingStepId={editingStepId}
       />
+
       {/* Export Progress Overlay */}
       {exportState.isActive && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-white">

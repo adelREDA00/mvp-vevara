@@ -80,12 +80,19 @@ export function useEditorPlayback(scenes) {
       setIsPlaying(false)
     }
 
+    const handlePlay = () => setIsPlaying(true)
+    const handlePause = () => setIsPlaying(false)
+
     motionEngine.onUpdate(handleUpdate)
     motionEngine.onAllComplete(handleComplete)
+    motionEngine.onPlay(handlePlay)
+    motionEngine.onPause(handlePause)
 
     return () => {
       motionEngine.onUpdateCallbacks = motionEngine.onUpdateCallbacks.filter(cb => cb !== handleUpdate)
       motionEngine.onAllCompleteCallbacks = motionEngine.onAllCompleteCallbacks.filter(cb => cb !== handleComplete)
+      motionEngine.onPlayCallbacks = motionEngine.onPlayCallbacks.filter(cb => cb !== handlePlay)
+      motionEngine.onPauseCallbacks = motionEngine.onPauseCallbacks.filter(cb => cb !== handlePause)
     }
   }, [motionEngine])
 

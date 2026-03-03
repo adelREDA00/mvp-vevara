@@ -2,10 +2,10 @@
 
 
 
-import { useEffect, useRef, useMemo, useLayoutEffect } from 'react'
+import { useEffect, useRef, useMemo, useLayoutEffect, useState } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
-import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer } from '../../engine/pixi/createLayer'
+import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, drawShapePath } from '../../engine/pixi/createLayer'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { LAYER_TYPES } from '../../../store/models'
 import { updateLayer, selectScenes, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
@@ -242,12 +242,8 @@ function redrawShapeWithColors(pixiObject, shapeData, width, height, anchorX, an
 
   pixiObject.clear()
 
-  if (isCircle) {
-    // For circles, use ellipse() to allow elliptical shapes during resizing
-    pixiObject.ellipse(shapeCenterX, shapeCenterY, halfWidth, halfHeight)
-  } else {
-    pixiObject.roundRect(shapeCenterX - halfWidth, shapeCenterY - halfHeight, width, height, shapeData.cornerRadius || 0)
-  }
+  // Draw shape path (fills exactly width × height — required for applyTransformInline to leave scale=1)
+  drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, width, height, shapeData.cornerRadius || 0)
 
   if (fill !== null) {
     pixiObject.fill(fill)
@@ -257,45 +253,19 @@ function redrawShapeWithColors(pixiObject, shapeData, width, height, anchorX, an
 
   if (stroke !== null && strokeWidth > 0) {
     if (isDashed || isDotted) {
+      // Dashed circles fall back to solid; all other shapes use dashed bounding rect
       if (isCircle) {
-        const dashLen = isDotted ? 0 : strokeWidth * 4
-        const gapLen = strokeWidth * 2
-
-        // For now, fall back to solid stroke for ellipses (dashed ellipse not implemented)
         pixiObject.ellipse(shapeCenterX, shapeCenterY, halfWidth, halfHeight)
-        pixiObject.stroke({
-          color: stroke,
-          width: strokeWidth,
-          alignment: 0.5
-        })
+        pixiObject.stroke({ color: stroke, width: strokeWidth, alignment: 0.5 })
       } else {
         const dashLen = isDotted ? 0 : strokeWidth * 4
         const gapLen = strokeWidth * 2
-
-        drawDashedRect(
-          pixiObject,
-          shapeCenterX - halfWidth,
-          shapeCenterY - halfHeight,
-          width,
-          height,
-          shapeData.cornerRadius || 0,
-          stroke,
-          strokeWidth,
-          dashLen,
-          gapLen
-        )
+        drawDashedRect(pixiObject, shapeCenterX - halfWidth, shapeCenterY - halfHeight, width, height, shapeData.cornerRadius || 0, stroke, strokeWidth, dashLen, gapLen)
       }
     } else {
-      if (isCircle) {
-        pixiObject.ellipse(shapeCenterX, shapeCenterY, halfWidth, halfHeight)
-      } else {
-        pixiObject.roundRect(shapeCenterX - halfWidth, shapeCenterY - halfHeight, width, height, shapeData.cornerRadius || 0)
-      }
-      pixiObject.stroke({
-        color: stroke,
-        width: strokeWidth,
-        alignment: 0.5
-      })
+      // Redraw path so the stroke follows the exact shape outline
+      drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, width, height, shapeData.cornerRadius || 0)
+      pixiObject.stroke({ color: stroke, width: strokeWidth, alignment: 0.5 })
     }
   }
 
@@ -350,13 +320,14 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // We only want to apply Redux "base" state if we are at the START of the current scene's duration,
   // OR if the layer has no motion actions (so it isn't controlled by GSAP).
   // This allows GSAP to maintain control during scrubbing/playing.
-  // [BASE EDITING FIX] When editingStepId === 'base', always allow base state updates
+  // [BASE EDITING FIX] Even when editing base, we only force base state if we are at the scene start.
+  // This prevents the "snap back" glitch during seeking after clicking the 'B' block.
   const isEditingBase = editingStepId === 'base'
   const startTimeOffset = layer.sceneStartOffset ?? 0
   const hasMotion = engine.activeTimelines?.has(layerId)
   const isAtSceneStart = !hasMotion || Math.abs(currentTime - startTimeOffset) < 0.1
-  // Allow base state updates when editing base OR at scene start
-  const shouldApplyBaseState = isEditingBase || isAtSceneStart
+  // Allow base state updates ONLY if at scene start (even if editing base)
+  const shouldApplyBaseState = isAtSceneStart
 
   // Skip updates during playback unless forced (GSAP is in control)
   if (isActuallyPlaying && !force) {
@@ -412,6 +383,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   if (force || capturedLayer || !isActuallyPlaying) {
     // CROP SYSTEM: Image/Video containers use a mask for crop
     if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
+      // [FIX] Always sync video timing metadata — this is read by syncMedia, not a visual transform.
+      // This ensures the video element knows its correct offset even if a scene switch happens mid-playback.
+      displayObject._sourceStartTime = layer.data?.sourceStartTime || 0
+      displayObject._sourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0)
+
       if (force || capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)) {
         const sprite = displayObject._imageSprite || displayObject._videoSprite
         const cropMask = displayObject._cropMask
@@ -431,10 +407,6 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         displayObject._storedCropHeight = cropH
         displayObject._storedMediaWidth = mediaW
         displayObject._storedMediaHeight = mediaH
-
-        // [FIX] Trim sync
-        displayObject._storedTrimStart = layer.data?.trimStart || 0
-        displayObject._storedTrimEnd = layer.data?.trimEnd || 0
 
         // Update sprite to match full media size
         if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
@@ -459,63 +431,76 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         displayObject.pivot.set(cropW * targetAnchorX, cropH * targetAnchorY)
       }
     }
+  }
 
-    // Standard width sync
-    if (displayObject.width !== undefined && layer.width !== undefined && !(displayObject instanceof PIXI.Sprite)) {
-      if (displayObject instanceof PIXI.Text) {
-        const isResizing = displayObject._isResizing === true
-        if (!isResizing && displayObject.style && layer.width > 0) {
-          if (displayObject.style.wordWrapWidth !== layer.width) {
-            displayObject.style.wordWrapWidth = layer.width
-          }
-        }
-
-        const align = layer.data?.textAlign || 'left'
-        const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
-        const currentWidth = layer.width || 200
-
-        displayObject.updateText?.(true)
-        const actualHeight = displayObject.getLocalBounds().height || layer.height || 40
-
-        displayObject.anchor.set(anchorX, 0)
-        displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
-      } else if (!(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))) {
-        // [FIX] Standard width sync for graphics/shapes should also be protected
-        if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
-          displayObject.width = layer.width
+  // Standard width sync
+  // NOTE: PIXI.Graphics is excluded because its size is managed by explicit coordinate drawing in
+  // redrawShapeWithColors / createShapeLayer. Setting .width via PIXI's setter computes
+  // scale.x = desiredWidth / localBounds.width. For shapes whose geometry doesn't fill the declared
+  // bounding box exactly (e.g. 5-point star: localBounds.width ≈ 0.951 × layer.width), this
+  // produces scale.x > 1 which pushes shape points beyond the selection/hover box on every frame.
+  if (displayObject.width !== undefined && layer.width !== undefined && !(displayObject instanceof PIXI.Sprite)) {
+    if (displayObject instanceof PIXI.Text) {
+      const isResizing = displayObject._isResizing === true
+      if (!isResizing && displayObject.style && layer.width > 0) {
+        if (displayObject.style.wordWrapWidth !== layer.width) {
+          displayObject.style.wordWrapWidth = layer.width
         }
       }
-    }
 
-    // Standard height sync
-    if (displayObject.height !== undefined && layer.height !== undefined && !(displayObject instanceof PIXI.Sprite)) {
-      if (!(displayObject instanceof PIXI.Text) &&
-        !(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))) {
-        if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
-          displayObject.height = layer.height
-        }
+      const align = layer.data?.textAlign || 'left'
+      const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+      const currentWidth = layer.width || 200
+
+      displayObject.updateText?.(true)
+      const actualHeight = displayObject.getLocalBounds().height || layer.height || 40
+
+      displayObject.anchor.set(anchorX, 0)
+      displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
+    } else if (
+      !(displayObject instanceof PIXI.Graphics) &&
+      !(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))
+    ) {
+      if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
+        displayObject.width = layer.width
       }
     }
   }
 
-  // 5. Anchor Synchronization
-  if (layer.anchorX !== undefined || layer.anchorY !== undefined) {
-    const anchorX = layer.anchorX !== undefined ? layer.anchorX : (displayObject.anchor?.x ?? 0.5)
-    const anchorY = layer.anchorY !== undefined ? layer.anchorY : (displayObject.anchor?.y ?? 0.5)
+  // Standard height sync (same Graphics exclusion — see width note above)
+  if (displayObject.height !== undefined && layer.height !== undefined && !(displayObject instanceof PIXI.Sprite)) {
+    if (
+      !(displayObject instanceof PIXI.Text) &&
+      !(displayObject instanceof PIXI.Graphics) &&
+      !(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))
+    ) {
+      if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
+        displayObject.height = layer.height
+      }
+    }
 
-    if (displayObject.anchor && !(displayObject instanceof PIXI.Text)) {
-      displayObject.anchor.set(anchorX, anchorY)
-    } else if (displayObject._imageSprite || displayObject._videoSprite) {
-      // CROP SYSTEM: Anchor is handled via container.pivot, not sprite.anchor
-      // Sprite anchor is always (0, 0) — pivot provides the anchor offset
-      displayObject.anchorX = anchorX
-      displayObject.anchorY = anchorY
+    // 5. Anchor Synchronization
+    if (layer.anchorX !== undefined || layer.anchorY !== undefined) {
+      const anchorX = layer.anchorX !== undefined ? layer.anchorX : (displayObject.anchor?.x ?? 0.5)
+      const anchorY = layer.anchorY !== undefined ? layer.anchorY : (displayObject.anchor?.y ?? 0.5)
+
+      if (displayObject.anchor && !(displayObject instanceof PIXI.Text)) {
+        displayObject.anchor.set(anchorX, anchorY)
+      } else if (displayObject._imageSprite || displayObject._videoSprite) {
+        // CROP SYSTEM: Anchor is handled via container.pivot, not sprite.anchor
+        displayObject.anchorX = anchorX
+        displayObject.anchorY = anchorY
+      }
     }
   }
 }
 
 export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null) {
   const dispatch = useDispatch()
+
+  // [Bug 3 Fix] Counter that increments whenever an async layer (video/image) resolves.
+  // This gives useCanvasInteractions a stable dep to rebind pointer handlers after async creation.
+  const [layerObjectsVersion, setLayerObjectsVersion] = useState(0)
 
   const layers = useSelector((state) => {
     try {
@@ -592,39 +577,33 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           scaleX: layer.scaleX,
           scaleY: layer.scaleY,
           opacity: layer.opacity,
-          visible: layer.visible && isVisibleInProject, // Combined with user manual visibility
+          visible: layer.visible && isVisibleInProject,
           anchorX: layer.anchorX,
           anchorY: layer.anchorY,
-          sceneId: layer.sceneId, // Helpful for visibility checks
-          sceneStartOffset: sceneStartTimeMap[layer.sceneId] || 0, // [FIX] Added for scene-aware sync
-          data: layer.type === LAYER_TYPES.SHAPE ? {
-            shapeType: layer.data?.shapeType,
-            radius: layer.data?.radius,
-            fill: layer.data?.fill,
-            stroke: layer.data?.stroke,
-            strokeWidth: layer.data?.strokeWidth,
-            strokeStyle: layer.data?.strokeStyle,
-            cornerRadius: layer.data?.cornerRadius
-          } : undefined,
-          ...(layer.type === LAYER_TYPES.TEXT ? {
-            content: layer.data?.content,
-            fontSize: layer.data?.fontSize,
-            fontFamily: layer.data?.fontFamily,
-            fontWeight: layer.data?.fontWeight,
-            color: layer.data?.color,
-            textAlign: layer.data?.textAlign,
-            wordWrap: layer.data?.wordWrap
-          } : {}),
-          ...(layer.type === LAYER_TYPES.BACKGROUND ? {
-            color: layer.data?.color
-          } : {})
+          sceneId: layer.sceneId,
+          sceneStartOffset: sceneStartTimeMap[layer.sceneId] || 0,
+          sourceId: layer.data?.id || layer.id,
+          // Sync video timing properties
+          sourceStartTime: layer.data?.sourceStartTime || 0,
+          sourceEndTime: layer.data?.sourceEndTime || layer.data?.duration || 0,
+          // CRITICAL: Ensure data property is properly populated for all types
+          data: {
+            ...layer.data,
+            sourceStartTime: layer.data?.sourceStartTime || 0,
+            sourceEndTime: layer.data?.sourceEndTime || layer.data?.duration || 0,
+          }
         }
       }
     })
     return renderData
   }, [layers, layerOrder, currentScene?.id, scenes, timelineInfo])
 
-  useEffect(() => {
+  // =======================================================================
+  // CONSOLIDATED LAYER MANAGEMENT (CREATION, UPDATE, CLEANUP, VISIBILITY)
+  // =======================================================================
+  // We use useLayoutEffect to ensure everything happens synchronously before paint.
+  // This prevents "blank frames" or flickering during scene transitions and splits.
+  useLayoutEffect(() => {
     if (!stageContainer || !isReady || !scenes) return
 
     const layerObjects = layerObjectsRef.current
@@ -634,15 +613,48 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const isActuallyPlaying = engine.getIsPlaying()
     const currentTime = engine.masterTimeline?.time() || 0
 
-    // =======================================================================
-    // LAYER CREATION
-    // =======================================================================
-
+    // 1. LAYER CREATION & ADOPTION
     layerOrder.forEach((layerId) => {
       const layer = layers[layerId]
       if (!layer) return
 
       if (createdLayers.has(layerId)) return
+
+      // [ADOPTION] Reuse existing PIXI objects from outgoing scenes
+      const sourceId = layer.sourceId || (layer.data?.id) || layer.id
+      let adoptedObject = null
+
+      for (let [oldId, oldObj] of layerObjects.entries()) {
+        const oldLayer = layers[oldId]
+        if (oldLayer && !oldObj.destroyed && (oldLayer.sourceId === sourceId || oldLayer.id === sourceId)) {
+          if (oldLayer.sceneId !== currentScene?.id) {
+            adoptedObject = oldObj
+            layerObjects.delete(oldId)
+            createdLayers.delete(oldId)
+            break
+          }
+        }
+      }
+
+      if (adoptedObject) {
+        layerObjects.set(layerId, adoptedObject)
+        createdLayers.add(layerId)
+
+        // [FIX] ID MAPPING: Update labels immediately for interaction hooks.
+        // This ensures findLayerIdFromObject (used for selection) matches the new ID.
+        adoptedObject.label = `layer-${layerId}`
+
+        // Reset visibility immediately for the new scene
+        const layerData = layerRenderData[layerId]
+        if (layerData) {
+          adoptedObject.visible = layerData.visible
+          adoptedObject.eventMode = layerData.visible ? 'static' : 'none'
+        }
+
+        applyTransformInline(adoptedObject, layer, dragStateAPI, layerId, motionCaptureMode, true)
+        engine.registerLayerObject(layerId, adoptedObject, { sceneId: layer.sceneId })
+        return
+      }
 
       let pixiObject = null
 
@@ -660,8 +672,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         const color = layer.data?.color !== undefined ? layer.data.color : 0xffffff
         graphics.rect(0, 0, layer.width || worldWidth, layer.height || worldHeight)
         graphics.fill(color)
-
-        // Ensure background is never interactive to prevent selection
         graphics.eventMode = 'none'
         container.eventMode = 'none'
 
@@ -682,7 +692,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
             return
           }
-
           const currentLayer = layers[layerId]
           if (!currentLayer) {
             destroyImageSprite(sprite, layer)
@@ -690,17 +699,14 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             createdLayers.delete(layerId)
             return
           }
-
           layerObjects.set(layerId, sprite)
           stageContainer.addChild(sprite)
-
-          // Initial visibility based on Global Universe rules
           const isVisible = currentLayer.visible !== false && currentLayer.sceneId === currentScene?.id
           sprite.visible = isVisible
-
           applyTransformInline(sprite, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
           engine.registerLayerObject(layerId, sprite, { sceneId: layer.sceneId })
-
+          // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
+          setLayerObjectsVersion(v => v + 1)
         }).catch((error) => {
           console.error(`Failed to create image layer ${layerId}:`, error)
           createdLayers.delete(layerId)
@@ -717,24 +723,28 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             }
             return
           }
-
           const currentLayer = layers[layerId]
           if (!currentLayer) {
+            console.warn(`[useCanvasLayers] Video layer creation resolved but layer missing from state: ${layerId}`)
             const sprite = container._videoSprite
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
             createdLayers.delete(layerId)
             return
           }
+          // [Bug 4 Fix] Set video time range from Redux layer data so MotionEngine.syncMedia
+          // knows which portion of the video file to play (critical for split scenes).
+          container._sourceStartTime = currentLayer.data?.sourceStartTime ?? 0
+          container._sourceEndTime = currentLayer.data?.sourceEndTime ?? undefined
 
           layerObjects.set(layerId, container)
           stageContainer.addChild(container)
-
           const isVisible = currentLayer.visible !== false && currentLayer.sceneId === currentScene?.id
           container.visible = isVisible
-
           applyTransformInline(container, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
           engine.registerLayerObject(layerId, container, { sceneId: layer.sceneId })
+          // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
+          setLayerObjectsVersion(v => v + 1)
         }).catch((error) => {
           console.error(`Failed to create video layer ${layerId}:`, error)
           createdLayers.delete(layerId)
@@ -761,30 +771,23 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             stageContainer.addChild(pixiObject)
           }
         }
-
         layerObjects.set(layerId, pixiObject)
         createdLayers.add(layerId)
+
+        // Set initial visibility for newly created synchronous layers
+        const layerData = layerRenderData[layerId]
+        if (layerData) {
+          pixiObject.visible = layerData.visible
+          pixiObject.eventMode = layerData.visible ? 'static' : 'none'
+        }
       }
     })
 
-    // =======================================================================
-    // LAYER UPDATES
-    // =======================================================================
-
-    // =======================================================================
-    // LAYER UPDATES & Z-ORDER SYNC
-    // =======================================================================
-
-    // Synchronize children order once to avoid O(N^2) indexOf calls in a loop
-    const currentChildren = stageContainer.children
-    const selectionBox = currentChildren.find(c => c.label === 'selection-box')
-
+    // 2. LAYER UPDATES & Z-ORDER SYNC
     layerOrder.forEach((layerId, desiredIndex) => {
       const layer = layers[layerId]
-      if (!layer) return
-
       const pixiObject = layerObjects.get(layerId)
-      if (!pixiObject || pixiObject.destroyed) return
+      if (!layer || !pixiObject || pixiObject.destroyed) return
 
       // UPDATE [Sync]: Ensure MotionEngine always has the latest metadata (especially sceneId)
       // This handles cases where a layer is moved between scenes or updated.
@@ -803,242 +806,275 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       // This prevents the "tug-of-war" between immediate mouse updates and delayed Redux state
       const isInteracting = pixiObject._isResizing || pixiObject._isRotating || pixiObject._isDragging
 
+      // -----------------------------------------------------------------------
+      // VISIBILITY & INTERACTION SYNC (from old useLayoutEffect)
+      // This prevents the "flash" when exiting edit mode by ensuring the PIXI layer
+      // becomes visible in the same frame that the HTML overlay unmounts.
+      // -----------------------------------------------------------------------
+      const layerData = layerRenderData[layerId]
+      if (!layerData) return // Should not happen if layer is in layerOrder
+
+      if (layerId === editingTextLayerId) {
+        pixiObject.visible = false
+        pixiObject.eventMode = 'none' // Disable interaction while editing
+      } else {
+        pixiObject.visible = layerData.visible // This already includes sceneId check!
+
+        // REINFORCE SCENE ISOLATION: Explicitly disable interaction for off-scene layers
+        // This prevents invisible layers from other scenes from responding to events
+        // [FIX] BACKGROUND PROTECTION: Never set background layers to 'static'
+        pixiObject.eventMode = (layerData.visible && layer.type !== LAYER_TYPES.BACKGROUND) ? 'static' : 'none'
+      }
+
       if (isInteracting) {
         // Skip geometric updates during interaction to prevent bouncing
-        return;
-      }
+        // But visibility and eventMode are already handled above.
+        // Opacity and Z-order are handled below.
+      } else {
+        if (layer.type === LAYER_TYPES.TEXT && layer.data && (!isActuallyPlaying || isLayerCaptured)) {
+          // [SYNC FIX] Remove scrubbing/scene-start skip.
+          // We always want to sync text if the timeline is paused so Redux truth is visible.
+          // Only update text content if it actually changed
+          if (pixiObject.text !== layer.data.content) {
+            pixiObject.text = layer.data.content || ''
 
-      if (layer.type === LAYER_TYPES.TEXT && layer.data && (!isActuallyPlaying || isLayerCaptured)) {
-        // [SYNC FIX] Remove scrubbing/scene-start skip.
-        // We always want to sync text if the timeline is paused so Redux truth is visible.
-        // Only update text content if it actually changed
-        if (pixiObject.text !== layer.data.content) {
-          pixiObject.text = layer.data.content || ''
-
-          // Re-calculate height if text changed
-          const currentFontSize = layer.data.fontSize || 16
-          const wordWrapWidth = layer.width || 200
-          calculateTextHeight(
-            layerId,
-            pixiObject.text,
-            currentFontSize,
-            wordWrapWidth,
-            layer.data.fontFamily,
-            layer.data.fontWeight,
-            dispatch,
-            layerId === editingTextLayerId
-          )
-        }
-
-        // Only update style properties if they changed
-        const style = pixiObject.style
-        if (style.fontSize !== (layer.data.fontSize || 16)) {
-          style.fontSize = layer.data.fontSize || 16
-          // Recalculate height on font size change
-          calculateTextHeight(layerId, pixiObject.text, style.fontSize, layer.width || 200, layer.data.fontFamily, layer.data.fontWeight, dispatch, layerId === editingTextLayerId)
-        }
-        if (style.fill !== (layer.data.color || '#000000')) style.fill = layer.data.color || '#000000'
-        if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
-        if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
-        if (style.letterSpacing !== 0) style.letterSpacing = 0
-
-        if (style.align !== (layer.data.textAlign || 'left')) {
-          style.align = layer.data.textAlign || 'left'
-          const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
-          if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
-
-          // Update pivot to keep centered rotation
-          // CRITICAL FIX: Use actual text height instead of layer.height
-          const width = layer.width || 200
-          pixiObject.updateText?.(true)
-          const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
-          pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
-        }
-      }
-
-      // -------------------------------------------------------------------
-      // BACKGROUND LAYER UPDATES
-      // -------------------------------------------------------------------
-
-      else if (layer.type === LAYER_TYPES.BACKGROUND) {
-        const currentColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
-        const targetWidth = layer.width || worldWidth
-        const targetHeight = layer.height || worldHeight
-        const graphics = pixiObject._backgroundGraphics
-
-        if (pixiObject._storedColor !== currentColor || pixiObject._storedWidth !== targetWidth || pixiObject._storedHeight !== targetHeight) {
-          if (graphics) {
-            graphics.clear()
-            graphics.rect(0, 0, targetWidth, targetHeight)
-            graphics.fill(currentColor)
-          }
-          pixiObject._storedColor = currentColor
-
-          // Update background image scale if present
-          if (pixiObject._backgroundImage) {
-            const sprite = pixiObject._backgroundImage
-            const texture = sprite.texture
-            const scale = Math.max(targetWidth / texture.width, targetHeight / texture.height)
-            sprite.scale.set(scale)
-            sprite.x = (targetWidth - texture.width * scale) / 2
-            sprite.y = (targetHeight - texture.height * scale) / 2
+            // Re-calculate height if text changed
+            const currentFontSize = layer.data.fontSize || 16
+            const wordWrapWidth = layer.width || 200
+            calculateTextHeight(
+              layerId,
+              pixiObject.text,
+              currentFontSize,
+              wordWrapWidth,
+              layer.data.fontFamily,
+              layer.data.fontWeight,
+              dispatch,
+              layerId === editingTextLayerId
+            )
           }
 
-          pixiObject._storedWidth = targetWidth
-          pixiObject._storedHeight = targetHeight
+          // Only update style properties if they changed
+          const style = pixiObject.style
+          if (style.fontSize !== (layer.data.fontSize || 16)) {
+            style.fontSize = layer.data.fontSize || 16
+            // Recalculate height on font size change
+            calculateTextHeight(layerId, pixiObject.text, style.fontSize, layer.width || 200, layer.data.fontFamily, layer.data.fontWeight, dispatch, layerId === editingTextLayerId)
+          }
+          if (style.fill !== (layer.data.color || '#000000')) style.fill = layer.data.color || '#000000'
+          if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
+          if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
+          if (style.letterSpacing !== 0) style.letterSpacing = 0
+
+          if (style.align !== (layer.data.textAlign || 'left')) {
+            style.align = layer.data.textAlign || 'left'
+            const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
+            if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
+
+            // Update pivot to keep centered rotation
+            // CRITICAL FIX: Use actual text height instead of layer.height
+            const width = layer.width || 200
+            pixiObject.updateText?.(true)
+            const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
+            pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
+          }
         }
 
-        // Handle Background Image update
-        const currentImageUrl = layer.data?.imageUrl
-        if (pixiObject._storedImageUrl !== currentImageUrl) {
-          pixiObject._storedImageUrl = currentImageUrl
+        // -------------------------------------------------------------------
+        // BACKGROUND LAYER UPDATES
+        // -------------------------------------------------------------------
 
-          // Cleanup old image
-          if (pixiObject._backgroundImage) {
-            const oldSprite = pixiObject._backgroundImage
-            pixiObject.removeChild(oldSprite)
-            destroyImageSprite(oldSprite, { type: LAYER_TYPES.IMAGE, data: { url: pixiObject._oldImageUrl } })
-            pixiObject._backgroundImage = null
-          }
+        else if (layer.type === LAYER_TYPES.BACKGROUND) {
+          const currentColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+          const targetWidth = layer.width || worldWidth
+          const targetHeight = layer.height || worldHeight
+          const graphics = pixiObject._backgroundGraphics
 
-          if (currentImageUrl) {
-            pixiObject._oldImageUrl = currentImageUrl
+          if (pixiObject._storedColor !== currentColor || pixiObject._storedWidth !== targetWidth || pixiObject._storedHeight !== targetHeight) {
+            if (graphics) {
+              graphics.clear()
+              graphics.rect(0, 0, targetWidth, targetHeight)
+              graphics.fill(currentColor)
+            }
+            pixiObject._storedColor = currentColor
 
-            loadTextureRobust(currentImageUrl).then(texture => {
-              if (pixiObject.destroyed || pixiObject._storedImageUrl !== currentImageUrl || !texture) return
-
-              const sprite = new PIXI.Sprite(texture)
-              pixiObject.addChild(sprite)
-              pixiObject._backgroundImage = sprite
-
-              // Scale to cover
-              const scale = Math.max(pixiObject._storedWidth / texture.width, pixiObject._storedHeight / texture.height)
+            // Update background image scale if present
+            if (pixiObject._backgroundImage) {
+              const sprite = pixiObject._backgroundImage
+              const texture = sprite.texture
+              const scale = Math.max(targetWidth / texture.width, targetHeight / texture.height)
               sprite.scale.set(scale)
-
-              // Center it
-              sprite.x = (pixiObject._storedWidth - texture.width * scale) / 2
-              sprite.y = (pixiObject._storedHeight - texture.height * scale) / 2
-            }).catch(err => {
-              console.error('Failed to load background image:', err)
-            })
-          }
-        }
-      }
-
-      // -------------------------------------------------------------------
-      // SHAPE LAYER UPDATES
-      // -------------------------------------------------------------------
-
-      else if (layer.type === LAYER_TYPES.SHAPE && layer.data) {
-        // [FIX] Sync shape properties whenever paused or captured 
-        // (Removed isAtSceneStart restriction as colors aren't animated by engine)
-        if (!isActuallyPlaying || isLayerCaptured) {
-          const currentWidth = layer.width || 100
-          const currentHeight = layer.height || 100
-          const currentFill = layer.data?.fill || null
-          const currentStroke = layer.data?.stroke || null
-          const currentStrokeWidth = layer.data?.strokeWidth || 0
-          const currentStrokeStyle = layer.data?.strokeStyle || 'solid'
-
-          if (pixiObject._storedWidth !== currentWidth || pixiObject._storedHeight !== currentHeight ||
-            pixiObject._storedFill !== currentFill || pixiObject._storedStroke !== currentStroke ||
-            pixiObject._storedStrokeWidth !== currentStrokeWidth || pixiObject._storedStrokeStyle !== currentStrokeStyle) {
-
-            redrawShapeWithColors(pixiObject, layer.data, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
-
-            pixiObject._storedWidth = currentWidth
-            pixiObject._storedHeight = currentHeight
-            pixiObject._storedFill = currentFill
-            pixiObject._storedStroke = currentStroke
-            pixiObject._storedStrokeWidth = currentStrokeWidth
-            pixiObject._storedStrokeStyle = currentStrokeStyle
-          }
-        }
-      }
-
-      // -------------------------------------------------------------------
-      // IMAGE LAYER UPDATES
-      // -------------------------------------------------------------------
-      else if (layer.type === LAYER_TYPES.IMAGE) {
-        if (pixiObject._imageSprite) {
-          const sprite = pixiObject._imageSprite
-          const cropMask = pixiObject._cropMask
-
-          // [FIX] Protected Sync: Only apply Redux dimensions/crops if not playing/scrubbing
-          // (unless specifically at a scene start or in capture mode)
-          const startTimeOffset = layer.sceneStartOffset ?? 0
-          const isAtSceneStart = Math.abs(currentTime - startTimeOffset) < 0.01
-
-          if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
-            // CROP SYSTEM: Sync media size, crop offset, mask, and pivot
-            const mediaW = layer.mediaWidth ?? layer.width ?? 100
-            const mediaH = layer.mediaHeight ?? layer.height ?? 100
-            const cropX = layer.cropX ?? 0
-            const cropY = layer.cropY ?? 0
-            const cropW = layer.cropWidth ?? layer.width ?? 100
-            const cropH = layer.cropHeight ?? layer.height ?? 100
-
-            if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-            if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-            if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-            if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
-
-            if (cropMask) {
-              cropMask.clear()
-              cropMask.rect(0, 0, cropW, cropH)
-              cropMask.fill(0xffffff)
+              sprite.x = (targetWidth - texture.width * scale) / 2
+              sprite.y = (targetHeight - texture.height * scale) / 2
             }
 
-            const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
-            const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
-            pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+            pixiObject._storedWidth = targetWidth
+            pixiObject._storedHeight = targetHeight
           }
-        }
-      }
-      // -------------------------------------------------------------------
-      // VIDEO LAYER UPDATES
-      // -------------------------------------------------------------------
-      else if (layer.type === LAYER_TYPES.VIDEO) {
-        if (pixiObject._videoSprite) {
-          const sprite = pixiObject._videoSprite
-          const cropMask = pixiObject._cropMask
 
-          if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
-            const mediaW = layer.mediaWidth ?? layer.width ?? 100
-            const mediaH = layer.mediaHeight ?? layer.height ?? 100
-            const cropX = layer.cropX ?? 0
-            const cropY = layer.cropY ?? 0
-            const cropW = layer.cropWidth ?? layer.width ?? 100
-            const cropH = layer.cropHeight ?? layer.height ?? 100
+          // Handle Background Image update
+          const currentImageUrl = layer.data?.imageUrl
+          if (pixiObject._storedImageUrl !== currentImageUrl) {
+            pixiObject._storedImageUrl = currentImageUrl
 
-            if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-            if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-            if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-            if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
-
-            if (cropMask) {
-              cropMask.clear()
-              cropMask.rect(0, 0, cropW, cropH)
-              cropMask.fill(0xffffff)
+            // Cleanup old image
+            if (pixiObject._backgroundImage) {
+              const oldSprite = pixiObject._backgroundImage
+              pixiObject.removeChild(oldSprite)
+              destroyImageSprite(oldSprite, { type: LAYER_TYPES.IMAGE, data: { url: pixiObject._oldImageUrl } })
+              pixiObject._backgroundImage = null
             }
 
-            const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
-            const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
-            pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+            if (currentImageUrl) {
+              pixiObject._oldImageUrl = currentImageUrl
+
+              loadTextureRobust(currentImageUrl).then(texture => {
+                if (pixiObject.destroyed || pixiObject._storedImageUrl !== currentImageUrl || !texture) return
+
+                const sprite = new PIXI.Sprite(texture)
+                pixiObject.addChild(sprite)
+                pixiObject._backgroundImage = sprite
+
+                // Scale to cover
+                const scale = Math.max(pixiObject._storedWidth / texture.width, pixiObject._storedHeight / texture.height)
+                sprite.scale.set(scale)
+
+                // Center it
+                sprite.x = (pixiObject._storedWidth - texture.width * scale) / 2
+                sprite.y = (pixiObject._storedHeight - texture.height * scale) / 2
+              }).catch(err => {
+                console.error('Failed to load background image:', err)
+              })
+            }
           }
+        }
+
+        // -------------------------------------------------------------------
+        // SHAPE LAYER UPDATES
+        // -------------------------------------------------------------------
+
+        else if (layer.type === LAYER_TYPES.SHAPE && layer.data) {
+          // [FIX] Sync shape properties whenever paused or captured
+          // (Removed isAtSceneStart restriction as colors aren't animated by engine)
+          if (!isActuallyPlaying || isLayerCaptured) {
+            const currentWidth = layer.width || 100
+            const currentHeight = layer.height || 100
+            const currentFill = layer.data?.fill || null
+            const currentStroke = layer.data?.stroke || null
+            const currentStrokeWidth = layer.data?.strokeWidth || 0
+            const currentStrokeStyle = layer.data?.strokeStyle || 'solid'
+
+            if (pixiObject._storedWidth !== currentWidth || pixiObject._storedHeight !== currentHeight ||
+              pixiObject._storedFill !== currentFill || pixiObject._storedStroke !== currentStroke ||
+              pixiObject._storedStrokeWidth !== currentStrokeWidth || pixiObject._storedStrokeStyle !== currentStrokeStyle) {
+
+              redrawShapeWithColors(pixiObject, layer.data, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
+
+              pixiObject._storedWidth = currentWidth
+              pixiObject._storedHeight = currentHeight
+              pixiObject._storedFill = currentFill
+              pixiObject._storedStroke = currentStroke
+              pixiObject._storedStrokeWidth = currentStrokeWidth
+              pixiObject._storedStrokeStyle = currentStrokeStyle
+            }
+          }
+        }
+
+        // -------------------------------------------------------------------
+        // IMAGE LAYER UPDATES
+        // -------------------------------------------------------------------
+        else if (layer.type === LAYER_TYPES.IMAGE) {
+          if (pixiObject._imageSprite) {
+            const sprite = pixiObject._imageSprite
+            const cropMask = pixiObject._cropMask
+
+            // [FIX] Protected Sync: Only apply Redux dimensions/crops if not playing/scrubbing
+            // (unless specifically at a scene start or in capture mode)
+            if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
+              // CROP SYSTEM: Sync media size, crop offset, mask, and pivot
+              const mediaW = layer.mediaWidth ?? layer.width ?? 100
+              const mediaH = layer.mediaHeight ?? layer.height ?? 100
+              const cropX = layer.cropX ?? 0
+              const cropY = layer.cropY ?? 0
+              const cropW = layer.cropWidth ?? layer.width ?? 100
+              const cropH = layer.cropHeight ?? layer.height ?? 100
+
+              if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
+              if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
+              if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
+              if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
+
+              if (cropMask) {
+                cropMask.clear()
+                cropMask.rect(0, 0, cropW, cropH)
+                cropMask.fill(0xffffff)
+              }
+
+              const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
+              const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
+              pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+            }
+          }
+        }
+        // -------------------------------------------------------------------
+        // VIDEO LAYER UPDATES
+        // -------------------------------------------------------------------
+        else if (layer.type === LAYER_TYPES.VIDEO) {
+          if (pixiObject._videoSprite) {
+            const sprite = pixiObject._videoSprite
+            const cropMask = pixiObject._cropMask
+
+            // [Bug 4 Fix] Always keep video time range in sync with Redux layer data.
+            // After a scene split, sourceStartTime / sourceEndTime change — MotionEngine.syncMedia
+            // reads these off the PIXI object, so they must stay current.
+            const oldStart = pixiObject._sourceStartTime
+            pixiObject._sourceStartTime = layer.data?.sourceStartTime ?? 0
+            pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
+
+            if (oldStart !== pixiObject._sourceStartTime) {
+              console.log(`[useCanvasLayers] Video time range updated: ${layerId}, sourceStartTime=${pixiObject._sourceStartTime}, sourceEndTime=${pixiObject._sourceEndTime}`)
+            }
+
+            if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
+              const mediaW = layer.mediaWidth ?? layer.width ?? 100
+              const mediaH = layer.mediaHeight ?? layer.height ?? 100
+              const cropX = layer.cropX ?? 0
+              const cropY = layer.cropY ?? 0
+              const cropW = layer.cropWidth ?? layer.width ?? 100
+              const cropH = layer.cropHeight ?? layer.height ?? 100
+
+              if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
+              if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
+              if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
+              if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
+
+              if (cropMask) {
+                cropMask.clear()
+                cropMask.rect(0, 0, cropW, cropH)
+                cropMask.fill(0xffffff)
+              }
+
+              const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
+              const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
+              pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+            }
+          }
+        }
+
+        // -------------------------------------------------------------------
+        // TRANSFORM & ALPHA
+        // -------------------------------------------------------------------
+
+        applyTransformInline(pixiObject, layer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
+
+        // Sync Opacity (Alpha)
+        if (layerData.opacity !== undefined && (!isActuallyPlaying || isLayerCaptured)) {
+          pixiObject.alpha = layerData.opacity
         }
       }
 
       // -------------------------------------------------------------------
-      // TRANSFORM & ALPHA & Z-ORDER
+      // Z-ORDER SYNC
       // -------------------------------------------------------------------
-
-      applyTransformInline(pixiObject, layer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
-
-      if (!isActuallyPlaying || isLayerCaptured) {
-        if (pixiObject.alpha !== (layer.opacity ?? 1)) pixiObject.alpha = layer.opacity ?? 1
-      }
-
       // Only reorder if the current index is wrong
       const currentIndex = stageContainer.children.indexOf(pixiObject)
       if (currentIndex !== desiredIndex) {
@@ -1046,10 +1082,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       }
     })
 
-    // =======================================================================
-    // LAYER REMOVAL AND CLEANUP
-    // =======================================================================
-
+    // 3. LAYER REMOVAL
     const currentLayerIds = new Set(layerOrder)
     layerObjects.forEach((pixiObject, layerId) => {
       if (!currentLayerIds.has(layerId)) {
@@ -1072,66 +1105,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         layerObjects.delete(layerId)
         createdLayers.delete(layerId)
         previousLayerValuesRef.current.delete(layerId)
-        previousSelectedLayerIdsRef.current.delete(layerId)
       }
     })
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId])
 
-  // SYNC VISIBILITY AND ALPHA SYNCHRONOUSLY
-  // This prevents the "flash" when exiting edit mode by ensuring the PIXI layer
-  // becomes visible in the same frame that the HTML overlay unmounts.
-  useLayoutEffect(() => {
-    if (!stageContainer || !isReady || !layers) return
-
-    const engine = getGlobalMotionEngine()
-    const isActuallyPlaying = engine.getIsPlaying()
-
-
-    layerObjectsRef.current.forEach((pixiObject, layerId) => {
-      const layer = layers[layerId]
-      if (!layer || pixiObject.destroyed) return
-
-      // Get the computed layer data WITH scene filtering
-      const layerData = layerRenderData[layerId]
-      if (!layerData) return
-
-      // Sync Visibility - CRITICAL: Use layerRenderData which has scene filtering
-      if (layerId === editingTextLayerId) {
-        pixiObject.visible = false
-        pixiObject.eventMode = 'none' // Disable interaction while editing
-      } else if (layerData.visible !== undefined) {
-        const wasVisible = pixiObject.visible
-        pixiObject.visible = layerData.visible // This already includes sceneId check!
-
-        // REINFORCE SCENE ISOLATION: Explicitly disable interaction for off-scene layers
-        // This prevents invisible layers from other scenes from responding to events
-        // [FIX] BACKGROUND PROTECTION: Never set background layers to 'static'
-        if (layer.type === LAYER_TYPES.BACKGROUND) {
-          pixiObject.eventMode = 'none'
-        } else {
-          pixiObject.eventMode = layerData.visible ? 'static' : 'none'
-        }
-
-      }
-
-      // -----------------------------------------------------------------------
-      // INTERACTION PROTECTED SYNC: Skip property updates if the layer is 
-      // currently BEING manipulated (resized/rotated) locally to avoid jitter 
-      // from async Redux updates.
-      // -----------------------------------------------------------------------
-      const isInteracting = pixiObject._isResizing === true || pixiObject._isRotating === true
-      if (isInteracting) return
-
-      const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layerId)
-
-      // Sync Opacity (Alpha)
-      if (layerData.opacity !== undefined && (!isActuallyPlaying || capturedLayer)) {
-        pixiObject.alpha = layerData.opacity
-      }
-    })
-  }, [editingTextLayerId, layers, layerRenderData, isReady, motionCaptureMode, stageContainer, currentScene?.id])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it
@@ -1206,6 +1185,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   return {
     layerObjects: layerObjectsRef.current,
     getLayerObject: (layerId) => layerObjectsRef.current.get(layerId),
+    layerObjectsVersion, // [Bug 3 Fix] Increments after each async layer creation
   }
 }
 
