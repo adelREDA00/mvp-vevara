@@ -26,6 +26,8 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
+        const targetCount = Math.max(1, Math.ceil(loadableLayers.length * 0.5));
+        let loadedCount = 0;
         let isMounted = true
 
         const loadAsset = (layer) => {
@@ -34,6 +36,10 @@ export function useAssetPreloader(layers, isCanvasReady) {
                 const handleResolve = () => {
                     if (!isResolved) {
                         isResolved = true
+                        loadedCount++;
+                        if (loadedCount >= targetCount && isMounted) {
+                            setIsPreloading(false)
+                        }
                         resolve()
                     }
                 }

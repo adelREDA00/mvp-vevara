@@ -21,7 +21,7 @@ function getVideoDimensions(file) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
     const video = document.createElement('video')
-    video.preload = 'auto'
+    video.preload = 'metadata'
     video.muted = true
     video.playsInline = true
 
