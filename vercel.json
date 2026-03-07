@@ -7,6 +7,10 @@
     {
       "source": "/uploads/:path*",
       "destination": "https://vexly-node.onrender.com/uploads/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
