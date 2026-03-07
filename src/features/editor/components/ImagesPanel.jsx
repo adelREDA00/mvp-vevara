@@ -206,7 +206,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                                         </div>
                                     ) : (
                                         <img
-                                            src={image.url}
+                                            src={image.metadata?.thumbnail || image.url}
                                             className="w-full h-full object-cover"
                                             alt=""
                                             onError={(e) => {

@@ -524,7 +524,7 @@ export async function createVideoLayer(config) {
         videoElement.muted = data.muted !== false
         videoElement.loop = false
         videoElement.playsInline = true
-        videoElement.preload = 'auto'
+        videoElement.preload = 'metadata'
         videoElement.autoplay = false
         videoElement.setAttribute('autoplay', 'false')
         videoElement.pause()

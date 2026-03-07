@@ -60,7 +60,8 @@ export function useAssetPreloader(layers, isCanvasReady) {
 
         const runPreloader = async () => {
             // Limit concurrency to save memory
-            const CONCURRENCY_LIMIT = 3
+            const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024
+            const CONCURRENCY_LIMIT = isMobile ? 1 : 3
 
             for (let i = 0; i < loadableLayers.length; i += CONCURRENCY_LIMIT) {
                 if (!isMounted) return
