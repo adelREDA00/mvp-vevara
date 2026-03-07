@@ -26,36 +26,57 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
-        let loadedCount = 0
-        const totalCount = loadableLayers.length
         let isMounted = true
 
-        const checkDone = () => {
-            if (!isMounted) return
-            loadedCount++
-            if (loadedCount >= totalCount) {
-                // Add a tiny delay to ensure PIXI has time to render the next frame after loading
-                setTimeout(() => {
-                    if (isMounted) setIsPreloading(false)
-                }, 500)
-            }
+        const loadAsset = (layer) => {
+            return new Promise((resolve) => {
+                let isResolved = false
+                const handleResolve = () => {
+                    if (!isResolved) {
+                        isResolved = true
+                        resolve()
+                    }
+                }
+
+                // Prevent hanging indefinitely if an asset fails to respond
+                const timeoutId = setTimeout(handleResolve, 15000)
+
+                const url = layer.data.url
+                if (layer.type === 'image') {
+                    const img = new Image()
+                    img.onload = () => { clearTimeout(timeoutId); handleResolve() }
+                    img.onerror = () => { clearTimeout(timeoutId); handleResolve() }
+                    img.src = url
+                } else if (layer.type === 'video') {
+                    const video = document.createElement('video')
+                    // Wait for metadata, NOT full data frame, to save memory on mobile/low-end
+                    video.onloadedmetadata = () => { clearTimeout(timeoutId); handleResolve() }
+                    video.onerror = () => { clearTimeout(timeoutId); handleResolve() }
+                    video.preload = 'metadata'
+                    video.src = url
+                }
+            })
         }
 
-        loadableLayers.forEach(layer => {
-            const url = layer.data.url
-            if (layer.type === 'image') {
-                const img = new Image()
-                img.onload = checkDone
-                img.onerror = checkDone // Continue even if one fails
-                img.src = url
-            } else if (layer.type === 'video') {
-                const video = document.createElement('video')
-                video.onloadeddata = checkDone
-                video.onerror = checkDone
-                video.src = url
-                video.load()
+        const runPreloader = async () => {
+            // Limit concurrency to save memory
+            const CONCURRENCY_LIMIT = 3
+
+            for (let i = 0; i < loadableLayers.length; i += CONCURRENCY_LIMIT) {
+                if (!isMounted) return
+                const chunk = loadableLayers.slice(i, i + CONCURRENCY_LIMIT)
+                await Promise.all(chunk.map(loadAsset))
             }
-        })
+
+            if (!isMounted) return
+
+            // Add a tiny delay to ensure PIXI has time to render the next frame after loading
+            setTimeout(() => {
+                if (isMounted) setIsPreloading(false)
+            }, 500)
+        }
+
+        runPreloader()
 
         return () => {
             isMounted = false
