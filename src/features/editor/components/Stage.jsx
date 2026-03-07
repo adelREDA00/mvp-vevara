@@ -1195,6 +1195,7 @@ function Stage({
           ref={containerRef}
           id="pixi-container"
           className="absolute inset-0 pixi-container"
+          style={{ touchAction: 'none' }}
           onMouseDown={(e) => {
             // Don't work if playing
             if (isPlaying) {

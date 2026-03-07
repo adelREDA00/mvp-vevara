@@ -137,6 +137,16 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
         return
       }
 
+      // --- MOBILE GUARD ---
+      // On touch devices, only respond to the primary (first) pointer.
+      // This prevents pinch-zoom (two-finger gesture) from triggering the drag selection box.
+      const origEvent = event.data?.originalEvent
+      if (origEvent) {
+        if (origEvent.pointerType === 'touch' && origEvent.isPrimary === false) {
+          return
+        }
+      }
+
       // Prevent text selection immediately
       event.preventDefault()
 
@@ -190,6 +200,18 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
 
     const handlePointerMove = (event) => {
       if (!dragStartRef.current) {
+        return
+      }
+
+      // --- MOBILE GUARD ---
+      // If a non-primary touch fires during tracking, it means the user started
+      // a multi-finger gesture (pinch zoom / pan). Cancel the drag selection.
+      const origMoveEvent = event.originalEvent || event.data?.originalEvent
+      if (origMoveEvent && origMoveEvent.pointerType === 'touch' && origMoveEvent.isPrimary === false) {
+        dragStartRef.current = null
+        isDraggingRef.current = false
+        removeSelectionBox()
+        resumeViewportDragPlugin(viewport)
         return
       }
 

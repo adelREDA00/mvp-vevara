@@ -57,7 +57,7 @@ const LoginPage = () => {
                                     </div>
                                 ))}
                             </div>
-                            <p className="text-[11px] text-white/20 font-medium tracking-wide uppercase">Join 2,000+ creators</p>
+                            <p className="text-[11px] text-white/20 font-medium tracking-wide uppercase">Join 200+ creators</p>
                         </div>
                     </div>
                 </div>

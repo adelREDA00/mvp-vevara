@@ -156,16 +156,16 @@ function TopToolbar({
               Select Resolution
             </div>
             <DropdownMenuItem onClick={() => onExport && onExport('720p')}>
-              720p (HD)
+              720p (HD) (fast)
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport && onExport('1080p')}>
-              1080p (Full HD)
+              1080p (Full HD) (fast)
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport && onExport('1440p')}>
-              2K (QHD)
+              2K (QHD) (medium)
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
-              4K (Ultra HD)
+              4K (Ultra HD) (slightly slow)
             </DropdownMenuItem>
           </DropdownMenu>
 

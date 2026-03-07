@@ -2730,6 +2730,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         return
       }
 
+      // --- MOBILE GUARD ---
+      // On touch devices, ignore non-primary pointers to prevent multi-touch
+      // gestures (pinch zoom) from starting element drags or selections.
+      const origEvent = event.data?.originalEvent
+      if (origEvent && origEvent.pointerType === 'touch' && origEvent.isPrimary === false) {
+        return
+      }
+
       const target = event.target
 
       // Prevent text selection immediately
@@ -3186,6 +3194,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // =========================================================================
 
     const handleGlobalPointerMove = (event) => {
+      // --- MOBILE GUARD ---
+      // Ignore non-primary touch pointers during move to prevent pinch gestures
+      // from triggering element drags.
+      const origMoveEvent = event.originalEvent || event.data?.originalEvent
+      if (origMoveEvent && origMoveEvent.pointerType === 'touch' && origMoveEvent.isPrimary === false) {
+        return
+      }
+
       const motionCapture = latestMotionCaptureModeRef.current
 
       // Performance monitoring: track frame drops and pointer move frequency

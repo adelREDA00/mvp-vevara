@@ -300,57 +300,115 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
 }
 
 /**
- * Safely destroys all export-specific resources without affecting the editor.
+ * Safely cleans up all export-specific resources without affecting the editor.
+ * Designed to be idempotent — safe to call multiple times or on partially-initialized state.
+ *
+ * CRITICAL — WHY WE NEVER CALL app.destroy() OR renderer.destroy():
+ * PIXI v8 has global shared state for batch geometry (BatcherPipe), buffer systems,
+ * and GPU program caches. Calling renderer.destroy() triggers runners.destroy.emit()
+ * which tears down these global pools. The editor's renderer still depends on them,
+ * so the editor crashes with "Cannot read properties of null (reading 'geometry')"
+ * in BatcherPipe.execute on the next frame.
+ *
+ * Instead we:
+ *   1. Stop the export ticker (no more render calls)
+ *   2. Detach all children from the stage (removes references)
+ *   3. Release the WebGL context via WEBGL_lose_context extension
+ *   4. Remove the offscreen canvas from the DOM
+ *   5. Null out all references and let GC handle the rest
  */
+let _cleanupInProgress = false;
 function cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects) {
+    if (_cleanupInProgress) return;
+    _cleanupInProgress = true;
+
     try {
-        if (exportEngine) exportEngine.destroy();
+        // --- Export motion engine ---
+        if (exportEngine && !exportEngine._destroyed) {
+            try {
+                exportEngine.destroy();
+                exportEngine._destroyed = true;
+            } catch (e) { /* ignore */ }
+        }
     } catch (e) { /* ignore */ }
 
-    for (const video of exportVideoElements) {
-        try {
-            video.pause();
-            video.removeAttribute('src');
-            video.load();
-        } catch (e) { /* ignore */ }
+    // --- Export-isolated video elements (NOT shared with the editor) ---
+    if (exportVideoElements && exportVideoElements.length > 0) {
+        for (const video of exportVideoElements) {
+            try {
+                if (video) {
+                    video.pause();
+                    video.removeAttribute('src');
+                    video.load();
+                }
+            } catch (e) { /* ignore */ }
+        }
+        exportVideoElements.length = 0;
     }
-    exportVideoElements.length = 0;
 
     try {
-        if (app) {
-            // [ROBUST CLEANUP] Stop app systems first
-            try { if (app.ticker) app.ticker.stop(); } catch (e) { }
+        if (app && !app._exportDestroyed) {
+            app._exportDestroyed = true;
 
-            layerObjects.forEach((obj) => {
-                try {
-                    if (obj._videoSprite) {
-                        // For videos, ensure we destroy the texture and base texture resources
-                        obj.destroy({ children: true, texture: true, baseTexture: true });
-                    } else if (obj.destroy) {
-                        obj.destroy({ children: true, texture: false });
-                    }
-                } catch (e) { /* ignore */ }
-            });
-            layerObjects.clear();
-
-            // Destroy renderer specifically if it exists
-            if (app.renderer) {
-                try {
-                    app.renderer.destroy(true);
-                } catch (e) {
-                    console.warn('Export: Renderer destruction warning', e);
+            // 1. Stop the ticker so no more render frames are scheduled
+            try {
+                if (app.ticker) {
+                    app.ticker.stop();
+                    app.ticker.destroy();
                 }
+            } catch (e) { /* ignore */ }
+
+            // 2. Detach all layer objects from the render tree.
+            //    We only removeChild — we do NOT call .destroy() on any PIXI
+            //    objects because that can cascade into destroying shared GPU
+            //    resources (geometry, buffers, programs) used by the editor.
+            if (layerObjects && layerObjects.size > 0) {
+                layerObjects.forEach((obj) => {
+                    try {
+                        if (!obj || obj.destroyed) return;
+                        if (obj.parent) {
+                            obj.parent.removeChild(obj);
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+                layerObjects.clear();
             }
 
-            if (app.canvas?.parentNode) {
-                try { app.canvas.parentNode.removeChild(app.canvas); } catch (e) { }
-            }
+            // 3. Clear the stage's children
+            try {
+                if (app.stage) {
+                    app.stage.removeChildren();
+                }
+            } catch (e) { /* ignore */ }
 
-            // Final app destroy
-            app.destroy(true, { children: true, texture: true, baseTexture: true });
+            // 4. Release the WebGL context directly.
+            //    This frees GPU memory without going through PIXI's destroy
+            //    pipeline which would corrupt the editor's shared state.
+            try {
+                if (app.canvas) {
+                    const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+                    if (gl) {
+                        const loseCtx = gl.getExtension('WEBGL_lose_context');
+                        if (loseCtx) loseCtx.loseContext();
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            // 5. Remove the offscreen canvas from the DOM
+            try {
+                if (app.canvas?.parentNode) {
+                    app.canvas.parentNode.removeChild(app.canvas);
+                }
+            } catch (e) { /* ignore */ }
+
+            // DO NOT call app.destroy() or app.renderer.destroy()
+            // — that triggers PIXI's internal system runners which
+            // destroy global BatcherPipe geometry shared with the editor.
         }
     } catch (e) {
         console.error('Export: Cleanup error', e);
+    } finally {
+        _cleanupInProgress = false;
     }
 }
 
@@ -424,6 +482,8 @@ export const exportVideo = async ({
     const exportVideoElements = [];
 
     try {
+        if (signal?.aborted) throw new Error('cancelled');
+
         app = new PIXI.Application();
         await app.init({
             width: targetWidth,
@@ -524,8 +584,9 @@ export const exportVideo = async ({
             const time = frame / fps;
 
             layerObjects.forEach((obj) => {
+                if (!obj || obj.destroyed) return;
                 const sceneId = obj._sceneId;
-                const range = exportEngine.sceneRanges.get(sceneId);
+                const range = exportEngine?.sceneRanges?.get(sceneId);
                 if (range) {
                     obj.visible = (time >= range.startTime - 0.001 && time < range.endTime);
                 } else {
@@ -533,13 +594,16 @@ export const exportVideo = async ({
                 }
             });
 
-            exportEngine.seek(time);
+            if (exportEngine && !exportEngine._destroyed) {
+                exportEngine.seek(time);
+            }
 
             for (const video of exportVideoElements) {
+                if (!video) continue;
                 const obj = [...layerObjects.values()].find(o => o._videoElement === video);
-                if (!obj || !obj.visible) continue;
+                if (!obj || obj.destroyed || !obj.visible) continue;
 
-                const range = exportEngine.sceneRanges.get(obj._sceneId);
+                const range = exportEngine?.sceneRanges?.get(obj._sceneId);
                 if (!range) continue;
 
                 const srcStart = obj._sourceStartTime || 0;
@@ -551,11 +615,13 @@ export const exportVideo = async ({
                 await seekVideoToTime(video, targetVideoTime);
 
                 if (obj._videoSprite?.texture?.source) {
-                    obj._videoSprite.texture.source.update();
+                    try { obj._videoSprite.texture.source.update(); } catch (e) { /* texture may be destroyed */ }
                 }
             }
 
-            app.render();
+            if (app && !app._exportDestroyed && app.renderer && !app.renderer.destroyed) {
+                app.render();
+            }
 
             const frameData = await captureFrame(app.canvas);
             await ffmpegInst.writeFile(`frame_${String(frame).padStart(5, '0')}.jpg`, frameData);
@@ -585,6 +651,8 @@ export const exportVideo = async ({
             videoFileName
         ]);
 
+        if (signal?.aborted) throw new Error('cancelled');
+
         // =====================================================================
         // AUDIO MIXING PHASE (only for unmuted video layers)
         // =====================================================================
@@ -592,12 +660,22 @@ export const exportVideo = async ({
             await mixAudioIntoVideo(ffmpegInst, audioSources, onProgress);
         }
 
+        if (signal?.aborted) throw new Error('cancelled');
+
         onProgress?.({ status: 'encoding', progress: 100 });
         const data = await ffmpegInst.readFile('output.mp4');
         return new Blob([data.buffer], { type: 'video/mp4' });
 
+    } catch (error) {
+        // Re-throw cancellation as-is, wrap other errors for context
+        if (error.message === 'cancelled') throw error;
+        throw error;
     } finally {
         cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects);
-        await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length);
+        try {
+            await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length);
+        } catch (e) {
+            console.warn('Export: Temp file cleanup warning', e);
+        }
     }
 };

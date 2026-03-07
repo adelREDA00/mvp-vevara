@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate, Link } from 'react-router-dom'
 import api from '../../../api/client'
 import { logoutUser } from '../../../store/slices/authSlice'
-import { Plus, Folder, Layout, LogOut, Settings, User as UserIcon, ExternalLink, Trash2, ChevronDown, Layers, Loader2 } from 'lucide-react'
+import { Plus, Folder, Layout, LogOut, Settings, User as UserIcon, ExternalLink, Trash2, ChevronDown, Layers, Loader2, X, Music, Presentation, Sparkles, Box, Wand2 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from '../../editor/components/DropdownMenu'
 import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
@@ -17,6 +17,35 @@ const DashboardPage = () => {
     const [loading, setLoading] = useState(true)
     const [scrolled, setScrolled] = useState(false)
     const [projectToDelete, setProjectToDelete] = useState(null)
+    const [feedbackText, setFeedbackText] = useState('')
+    const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, sending, success, error
+    const [showBetaMessage, setShowBetaMessage] = useState(true)
+
+    const toggleBetaMessage = () => {
+        const newState = !showBetaMessage
+        setShowBetaMessage(newState)
+        if (!newState) {
+            localStorage.setItem('vevara_hide_beta_message', 'true')
+        } else {
+            localStorage.removeItem('vevara_hide_beta_message')
+        }
+    }
+
+    const handleSendFeedback = async () => {
+        if (!feedbackText.trim() || feedbackStatus === 'sending') return
+
+        try {
+            setFeedbackStatus('sending')
+            await api.post('/api/feedback', { text: feedbackText })
+            setFeedbackStatus('success')
+            setFeedbackText('')
+            setTimeout(() => setFeedbackStatus('idle'), 3000)
+        } catch (error) {
+            console.error('Failed to send feedback:', error)
+            setFeedbackStatus('error')
+            setTimeout(() => setFeedbackStatus('idle'), 3000)
+        }
+    }
 
     useEffect(() => {
         const handleScroll = () => {
@@ -167,11 +196,6 @@ const DashboardPage = () => {
                     </a>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="hidden xs:flex bg-white/[0.03] border border-white/5 rounded-full px-3 py-1 flex items-center gap-2 text-[10px] font-medium text-[#6940c9]">
-                        <span className="w-1.5 h-1.5 bg-[#6940c9] rounded-full animate-pulse"></span>
-                        Alpha
-                    </div>
-
                     {isAuthenticated && (
                         <DropdownMenu
                             trigger={
@@ -206,42 +230,73 @@ const DashboardPage = () => {
             {/* Main Content (Now Full Width & Scrollable) */}
             <main className="w-full min-h-screen">
                 {/* Hero Section */}
-                <section className="pt-24 pb-16 md:pt-32 md:pb-24 px-6 md:px-10 bg-gradient-to-b from-[#6940c9]/5 to-transparent">
-                    <div className="max-w-4xl mx-auto text-center space-y-8">
-                        <h1 className="text-3xl md:text-5xl font-extralight tracking-tight leading-tight">
-                            What will you <span className="text-[#6940c9] italic">create</span> today?
+                <section className="pt-24 pb-12 md:pt-32 md:pb-16 px-6 md:px-10 bg-gradient-to-b from-[#6940c9]/5 to-transparent">
+                    <div className="max-w-4xl mx-auto text-center">
+                        <h1 className="text-3xl md:text-5xl font-extralight tracking-tight leading-loose mb-12">
+                            Canva simplicity <span className="text-[#6940c9] italic">Real </span> motion control
                         </h1>
 
-                        <div className="max-w-xl mx-auto relative group">
-                            <div className="absolute inset-0 bg-[#6940c9]/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-                            <div className="relative bg-white/[0.03] border border-white/5 rounded-xl p-3 md:p-3.5 flex items-center gap-3 transition-all focus-within:border-[#6940c9]/30 focus-within:bg-white/[0.05]">
-                                <Plus className="w-4 h-4 text-white/20" />
-                                <input
-                                    type="text"
-                                    placeholder="Search motions..."
-                                    className="bg-transparent border-none outline-none flex-1 text-white text-[13px] placeholder:text-white/10"
-                                />
-                                <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 bg-white/5 rounded border border-white/5 text-[9px] text-white/20">
-                                    <kbd>⌘</kbd> <kbd>K</kbd>
+                        <div className="max-w-xl mx-auto space-y-6">
+                            {showBetaMessage && (
+                                <div className="relative bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-2xl p-6 text-left animate-in fade-in slide-in-from-top-4 duration-500">
+                                    <button
+                                        onClick={toggleBetaMessage}
+                                        className="absolute top-4 right-4 p-1 rounded-full hover:bg-white/5 text-white/20 hover:text-white transition-all"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6940c9] bg-[#6940c9]/10 px-2 py-0.5 rounded">Rédaction</span>
+                                        </div>
+
+                                        <div className="space-y-3 text-white/70 text-[13px] leading-relaxed font-light">
+                                            <p>Thanks for being one of the first 140 creators exploring Vevara.</p>
+                                            <p>This is an early beta to test a new approach to motion design, so you may encounter bugs in places. I’ll continue improving the app based on your feedback.</p>
+                                            <p>For now, Vevara works best on desktop, mobile support is still unstable.</p>
+                                            <p className="text-white font-normal italic">Your feedback will help shape the future of the product.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Feedback Input Section */}
+                            <div className="bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-2xl p-5 flex flex-col items-start gap-4 shadow-2xl">
+                                <div className="w-full flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="text-[11px] font-bold uppercase tracking-widest text-white/30">Share your thoughts</h3>
+                                        {!showBetaMessage && (
+                                            <button
+                                                onClick={toggleBetaMessage}
+                                                className="text-[12px] text-[#6940c9] hover:text-[#7b52da] font-bold transition-all ml-1 underline underline-offset-4 decoration-[#6940c9]/30 hover:decoration-[#6940c9]"
+                                            >
+                                                Show update message
+                                            </button>
+                                        )}
+                                    </div>
+                                    {feedbackStatus === 'success' && (
+                                        <span className="text-[10px] text-emerald-500 font-medium">Feedback sent!</span>
+                                    )}
+                                </div>
+                                <div className="w-full flex items-center gap-3">
+                                    <input
+                                        type="text"
+                                        value={feedbackText}
+                                        onChange={(e) => setFeedbackText(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSendFeedback()}
+                                        placeholder="What's missing or broken?"
+                                        className="flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-2.5 text-[13px] text-white placeholder:text-white/10 outline-none focus:border-[#6940c9]/30 transition-all font-light"
+                                    />
+                                    <button
+                                        onClick={handleSendFeedback}
+                                        disabled={!feedbackText.trim() || feedbackStatus === 'sending'}
+                                        className="px-6 py-2.5 bg-[#6940c9] hover:bg-[#7b52da] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[12px] font-bold transition-all flex items-center gap-2"
+                                    >
+                                        {feedbackStatus === 'sending' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Send'}
+                                    </button>
                                 </div>
                             </div>
-                        </div>
-
-                        {/* Quick Actions (Scaled Down) */}
-                        <div className="flex flex-wrap justify-center gap-6 md:gap-10 mt-10 md:mt-14 pb-4 overflow-x-auto no-scrollbar">
-                            {[
-                                { icon: <Layout />, label: 'Social', color: 'bg-pink-500/80' },
-                                { icon: <ExternalLink />, label: 'Video', color: 'bg-purple-500/80' },
-                                { icon: <Folder />, label: 'Assets', color: 'bg-blue-500/80' },
-                                { icon: <Settings />, label: 'Automation', color: 'bg-emerald-500/80' }
-                            ].map((item, i) => (
-                                <button key={i} className="flex flex-col items-center gap-3 group flex-shrink-0">
-                                    <div className={`w-12 h-12 ${item.color} rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-105 transition-all duration-300`}>
-                                        {React.cloneElement(item.icon, { className: 'w-5 h-5 text-white', strokeWidth: 1.5 })}
-                                    </div>
-                                    <span className="text-[10px] font-medium text-white/40 group-hover:text-white transition-colors uppercase tracking-wider">{item.label}</span>
-                                </button>
-                            ))}
                         </div>
                     </div>
                 </section>
@@ -398,23 +453,57 @@ const DashboardPage = () => {
                             ))}
                         </div>
                     </section>
-
-                    {/* Alpha Message (Minimalist) */}
-                    <section>
-                        <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                            <div className="max-w-xl">
-                                <h3 className="font-medium text-base mb-2 flex items-center gap-2">
-                                    Welcome to Vevara Alpha <span className="text-[10px] bg-[#6940c9]/20 text-[#6940c9] px-2 py-0.5 rounded-full uppercase font-bold tracking-widest">v0.1.2</span>
-                                </h3>
-                                <p className="text-white/40 text-[13px] leading-relaxed">
-                                    Thank you for being part of our early journey. We're refining the engine daily based on your creative workflow.
-                                </p>
+                    {/* Upcoming Features Section */}
+                    <section className="pt-12">
+                        <div className="flex flex-col gap-2 mb-10">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-[#6940c9]" />
+                                <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-white/30">Upcoming Features</h2>
                             </div>
-                            <button className="px-5 py-2 bg-[#6940c9] hover:bg-[#7b52da] rounded-lg text-[13px] font-bold transition-all shadow-lg hover:shadow-[#6940c9]/20">
-                                Feedback
-                            </button>
+                            <h3 className="text-2xl font-extralight tracking-tight">What's <span className="font-normal italic">Next</span> for Vevara</h3>
+                        </div>
+
+                        <div className="max-w-2xl space-y-8">
+                            {[
+                                {
+                                    icon: <Presentation />,
+                                    title: "Presentation Mode",
+                                    desc: "Create animated school presentations with premium fluid transitions."
+                                },
+                                {
+                                    icon: <Wand2 />,
+                                    title: "Blur & Alpha Animation",
+                                    desc: "Cinematic depth with standard blur transitions and transparency controls."
+                                },
+                                {
+                                    icon: <Music />,
+                                    title: "Music Support",
+                                    desc: "Integrated audio tracks with waveform-perfect syncing."
+                                },
+                                {
+                                    icon: <Box />,
+                                    title: "Reusable Smart Templates",
+                                    desc: "High-quality animation content with pre-built logic-driven layouts."
+                                },
+                                {
+                                    icon: <Layers />,
+                                    title: "Animated Component Library",
+                                    desc: "Ready-to-use animated components and high-quality image assets."
+                                }
+                            ].map((feature, i) => (
+                                <div key={i} className="flex items-start gap-5 group">
+                                    <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/5 flex items-center justify-center shrink-0 group-hover:border-[#6940c9]/30 transition-colors">
+                                        {React.cloneElement(feature.icon, { className: 'w-4 h-4 text-white/40 group-hover:text-[#6940c9] transition-colors', strokeWidth: 1.5 })}
+                                    </div>
+                                    <div className="space-y-1">
+                                        <h4 className="text-[14px] font-medium text-white/80 group-hover:text-white transition-colors">{feature.title}</h4>
+                                        <p className="text-[12px] text-white/30 font-light leading-relaxed">{feature.desc}</p>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </section>
+
                 </div>
             </main>
 

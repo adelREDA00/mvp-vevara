@@ -57,6 +57,7 @@ function EditorPage() {
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
   const [zoom, setZoom] = useState(43)
+  const [showGuestModal, setShowGuestModal] = useState(false)
   const zoomRef = useRef(43) // Ref to track current zoom without causing re-renders
   const prevZoomRef = useRef(43) // Track previous zoom to detect changes
 
@@ -245,7 +246,10 @@ function EditorPage() {
   const lastSavedStateRef = useRef(null)
 
   const handleSave = useCallback(async (options = {}) => {
-    if (!isAuthenticated) return
+    if (!isAuthenticated) {
+      setShowGuestModal(true)
+      return
+    }
     if (isExportActiveRef.current) return
 
     const { force = false } = options
@@ -319,6 +323,7 @@ function EditorPage() {
       exportAbortControllerRef.current.abort()
       exportAbortControllerRef.current = null
     }
+    setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
   }, [])
 
   const handleExport = useCallback(async (resolution) => {
@@ -2137,6 +2142,40 @@ function EditorPage() {
         e.preventDefault()
       }}
     >
+      {/* Guest Save/Import Modal */}
+      {showGuestModal && (
+        <Modal
+          isOpen={showGuestModal}
+          onClose={() => setShowGuestModal(false)}
+          maxWidth="max-w-xs"
+          showCloseButton={true}
+        >
+          <div className="flex flex-col items-center text-center">
+            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-4">
+              <FileText className="h-6 w-6 text-purple-400" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Open account to save</h3>
+            <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+              Create a free account to save your projects and access professional templates.
+            </p>
+            <div className="flex flex-col w-full gap-2">
+              <button
+                onClick={() => window.location.href = '/login'}
+                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-purple-500/20"
+              >
+                Sign up for free
+              </button>
+              <button
+                onClick={() => setShowGuestModal(false)}
+                className="w-full py-2 text-zinc-500 hover:text-zinc-300 text-xs font-medium transition-all"
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Loading Overlay */}
       {projectStatus === 'loading' && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#0f1015]/60 backdrop-blur-sm">
@@ -2200,7 +2239,7 @@ function EditorPage() {
               {activeSidebarItem === 'Uploads' && (
                 <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
-              {activeSidebarItem === 'Images' && (
+              {activeSidebarItem === 'Media' && (
                 <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
               {activeSidebarItem === 'Tools' && (
@@ -2360,7 +2399,7 @@ function EditorPage() {
                   {activeSidebarItem === 'Uploads' && (
                     <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
-                  {activeSidebarItem === 'Images' && (
+                  {activeSidebarItem === 'Media' && (
                     <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
                   {activeSidebarItem === 'Tools' && (
@@ -2798,12 +2837,23 @@ function EditorPage() {
               {exportState.status === 'error' && 'Export Failed'}
             </h3>
 
-            <p className="text-white/40 text-[13px] mb-8 text-center max-w-[280px] leading-relaxed">
-              {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
-              {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
-              {exportState.status === 'completed' && 'Your download has started automatically.'}
-              {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
-            </p>
+            <div className="text-white/40 text-[13px] mb-8 text-center max-w-[320px] leading-relaxed">
+              <p>
+                {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
+                {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
+                {exportState.status === 'completed' && 'Your download has started automatically.'}
+                {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
+              </p>
+              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'initializing') && (
+                <div className="mt-4 px-4 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                  <p className="text-yellow-500/80 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
+                  <p className="text-white/60 text-[12px]">
+                    4K and 2K exports with video elements take a long time.
+                    <span className="block font-bold text-white/80 mt-1">Please do not close this page.</span>
+                  </p>
+                </div>
+              )}
+            </div>
 
             {exportState.status !== 'error' && exportState.status !== 'completed' && (
               <div className="w-full">

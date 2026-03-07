@@ -144,7 +144,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
 
             <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
                 <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-semibold text-white">Images</h2>
+                    <h2 className="text-lg font-semibold text-white">Media</h2>
                     {onClose && (
                         <button onClick={onClose} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800">
                             <X className="h-4 w-4" />
@@ -152,16 +152,6 @@ function ImagesPanel({ onClose, aspectRatio }) {
                     )}
                 </div>
 
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                    <input
-                        type="text"
-                        placeholder="Search assets"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-white text-sm"
-                    />
-                </div>
             </div>
 
             {fetchError && (

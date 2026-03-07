@@ -14,9 +14,9 @@ import { Link } from 'react-router-dom'
 
 export const SIDEBAR_ITEMS = [
   { icon: Grid3x3, label: 'Elements' },
+  { icon: Image, label: 'Media' },
   { icon: Type, label: 'Text' },
   { icon: Upload, label: 'Uploads' },
-  { icon: Image, label: 'Images' },
   { icon: Wand2, label: 'Tools' },
 ]
 
