@@ -11,6 +11,7 @@ import {
   Layers,
   Shapes,
   User,
+  LayoutDashboard,
 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 
@@ -130,10 +131,8 @@ function TopToolbar({
             className="h-8 w-8 rounded-full bg-[#1a1b23] hover:bg-[#25262e] active:bg-[#2a2b33] flex items-center justify-center transition-all border border-white/10 overflow-hidden flex-shrink-0"
             title={isAuthenticated ? "Dashboard" : "Login"}
           >
-            {isAuthenticated && user?.email ? (
-              <span className="text-white text-[11px] font-bold uppercase tracking-tight">
-                {user.email.substring(0, 2)}
-              </span>
+            {isAuthenticated ? (
+              <LayoutDashboard className="h-4 w-4 text-white" strokeWidth={1.5} />
             ) : (
               <User className="h-4 w-4 text-white" strokeWidth={1.5} />
             )}

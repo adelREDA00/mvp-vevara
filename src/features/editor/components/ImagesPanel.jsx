@@ -79,9 +79,14 @@ function ImagesPanel({ onClose, aspectRatio }) {
         if (!sharedAssets.length) return []
         return sharedAssets.filter(image => {
             const matchesSearch = searchQuery === '' || image.name.toLowerCase().includes(searchQuery.toLowerCase())
+
+            // ROBUST TYPE DETECTION: Shared assets might have type at top level or in metadata
+            const isVideo = image.type === 'video' || image.metadata?.type?.startsWith('video/')
+            const isImage = image.type === 'image' || image.metadata?.type?.startsWith('image/')
+
             const matchesTab = activeTab === 'All' ||
-                (activeTab === 'Images' && image.metadata?.type?.startsWith('image/')) ||
-                (activeTab === 'Videos' && image.metadata?.type?.startsWith('video/'))
+                (activeTab === 'Images' && isImage) ||
+                (activeTab === 'Videos' && isVideo)
             return matchesSearch && matchesTab
         })
     }, [sharedAssets, searchQuery, activeTab])
@@ -100,7 +105,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
             finalHeight *= scale
         }
 
-        const isVideo = image.metadata?.type?.startsWith('video/')
+        const isVideo = image.type === 'video' || image.metadata?.type?.startsWith('video/')
 
         dispatch(addLayerAndSelect({
             sceneId: currentSceneId,
@@ -126,8 +131,8 @@ function ImagesPanel({ onClose, aspectRatio }) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024
 
     const totalCount = sharedAssets.length
-    const imageCount = sharedAssets.filter(img => img.metadata?.type?.startsWith('image/')).length
-    const videoCount = sharedAssets.filter(img => img.metadata?.type?.startsWith('video/')).length
+    const imageCount = sharedAssets.filter(img => img.type === 'image' || img.metadata?.type?.startsWith('image/')).length
+    const videoCount = sharedAssets.filter(img => img.type === 'video' || img.metadata?.type?.startsWith('video/')).length
 
     return (
         <div
@@ -187,7 +192,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                 ) : (
                     <div className="grid grid-cols-2 gap-3">
                         {filteredImages.map((image) => {
-                            const isVideo = image.metadata?.type?.startsWith('video/')
+                            const isVideo = image.type === 'video' || image.metadata?.type?.startsWith('video/')
 
                             return (
                                 <div

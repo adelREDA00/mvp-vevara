@@ -312,7 +312,7 @@ function EditorPage() {
   // when the user clicks the dashboard/user icon.
   const handleNavigate = useCallback(async (path) => {
     if (isAuthenticated) {
-      await handleSave({ silent: true })
+      await handleSave({ silent: false })
     }
     // [FIX] Force full page reload to release WebGL context
     window.location.href = path
