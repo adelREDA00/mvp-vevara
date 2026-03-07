@@ -26,7 +26,9 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
-        const targetCount = Math.max(1, Math.ceil(loadableLayers.length * 0.5));
+        const isMobileDevice = typeof window !== 'undefined' && window.innerWidth < 1024;
+        const targetPercent = isMobileDevice ? 1.0 : 0.5;
+        const targetCount = Math.max(1, Math.ceil(loadableLayers.length * targetPercent));
         let loadedCount = 0;
         let isMounted = true
 
