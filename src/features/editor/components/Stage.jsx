@@ -1191,26 +1191,26 @@ function Stage({
         )}
 
         {/* Pixi canvas container - fills the entire canvas container */}
-        <div
-          ref={containerRef}
-          id="pixi-container"
-          className="absolute inset-0 pixi-container"
-          style={{ touchAction: 'none' }}
-          onMouseDown={(e) => {
-            // Don't work if playing
-            if (isPlaying) {
-              return
-            }
-
-            // Prevent text selection immediately on mousedown
-            // This catches the event before it reaches Pixi
-            e.preventDefault()
-          }}
-          onDragStart={(e) => {
-            // Prevent any drag operations that might cause text selection
-            e.preventDefault()
-          }}
-        />
+          <div
+            ref={containerRef}
+            id="pixi-container"
+            className="absolute inset-0 pixi-container"
+            style={{ touchAction: 'none' }}
+            onMouseDown={(e) => {
+              if (isPlaying) {
+                return
+              }
+              e.preventDefault()
+            }}
+            onTouchStart={(e) => {
+              if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                e.stopPropagation()
+              }
+            }}
+            onDragStart={(e) => {
+              e.preventDefault()
+            }}
+          />
 
         {/* Error State */}
         {error ? (

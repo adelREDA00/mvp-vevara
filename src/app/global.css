@@ -134,6 +134,29 @@ body {
   background-size: 20px 20px;
 }
 
+/* Mobile / touch device editor improvements */
+@media (pointer: coarse), (max-width: 1023px) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .stage-container,
+  .canvas-wrapper,
+  .pixi-container {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input, textarea, [contenteditable="true"], .text-edit-overlay {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    -webkit-touch-callout: default !important;
+  }
+}
+
 /* Mobile-friendly utilities */
 @layer utilities {
   .scrollbar-hide {

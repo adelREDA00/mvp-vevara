@@ -8,6 +8,8 @@ import { DropdownMenu, DropdownMenuItem } from '../../editor/components/Dropdown
 import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
 
+const TUTORIAL_VIDEO_URL = "/first.mp4"
+
 const DashboardPage = () => {
     const dispatch = useDispatch()
     const navigate = useNavigate()
@@ -19,7 +21,9 @@ const DashboardPage = () => {
     const [projectToDelete, setProjectToDelete] = useState(null)
     const [feedbackText, setFeedbackText] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, sending, success, error
-    const [showBetaMessage, setShowBetaMessage] = useState(true)
+    const [showBetaMessage, setShowBetaMessage] = useState(() => {
+        return localStorage.getItem('vevara_hide_beta_message') !== 'true'
+    })
 
     const toggleBetaMessage = () => {
         const newState = !showBetaMessage
@@ -83,7 +87,7 @@ const DashboardPage = () => {
                 console.error('Failed to fetch projects:', error)
             } finally {
                 // Wait a bit for premium feel
-                setTimeout(() => setLoading(false), 800)
+                setTimeout(() => setLoading(false), 200)
             }
         }
 
@@ -196,6 +200,12 @@ const DashboardPage = () => {
                     </a>
                 </div>
                 <div className="flex items-center gap-4">
+                    <a
+                        href="#learn-vevara"
+                        className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/50 text-[10px] font-bold uppercase tracking-wider hover:bg-white/10 hover:text-white transition-all"
+                    >
+                        Learn Vevara in 40s
+                    </a>
                     {isAuthenticated && (
                         <DropdownMenu
                             trigger={
@@ -256,6 +266,11 @@ const DashboardPage = () => {
                                             <p>This is an early beta to test a new approach to motion design, so you may encounter bugs in places. I’ll continue improving the app based on your feedback.</p>
                                             <p>For now, Vevara works best on desktop, mobile support is still unstable.</p>
                                             <p className="text-white font-normal italic">Your feedback will help shape the future of the product.</p>
+                                            <div className="pt-2">
+                                                <a href="#learn-vevara" className="inline-flex items-center gap-1.5 text-[#6940c9] hover:text-[#7b52da] font-bold transition-colors">
+                                                    Learn Vevara in 40 seconds <ExternalLink className="w-3 h-3" />
+                                                </a>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -302,57 +317,7 @@ const DashboardPage = () => {
                 </section>
 
                 <div className="max-w-[1400px] mx-auto px-6 md:px-10 pb-32 space-y-24">
-                    {/* Example Projects Section */}
-                    {templateProjects.length > 0 && (
-                        <section id="template-projects">
-                            <div className="flex items-center justify-between mb-10 border-b border-white/5 pb-6">
-                                <h2 className="text-2xl font-extralight tracking-tight">Example <span className="font-normal italic">Projects</span></h2>
-                            </div>
-
-                            {loading ? (
-                                <div className="flex items-center justify-center py-24">
-                                    <div className="w-6 h-6 border-[1.5px] border-[#6940c9]/20 border-t-[#6940c9] rounded-full animate-spin"></div>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
-                                    {templateProjects.map((project) => (
-                                        <div
-                                            key={project._id}
-                                            className="group cursor-pointer"
-                                            onClick={() => handleDuplicateTemplate(project._id)}
-                                        >
-                                            <div className="aspect-video bg-[#050505] border border-white/5 rounded-xl overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all">
-                                                {project.thumbnail ? (
-                                                    <img
-                                                        src={project.thumbnail}
-                                                        alt={`${project.name} thumbnail`}
-                                                        className="w-full h-full object-contain"
-                                                    />
-                                                ) : (
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
-                                                        <Layers className="w-8 h-8 opacity-50" />
-                                                        <span className="text-xs font-medium uppercase tracking-widest opacity-50">Empty Canvas</span>
-                                                    </div>
-                                                )}
-
-                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm">
-                                                    <button className="bg-white text-black text-[10px] font-bold px-4 py-2 rounded-lg">DUPLICATE & EDIT</button>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-start justify-between gap-4">
-                                                <div>
-                                                    <h3 className="text-[13px] font-light text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
-                                                    <p className="text-[10px] text-white/20 mt-1 uppercase tracking-tighter">Template</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </section>
-                    )}
-
-                    {/* Projects Section (Optimized Grid) - MOVED UP */}
+                    {/* Projects Section (Optimized Grid) */}
                     <section id="projects">
                         <div className="flex items-center justify-between mb-10 border-b border-white/5 pb-6">
                             <h2 className="text-2xl font-extralight tracking-tight">Your <span className="font-normal italic">Projects</span></h2>
@@ -425,32 +390,85 @@ const DashboardPage = () => {
                         )}
                     </section>
 
-                    {/* Tutorial Section (Responsive Grid) - MOVED DOWN AND RENAMED TO LEARN */}
-                    <section>
-                        <div className="flex items-center justify-between mb-8">
-                            <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-white/30">Learn Vevara</h2>
-                            <button className="text-[11px] text-[#6940c9] hover:text-[#7b52da] font-medium flex items-center gap-1.5 transition-colors">
-                                EXPLORE ALL <ExternalLink className="w-3 h-3" strokeWidth={2.5} />
-                            </button>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                            {[
-                                "Mastering Motion Capture",
-                                "Layer Composition Basics",
-                                "Exporting for Performance"
-                            ].map((title, i) => (
-                                <div key={i} className="group cursor-pointer">
-                                    <div className="aspect-video bg-white/[0.02] border border-white/5 rounded-xl overflow-hidden relative mb-4">
-                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-transparent transition-colors">
-                                            <div className="w-10 h-10 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/10 group-hover:scale-110 transition-transform">
-                                                <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-white border-b-[6px] border-b-transparent ml-1"></div>
+                    {/* Example Projects Section */}
+                    {templateProjects.length > 0 && (
+                        <section id="template-projects">
+                            <div className="flex items-center justify-between mb-10 border-b border-white/5 pb-6">
+                                <h2 className="text-2xl font-extralight tracking-tight">Example <span className="font-normal italic">Projects</span></h2>
+                            </div>
+
+                            {loading ? (
+                                <div className="flex items-center justify-center py-24">
+                                    <div className="w-6 h-6 border-[1.5px] border-[#6940c9]/20 border-t-[#6940c9] rounded-full animate-spin"></div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
+                                    {templateProjects.map((project) => (
+                                        <div
+                                            key={project._id}
+                                            className="group cursor-pointer"
+                                            onClick={() => handleDuplicateTemplate(project._id)}
+                                        >
+                                            <div className="aspect-video bg-[#050505] border border-white/5 rounded-xl overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all">
+                                                {project.thumbnail ? (
+                                                    <img
+                                                        src={project.thumbnail}
+                                                        alt={`${project.name} thumbnail`}
+                                                        className="w-full h-full object-contain"
+                                                    />
+                                                ) : (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
+                                                        <Layers className="w-8 h-8 opacity-50" />
+                                                        <span className="text-xs font-medium uppercase tracking-widest opacity-50">Empty Canvas</span>
+                                                    </div>
+                                                )}
+
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm">
+                                                    <button className="bg-white text-black text-[10px] font-bold px-4 py-2 rounded-lg">DUPLICATE & EDIT</button>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div>
+                                                    <h3 className="text-[13px] font-light text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
+                                                    <p className="text-[10px] text-white/20 mt-1 uppercase tracking-tighter">Template</p>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <h4 className="font-light text-[13px] group-hover:text-[#6940c9] transition-colors leading-snug">{title}</h4>
-                                    <p className="text-white/20 text-[11px] mt-1 italic">5 mins • Beginner</p>
+                                    ))}
                                 </div>
-                            ))}
+                            )}
+                        </section>
+                    )}
+
+                    {/* Learn Vevara Section - Wide Video Tutorial */}
+                    <section id="learn-vevara" className="text-center flex flex-col items-center scroll-mt-24">
+                        <div className="flex flex-col items-center mb-8">
+                            <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-white/30 mb-2">Learn Vevara</h2>
+                            <div className="h-px w-10 bg-[#6940c9]/30" />
+                        </div>
+
+                        <div className="max-w-4xl w-full aspect-video bg-[#050505] border border-white/10 rounded-3xl overflow-hidden relative group shadow-2xl ring-1 ring-white/5 mx-auto">
+                            <video
+                                className="w-full h-full object-cover"
+                                controls
+                                playsInline
+                                preload="metadata"
+                            >
+                                <source src={TUTORIAL_VIDEO_URL} type="video/mp4" />
+                                Your browser does not support the video tag.
+                            </video>
+
+                            {/* Premium overlay effect when hovered */}
+                            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                        </div>
+
+                        <div className="mt-8">
+                            <h4 className="text-xl font-extralight tracking-tight text-white/90">Getting Started with <span className="text-[#6940c9] italic font-normal">Vevara</span></h4>
+
+
+                            <button className="mt-8 text-[11px] text-[#6940c9] hover:text-[#7b52da] font-medium flex items-center gap-1.5 transition-colors mx-auto opacity-50 hover:opacity-100 transition-opacity">
+                                EXPLORE ALL <ExternalLink className="w-3 h-3" strokeWidth={2.5} />
+                            </button>
                         </div>
                     </section>
                     {/* Upcoming Features Section */}

@@ -252,7 +252,7 @@ function EditorPage() {
     }
     if (isExportActiveRef.current) return
 
-    const { force = false } = options
+    const { force = false, silent = false } = options
 
     // [PERFORMANCE] Dirty check: Compare current state with last saved state
     // to avoid redundant saves and expensive thumbnail captures.
@@ -270,7 +270,7 @@ function EditorPage() {
       return
     }
 
-    setIsSaving(true)
+    if (!silent) setIsSaving(true)
     try {
       // Capture a high-quality thumbnail from the ARTBOARD area
       let thumbnail = null
@@ -283,7 +283,7 @@ function EditorPage() {
           // Since layersContainer is a child of the viewport but represents
           // the world space, capturing it with 1:1 scale ensures the thumbnail
           // is never affected by editor zoom/pan.
-          const targetWidth = 800
+          const targetWidth = 400
           const targetResolution = Math.min(1, targetWidth / worldWidth)
 
           thumbnail = await app.renderer.extract.base64({
@@ -304,7 +304,7 @@ function EditorPage() {
     } catch (error) {
       console.error('Failed to save project:', error)
     } finally {
-      setIsSaving(false)
+      if (!silent) setIsSaving(false)
     }
   }, [dispatch, isAuthenticated, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight])
 
@@ -312,7 +312,7 @@ function EditorPage() {
   // when the user clicks the dashboard/user icon.
   const handleNavigate = useCallback(async (path) => {
     if (isAuthenticated) {
-      await handleSave()
+      await handleSave({ silent: true })
     }
     // [FIX] Force full page reload to release WebGL context
     window.location.href = path
@@ -548,7 +548,7 @@ function EditorPage() {
       if (isAuthenticated && projectId) {
         // We don't block the exit with a confirmation, just fire the save.
         // Some browsers allow async work to finish if it's fast enough.
-        handleSave()
+        handleSave({ silent: true })
       }
     }
 
@@ -1949,13 +1949,7 @@ function EditorPage() {
     return () => window.removeEventListener('resize', updateSidebarWidth)
   }, [])
 
-  // Real Auto-save: Save project every 60 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      handleSave()
-    }, 60000)
-    return () => clearInterval(interval)
-  }, [handleSave])
+
 
 
 
