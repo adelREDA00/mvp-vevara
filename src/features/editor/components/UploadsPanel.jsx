@@ -18,6 +18,7 @@ import {
   fetchUploads,
   selectLastUploadedId,
   selectHasLargeUpload,
+  selectUploadProgress,
 } from '../../../store/slices/uploadsSlice'
 
 // NEW: Added imports for creating image layers on the canvas
@@ -81,6 +82,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const imageCount = useSelector(selectImageCount)
   const videoCount = useSelector(selectVideoCount)
   const hasLargeUpload = useSelector(selectHasLargeUpload)
+  const uploadProgress = useSelector(selectUploadProgress)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const allLayers = useSelector(selectLayers)
 
@@ -328,14 +330,17 @@ function UploadsPanel({ onClose, aspectRatio }) {
               <div className="mb-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-purple-400">
-                    {hasLargeUpload ? 'Uploading large files...' : 'Processing media...'}
+                    {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : 'Processing media...'}
                   </span>
                   <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
                 </div>
                 <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mb-2">
-                  <div className="h-full bg-purple-500 animate-[progress_2s_ease-in-out_infinite]" style={{ width: '40%' }} />
+                  <div
+                    className={`h-full bg-purple-500 transition-all duration-300 ${uploadProgress === 0 ? 'animate-[progress_2s_ease-in-out_infinite]' : ''}`}
+                    style={{ width: `${Math.max(uploadProgress, 10)}%` }}
+                  />
                 </div>
-                {hasLargeUpload && (
+                {hasLargeUpload && uploadProgress < 100 && (
                   <p className="text-[10px] text-zinc-400 leading-tight">
                     This file is large and may take some time. Please don't leave the page.
                   </p>

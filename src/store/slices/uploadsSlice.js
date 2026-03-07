@@ -72,9 +72,10 @@ function getVideoDimensions(file) {
 
     // Timeout fallback in case metadata or seek never loads
     setTimeout(() => {
+      // Return zeroes but allow upload to proceed after 4s (instead of 15s)
       resolve({ width: 0, height: 0, duration: 0 })
       cleanup()
-    }, 15000)
+    }, 4000)
 
     video.src = url
   })
@@ -82,12 +83,12 @@ function getVideoDimensions(file) {
 
 export const uploadFile = createAsyncThunk(
   'uploads/upload',
-  async (file, { rejectWithValue }) => {
+  async (file, { dispatch, rejectWithValue }) => {
     try {
       const formData = new FormData()
       formData.append('file', file)
 
-      // Extract media dimensions before upload
+      // Extract media dimensions before upload (now with 4s timeout)
       let dimensions = { width: 0, height: 0, duration: 0 }
       if (file.type.startsWith('image/')) {
         const url = URL.createObjectURL(file)
@@ -108,7 +109,12 @@ export const uploadFile = createAsyncThunk(
       }
 
       formData.append('metadata', JSON.stringify(dimensions))
-      const data = await api.upload('/uploads', formData)
+
+      const data = await api.upload('/uploads', formData, {
+        onProgress: (percent) => {
+          dispatch(setUploadProgress(percent))
+        }
+      })
       return data
     } catch (error) {
       return rejectWithValue(error.message)
@@ -133,6 +139,7 @@ const initialState = {
   isFetching: false,
   fetchError: null,
   uploadingCount: 0,
+  uploadProgress: 0, // Current upload progress (%)
   hasLargeUpload: false,
   uploadError: null,
   lastUploadedId: null,
@@ -169,6 +176,9 @@ const uploadsSlice = createSlice({
     clearFetchError: (state) => {
       state.fetchError = null
     },
+    setUploadProgress: (state, action) => {
+      state.uploadProgress = action.payload
+    }
   },
   extraReducers: (builder) => {
     builder
@@ -195,6 +205,7 @@ const uploadsSlice = createSlice({
       // === Upload file ===
       .addCase(uploadFile.pending, (state, action) => {
         state.uploadingCount += 1
+        state.uploadProgress = 0
         // Check if this specific file is large (> 50MB)
         if (action.meta.arg.size > 50 * 1024 * 1024) {
           state.hasLargeUpload = true
@@ -206,6 +217,7 @@ const uploadsSlice = createSlice({
         const imageId = item._id
         state.uploadedImages[imageId] = normalizeAsset(item)
         state.uploadingCount = Math.max(0, state.uploadingCount - 1)
+        state.uploadProgress = 0
         if (state.uploadingCount === 0) {
           state.hasLargeUpload = false
         }
@@ -213,6 +225,7 @@ const uploadsSlice = createSlice({
       })
       .addCase(uploadFile.rejected, (state, action) => {
         state.uploadingCount = Math.max(0, state.uploadingCount - 1)
+        state.uploadProgress = 0
         if (state.uploadingCount === 0) {
           state.hasLargeUpload = false
         }
@@ -246,6 +259,9 @@ export const selectIsFetching = (state) => state.uploads.isFetching
 export const selectUploadError = (state) => state.uploads.uploadError
 export const selectFetchError = (state) => state.uploads.fetchError
 export const selectLastUploadedId = (state) => state.uploads.lastUploadedId
+export const selectUploadProgress = (state) => state.uploads.uploadProgress
+const { setUploadProgress } = uploadsSlice.actions
+export { setUploadProgress }
 
 export const selectImageCount = createSelector(
   [selectUploadedImagesArray],

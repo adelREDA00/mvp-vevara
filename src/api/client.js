@@ -14,12 +14,64 @@ async function request(path, options = {}) {
     const url = buildApiUrl(path);
     const isFormData = options.body instanceof FormData;
 
+    // Special case for uploads where we want progress tracking via XHR
+    if (options.useXhr) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open(options.method || 'GET', url);
+            xhr.withCredentials = true;
+
+            if (options.onProgress && xhr.upload) {
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percent = Math.round((event.loaded / event.total) * 100);
+                        options.onProgress(percent);
+                    }
+                };
+            }
+
+            xhr.onload = () => {
+                let data = {};
+                try {
+                    data = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    data = {};
+                }
+
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(data);
+                } else {
+                    reject(new Error(data.error || `Request failed with status ${xhr.status}`));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Network error'));
+
+            // Only set Content-Type for non-FormData requests.
+            // For FormData, the browser MUST set it automatically to include the boundary.
+            if (!isFormData) {
+                xhr.setRequestHeader('Content-Type', 'application/json');
+            }
+
+            // Apply custom headers
+            if (options.headers) {
+                Object.entries(options.headers).forEach(([key, value]) => {
+                    if (value !== undefined) xhr.setRequestHeader(key, value);
+                });
+            }
+
+            const body = (isFormData || typeof options.body !== 'object')
+                ? options.body
+                : JSON.stringify(options.body);
+
+            xhr.send(body);
+        });
+    }
+
     const finalOptions = {
         credentials: 'include',
         ...options,
         headers: {
-            // Only set Content-Type for non-FormData requests.
-            // For FormData, the browser MUST set it automatically to include the boundary.
             ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
             ...options.headers,
         },
@@ -53,12 +105,11 @@ export const api = {
     put: (path, body, options) => request(path, { ...options, method: 'PUT', body }),
     delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
     upload: (path, formData, options) => {
-        // FormData uploads: Content-Type is automatically excluded by the request function
-        // so the browser sets the correct multipart/form-data boundary
         return request(path, {
             ...options,
             method: 'POST',
             body: formData,
+            useXhr: true,
         });
     }
 };
