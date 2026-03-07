@@ -160,6 +160,7 @@ export class CropAction {
         const cropW = pixiObject.cropWidth
         const cropH = pixiObject.cropHeight
 
+
         // Update sprite geometry
         if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
         if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH

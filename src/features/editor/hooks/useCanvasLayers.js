@@ -5,7 +5,7 @@
 import { useEffect, useRef, useMemo, useLayoutEffect, useState } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
-import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, drawShapePath } from '../../engine/pixi/createLayer'
+import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, drawShapePath, releaseVideoElement } from '../../engine/pixi/createLayer'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { LAYER_TYPES } from '../../../store/models'
 import { updateLayer, selectScenes, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
@@ -29,25 +29,14 @@ const destroyImageSprite = (sprite, layer) => {
   }
 
   // Handle Video-specific cleanup (critical for preventing resource errors)
-  if (layer?.type === LAYER_TYPES.VIDEO && sprite.texture) {
-    // PIXI v8: access resource via source
-    const source = sprite.texture.source
-    const videoSource = source?.resource
-
-    // Force stop the video and clear source to unlock file handle/URL
-    if (videoSource instanceof HTMLVideoElement) {
-      try {
-        videoSource.pause()
-        videoSource.src = ''
-        videoSource.load() // Flush state
-      } catch (e) { /* ignore cleanup errors */ }
+  if (layer?.type === LAYER_TYPES.VIDEO) {
+    // Release from the global cache and kill the element
+    if (layer.id) {
+      releaseVideoElement(layer.id)
     }
 
-    // For videos, we explicitly destroy the texture (often unique/heavy)
+    // Standard Pixi cleanup for the sprite/texture
     sprite.destroy({ texture: true })
-    if (source && !source.destroyed) {
-      try { source.destroy() } catch (e) { }
-    }
   } else {
     // For regular images, just destroy sprite, keep texture (Assets managed)
     sprite.destroy({ texture: false })
@@ -95,7 +84,7 @@ const sharedTextStyle = new PIXI.TextStyle()
 
 function getCachedTextBounds(text, style) {
   // PERFORMANCE: Use a faster key builder
-  const key = `${text || ''}|${style.fontFamily}|${style.fontSize}|${style.fontWeight}|${style.wordWrapWidth}|${style.lineHeight}|${style.letterSpacing || 0}`
+  const key = `${text || ''}|${style.fontFamily}|${style.fontSize}|${style.fontWeight}|${style.fontStyle || 'normal'}|${style.wordWrapWidth}|${style.lineHeight}|${style.letterSpacing || 0}`
 
   if (textMetricsCache.has(key)) {
     return textMetricsCache.get(key)
@@ -108,6 +97,7 @@ function getCachedTextBounds(text, style) {
       fontFamily: style.fontFamily || 'Arial',
       fontSize: style.fontSize || 24,
       fontWeight: style.fontWeight || 'normal',
+      fontStyle: style.fontStyle || 'normal',
       wordWrap: style.wordWrap || false,
       wordWrapWidth: style.wordWrapWidth || 100,
       breakWords: true, // [WRAP FIX] Ensure PIXI breaks long words same as browser
@@ -139,15 +129,16 @@ function debounce(func, wait) {
 
 const debouncedTextHeightCalculationsRef = { current: new Map() } // Ensure ref exists
 
-function calculateTextHeight(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, dispatch, isEditing = false) {
+function calculateTextHeight(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, fontStyle, dispatch, isEditing = false) {
   const cacheKey = `${layerId}-height-calc`
 
-  const runCalculation = (layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, dispatch) => {
+  const runCalculation = (layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, fontStyle, dispatch) => {
     try {
       const textStyle = {
         fontFamily: fontFamily || 'Arial',
         fontSize: fontSize,
         fontWeight: fontWeight || 'normal',
+        fontStyle: fontStyle || 'normal',
         wordWrap: true,
         wordWrapWidth: wordWrapWidth,
         breakWords: true, // [WRAP FIX] Consistent metrics
@@ -171,7 +162,7 @@ function calculateTextHeight(layerId, content, fontSize, wordWrapWidth, fontFami
 
   // If currently editing, we need IMMEDIATE feedback for the selection box to follow the text
   if (isEditing) {
-    runCalculation(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, dispatch)
+    runCalculation(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, fontStyle, dispatch)
     return
   }
 
@@ -179,7 +170,7 @@ function calculateTextHeight(layerId, content, fontSize, wordWrapWidth, fontFami
     debouncedTextHeightCalculationsRef.current.set(cacheKey, debounce(runCalculation, 200))
   }
 
-  debouncedTextHeightCalculationsRef.current.get(cacheKey)(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, dispatch)
+  debouncedTextHeightCalculationsRef.current.get(cacheKey)(layerId, content, fontSize, wordWrapWidth, fontFamily, fontWeight, fontStyle, dispatch)
 }
 
 
@@ -356,7 +347,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   const currentScaleX = capturedLayer?.scaleX ?? (layer.scaleX !== undefined ? layer.scaleX : 1)
   const currentScaleY = capturedLayer?.scaleY ?? (layer.scaleY !== undefined ? layer.scaleY : 1)
 
-  if (displayObject instanceof PIXI.Sprite) {
+  // [FIX] EXCLUDE PIXI.Text from manual .width/.height scaling.
+  // Text layers should render naturally via their .style properties (fontSize, wordWrapWidth)
+  // and only be scaled via .scale property. Setting .width directly on Text objects
+  // stretches/squishes the text texture, leading to distortion and clipping-like effects.
+  if (displayObject instanceof PIXI.Sprite && !(displayObject instanceof PIXI.Text)) {
     const baseWidth = capturedLayer?.width ?? layer.width
     const baseHeight = capturedLayer?.height ?? layer.height
 
@@ -379,14 +374,44 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     displayObject.rotation = degToRad(layer.rotation)
   }
 
-  // 4. Width/Height Synchronization (for Graphics/Text/Containers)
+  // 4. Width/Height/Style Synchronization (for Graphics/Text/Containers)
   if (force || capturedLayer || !isActuallyPlaying) {
-    // CROP SYSTEM: Image/Video containers use a mask for crop
-    if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
+    if (displayObject instanceof PIXI.Text) {
+      const isResizing = displayObject._isResizing === true
+      const style = displayObject.style
+      if (!isResizing && style && layer.width > 0) {
+        if (style.wordWrapWidth !== layer.width) {
+          style.wordWrapWidth = layer.width
+          if (displayObject.updateText) displayObject.updateText(true)
+        }
+      }
+
+      const align = layer.data?.textAlign || 'left'
+      const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+      const currentWidth = layer.width || 200
+
+      // PERFORMANCE FIX: Removed unconditional updateText(true) that was causing expensive 
+      // canvas rasterization on every frame/render loop for PIXI.Text objects.
+      const actualHeight = displayObject.getLocalBounds().height || layer.height || 40
+
+      if (displayObject.anchor.x !== anchorX) displayObject.anchor.set(anchorX, 0)
+      displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
+    } else if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
       // [FIX] Always sync video timing metadata — this is read by syncMedia, not a visual transform.
       // This ensures the video element knows its correct offset even if a scene switch happens mid-playback.
       displayObject._sourceStartTime = layer.data?.sourceStartTime || 0
       displayObject._sourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0)
+
+      // Sync muted state dynamically.
+      // Muting is always safe, but unmuting requires prior user interaction
+      // (browser autoplay policy). Only unmute when the engine is actively
+      // playing, which guarantees the user clicked "play" first.
+      if (displayObject._videoElement) {
+        const isMuted = layer.data?.muted !== false;
+        if (displayObject._videoElement.muted !== isMuted) {
+          displayObject._videoElement.muted = isMuted;
+        }
+      }
 
       if (force || capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)) {
         const sprite = displayObject._imageSprite || displayObject._videoSprite
@@ -423,80 +448,81 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
           cropMask.fill(0xffffff)
         }
 
-        // Update pivot for anchor-based positioning
+        // Update pivot for anchor-based positioning (required so visual center matches container position)
         const targetAnchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
         const targetAnchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
-        displayObject.anchorX = targetAnchorX
-        displayObject.anchorY = targetAnchorY
         displayObject.pivot.set(cropW * targetAnchorX, cropH * targetAnchorY)
-      }
-    }
-  }
-
-  // Standard width sync
-  // NOTE: PIXI.Graphics is excluded because its size is managed by explicit coordinate drawing in
-  // redrawShapeWithColors / createShapeLayer. Setting .width via PIXI's setter computes
-  // scale.x = desiredWidth / localBounds.width. For shapes whose geometry doesn't fill the declared
-  // bounding box exactly (e.g. 5-point star: localBounds.width ≈ 0.951 × layer.width), this
-  // produces scale.x > 1 which pushes shape points beyond the selection/hover box on every frame.
-  if (displayObject.width !== undefined && layer.width !== undefined && !(displayObject instanceof PIXI.Sprite)) {
-    if (displayObject instanceof PIXI.Text) {
-      const isResizing = displayObject._isResizing === true
-      if (!isResizing && displayObject.style && layer.width > 0) {
-        if (displayObject.style.wordWrapWidth !== layer.width) {
-          displayObject.style.wordWrapWidth = layer.width
+        if (typeof console !== 'undefined' && console.log && (displayObject._videoSprite || displayObject._imageSprite)) {
+          console.log('[useCanvasLayers] applyTransformInline media', {
+            layerId,
+            fromCapture: !!capturedLayer,
+            pos: { x: displayObject.x, y: displayObject.y },
+            cropW,
+            cropH,
+            pivot: { x: displayObject.pivot.x, y: displayObject.pivot.y }
+          })
         }
       }
-
-      const align = layer.data?.textAlign || 'left'
-      const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
-      const currentWidth = layer.width || 200
-
-      displayObject.updateText?.(true)
-      const actualHeight = displayObject.getLocalBounds().height || layer.height || 40
-
-      displayObject.anchor.set(anchorX, 0)
-      displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
-    } else if (
-      !(displayObject instanceof PIXI.Graphics) &&
-      !(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))
-    ) {
+    } else if (!(displayObject instanceof PIXI.Graphics) && !(displayObject instanceof PIXI.Sprite)) {
       if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
-        displayObject.width = layer.width
+        if (layer.width !== undefined) displayObject.width = layer.width
+        if (layer.height !== undefined) displayObject.height = layer.height
       }
     }
   }
 
-  // Standard height sync (same Graphics exclusion — see width note above)
-  if (displayObject.height !== undefined && layer.height !== undefined && !(displayObject instanceof PIXI.Sprite)) {
-    if (
-      !(displayObject instanceof PIXI.Text) &&
-      !(displayObject instanceof PIXI.Graphics) &&
-      !(displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite))
-    ) {
-      if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
-        displayObject.height = layer.height
-      }
-    }
-
-    // 5. Anchor Synchronization
-    if (layer.anchorX !== undefined || layer.anchorY !== undefined) {
-      const anchorX = layer.anchorX !== undefined ? layer.anchorX : (displayObject.anchor?.x ?? 0.5)
-      const anchorY = layer.anchorY !== undefined ? layer.anchorY : (displayObject.anchor?.y ?? 0.5)
-
-      if (displayObject.anchor && !(displayObject instanceof PIXI.Text)) {
-        displayObject.anchor.set(anchorX, anchorY)
-      } else if (displayObject._imageSprite || displayObject._videoSprite) {
-        // CROP SYSTEM: Anchor is handled via container.pivot, not sprite.anchor
-        displayObject.anchorX = anchorX
-        displayObject.anchorY = anchorY
-      }
+  // 5. Anchor Synchronization (for standard Sprites that aren't Text or Cropped Containers)
+  if (!(displayObject instanceof PIXI.Text) && !(displayObject._imageSprite || displayObject._videoSprite)) {
+    if (displayObject.anchor) {
+      const anchorX = layer.anchorX !== undefined ? layer.anchorX : (displayObject.anchor.x ?? 0.5)
+      const anchorY = layer.anchorY !== undefined ? layer.anchorY : (displayObject.anchor.y ?? 0.5)
+      displayObject.anchor.set(anchorX, anchorY)
     }
   }
 }
 
 export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null) {
   const dispatch = useDispatch()
+
+  // Trigger a full redraw of text layers when web fonts finish loading
+  const [fontsLoadedVersion, setFontsLoadedVersion] = useState(0)
+
+  useEffect(() => {
+    if (document.fonts) {
+      let isMounted = true;
+      const handleLoadingDone = () => {
+        if (!isMounted) return;
+        // console.log(`[useCanvasLayers] Fonts ready. Status: ${document.fonts.status}`);
+        textMetricsCache.clear();
+        setFontsLoadedVersion(v => v + 1);
+      };
+
+      // Initial check
+      document.fonts.ready.then(() => {
+        setTimeout(handleLoadingDone, 300); // Wait for browser rasterizer to catch up
+      }).catch(() => { });
+
+      document.fonts.addEventListener('loadingdone', handleFontChange);
+
+      // Poll a few times during first 10 seconds to catch late-load fonts
+      const pollSequence = [1000, 2000, 5000, 10000];
+      const timeouts = pollSequence.map(delay => setTimeout(handleLoadingDone, delay));
+
+      function handleFontChange() {
+        if (document.fonts.status === 'loaded') {
+          handleLoadingDone();
+        }
+      }
+
+      return () => {
+        isMounted = false;
+        document.fonts.removeEventListener('loadingdone', handleFontChange);
+        timeouts.forEach(t => clearTimeout(t));
+      };
+    } else {
+      // console.warn('[useCanvasLayers] document.fonts API not available')
+    }
+  }, []);
 
   // [Bug 3 Fix] Counter that increments whenever an async layer (video/image) resolves.
   // This gives useCanvasInteractions a stable dep to rebind pointer handlers after async creation.
@@ -561,7 +587,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     })
 
     layerOrder.forEach(layerId => {
-      const layer = layers[layerId]
+      const layer = layers?.[layerId]
       if (layer) {
         // Calculate project-wide visibility
         // Layer is visible if it belongs to current scene OR we are playing the whole project
@@ -605,6 +631,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   // This prevents "blank frames" or flickering during scene transitions and splits.
   useLayoutEffect(() => {
     if (!stageContainer || !isReady || !scenes) return
+    // [FIX] Guard against destroyed PIXI renderer during navigation transitions.
+    // Without this, layer creation/updates would draw on a dead WebGL context,
+    // causing GL_INVALID_OPERATION errors.
+    if (pixiApp && (!pixiApp.renderer || pixiApp.destroyed)) return
 
     const layerObjects = layerObjectsRef.current
     const createdLayers = createdLayersRef.current
@@ -615,7 +645,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     // 1. LAYER CREATION & ADOPTION
     layerOrder.forEach((layerId) => {
-      const layer = layers[layerId]
+      const layer = layers?.[layerId]
       if (!layer) return
 
       if (createdLayers.has(layerId)) return
@@ -628,6 +658,18 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         const oldLayer = layers[oldId]
         if (oldLayer && !oldObj.destroyed && (oldLayer.sourceId === sourceId || oldLayer.id === sourceId)) {
           if (oldLayer.sceneId !== currentScene?.id) {
+            // [SEAMLESS FIX] Continuity Check: Only adopt video layers if playback is contiguous
+            // If there's a discontinuity (e.g. trimming the split), we want a fresh object
+            // so we can "double buffer" the segments in distinct video elements.
+            if (layer.type === 'video') {
+              const oldEnd = oldLayer.data?.sourceEndTime || 0
+              const newStart = layer.data?.sourceStartTime || 0
+              if (Math.abs(oldEnd - newStart) > 0.05) {
+                // console.log(`[useCanvasLayers] Skipping video adoption due to discontinuity: ${oldEnd.toFixed(2)} -> ${newStart.toFixed(2)}`)
+                continue
+              }
+            }
+
             adoptedObject = oldObj
             layerObjects.delete(oldId)
             createdLayers.delete(oldId)
@@ -692,7 +734,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
             return
           }
-          const currentLayer = layers[layerId]
+          const currentLayer = layers?.[layerId]
           if (!currentLayer) {
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
@@ -704,11 +746,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           const isVisible = currentLayer.visible !== false && currentLayer.sceneId === currentScene?.id
           sprite.visible = isVisible
           applyTransformInline(sprite, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
-          engine.registerLayerObject(layerId, sprite, { sceneId: layer.sceneId })
+          engine.registerLayerObject(layerId, sprite, { sceneId: currentLayer.sceneId })
           // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
         }).catch((error) => {
-          console.error(`Failed to create image layer ${layerId}:`, error)
+          // console.error(`Failed to create image layer ${layerId}:`, error)
           createdLayers.delete(layerId)
         })
         return
@@ -723,9 +765,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             }
             return
           }
-          const currentLayer = layers[layerId]
+          const currentLayer = layers?.[layerId]
           if (!currentLayer) {
-            console.warn(`[useCanvasLayers] Video layer creation resolved but layer missing from state: ${layerId}`)
+            // console.warn(`[useCanvasLayers] Video layer creation resolved but layer missing from state: ${layerId}`)
             const sprite = container._videoSprite
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
@@ -742,11 +784,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           const isVisible = currentLayer.visible !== false && currentLayer.sceneId === currentScene?.id
           container.visible = isVisible
           applyTransformInline(container, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
-          engine.registerLayerObject(layerId, container, { sceneId: layer.sceneId })
+          engine.registerLayerObject(layerId, container, { sceneId: currentLayer.sceneId })
           // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
         }).catch((error) => {
-          console.error(`Failed to create video layer ${layerId}:`, error)
+          // console.error(`Failed to create video layer ${layerId}:`, error)
           createdLayers.delete(layerId)
         })
         return
@@ -785,7 +827,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     // 2. LAYER UPDATES & Z-ORDER SYNC
     layerOrder.forEach((layerId, desiredIndex) => {
-      const layer = layers[layerId]
+      const layer = layers?.[layerId]
       const pixiObject = layerObjects.get(layerId)
       if (!layer || !pixiObject || pixiObject.destroyed) return
 
@@ -836,7 +878,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           // We always want to sync text if the timeline is paused so Redux truth is visible.
           // Only update text content if it actually changed
           if (pixiObject.text !== layer.data.content) {
+            // console.log(`[useCanvasLayers] Text content changed for ${layerId}: "${pixiObject.text}" -> "${layer.data.content}"`)
             pixiObject.text = layer.data.content || ''
+
+            // In PIXI v8, changing .text doesn't always immediately update bounds until the next render
+            // forcing it helps for immediate height sync back to Redux
+            if (pixiObject.updateText) pixiObject.updateText(true);
 
             // Re-calculate height if text changed
             const currentFontSize = layer.data.fontSize || 16
@@ -848,22 +895,81 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               wordWrapWidth,
               layer.data.fontFamily,
               layer.data.fontWeight,
+              layer.data.fontStyle,
               dispatch,
               layerId === editingTextLayerId
             )
           }
 
-          // Only update style properties if they changed
+          // Sync wordWrapWidth whenever layer.width changes
           const style = pixiObject.style
+          const wordWrapWidth = layer.width || 200
+          if (style.wordWrapWidth !== wordWrapWidth) {
+            style.wordWrapWidth = wordWrapWidth
+            // Force re-measure immediately
+            if (pixiObject.updateText) pixiObject.updateText(true)
+
+            // Recalculate height whenever width/wrap changes
+            calculateTextHeight(
+              layerId,
+              pixiObject.text,
+              style.fontSize || 16,
+              wordWrapWidth,
+              layer.data.fontFamily,
+              layer.data.fontWeight,
+              layer.data.fontStyle,
+              dispatch,
+              layerId === editingTextLayerId
+            )
+          }
+
           if (style.fontSize !== (layer.data.fontSize || 16)) {
             style.fontSize = layer.data.fontSize || 16
             // Recalculate height on font size change
-            calculateTextHeight(layerId, pixiObject.text, style.fontSize, layer.width || 200, layer.data.fontFamily, layer.data.fontWeight, dispatch, layerId === editingTextLayerId)
+            calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
           }
           if (style.fill !== (layer.data.color || '#000000')) style.fill = layer.data.color || '#000000'
           if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
           if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
+          if (style.fontStyle !== (layer.data.fontStyle || 'normal')) style.fontStyle = layer.data.fontStyle || 'normal'
           if (style.letterSpacing !== 0) style.letterSpacing = 0
+
+          // If the fonts loaded version changes, we MUST force a re-render of this text object
+          if (pixiObject._fontsLoadedVersion !== fontsLoadedVersion) {
+            pixiObject._fontsLoadedVersion = fontsLoadedVersion;
+
+            // [NUCLEAR REFRESH] Toggling font family forces PIXI to re-query the browser's metrics/rasterizer
+            const targetFont = layer.data?.fontFamily || 'Arial';
+
+            // Temporal switch to invalid/generic font and back triggers deep dirty flag in PIXI v8
+            style.fontFamily = 'monospace';
+            if (pixiObject.updateText) pixiObject.updateText(true);
+
+            style.fontFamily = targetFont;
+            if (pixiObject.updateText) pixiObject.updateText(true);
+
+            // Force re-measure and re-pivot immediately
+            const align = layer.data?.textAlign || 'left'
+            const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+            const currentWidth = layer.width || 200
+            const bounds = pixiObject.getLocalBounds()
+
+            pixiObject.anchor.set(anchorX, 0)
+            pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2)
+
+            // Re-calculate the Redux height so selection boxes fit
+            calculateTextHeight(
+              layerId,
+              pixiObject.text,
+              layer.data.fontSize || 16,
+              currentWidth,
+              targetFont,
+              layer.data.fontWeight,
+              layer.data.fontStyle,
+              dispatch,
+              layerId === editingTextLayerId
+            );
+          }
 
           if (style.align !== (layer.data.textAlign || 'left')) {
             style.align = layer.data.textAlign || 'left'
@@ -1089,7 +1195,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         stageContainer.removeChild(pixiObject)
 
         // Properly destroy image sprites vs other objects
-        const layer = layers[layerId]
+        const layer = layers?.[layerId]
         if (layer?.type === LAYER_TYPES.IMAGE || layer?.type === LAYER_TYPES.VIDEO) {
           const sprite = pixiObject._imageSprite || pixiObject._videoSprite || pixiObject
           if (sprite instanceof PIXI.Sprite) {
@@ -1110,7 +1216,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it
@@ -1154,22 +1260,34 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
       layerObjectsRef.current.forEach((pixiObject, layerId) => {
         if (pixiObject && !pixiObject.destroyed) {
-          // SAFETY CHECK: Ensure layers exists before accessing it
-          // This prevents the "Cannot read properties of null" error when crashing/unmounting
-          const layer = (layers && typeof layers === 'object') ? layers[layerId] : null
+          // [FIX] Wrap all destroy calls in try/catch. During navigation teardown,
+          // PIXI objects may be in a partially-destroyed state (e.g. WebGL context
+          // already lost) which causes internal PIXI errors when calling .destroy().
+          try {
+            // SAFETY CHECK: Ensure layers exists before accessing it
+            const layer = layers?.[layerId]
 
-          // CRITICAL: Updated cleanup to handle both Image and Video containers
-          if ((layer?.type === LAYER_TYPES.IMAGE || layer?.type === LAYER_TYPES.VIDEO)) {
-            const sprite = pixiObject._imageSprite || pixiObject._videoSprite || (pixiObject instanceof PIXI.Sprite ? pixiObject : null)
-            if (sprite) {
-              destroyImageSprite(sprite, layer)
+            if ((layer?.type === LAYER_TYPES.IMAGE || layer?.type === LAYER_TYPES.VIDEO)) {
+              const sprite = pixiObject._imageSprite || pixiObject._videoSprite || (pixiObject instanceof PIXI.Sprite ? pixiObject : null)
+              if (sprite) {
+                destroyImageSprite(sprite, layer)
+              }
+              if (pixiObject !== sprite && !pixiObject.destroyed) {
+                pixiObject.destroy({ children: true })
+              }
+            } else {
+              pixiObject.destroy()
             }
-            if (pixiObject !== sprite && !pixiObject.destroyed) {
-              pixiObject.destroy({ children: true })
-            }
-          } else {
-            // Standard cleanup for text/shapes
-            pixiObject.destroy()
+          } catch (e) {
+            // Ignore errors from partially-destroyed objects during navigation
+          }
+
+          // [FIX] Unregister from MotionEngine to prevent stale objects from causing crashes
+          // during subsequent project loads (reading 'x' error in MotionEngine.js).
+          try {
+            getGlobalMotionEngine().unregisterLayerObject(layerId)
+          } catch (e) {
+            // Ignore errors during teardown
           }
         }
       })

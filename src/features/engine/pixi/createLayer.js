@@ -33,6 +33,7 @@ export function createTextLayer(config) {
       fontSize: data.fontSize || 24,
       fill: data.color || '#000000',
       fontWeight: data.fontWeight || 'normal',
+      fontStyle: data.fontStyle || 'normal',
       wordWrap: true, // Enable word wrap by default
       wordWrapWidth: width || 200,
       breakWords: true,
@@ -50,6 +51,12 @@ export function createTextLayer(config) {
     text.texture.source.mipMap = 'on'
     text.texture.source.scaleMode = 'linear'
   }
+
+  // Set position and opacity
+  text.x = x
+  text.y = y
+  text.alpha = opacity
+  text._fontsLoadedVersion = -1 // Start at -1 to ensure observer triggers on load even if fonts are ready
 
   // CRITICAL FIX: Force text update BEFORE setting pivot to get accurate dimensions
   text.updateText?.(true)
@@ -430,9 +437,38 @@ export async function createImageLayer(config) {
 }
 
 
-// GLOABL VIDEO ELEMENT CACHE: Recycles HTMLVideoElements for the same URL
-// This prevents the 1s "freeze" when a video is split across scenes
+// GLOBAL VIDEO ELEMENT CACHE: Maps scene-specific segment keys -> HTMLVideoElement
+// Key format: videoUrl|sceneId|sourceStartTime|sourceEndTime
 const videoElementCache = new Map()
+const releaseTimers = new Map() // layerId -> timeoutId for deferred cleanup
+
+/**
+ * Explicitly cleanup and release a video element from the cache.
+ * Called when a video layer is destroyed from the stage.
+ * Uses a deferred timeout to avoid killing elements that are immediately reused.
+ */
+export function releaseVideoElement(layerId) {
+  // [FIX] Deferred Release: Reordering scenes often triggers a momentary "removal"
+  // If we kill the element immediately, we get a dark flash/freeze when it's re-added.
+  if (releaseTimers.has(layerId)) return
+
+  const timerId = setTimeout(() => {
+    const videoElement = videoElementCache.get(layerId)
+    if (videoElement) {
+      try {
+        videoElement.pause()
+        videoElement.src = ''
+        videoElement.load()
+      } catch (e) {
+        console.warn(`[releaseVideoElement] Error cleaning up video ${layerId}:`, e)
+      }
+      videoElementCache.delete(layerId)
+    }
+    releaseTimers.delete(layerId)
+  }, 200) // Wait 200ms before actual destruction
+
+  releaseTimers.set(layerId, timerId)
+}
 
 /**
  * Create a Pixi Container with a Video Sprite from layer config
@@ -447,21 +483,45 @@ export async function createVideoLayer(config) {
     throw new Error('Video layer requires data.url or data.src')
   }
 
+  // [ROBUST FIX] Index cache by layerId to ensure instance stability.
+  // Using layerId ensures that as long as the layer exists in the project,
+  // it keeps its dedicated video element.
+  const cacheKey = config.id
+  if (!cacheKey) {
+    throw new Error('Video layer requires a unique config.id for caching')
+  }
+
+  // [FIX] Cancel any pending release if the layer is re-requested
+  if (releaseTimers.has(cacheKey)) {
+    clearTimeout(releaseTimers.get(cacheKey))
+    releaseTimers.delete(cacheKey)
+    // console.log(`[createVideoLayer] Cancelled deferred release for layer: ${cacheKey}`)
+  }
+
   let texture
-  let videoElement = videoElementCache.get(videoUrl)
+  let videoElement = videoElementCache.get(cacheKey)
   if (videoElement) {
-    videoElement.pause() // Safeguard: ensure it's not playing when pulled from cache
+    // If the URL has changed for the same layer ID, update the source
+    const currentSrc = videoElement.src || ''
+    if (videoUrl && !currentSrc.includes(videoUrl)) {
+      console.log(`[createVideoLayer] URL changed for layer ${cacheKey}, updating src`)
+      videoElement.pause()
+      videoElement.src = videoUrl
+      videoElement.load()
+    } else {
+      videoElement.pause() // Safeguard: ensure it's not playing when pulled from cache
+    }
   }
 
   try {
     if (videoUrl.startsWith('blob:')) {
       // If NOT in cache, create and prepare
       if (!videoElement) {
-        console.log(`[createVideoLayer] Creating new video element for blob: ${videoUrl}`)
+        console.log(`[createVideoLayer] Creating new video element for ${config.sceneId}: ${videoUrl}`)
         // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
         videoElement = document.createElement('video')
         videoElement.src = videoUrl
-        videoElement.muted = true
+        videoElement.muted = data.muted !== false
         videoElement.loop = false
         videoElement.playsInline = true
         videoElement.preload = 'auto'
@@ -482,8 +542,8 @@ export async function createVideoLayer(config) {
           return originalPlay.apply(this, arguments)
         }
 
-        // Cache it immediately
-        videoElementCache.set(videoUrl, videoElement)
+        // Cache it immediately with the partitioned key
+        videoElementCache.set(cacheKey, videoElement)
 
         // WEBGL FIX: We must wait for metadata and data
         const startTime = Date.now()
@@ -524,7 +584,7 @@ export async function createVideoLayer(config) {
       texture = PIXI.Texture.from(videoElement, {
         resourceOptions: {
           autoPlay: false,
-          muted: true,
+          muted: data.muted !== false,
           loop: false,
           playsinline: true
         }
@@ -538,9 +598,10 @@ export async function createVideoLayer(config) {
         data: {
           resourceOptions: {
             autoPlay: false,
-            muted: true,
+            muted: data.muted !== false,
             loop: false,
             playsinline: true,
+            crossOrigin: 'anonymous',
           }
         }
       })

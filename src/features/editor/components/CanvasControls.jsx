@@ -1,6 +1,7 @@
 import {
   Minus, ChevronDown,
-  Settings, Activity, X, MoreVertical, Layers
+  Settings, Activity, X, MoreVertical, Layers,
+  Volume2, VolumeX
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -383,6 +384,24 @@ function CanvasControls({
           <Layers className="h-4 w-4 flex-shrink-0 opacity-70" />
           <span className="text-sm">Position</span>
         </button>
+
+        {/* Video specific controls */}
+        {selectedLayer?.type === LAYER_TYPES.VIDEO && (
+          <button
+            onClick={() => {
+              const isMuted = selectedLayer.data?.muted !== false // default true
+              handleLayerUpdate({ data: { ...selectedLayer.data, muted: !isMuted } })
+            }}
+            className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10 flex-shrink-0"
+            title={selectedLayer.data?.muted !== false ? "Unmute Video" : "Mute Video"}
+          >
+            {selectedLayer.data?.muted !== false ? (
+              <VolumeX className="h-4 w-4 opacity-70 text-red-400" />
+            ) : (
+              <Volume2 className="h-4 w-4 opacity-70" />
+            )}
+          </button>
+        )}
 
         {/* Motion Controls Group */}
         <div className="flex items-center gap-0.5 flex-shrink-0">

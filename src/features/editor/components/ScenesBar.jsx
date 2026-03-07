@@ -1,9 +1,9 @@
-import { Plus, Zap } from 'lucide-react'
+import { Plus, Zap, ChevronDown } from 'lucide-react'
 import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep } from '../../../store/slices/projectSlice'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming } from '../../../store/slices/projectSlice'
 import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 
@@ -333,118 +333,216 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
   )
 })
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId }) => {
   const containerRef = useRef(null)
+  const dispatch = useDispatch()
+  const dragRef = useRef(null)
+  const didDragRef = useRef(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const pxToMs = cardWidth > 0 ? pageDuration / cardWidth : 0
+
+  const handleStepPointerDown = useCallback((e, step, type) => {
+    e.stopPropagation()
+    e.preventDefault()
+    didDragRef.current = false
+    setIsDragging(true)
+
+    dragRef.current = {
+      stepId: step.id,
+      type,
+      startX: e.clientX,
+      origStartTime: step.startTime || 0,
+      origDuration: step.duration || (pageDuration / (steps.length || 1)),
+    }
+
+    const handlePointerMove = (moveE) => {
+      if (!dragRef.current) return
+      const dx = moveE.clientX - dragRef.current.startX
+      if (Math.abs(dx) > 2) didDragRef.current = true
+      const msDelta = dx * pxToMs
+
+      if (dragRef.current.type === 'resize-right') {
+        dispatch(updateStepTiming({
+          sceneId,
+          stepId: dragRef.current.stepId,
+          duration: Math.round(dragRef.current.origDuration + msDelta),
+        }))
+      } else if (dragRef.current.type === 'resize-left') {
+        dispatch(updateStepTiming({
+          sceneId,
+          stepId: dragRef.current.stepId,
+          startTime: Math.round(dragRef.current.origStartTime + msDelta),
+          duration: Math.round(dragRef.current.origDuration - msDelta),
+        }))
+      } else {
+        dispatch(updateStepTiming({
+          sceneId,
+          stepId: dragRef.current.stepId,
+          startTime: Math.round(dragRef.current.origStartTime + msDelta),
+        }))
+      }
+    }
+
+    const handlePointerUp = () => {
+      dragRef.current = null
+      setIsDragging(false)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+    }
+
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', handlePointerUp)
+  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch])
 
   return (
     <div
       ref={containerRef}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      }}
-      onMouseDown={(e) => {
-        e.stopPropagation()
-      }}
-      className="absolute left-0 right-0 flex items-start z-[120] overflow-hidden no-scrollbar"
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => e.stopPropagation()}
+      className="absolute left-0 right-0 z-[120]"
       style={{
-        top: '-44px', // Slightly more space for the blocks and hit area
-        height: '44px',
-        padding: '0',
+        top: '-36px',
+        height: '36px',
         pointerEvents: 'auto',
       }}
     >
-      <div className="flex items-center gap-0.5 px-0 w-full h-full relative">
-        {/* Base Block - Distinct "Anchor" Representation */}
-        <button
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onStepClick?.('base')
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onStepContextMenu?.(e, 'base')
-          }}
-          onMouseDown={(e) => {
-            e.stopPropagation()
-          }}
-          data-step-id="base"
-          title="Base / 0s"
-          className={`h-[24px] transition-all flex items-center justify-center shadow-sm border-y border-l z-20 flex-shrink-0 rounded-l-lg group cursor-pointer
-            ${(activeStepId === 'base' || !activeStepId)
-              ? 'bg-zinc-800 text-white border-zinc-700 w-5 min-w-[20px] hover:bg-zinc-750'
-              : 'bg-zinc-100 text-zinc-500 border-zinc-200 hover:bg-zinc-700 hover:text-white hover:border-zinc-500 w-4 min-w-[16px]'
-            }
-            ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_20px_rgba(168,85,247,0.8)] animate-pulse-glow' : ''}
-          `}
-        >
-          {/* Minimal Label or Icon if needed */}
-          <span className="text-[7px] font-bold">B</span>
+      {/* ── Base Block ── */}
+      <button
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onStepClick?.('base') }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onStepContextMenu?.(e, 'base') }}
+        onMouseDown={(e) => e.stopPropagation()}
+        data-step-id="base"
+        title="Base pose (0s)"
+        className={`absolute left-0 top-1/2 -translate-y-1/2 h-[24px] flex items-center justify-center rounded-[5px] transition-all duration-150 select-none group z-[110]
+          ${(activeStepId === 'base' || !activeStepId)
+            ? 'bg-zinc-700 text-white/90 shadow-sm ring-1 ring-zinc-500/40 w-[18px]'
+            : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-white/80 hover:shadow-sm w-[16px]'
+          }
+          ${activeStepId === 'base' && isMotionCaptureActive ? 'ring-2 ring-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : ''}
+        `}
+        style={{ cursor: 'pointer', pointerEvents: steps.some(s => (s.startTime || 0) < 100) ? 'none' : 'auto' }}
+      >
+        <span className="text-[7px] font-bold leading-none opacity-80">B</span>
+        <div className="hidden group-hover:block absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[9px] px-2 py-1 rounded-md shadow-lg whitespace-nowrap pointer-events-none z-50 border border-white/10">
+          Base pose
+        </div>
+      </button>
 
-          {/* Tooltip */}
-          <div className="hidden group-hover:flex absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[8px] px-1.5 py-0.5 rounded shadow-xl whitespace-nowrap pointer-events-none">
-            Base / 0s
-          </div>
-        </button>
+      {/* ── Step Blocks ── */}
+      <div className="absolute inset-0 overflow-visible">
+        {steps.map((step, i) => {
+          const isActive = activeStepId === step.id
+          const stepStart = step.startTime || 0
+          const stepDur = step.duration || (pageDuration / (steps.length || 1))
+          const leftPct = Math.min((stepStart / pageDuration) * 100, 100)
+          const rawWidthPct = (stepDur / pageDuration) * 100
+          const widthPct = Math.min(rawWidthPct, 100 - leftPct)
+          const isManual = !!step.manual
+          const blockPx = (stepDur / pageDuration) * cardWidth
 
-        {/* Dynamic Step Blocks - Proportional Width */}
-        <div className="flex-1 flex items-center gap-px h-full overflow-hidden">
-          {steps.map((step, i) => {
-            const isActive = activeStepId === step.id
-            const stepDurationMs = step.duration || (pageDuration / (steps.length || 1))
+          return (
+            <div
+              key={step.id || i}
+              data-step-id={step.id}
+              className="absolute top-1/2 -translate-y-1/2 group/step"
+              style={{
+                left: `${leftPct}%`,
+                width: `${widthPct}%`,
+                height: '24px',
+              }}
+            >
+              {/* Left resize handle */}
+              <div
+                data-resize-handle="true"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  handleStepPointerDown(e, step, 'resize-left')
+                }}
+                className="absolute left-0 top-0 bottom-0 z-30 flex items-center justify-center"
+                style={{
+                  cursor: 'ew-resize',
+                  touchAction: 'none',
+                  width: `${Math.max(8, Math.min(14, Math.floor(blockPx * 0.25)))}px`,
+                }}
+              >
+                <div className={`w-[3px] h-[10px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
+                  }`} />
+              </div>
 
-            return (
+              {/* Step body */}
               <button
-                key={step.id || i}
-                data-step-id={step.id}
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  onStepClick?.(step.id)
+                  if (!didDragRef.current) onStepClick?.(step.id)
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
                   onStepContextMenu?.(e, step.id)
                 }}
-                onMouseDown={(e) => {
-                  e.stopPropagation()
+                onPointerDown={(e) => {
+                  if (e.button !== 0 || e.target.dataset.resizeHandle) return
+                  handleStepPointerDown(e, step, 'move')
                 }}
-                className={`h-[24px] text-[8px] font-bold transition-all flex items-center justify-center shadow-sm border flex-shrink-0 first:rounded-l-none last:rounded-r-lg rounded-sm cursor-pointer
+                className={`w-full h-full text-[8px] font-semibold tracking-wider uppercase flex items-center justify-center rounded-[5px] select-none transition-all duration-100 relative overflow-hidden
                   ${isActive
-                    ? 'bg-purple-600 text-white border-purple-500 z-10 shadow-md'
-                    : 'bg-purple-50 text-purple-600 border-purple-100 hover:bg-purple-600 hover:text-white hover:border-purple-500 hover:ring-1 hover:ring-purple-400'
+                    ? 'text-white shadow-md z-10'
+                    : 'text-purple-200 hover:text-white'
                   }
-                  ${isActive && isMotionCaptureActive ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-zinc-900 shadow-[0_0_25px_rgba(168,85,247,0.9)] animate-pulse-glow' : ''}
+                  ${isActive && isMotionCaptureActive ? 'ring-[1.5px] ring-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)]' : ''}
                 `}
                 style={{
-                  width: `${(stepDurationMs / pageDuration) * 100}%`,
-                  minWidth: '22px' // Increased minimum clickable width
+                  cursor: isDragging ? 'grabbing' : 'grab',
+                  backgroundColor: isActive ? '#7c3aed' : '#3b2667',
+                  border: isActive ? '1px solid #a78bfa' : '1px solid #5b3a8c',
                 }}
               >
-                <span className="truncate px-0.5">S{i + 1}</span>
+                <span className="truncate px-1 relative z-10">
+                  S{i + 1}
+                  {isManual && <span className="text-[6px] opacity-40 ml-0.5">*</span>}
+                </span>
               </button>
-            )
-          })}
-        </div>
+
+              {/* Right resize handle */}
+              <div
+                data-resize-handle="true"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  handleStepPointerDown(e, step, 'resize-right')
+                }}
+                className="absolute right-0 top-0 bottom-0 z-30 flex items-center justify-center"
+                style={{
+                  cursor: 'ew-resize',
+                  touchAction: 'none',
+                  width: `${Math.max(8, Math.min(14, Math.floor(blockPx * 0.25)))}px`,
+                }}
+              >
+                <div className={`w-[3px] h-[10px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
+                  }`} />
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 })
 
+
+
 const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
   // Get responsive card dimensions
   const getCardDimensions = () => {
-    if (typeof window === 'undefined') return { width: 112, height: 48 }
+    if (typeof window === 'undefined') return { width: 120, height: 44 }
 
     if (window.innerWidth >= 1024) {
-      return { width: 112, height: 36 }
+      return { width: 120, height: 44 }
     } else if (window.innerWidth >= 640) {
-      return { width: 104, height: 34 }
+      return { width: 110, height: 40 }
     } else {
-      return { width: 96, height: 32 }
+      return { width: 100, height: 36 }
     }
   }
 
@@ -812,7 +910,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         boxSizing: 'border-box',
       }}
     >
-      {/* Grey placeholder at original position when dragging */}
+      {/* Ghost placeholder at original position when dragging */}
       {isDraggedItem && draggedIndex !== null && (
         <div
           className="absolute z-10 pointer-events-none"
@@ -821,15 +919,15 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             top: '0',
             width: `${width}px`,
             height: `${height}px`,
-            backgroundColor: '#9ca3af',
-            borderRadius: '8px',
-            border: '2px solid #6b7280',
-            opacity: 0.6,
+            backgroundColor: 'rgba(255,255,255,0.06)',
+            borderRadius: '6px',
+            border: '1px dashed rgba(255,255,255,0.15)',
+            opacity: 1,
           }}
         />
       )}
 
-      {/* Floating drag preview - rendered via portal */}
+      {/* Floating drag preview */}
       {isDraggedItem && draggedIndex !== null && typeof document !== 'undefined' && (
         createPortal(
           <div
@@ -853,14 +951,14 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             }}
           >
             <div
-              className="bg-white rounded-lg border-2 shadow-2xl"
+              className="rounded-md overflow-hidden"
               style={{
                 width: '100%',
                 height: `${height}px`,
-                borderColor: isActive ? '#3b82f6' : '#e5e7eb',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 10px 15px -5px rgba(0, 0, 0, 0.3)',
+                border: '2px solid rgba(139,92,246,0.7)',
+                boxShadow: '0 20px 40px -8px rgba(0,0,0,0.5), 0 0 20px rgba(139,92,246,0.3)',
                 willChange: 'transform',
-                transform: 'translateZ(0)',
+                transform: 'translateZ(0) scale(1.04)',
                 backfaceVisibility: 'hidden',
               }}
             >
@@ -870,9 +968,6 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
                 cardHeight={height}
                 backgroundColor={scene.backgroundColor}
               />
-              <div className="absolute bottom-0.5 left-0.5 sm:bottom-1 sm:left-1 md:bottom-1.5 md:left-1.5 text-black text-[8px] sm:text-[8px] md:text-[9px] font-medium z-10 pointer-events-none">
-                {formatDuration(scene.duration || 0)}
-              </div>
             </div>
           </div>,
           document.body
@@ -886,18 +981,16 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           opacity: isDraggedItem ? 0 : 1,
           transition: isDraggedItem ? 'none' : 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
           transform: shouldMoveLeft ? 'translateX(-8px)' : shouldMoveRight ? 'translateX(8px)' : 'translateX(0)',
-          overflow: 'visible', // Allow purple bars to extend above card
-          pointerEvents: 'auto', // Explicitly enable for steps interactivity
+          overflow: 'visible',
+          pointerEvents: 'auto',
         }}
         draggable={!resizeState.isResizing}
         onDragStart={(e) => {
-          // Don't allow drag if clicking on resize handle
           if (e.target.classList.contains('resize-handle') || e.target.closest('.resize-handle')) {
             e.preventDefault()
             e.stopPropagation()
             return false
           }
-          // Only proceed if not resizing and handler exists
           if (resizeState.isResizing) {
             e.preventDefault()
             return false
@@ -924,7 +1017,6 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             }
           }}
           onTouchStart={(e) => {
-            // Long press for context menu on mobile
             const touch = e.touches[0]
             const timer = setTimeout(() => {
               onContextMenu({
@@ -939,14 +1031,19 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             e.currentTarget.addEventListener('touchend', cleanup, { once: true })
             e.currentTarget.addEventListener('touchmove', cleanup, { once: true })
           }}
-          className={`bg-white rounded-lg border-2 shadow-lg transition-all duration-200 touch-manipulation flex-shrink-0 relative ${isActive ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-transparent hover:border-blue-500/60 active:border-blue-600'
-            }`}
+          className="rounded-md touch-manipulation flex-shrink-0 relative"
           style={{
             width: '100%',
             height: `${height}px`,
             pointerEvents: 'auto',
-            overflow: resizeState.isResizing ? 'visible' : 'hidden', // Allow tooltip to show when resizing
+            overflow: resizeState.isResizing ? 'visible' : 'hidden',
             cursor: isDraggingRef.current ? 'grabbing' : 'grab',
+            border: isActive ? '2px solid rgba(139,92,246,0.8)' : '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '6px',
+            boxShadow: isActive
+              ? '0 0 0 1px rgba(139,92,246,0.2), 0 2px 8px rgba(0,0,0,0.3)'
+              : '0 1px 4px rgba(0,0,0,0.2)',
+            transition: resizeState.isResizing ? 'none' : 'border-color 0.2s, box-shadow 0.2s',
           }}
         >
           <ScenePreview
@@ -956,27 +1053,41 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             backgroundColor={scene.backgroundColor}
           />
         </div>
-        <div className="absolute bottom-0.5 left-0.5 sm:bottom-1 sm:left-1 md:bottom-1.5 md:left-1.5 text-black text-[8px] sm:text-[8px] md:text-[9px] font-medium z-10 pointer-events-none">
+        {/* Duration label */}
+        <div
+          className="absolute z-10 pointer-events-none"
+          style={{
+            bottom: '2px',
+            left: '4px',
+            fontSize: '8px',
+            fontWeight: 500,
+            color: '#000000',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            letterSpacing: '0.02em',
+          }}
+        >
           {formatDuration(scene.duration || 0)}
         </div>
-        {/* Motion indicator - shows thunder icon when scene has motion steps */}
+        {/* Motion indicator */}
         {hasMotionSteps && (
           <div
-            className="absolute bottom-0.5 right-0.5 sm:bottom-1 sm:right-1 md:bottom-1.5 md:right-1.5 z-10 pointer-events-none"
+            className="absolute z-10 pointer-events-none"
+            style={{ bottom: '2px', right: '4px' }}
             title={`${motionStepCount} animation step${motionStepCount !== 1 ? 's' : ''}`}
           >
-            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-400 fill-yellow-400" />
+            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-purple-400 fill-purple-400 opacity-80" />
           </div>
         )}
-        {/* Interactive Motion Step Blocks - Replacement for simple purple bars */}
+        {/* Motion Step Blocks */}
         <MotionStepsBar
           steps={motionFlow?.steps || []}
-          activeStepId={isActive ? activeStepId : null} // Only show active step if the scene itself is active
+          activeStepId={isActive ? activeStepId : null}
           onStepClick={onStepClick}
           onStepContextMenu={onStepContextMenu}
           isMotionCaptureActive={isMotionCaptureActive}
           cardWidth={width}
           pageDuration={scene.duration ? scene.duration * 1000 : 5000}
+          sceneId={scene.id}
         />
       </div>
 
@@ -996,8 +1107,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         draggable={false}
         style={{
           cursor: 'ew-resize',
-          width: '12px',
-          left: '0px',
+          width: '10px',
+          left: '-2px',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           MozUserSelect: 'none',
@@ -1005,35 +1116,24 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           pointerEvents: 'auto',
           zIndex: 50,
         }}
-        onMouseEnter={(e) => {
-          if (!resizeState.isResizing) {
-            e.currentTarget.style.borderLeft = '2px solid rgba(59, 130, 246, 0.6)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!resizeState.isResizing) {
-            e.currentTarget.style.borderLeft = 'none'
-          }
-        }}
-        title="Drag to resize width from left"
+        title="Drag to resize"
       >
-        {resizeState.isResizing && resizeState.side === 'left' && (
-          <div
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: '-2px',
-              bottom: '-2px',
-              width: '8px',
-              borderLeft: '2px solid #3b82f6',
-              borderRadius: '6px 0 0 6px',
-              boxShadow: '-1px 0 6px rgba(59, 130, 246, 0.3)', // Softer glow
-              backgroundColor: 'rgba(59, 130, 246, 0.02)', // Minimal fill
-              zIndex: 100,
-              pointerEvents: 'none',
-            }}
-          />
-        )}
+        <div
+          style={{
+            position: 'absolute',
+            left: '2px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '3px',
+            height: '16px',
+            borderRadius: '2px',
+            backgroundColor: resizeState.isResizing && resizeState.side === 'left'
+              ? 'rgba(139,92,246,0.8)' : 'transparent',
+            transition: 'background-color 0.15s',
+            pointerEvents: 'none',
+          }}
+          className="group-hover:!bg-purple-400/50"
+        />
       </div>
 
       {/* Right resize handle */}
@@ -1052,8 +1152,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         draggable={false}
         style={{
           cursor: 'ew-resize',
-          width: '12px',
-          right: '0px',
+          width: '10px',
+          right: '-2px',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           MozUserSelect: 'none',
@@ -1061,38 +1161,27 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           pointerEvents: 'auto',
           zIndex: 50,
         }}
-        onMouseEnter={(e) => {
-          if (!resizeState.isResizing) {
-            e.currentTarget.style.borderRight = '2px solid rgba(59, 130, 246, 0.6)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!resizeState.isResizing) {
-            e.currentTarget.style.borderRight = 'none'
-          }
-        }}
-        title="Drag to resize width from right"
+        title="Drag to resize"
       >
-        {resizeState.isResizing && resizeState.side === 'right' && (
-          <div
-            style={{
-              position: 'absolute',
-              right: '-2px',
-              top: '-2px',
-              bottom: '-2px',
-              width: '8px',
-              borderRight: '2px solid #3b82f6',
-              borderRadius: '0 6px 6px 0',
-              boxShadow: '1px 0 6px rgba(59, 130, 246, 0.3)', // Softer glow
-              backgroundColor: 'rgba(59, 130, 246, 0.02)', // Minimal fill
-              zIndex: 100,
-              pointerEvents: 'none',
-            }}
-          />
-        )}
+        <div
+          style={{
+            position: 'absolute',
+            right: '2px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '3px',
+            height: '16px',
+            borderRadius: '2px',
+            backgroundColor: resizeState.isResizing && resizeState.side === 'right'
+              ? 'rgba(139,92,246,0.8)' : 'transparent',
+            transition: 'background-color 0.15s',
+            pointerEvents: 'none',
+          }}
+          className="group-hover:!bg-purple-400/50"
+        />
       </div>
 
-      {/* Duration tooltip - rendered outside container using portal */}
+      {/* Duration tooltip */}
       {
         resizeState.isResizing && resizeState.duration !== null && typeof document !== 'undefined'
           ? createPortal(
@@ -1106,23 +1195,23 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               }}
             >
               <div
-                className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+                className="text-white px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap"
                 style={{
-                  backdropFilter: 'blur(8px)',
-                  WebkitBackdropFilter: 'blur(8px)',
+                  backgroundColor: 'rgba(15,16,21,0.95)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  fontFamily: 'Inter, system-ui, sans-serif',
                 }}
               >
                 {formatDuration(resizeState.duration)}
               </div>
-              {/* Arrow pointing down to the right border */}
               <div
                 className="absolute left-1/2 top-full transform -translate-x-1/2"
                 style={{
                   width: '0',
                   height: '0',
-                  borderLeft: '5px solid transparent',
-                  borderRight: '5px solid transparent',
-                  borderTop: '5px solid rgb(39, 39, 42)',
+                  borderLeft: '4px solid transparent',
+                  borderRight: '4px solid transparent',
+                  borderTop: '4px solid rgba(15,16,21,0.95)',
                 }}
               />
             </div>,
@@ -1144,6 +1233,7 @@ const ScenesBar = React.memo(({
   currentTimeStepId = null,
   isMotionCaptureActive,
   onStepClick,
+  onStepEdit, // Explicit edit action (context menu "Update Step")
   bottomSectionHeight = null, // Dynamic height from EditorPage
   onPlay, // Optional: to resume playback after split
   onPause // Optional: to pause during split
@@ -1174,10 +1264,10 @@ const ScenesBar = React.memo(({
 
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
-    if (typeof window === 'undefined') return 112
-    if (window.innerWidth >= 1024) return 112
-    if (window.innerWidth >= 640) return 104
-    return 96
+    if (typeof window === 'undefined') return 120
+    if (window.innerWidth >= 1024) return 120
+    if (window.innerWidth >= 640) return 110
+    return 100
   }, [])
 
   // Calculate duration from width (default width = 5 seconds)
@@ -1195,10 +1285,10 @@ const ScenesBar = React.memo(({
   }, [getDefaultCardWidth])
 
   const getDefaultCardHeight = useCallback(() => {
-    if (typeof window === 'undefined') return 48
-    if (window.innerWidth >= 1024) return 36
-    if (window.innerWidth >= 640) return 34
-    return 32
+    if (typeof window === 'undefined') return 44
+    if (window.innerWidth >= 1024) return 44
+    if (window.innerWidth >= 640) return 40
+    return 36
   }, [])
 
   // Utility Formatters
@@ -1916,68 +2006,76 @@ const ScenesBar = React.memo(({
         backgroundColor: '#0f1015',
       }}
     >
-      {/* Timeline Ruler - Overlay on top, scrolls with content */}
+      {/* Timeline Ruler */}
       <div
         className="absolute top-0 left-0 z-20"
         ref={timelineRef}
         style={{
-          height: '12px', // Very compact height to strictly clear blocks below
+          height: '16px',
           pointerEvents: 'none',
           width: `${totalCardsWidth + 32}px`,
           minWidth: '100%',
         }}
       >
-        {/* Time markers - vertical lines with numbers, positioned accurately based on actual timeline */}
         {majorMarkers.map((marker) => (
           <div
             key={`major-${marker.time}`}
-            className="absolute top-0 flex items-center justify-center h-full"
+            className="absolute top-0 flex flex-col items-center"
             style={{
               left: `${16 + marker.position}px`,
-              transform: 'translateX(-50%)'
+              transform: 'translateX(-50%)',
+              height: '100%',
             }}
           >
-            {/* Time label - Takes the point position directly */}
             <div
-              className="text-white text-[10px] sm:text-[11px] font-bold whitespace-nowrap opacity-90 drop-shadow-sm"
+              className="whitespace-nowrap"
               style={{
-                color: '#ffffff',
-                fontFamily: 'Inter, sans-serif',
+                color: 'rgba(255,255,255,0.45)',
+                fontSize: '9px',
+                fontWeight: 600,
+                fontFamily: 'Inter, system-ui, sans-serif',
+                letterSpacing: '0.03em',
+                lineHeight: '12px',
               }}
             >
               {marker.label}
             </div>
+            <div style={{
+              width: '1px',
+              height: '4px',
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              marginTop: '1px',
+            }} />
           </div>
         ))}
 
         {minorMarkers.map((marker) => (
           <div
             key={`minor-${marker.time}`}
-            className="absolute bottom-1" // Align to baseline area
+            className="absolute"
             style={{
               left: `${16 + marker.position}px`,
               transform: 'translateX(-50%)',
+              bottom: '0',
               width: '1px',
               height: '3px',
-              backgroundColor: 'rgba(255, 255, 255, 0.25)'
+              backgroundColor: 'rgba(255,255,255,0.1)'
             }}
           />
         ))}
 
-        {/* Clickable overlay for seeking - only when not dragging or hovering playhead */}
-        {/* Clickable overlay for seeking - only when not dragging or hovering playhead */}
+        {/* Seek overlay */}
         {!isDraggingPlayhead && !isHoveringPlayhead && (
           <div
             className="absolute top-0 left-0 right-0 cursor-pointer"
             onClick={handleTimelineClick}
             onTouchStart={(e) => {
-              // Extract clientX from touch for mobile seeking
               const touch = e.touches[0]
               handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
             }}
             style={{
               zIndex: 10,
-              height: '30px', // Slightly larger hit area for mobile
+              height: '30px',
               pointerEvents: 'auto',
               touchAction: 'none',
             }}
@@ -1985,21 +2083,19 @@ const ScenesBar = React.memo(({
         )}
       </div>
 
-      {/* Playhead - Draggable area (outside pointer-events-none container) */}
-      {/* Position playhead based on actual card widths in pixels */}
+      {/* Playhead */}
       <div
         ref={playheadElementRef}
         className="absolute top-0 bottom-0"
         style={{
-          left: `${16 + playheadPosition}px`, // Initial position, updated by useEffect during playback
+          left: `${16 + playheadPosition}px`,
           transform: 'translateX(-50%)',
           cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
           zIndex: 50,
-          width: '12px',
+          width: '16px',
           userSelect: 'none',
           touchAction: 'none',
           pointerEvents: 'auto',
-          // Optimize for smooth animation
           willChange: 'transform, left',
         }}
         onMouseDown={(e) => {
@@ -2007,14 +2103,12 @@ const ScenesBar = React.memo(({
           e.stopPropagation()
           setIsDraggingPlayhead(true)
 
-          // Initialize tooltip with current time
           setPlayheadTooltipTime(currentTime)
           if (timelineRef.current) {
             const timelineRect = timelineRef.current.getBoundingClientRect()
-            // Position tooltip above the caret tip (caret is -1.5rem = -6px, plus caret height ~10px = -16px from top)
             setPlayheadTooltipPosition({
-              top: timelineRect.top - 16 - 28, // 16px for caret tip, 28px for tooltip height + spacing
-              left: timelineRect.left + 16 + playheadPosition, // 16px padding + playhead position
+              top: timelineRect.top - 16 - 28,
+              left: timelineRect.left + 16 + playheadPosition,
             })
           }
         }}
@@ -2025,7 +2119,6 @@ const ScenesBar = React.memo(({
           setIsHoveringPlayhead(false)
         }}
         onTouchStart={(e) => {
-          // mobile dragging support
           e.preventDefault()
           e.stopPropagation()
           setIsDraggingPlayhead(true)
@@ -2040,32 +2133,38 @@ const ScenesBar = React.memo(({
           }
         }}
       >
-        {/* Playhead line - extends all the way down */}
+        {/* Playhead diamond/triangle marker at top */}
+        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: '-2px' }}>
+          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+            <path d="M5 8L0.5 0H9.5L5 8Z" fill="#fff" />
+          </svg>
+        </div>
+
+        {/* Playhead line */}
         <div
-          className="absolute top-0 bottom-0 left-1/2 transform -translate-x-1/2 transition-all pointer-events-none"
+          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
           style={{
             backgroundColor: '#ffffff',
-            width: isHoveringPlayhead || isDraggingPlayhead ? '4px' : '3px',
+            width: isDraggingPlayhead ? '2.5px' : '2px',
+            top: '6px',
+            borderRadius: '1px',
+            boxShadow: isDraggingPlayhead ? '0 0 6px rgba(255,255,255,0.4)' : '0 0 3px rgba(255,255,255,0.2)',
+            transition: 'width 0.1s, box-shadow 0.1s',
           }}
         />
-
       </div>
 
-      {/* Scene Cards Section - Horizontally scrollable */}
+      {/* Scene Cards */}
       <div
         ref={cardsContainerRef}
         className="flex flex-shrink-0 relative z-10 items-center"
         onContextMenu={(e) => {
-          // Pre-emptively stop browser context menu on the whole bar section
           e.preventDefault()
         }}
         style={{
           gap: 0,
-          // Dynamically increase marginTop based on bottomSectionHeight
-          // Base height is approx 180px, base marginTop is 42px.
-          // [FIX] Increase base marginTop from 42px to 60px to prevent timeline overlap with steps
-          marginTop: bottomSectionHeight ? `${Math.max(60, 60 + (bottomSectionHeight - 170))}px` : '60px',
-          paddingBottom: '8px',
+          marginTop: bottomSectionHeight ? `${Math.max(56, 56 + (bottomSectionHeight - 170))}px` : '56px',
+          paddingBottom: '6px',
           minWidth: 'max-content',
           width: 'max-content',
         }}
@@ -2147,27 +2246,38 @@ const ScenesBar = React.memo(({
                   onContextMenu={(e) => handleContextMenu(e, scene.id)}
                 />
               </div>
-              {/* Transition button - always visible at bottom of gap between cards */}
+              {/* Transition button */}
               {index < scenes.length - 1 && (
                 <div
                   key={`gap-button-${index}`}
                   className="absolute z-40"
                   style={{
                     left: `${buttonPosition}px`,
-                    bottom: '2px',
+                    bottom: '0px',
                     transform: 'translateX(-50%)',
                     pointerEvents: 'auto',
                   }}
                 >
                   <button
-                    className="w-5 h-5 rounded-full bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 border border-zinc-600 flex items-center justify-center shadow-lg transition-all duration-150"
+                    className="w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150"
+                    style={{
+                      backgroundColor: '#2a2a30',
+                      border: '1px solid #3f3f46',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#3f3f46'
+                      e.currentTarget.style.borderColor = '#52525b'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#2a2a30'
+                      e.currentTarget.style.borderColor = '#3f3f46'
+                    }}
                     onClick={(e) => {
                       e.stopPropagation()
-                      // TODO: Add transition functionality
                     }}
                     title="Add transition"
                   >
-                    <Plus className="h-3 w-3 text-zinc-300" strokeWidth={2.5} />
+                    <Plus className="h-3 w-3 text-zinc-400" strokeWidth={2} />
                   </button>
                 </div>
               )}
@@ -2217,31 +2327,37 @@ const ScenesBar = React.memo(({
           />
         )}
 
-        {/* Add Scene Button - aligned with cards */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            handleAddScene()
-          }}
-          onMouseDown={(e) => {
-            e.stopPropagation()
-          }}
-          className="text-zinc-400 hover:text-white active:text-white hover:bg-zinc-800 active:bg-zinc-700 rounded-lg border border-zinc-700 flex-shrink-0 transition-colors flex items-center justify-center touch-manipulation relative ml-1"
-          title="Add Scene"
-          style={{
-            cursor: 'pointer',
-            zIndex: 30,
-            position: 'relative',
-            pointerEvents: 'auto',
-            width: `${getDefaultCardWidth()}px`,
-            height: `${getDefaultCardHeight()}px`,
-          }}
-        >
-          <Plus className="h-4 w-4 pointer-events-none" />
-        </button>
+        {/* Add Scene Button */}
+        <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleAddScene()
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+            }}
+            className="flex items-center justify-center touch-manipulation rounded-md transition-all duration-150"
+            title="Add Scene"
+            style={{
+              cursor: 'pointer',
+              zIndex: 30,
+              position: 'relative',
+              pointerEvents: 'auto',
+              width: '36px',
+              height: `${getDefaultCardHeight()}px`,
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              border: '1px dashed rgba(255,255,255,0.12)',
+              borderRadius: '6px',
+            }}
+          >
+            <Plus className="h-4 w-4 text-white/30 hover:text-white/60 pointer-events-none" strokeWidth={1.5} />
+          </button>
+
+        </div>
       </div>
 
-      {/* Playhead time tooltip - rendered outside container using portal */}
+      {/* Playhead time tooltip */}
       {isDraggingPlayhead && playheadTooltipTime !== null && typeof document !== 'undefined'
         ? createPortal(
           <div
@@ -2254,23 +2370,23 @@ const ScenesBar = React.memo(({
             }}
           >
             <div
-              className="bg-zinc-900 text-white px-2.5 py-1.5 rounded-md shadow-xl border border-zinc-700 text-xs font-semibold whitespace-nowrap"
+              className="text-white px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap"
               style={{
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
+                backgroundColor: 'rgba(15,16,21,0.95)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                fontFamily: 'Inter, system-ui, sans-serif',
               }}
             >
               {formatTime(playheadTooltipTime)}
             </div>
-            {/* Arrow pointing down to the playhead */}
             <div
               className="absolute left-1/2 top-full transform -translate-x-1/2"
               style={{
                 width: '0',
                 height: '0',
-                borderLeft: '5px solid transparent',
-                borderRight: '5px solid transparent',
-                borderTop: '5px solid rgb(39, 39, 42)',
+                borderLeft: '4px solid transparent',
+                borderRight: '4px solid transparent',
+                borderTop: '4px solid rgba(15,16,21,0.95)',
               }}
             />
           </div>,
@@ -2281,28 +2397,31 @@ const ScenesBar = React.memo(({
       {/* Context Menu for Scene Cards */}
       {contextMenu.visible && createPortal(
         <div
-          className="fixed border border-white/10 rounded-xl shadow-2xl py-1 z-[10005] min-w-[180px] overflow-hidden"
+          className="fixed rounded-lg shadow-2xl py-1 z-[10005] min-w-[170px] overflow-hidden"
           style={{
             top: `${contextMenu.y}px`,
             left: `${contextMenu.x}px`,
-            backgroundColor: 'rgba(24, 24, 27, 0.75)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            backgroundColor: 'rgba(20, 20, 24, 0.92)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+            className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5"
+            style={{ width: 'calc(100% - 4px)' }}
             onClick={handleCutPage}
           >
-            <Plus className="h-3.5 w-3.5 rotate-45 text-purple-400" /> {/* Use Plus as a cross for Split symbol */}
-            <span>Split Page at Playhead</span>
+            <Plus className="h-3.5 w-3.5 rotate-45 text-purple-400" />
+            <span>Split at Playhead</span>
           </button>
 
-          <div className="h-px bg-white/5 my-1 mx-2" />
+          <div className="h-px bg-white/5 my-0.5 mx-2.5" />
 
           <button
-            className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300 flex items-center gap-2 transition-colors mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+            className="w-full text-left px-3.5 py-2 text-[11px] text-red-400/90 hover:bg-red-500/15 hover:text-red-300 flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5"
+            style={{ width: 'calc(100% - 4px)' }}
             onClick={() => {
               dispatch(deleteScene(contextMenu.sceneId))
               setContextMenu(prev => ({ ...prev, visible: false }))
@@ -2317,21 +2436,23 @@ const ScenesBar = React.memo(({
       {/* Context Menu for Motion Steps */}
       {stepContextMenu.visible && createPortal(
         <div
-          className="fixed border border-white/10 rounded-xl shadow-2xl py-1 z-[10005] min-w-[180px] overflow-hidden"
+          className="fixed rounded-lg shadow-2xl py-1 z-[10005] min-w-[170px] overflow-hidden"
           style={{
             top: `${stepContextMenu.y}px`,
             left: `${stepContextMenu.x}px`,
-            backgroundColor: 'rgba(24, 24, 27, 0.75)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            backgroundColor: 'rgba(20, 20, 24, 0.92)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           {stepContextMenu.stepId !== 'base' && (
             <button
-              className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+              className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+              style={{ width: 'calc(100% - 4px)' }}
               onClick={() => {
-                if (onStepClick) onStepClick(stepContextMenu.stepId)
+                if (onStepEdit) onStepEdit(stepContextMenu.stepId)
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
@@ -2342,7 +2463,8 @@ const ScenesBar = React.memo(({
 
           {stepContextMenu.stepId === 'base' && (
             <button
-              className="w-full text-left px-4 py-2.5 text-xs text-white/90 hover:text-white hover:bg-white/10 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+              className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+              style={{ width: 'calc(100% - 4px)' }}
               onClick={() => {
                 if (onStepClick) onStepClick('base')
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
@@ -2355,9 +2477,10 @@ const ScenesBar = React.memo(({
 
           {stepContextMenu.stepId !== 'base' && (
             <>
-              <div className="h-px bg-white/5 my-1 mx-2" />
+              <div className="h-px bg-white/5 my-0.5 mx-2.5" />
               <button
-                className="w-full text-left px-4 py-2.5 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300 flex items-center gap-2 transition-colors font-medium mx-1 my-0.5 rounded-lg w-[calc(100%-8px)]"
+                className="w-full text-left px-3.5 py-2 text-[11px] text-red-400/90 hover:bg-red-500/15 hover:text-red-300 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+                style={{ width: 'calc(100% - 4px)' }}
                 onClick={() => {
                   dispatch(deleteSceneMotionStep({
                     sceneId: stepContextMenu.sceneId,

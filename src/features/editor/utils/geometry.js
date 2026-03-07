@@ -86,9 +86,54 @@ function resolveDimension(layerDim, fallback) {
 }
 
 /**
+ * Single source of truth for layer dimensions used by both rendering and selection/interaction.
+ * For media layers (image/video), returns the visible cropped area dimensions, reading from
+ * the PIXI object when it has reactive crop (GSAP) or stored crop (Redux sync), then Redux.
+ * This keeps selection box, hover outline, and handles aligned with the visual layer.
+ *
+ * @param {Object} layer - Redux layer data
+ * @param {Object} layerObject - PIXI DisplayObject (may be container with _imageSprite/_videoSprite)
+ * @param {Object} [motionCaptureMode=null] - Current motion capture state
+ * @returns {{ width: number, height: number } | null}
+ */
+export function getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode = null) {
+  if (!layer || !layerObject || layerObject.destroyed) return null
+
+  const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layer.id)
+  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+
+  if (isMedia) {
+    const w =
+      capturedLayer?.cropWidth ??
+      (layerObject._hasReactiveCropProperties
+        ? layerObject.cropWidth
+        : (layerObject._storedCropWidth ?? layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
+    const h =
+      capturedLayer?.cropHeight ??
+      (layerObject._hasReactiveCropProperties
+        ? layerObject.cropHeight
+        : (layerObject._storedCropHeight ?? layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
+    return { width: w, height: h }
+  }
+
+  if (layer.type === 'text') {
+    return {
+      width: capturedLayer?.width ?? layer.width ?? DEFAULT_DIMENSION,
+      height: capturedLayer?.height ?? layer.height ?? DEFAULT_DIMENSION / 5
+    }
+  }
+
+  return {
+    width: capturedLayer?.width ?? layer.width ?? DEFAULT_DIMENSION,
+    height: capturedLayer?.height ?? layer.height ?? DEFAULT_DIMENSION
+  }
+}
+
+/**
  * Calculates the world bounds of a layer, accounting for position, scale, rotation, and anchors.
  * Supports motion capture mode to use tracked dimensions/positions when active.
- * 
+ * Uses getEffectiveLayerDimensions for a single source of truth with selection/interaction.
+ *
  * @param {Object} layer - Redux layer data
  * @param {Object} layerObject - PIXI DisplayObject
  * @param {Object} [motionCaptureMode=null] - Current motion capture state
@@ -99,25 +144,13 @@ export function getLayerWorldBounds(layer, layerObject, motionCaptureMode = null
 
   const displayObject = getSafeDisplayObject(layerObject)
 
-  // Prioritize captured dimensions if in motion capture mode
   const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layer.id)
-
   const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
 
-  // CROP SYSTEM: Prioritize visible (cropped) area for media layers
-  // We check the PIXI object for "reactive" properties which represent the real-time visual state (animated or captured)
-  let width, height
-
-  if (isMedia) {
-    width = capturedLayer?.cropWidth ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropWidth : (layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
-    height = capturedLayer?.cropHeight ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropHeight : (layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
-  } else if (layer.type === 'text' || displayObject instanceof PIXI.Text) {
-    width = capturedLayer?.width ?? layer.width ?? DEFAULT_DIMENSION
-    height = capturedLayer?.height ?? layer.height ?? (DEFAULT_DIMENSION / 5)
-  } else {
-    width = capturedLayer?.width ?? layer.width ?? DEFAULT_DIMENSION
-    height = capturedLayer?.height ?? layer.height ?? DEFAULT_DIMENSION
-  }
+  const dims = getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode)
+  if (!dims) return null
+  let width = dims.width
+  let height = dims.height
 
   const { anchorX, anchorY } = resolveAnchors(layer, displayObject)
 
@@ -223,7 +256,6 @@ export function getRotatedAABB(x, y, width, height, scaleX, scaleY, rotation, an
     top: minY,
     bottom: maxY,
     width: maxX - minX,
-    width: maxX - minX,
     height: maxY - minY,
     centerX: x,
     centerY: y,
@@ -318,16 +350,10 @@ export function getLayerMetrics(layer, layerObject, motionCaptureMode = null) {
   const x = capturedLayer?.currentPosition?.x ?? (displayObject?.x !== undefined ? displayObject.x : (layer.x || 0))
   const y = capturedLayer?.currentPosition?.y ?? (displayObject?.y !== undefined ? displayObject.y : (layer.y || 0))
 
-  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
-  let width, height
-
-  if (isMedia) {
-    width = capturedLayer?.cropWidth ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropWidth : (layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
-    height = capturedLayer?.cropHeight ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropHeight : (layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
-  } else {
-    width = resolveDimension(capturedLayer?.width ?? layer.width, displayObject?.width)
-    height = resolveDimension(capturedLayer?.height ?? layer.height, displayObject?.height)
-  }
+  const dims = getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode)
+  if (!dims) return null
+  const width = resolveDimension(dims.width, displayObject?.width)
+  const height = resolveDimension(dims.height, displayObject?.height)
 
   const { anchorX, anchorY } = resolveAnchors(layer, displayObject)
 

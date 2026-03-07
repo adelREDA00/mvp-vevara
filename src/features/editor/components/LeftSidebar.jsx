@@ -7,12 +7,16 @@ import {
   Wand2,
   FolderOpen,
   Grid2x2,
+  User,
+  Image,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 export const SIDEBAR_ITEMS = [
   { icon: Grid3x3, label: 'Elements' },
   { icon: Type, label: 'Text' },
   { icon: Upload, label: 'Uploads' },
+  { icon: Image, label: 'Images' },
   { icon: Wand2, label: 'Tools' },
 ]
 

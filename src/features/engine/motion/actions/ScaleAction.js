@@ -68,7 +68,6 @@ export class ScaleAction {
 
                 const currentRes = textObj.resolution || 1
                 if (currentRes < targetResolution) {
-                    console.log(`[ScaleAction] Adaptive resolution boost: ${Number(currentRes).toFixed(1)} -> ${Number(targetResolution).toFixed(1)} (target scale: ${Number(maxTargetScale).toFixed(2)}x)`)
                     textObj.resolution = targetResolution
                     textObj.updateText?.(true)
                 }

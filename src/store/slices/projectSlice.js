@@ -1,16 +1,64 @@
-import { createSlice, createSelector } from '@reduxjs/toolkit'
+import { createSlice, createSelector, createAsyncThunk } from '@reduxjs/toolkit'
 import { uid } from '../../utils/ids'
 import { setSelectedLayer, selectSelectedLayerId } from './selectionSlice'
+import api from '../../api/client'
 
 const generateId = uid
 
+export const saveProject = createAsyncThunk(
+  'project/save',
+  async (args, { getState, rejectWithValue }) => {
+    try {
+      const state = getState().project
+      const thumbnail = args?.thumbnail || null
+
+      const projectPayload = {
+        name: state.projectName,
+        data: {
+          scenes: state.scenes,
+          layers: state.layers,
+          sceneMotionFlows: state.sceneMotionFlows,
+          aspectRatio: state.aspectRatio || '16:9'
+        },
+        thumbnail,
+      }
+
+      let response
+      if (state.projectId) {
+        // Update existing project
+        response = await api.put(`/projects/${state.projectId}`, projectPayload)
+      } else {
+        // Create new project
+        response = await api.post('/projects', projectPayload)
+      }
+      return response
+    } catch (error) {
+      return rejectWithValue(error.message)
+    }
+  }
+)
+
+export const fetchProjectById = createAsyncThunk(
+  'project/fetchById',
+  async (id, { rejectWithValue }) => {
+    try {
+      const data = await api.get(`/projects/${id}`)
+      return data
+    } catch (error) {
+      return rejectWithValue(error.message)
+    }
+  }
+)
+
 const initialState = {
+  projectId: null,
   scenes: [],
   layers: {},
   // Scene-based motion flows: { [sceneId]: { steps: [{ id, layerActions: { [layerId]: [...actions] } }], pageDuration } }
   sceneMotionFlows: {},
   currentSceneId: null, // Unified scene selection 
   projectName: 'Untitled Project',
+  aspectRatio: '16:9',
   lastPastedLayerIds: [], // Track last pasted layer IDs for selection
   motionEditingMode: {
     isActive: false,
@@ -19,9 +67,92 @@ const initialState = {
     // Map of layerId -> initial transform captured at edit start
     initialTransforms: {},
   },
+  status: 'idle',
+  error: null,
+  isSaving: false,
+  saveError: null,
 }
 
-// Sync all action durations within a scene's motion flow based on scene duration and step count
+// Resolve step layout: auto steps get default duration, manual steps are preserved.
+// Overflow is absorbed by trimming rightmost manual step(s). Steps are placed contiguously.
+const resolveStepLayout = (steps, sceneDurationMs) => {
+  if (steps.length === 0) return
+  const MIN_DURATION = 200 // ms — minimum to prevent micro-durations
+  const defaultDuration = Math.max(MIN_DURATION, Math.round(sceneDurationMs / steps.length))
+
+  // Step 1: Set auto step durations to default, keep manual durations
+  steps.forEach(step => {
+    if (!step.manual) {
+      step.duration = defaultDuration
+    }
+    // Enforce minimum for all steps
+    if (!step.duration || step.duration < MIN_DURATION) step.duration = MIN_DURATION
+  })
+
+  // Step 2: Resolve overflow — trim from rightmost manual steps
+  let total = steps.reduce((sum, s) => sum + s.duration, 0)
+  if (total > sceneDurationMs) {
+    let overflow = total - sceneDurationMs
+    for (let i = steps.length - 1; i >= 0 && overflow > 0; i--) {
+      if (steps[i].manual) {
+        const maxTrim = steps[i].duration - MIN_DURATION
+        if (maxTrim > 0) {
+          const trim = Math.min(maxTrim, overflow)
+          steps[i].duration = Math.round(steps[i].duration - trim)
+          overflow -= trim
+        }
+      }
+    }
+    // Emergency fallback: if still overflowing, trim auto steps from right
+    if (overflow > 0) {
+      for (let i = steps.length - 1; i >= 0 && overflow > 0; i--) {
+        const maxTrim = steps[i].duration - MIN_DURATION
+        if (maxTrim > 0) {
+          const trim = Math.min(maxTrim, overflow)
+          steps[i].duration = Math.round(steps[i].duration - trim)
+          overflow -= trim
+        }
+      }
+    }
+  }
+
+  // Step 3: Position steps — preserve manually set positions (with gaps)
+  const hasManualPositions = steps.some(s => s.manual && s.startTime != null)
+
+  if (hasManualPositions) {
+    let cursor = 0
+    steps.forEach(step => {
+      if (step.manual && step.startTime != null) {
+        // Manual step: keep its user-set position (preserves gaps)
+        cursor = step.startTime + step.duration
+      } else {
+        // Auto step: place after the last positioned step
+        step.startTime = Math.round(cursor)
+        cursor += step.duration
+      }
+    })
+  } else {
+    // All auto: contiguous placement (default behavior)
+    let cursor = 0
+    steps.forEach(step => {
+      step.startTime = Math.round(cursor)
+      cursor += step.duration
+    })
+  }
+
+  // Step 4: Boundary clamp — no step may extend past the scene duration.
+  // This prevents tweens from bleeding into the next scene (which breaks playback).
+  steps.forEach(step => {
+    if (step.startTime >= sceneDurationMs) {
+      step.startTime = Math.max(0, sceneDurationMs - MIN_DURATION)
+      step.duration = MIN_DURATION
+    } else if (step.startTime + step.duration > sceneDurationMs) {
+      step.duration = Math.max(MIN_DURATION, sceneDurationMs - step.startTime)
+    }
+  })
+}
+
+// Sync motion flow: resolve layout and sync action durations.
 const syncSceneMotionDuration = (state, sceneId) => {
   const scene = state.scenes.find(s => s.id === sceneId)
   if (!scene) return
@@ -29,27 +160,26 @@ const syncSceneMotionDuration = (state, sceneId) => {
   const motionFlow = state.sceneMotionFlows[sceneId]
   if (!motionFlow) return
 
-  const sceneDurationMs = (scene.duration || 5) * 1000
+  const sceneDurationMs = Math.round((scene.duration || 5) * 1000)
   motionFlow.pageDuration = sceneDurationMs
 
   const steps = motionFlow.steps || []
   if (steps.length === 0) return
 
-  const stepDurationMs = sceneDurationMs / steps.length
+  // Resolve layout: auto steps reflow, manual steps preserved
+  resolveStepLayout(steps, sceneDurationMs)
 
+  // Sync action durations to each step's effective duration
   steps.forEach(step => {
-    step.duration = stepDurationMs
     if (!step.layerActions) step.layerActions = {}
-    // Iterate over each layer's actions within this step
+    const effectiveDuration = step.duration
     Object.keys(step.layerActions).forEach(layerId => {
       const actions = step.layerActions[layerId]
       if (!Array.isArray(actions)) return
       actions.forEach(action => {
         if (!action.values) action.values = {}
-        // Force sync duration to action values
-        action.values.duration = stepDurationMs
-        // Also sync it to action level for legacy engine support if needed  
-        action.duration = stepDurationMs
+        action.values.duration = effectiveDuration
+        action.duration = effectiveDuration
       })
     })
   })
@@ -84,14 +214,37 @@ const projectSlice = createSlice({
   name: 'project',
   initialState,
   reducers: {
+    // [FIX] Reset project state to initial values for clean editor re-entry
+    resetProject: () => initialState,
+    setProjectName: (state, action) => {
+      state.projectName = action.payload
+    },
+    setAspectRatio: (state, action) => {
+      state.aspectRatio = action.payload
+    },
     // Scene actions
     addScene: (state, action) => {
       const sceneId = action.payload.id || generateId()
       const backgroundColor = action.payload.backgroundColor !== undefined ? action.payload.backgroundColor : 0xffffff
 
-      // Use provided width/height or default to 1920x1080
-      const width = action.payload.width || 1920
-      const height = action.payload.height || 1080
+      // Use provided width/height or default to standard resolutions based on aspectRatio
+      let width = action.payload.width
+      let height = action.payload.height
+
+      if (!width || !height) {
+        // Fallback to standard resolutions based on current aspectRatio
+        if (state.aspectRatio === '9:16') {
+          width = 1080
+          height = 1920
+        } else if (state.aspectRatio === '1:1') {
+          width = 1080
+          height = 1080
+        } else {
+          // Default to 16:9 or custom
+          width = 1920
+          height = 1080
+        }
+      }
 
       // Create background layer for this scene
       const backgroundLayer = {
@@ -172,8 +325,40 @@ const projectSlice = createSlice({
 
         Object.assign(scene, updates)
 
-        // If duration updated, sync the scene's motion flow
+        // [FIX] Sync video sourceEndTime if duration was updated
+        // This ensures stretching a scene also stretches the video playback boundary
         if (updates.duration !== undefined) {
+          scene.layers.forEach(layerId => {
+            const layer = state.layers[layerId]
+            if (layer && layer.type === 'video' && layer.data) {
+              // Only update if sourceEndTime was already set (e.g. by split or manual trim)
+              if (layer.data.sourceEndTime !== undefined) {
+                const start = layer.data.sourceStartTime || 0
+                layer.data.sourceEndTime = start + updates.duration
+              }
+            }
+          })
+
+          // Scale manual step positions AND durations proportionally when scene duration changes
+          const motionFlow = state.sceneMotionFlows[id]
+          if (motionFlow && motionFlow.steps && motionFlow.steps.length > 0) {
+            const oldPageDuration = motionFlow.pageDuration || 5000
+            const newPageDuration = Math.round(updates.duration * 1000)
+            if (oldPageDuration > 0 && newPageDuration !== oldPageDuration) {
+              const ratio = newPageDuration / oldPageDuration
+              motionFlow.steps.forEach(step => {
+                if (step.manual) {
+                  if (step.startTime != null) {
+                    step.startTime = Math.round(step.startTime * ratio)
+                  }
+                  if (step.duration != null) {
+                    step.duration = Math.round(Math.max(200, step.duration * ratio))
+                  }
+                }
+              })
+            }
+          }
+
           syncSceneMotionDuration(state, id)
         }
       }
@@ -233,96 +418,132 @@ const projectSlice = createSlice({
       // Ensure split time is within bounds
       const rawSplitTime = Math.max(0.1, Math.min(splitTime, originalDuration - 0.1))
       // [FIX] Frame Snapping: Round to nearest 60fps boundary to avoid repeated frames in videos
-      // This ensures that video offsets and scene durations are perfectly frame-aligned.
       const safeSplitTime = Math.round(rawSplitTime * 60) / 60
 
       const newSceneId = generateId()
       const newSceneDuration = originalDuration - safeSplitTime
 
       // 1. Create the new scene (second segment)
+      // We start by cloning the original scene metadata
       const newScene = {
         ...originalScene,
         id: newSceneId,
         name: `${originalScene.name} (Part 2)`,
         duration: newSceneDuration,
-        layers: [], // Will be populated below
+        layers: [], // Will be populated with new layer IDs
       }
 
       // 2. Adjust original scene duration (first segment)
       originalScene.duration = safeSplitTime
 
-      // 3. Handle layers
+      // 3. Handle layers - Deep duplication to ensure independent segments
+      // We map originalLayerId -> newLayerId for motion flow duplication below
+      const layerIdMap = {}
+
       originalScene.layers.forEach(layerId => {
         const layer = state.layers[layerId]
         if (!layer) return
 
-        // Duplicate the layer for the new scene
         const newLayerId = generateId()
+        layerIdMap[layerId] = newLayerId
+
+        // Deep duplicate the layer
         const newLayer = JSON.parse(JSON.stringify(layer))
         newLayer.id = newLayerId
         newLayer.sceneId = newSceneId
-        newLayer.sourceId = layer.sourceId || layer.id // Preservation for seamless transitions
+
+        // [SCENE CUT FIX] Preserve sourceId to enable seamless PIXI object adoption
+        // This ensures that video elements are reused across the split transition,
+        // preventing the "freeze" or "flicker" caused by layer reconstruction.
+        newLayer.sourceId = layer.sourceId || layer.id
 
         // Split logic for video layers
-        if (layer.type === 'video') {
-          // Original layer (first segment): ends at split point
+        if (layer.type === 'video' && layer.data) {
           const originalSourceStart = layer.data.sourceStartTime || 0
+
+          // Original layer (left segment): ends at split point
           layer.data.sourceEndTime = originalSourceStart + safeSplitTime
 
-          // New layer (second segment): starts at split point
+          // New layer (right segment): starts at split point
           newLayer.data.sourceStartTime = originalSourceStart + safeSplitTime
-          // sourceEndTime remains the same as original's original sourceEndTime
+          // sourceEndTime remains as duplicated (original's original sourceEndTime)
         }
 
         state.layers[newLayerId] = newLayer
         newScene.layers.push(newLayerId)
       })
 
-      // 4. Split motion flows
+      // 4. Handle Motion Flows — Both scenes get a FULL COPY of all steps.
+      // We do NOT split or filter steps. syncSceneMotionDuration will recalculate
+      // step durations relative to each scene's new duration.
       const originalFlow = state.sceneMotionFlows[sceneId]
-      if (originalFlow && originalFlow.steps) {
-        const steps = originalFlow.steps
-        const numSteps = steps.length
-        const totalDurationBeforeSplit = safeSplitTime + newSceneDuration
-        const stepDuration = totalDurationBeforeSplit / Math.max(1, numSteps)
+      const cutPointMs = Math.round(safeSplitTime * 1000)
+      const newSceneDurationMs = Math.round(newSceneDuration * 1000)
 
-        // Find split point in terms of steps
-        const splitStepIndex = Math.floor(safeSplitTime / stepDuration)
+      if (originalFlow) {
+        const originalPageDuration = originalFlow.pageDuration || (scene.duration * 1000)
+        // Deep copy all steps for the right scene
+        const newFlowSteps = JSON.parse(JSON.stringify(originalFlow.steps || []))
 
-        // Split the steps array
-        const firstHalfSteps = steps.slice(0, Math.max(1, splitStepIndex))
-        const secondHalfSteps = steps.slice(Math.max(1, splitStepIndex))
-
-        // Update original scene's steps
-        originalFlow.steps = firstHalfSteps
-        originalFlow.pageDuration = safeSplitTime * 1000
-
-        // Ensure both flows are definitely initialized with correct metadata
-        if (!state.sceneMotionFlows[sceneId]) {
-          state.sceneMotionFlows[sceneId] = { steps: [], pageDuration: safeSplitTime * 1000 }
-        }
-        if (!state.sceneMotionFlows[newSceneId]) {
-          state.sceneMotionFlows[newSceneId] = { steps: [], pageDuration: newSceneDuration * 1000 }
+        // Helper: proportionally scale step timing to a new scene duration
+        const scaleStepTiming = (step, targetDurationMs) => {
+          if (originalPageDuration <= 0) return
+          const ratio = targetDurationMs / originalPageDuration
+          if (step.startTime != null) {
+            step.startTime = Math.round(step.startTime * ratio)
+          }
+          if (step.duration != null) {
+            step.duration = Math.max(200, Math.round(step.duration * ratio))
+          }
+          // Keep step.manual flag intact — preserves manual state
         }
 
-        // Sync both to be safe
-        syncSceneMotionDuration(state, sceneId)
-        syncSceneMotionDuration(state, newSceneId)
-      } else {
-        // [FIX] CRITICAL: Even if there was no original flow, we MUST initialize 
-        // motion flows for both scenes to ensure interactions (selection/hover/steps) work.
-        state.sceneMotionFlows[sceneId] = {
-          steps: [],
-          pageDuration: safeSplitTime * 1000
-        }
+        // Remap layer IDs in the new flow's steps to match the duplicated layers
+        newFlowSteps.forEach(step => {
+          if (step.layerActions) {
+            const newLayerActions = {}
+            Object.keys(step.layerActions).forEach(oldLayerId => {
+              const newLayerId = layerIdMap[oldLayerId]
+              if (newLayerId) {
+                newLayerActions[newLayerId] = step.layerActions[oldLayerId].map(action => ({
+                  ...action,
+                  id: generateId()
+                }))
+              }
+            })
+            step.layerActions = newLayerActions
+          }
+          // Give each step a new ID for the right scene
+          step.id = generateId()
+          // Scale timing proportionally to the right scene's duration
+          scaleStepTiming(step, newSceneDurationMs)
+        })
+
+        // Assign the duplicated flow to the right scene
         state.sceneMotionFlows[newSceneId] = {
-          steps: [],
-          pageDuration: newSceneDuration * 1000
+          steps: newFlowSteps,
+          pageDuration: newSceneDurationMs
         }
+
+        // Update left scene's pageDuration and scale its steps proportionally
+        originalFlow.pageDuration = cutPointMs
+          ; (originalFlow.steps || []).forEach(step => {
+            scaleStepTiming(step, cutPointMs)
+          })
+      } else {
+        // Ensure both flows are initialized even if empty
+        state.sceneMotionFlows[sceneId] = { steps: [], pageDuration: cutPointMs }
+        state.sceneMotionFlows[newSceneId] = { steps: [], pageDuration: newSceneDurationMs }
       }
 
-      // 5. Insert the new scene into the project
+      // 5. Insert the new scene into the project array
+      // This MUST happen before syncSceneMotionDuration so the new scene is discoverable by ID
       state.scenes.splice(sceneIndex + 1, 0, newScene)
+
+      // 6. Sync both for absolute duration/step alignment
+      syncSceneMotionDuration(state, sceneId)
+      syncSceneMotionDuration(state, newSceneId)
+
       state.currentSceneId = newSceneId
     },
 
@@ -580,11 +801,10 @@ const projectSlice = createSlice({
       }
     },
 
-    // Add a new step to a scene's motion flow
     addSceneMotionStep: (state, action) => {
       const { sceneId, stepId } = action.payload
       const scene = state.scenes.find(s => s.id === sceneId)
-      const pageDuration = scene ? scene.duration * 1000 : 6000
+      const pageDuration = scene ? Math.round(scene.duration * 1000) : 6000
 
       if (!state.sceneMotionFlows[sceneId]) {
         state.sceneMotionFlows[sceneId] = {
@@ -593,12 +813,14 @@ const projectSlice = createSlice({
         }
       }
 
-      const newStep = {
+      // New step is always auto (manual: false or undefined)
+      state.sceneMotionFlows[sceneId].steps.push({
         id: stepId || generateId(),
-        layerActions: {}, // { [layerId]: [{ id, type, values }] }
-      }
+        layerActions: {},
+        // No manual flag → auto step, resolveStepLayout assigns duration
+      })
 
-      state.sceneMotionFlows[sceneId].steps.push(newStep)
+      // resolveStepLayout recalculates: auto steps get default, manual preserved, overflow trimmed
       syncSceneMotionDuration(state, sceneId)
     },
 
@@ -615,7 +837,7 @@ const projectSlice = createSlice({
       }
     },
 
-    // Delete a motion step from a scene
+    // Delete a motion step — resolveStepLayout recalculates auto steps, manual preserved
     deleteSceneMotionStep: (state, action) => {
       const { sceneId, stepId } = action.payload
       const motionFlow = state.sceneMotionFlows[sceneId]
@@ -625,7 +847,7 @@ const projectSlice = createSlice({
       }
     },
 
-    // Reorder motion steps within a scene
+    // Reorder motion steps — clears manual flags and redistributes equally
     reorderSceneMotionSteps: (state, action) => {
       const { sceneId, fromIndex, toIndex } = action.payload
       const motionFlow = state.sceneMotionFlows[sceneId]
@@ -635,12 +857,73 @@ const projectSlice = createSlice({
           fromIndex < motionFlow.steps.length && toIndex < motionFlow.steps.length) {
           const [moved] = motionFlow.steps.splice(fromIndex, 1)
           motionFlow.steps.splice(toIndex, 0, moved)
+          // After reorder, clear all manual flags so resolveStepLayout redistributes equally
+          motionFlow.steps.forEach(s => {
+            delete s.manual
+            delete s.startTime
+            delete s.duration
+          })
           syncSceneMotionDuration(state, sceneId)
         }
       }
     },
 
+    // Update step timing manually (move, resize left, resize right)
+    // Marks the edited step as manual = true (protected from auto-redistribution).
+    // Enforces: no overlap, order preserved, scene boundaries respected.
+    // Does NOT trigger fast preview or move the timeline marker.
+    updateStepTiming: (state, action) => {
+      const { sceneId, stepId, startTime, duration } = action.payload
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (!motionFlow) return
+
+      const steps = motionFlow.steps
+      const stepIndex = steps.findIndex(s => s.id === stepId)
+      if (stepIndex === -1) return
+
+      const step = steps[stepIndex]
+      const sceneDuration = motionFlow.pageDuration || 5000
+      const MIN_DURATION = 200 // ms — synced with resolveStepLayout
+
+      // Mark this step as manually edited
+      step.manual = true
+
+      // Determine neighbor boundaries
+      const prevEnd = stepIndex > 0
+        ? (steps[stepIndex - 1].startTime || 0) + (steps[stepIndex - 1].duration || 0)
+        : 0
+      const nextStart = stepIndex < steps.length - 1
+        ? (steps[stepIndex + 1].startTime || sceneDuration)
+        : sceneDuration
+
+      let newStartTime = startTime !== undefined ? startTime : step.startTime
+      let newDuration = duration !== undefined ? duration : step.duration
+
+      // Clamp startTime: cannot go before prevEnd, cannot push past nextStart
+      newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+
+      // Clamp duration: minimum 50ms, cannot exceed space to nextStart
+      newDuration = Math.max(MIN_DURATION, Math.min(newDuration, nextStart - newStartTime))
+
+      step.startTime = Math.round(newStartTime)
+      step.duration = Math.round(newDuration)
+
+      // Sync action durations
+      if (step.layerActions) {
+        Object.keys(step.layerActions).forEach(layerId => {
+          const actions = step.layerActions[layerId]
+          if (!Array.isArray(actions)) return
+          actions.forEach(a => {
+            if (!a.values) a.values = {}
+            a.values.duration = step.duration
+            a.duration = step.duration
+          })
+        })
+      }
+    },
+
     // Add action to a layer within a motion step
+    // Does NOT trigger layout reflow — only syncs the new action's duration to the step
     addSceneMotionAction: (state, action) => {
       const { sceneId, stepId, layerId, actionId, type, values = {} } = action.payload
       const motionFlow = state.sceneMotionFlows[sceneId]
@@ -650,21 +933,24 @@ const projectSlice = createSlice({
           if (!step.layerActions[layerId]) {
             step.layerActions[layerId] = []
           }
+          const stepDuration = step.duration || 1000
           const newAction = {
             id: actionId || generateId(),
             type,
+            duration: stepDuration,
             values: {
               ...values,
+              duration: stepDuration,
               controlPoints: values.controlPoints ? JSON.parse(JSON.stringify(values.controlPoints)) : undefined
             },
           }
           step.layerActions[layerId].push(newAction)
-          syncSceneMotionDuration(state, sceneId)
         }
       }
     },
 
     // Update a motion action for a specific layer within a step
+    // Does NOT trigger layout reflow — only updates action data in place
     updateSceneMotionAction: (state, action) => {
       const { sceneId, stepId, layerId, actionId, ...updates } = action.payload
       const motionFlow = state.sceneMotionFlows[sceneId]
@@ -673,18 +959,18 @@ const projectSlice = createSlice({
         if (step && step.layerActions[layerId]) {
           const motionAction = step.layerActions[layerId].find(a => a.id === actionId)
           if (motionAction) {
-            // CRITICAL: Merge values to preserve synced duration and easing if not provided
+            // Merge values to preserve synced duration and easing if not provided
             if (updates.values) {
               updates.values = {
                 ...(motionAction.values || {}),
                 ...updates.values,
+                duration: step.duration || motionAction.values?.duration,
                 controlPoints: updates.values.controlPoints !== undefined
                   ? JSON.parse(JSON.stringify(updates.values.controlPoints))
                   : (motionAction.values?.controlPoints ? JSON.parse(JSON.stringify(motionAction.values.controlPoints)) : undefined)
               }
             }
             Object.assign(motionAction, updates)
-            syncSceneMotionDuration(state, sceneId)
           }
         }
       }
@@ -1298,9 +1584,47 @@ const projectSlice = createSlice({
       }
     },
   },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchProjectById.pending, (state) => {
+        state.status = 'loading'
+        state.error = null
+      })
+      .addCase(fetchProjectById.fulfilled, (state, action) => {
+        const { _id, name, data } = action.payload
+        state.projectId = _id
+        state.projectName = name
+        state.scenes = data.scenes || []
+        state.layers = data.layers || {}
+        state.sceneMotionFlows = data.sceneMotionFlows || {}
+        state.aspectRatio = data.aspectRatio || '16:9' // Restore aspect ratio
+        state.currentSceneId = state.scenes.length > 0 ? state.scenes[0].id : null
+        state.status = 'succeeded'
+      })
+      .addCase(fetchProjectById.rejected, (state, action) => {
+        state.status = 'failed'
+        state.error = action.payload || 'Failed to load project'
+      })
+      // Save project
+      .addCase(saveProject.pending, (state) => {
+        state.isSaving = true
+        state.saveError = null
+      })
+      .addCase(saveProject.fulfilled, (state, action) => {
+        state.projectId = action.payload._id
+        state.isSaving = false
+        state.saveError = null
+      })
+      .addCase(saveProject.rejected, (state, action) => {
+        state.isSaving = false
+        state.saveError = action.payload || 'Failed to save project'
+      })
+  }
 })
 
 export const {
+  resetProject,
+  setProjectName,
   addScene,
   updateScene,
   deleteScene,
@@ -1328,9 +1652,9 @@ export const {
   deleteSceneMotionAction,
   duplicateSceneMotionStep,
   clearSceneMotionFlow,
+  updateStepTiming,
   startMotionEditing,
   stopMotionEditing,
-  setProjectName,
   initializeProject,
   restoreProjectState,
   copyLayers,
@@ -1340,9 +1664,18 @@ export const {
   setBackgroundImage,
   removeBackgroundImage,
   detachBackgroundImage,
+  setAspectRatio,
 } = projectSlice.actions
 
+// Stable default references to prevent unnecessary rerenders
+export const EMPTY_MOTION_FLOW = { steps: [], pageDuration: 6000 }
+export const EMPTY_OBJECT = {}
+export const EMPTY_ARRAY = []
+
 // Selectors
+export const selectProjectId = (state) => state.project.projectId
+export const selectProjectName = (state) => state.project.projectName
+export const selectAspectRatio = (state) => state.project.aspectRatio
 export const selectScenes = (state) => state.project.scenes
 export const selectCurrentSceneId = (state) => state.project.currentSceneId
 export const selectCurrentScene = (state) => {
@@ -1351,12 +1684,17 @@ export const selectCurrentScene = (state) => {
 }
 // Returns all layers in the project
 export const selectLayers = (state) => state.project.layers
-// Returns the layers for a given scene
-export const selectLayersByScene = (state, sceneId) => {
-  const scene = state.project.scenes.find(s => s.id === sceneId)
-  if (!scene) return []
-  return scene.layers.map(layerId => state.project.layers[layerId]).filter(Boolean)
-}
+// Returns the layers for a given scene (memoized for performance)
+export const selectLayersByScene = createSelector(
+  [
+    (state, sceneId) => state.project.scenes.find(s => s.id === sceneId),
+    (state) => state.project.layers
+  ],
+  (scene, layers) => {
+    if (!scene) return EMPTY_ARRAY
+    return scene.layers.map(layerId => layers[layerId]).filter(Boolean)
+  }
+)
 // Returns the currently selected layer (memoized for performance)
 export const selectSelectedLayer = createSelector(
   [selectSelectedLayerId, selectLayers],
@@ -1372,7 +1710,7 @@ export const selectSceneMotionFlows = (state) => state.project.sceneMotionFlows
 
 // Returns the motion flow for a given scene
 export const selectSceneMotionFlow = (state, sceneId) => {
-  return state.project.sceneMotionFlows[sceneId] || { steps: [], pageDuration: 6000 }
+  return state.project.sceneMotionFlows[sceneId] || EMPTY_MOTION_FLOW
 }
 
 // Returns the motion step for a given scene and step ID
@@ -1382,12 +1720,14 @@ export const selectSceneMotionStep = (state, sceneId, stepId) => {
   return motionFlow.steps.find(step => step.id === stepId) || null
 }
 
-// Returns all layer actions for a specific step
-export const selectStepLayerActions = (state, sceneId, stepId) => {
-  const step = selectSceneMotionStep(state, sceneId, stepId)
-  if (!step) return {}
-  return step.layerActions || {}
-}
+// Returns all layer actions for a specific step (memoized for performance)
+export const selectStepLayerActions = createSelector(
+  [(state, sceneId, stepId) => selectSceneMotionStep(state, sceneId, stepId)],
+  (step) => {
+    if (!step) return EMPTY_OBJECT
+    return step.layerActions || EMPTY_OBJECT
+  }
+)
 
 /**
  * Selector to calculate the global timeline info for all scenes.
@@ -1423,12 +1763,14 @@ export const selectTotalProjectDuration = createSelector(
   }
 )
 
-// Returns actions for a specific layer within a step
-export const selectLayerActionsInStep = (state, sceneId, stepId, layerId) => {
-  const step = selectSceneMotionStep(state, sceneId, stepId)
-  if (!step || !step.layerActions) return []
-  return step.layerActions[layerId] || []
-}
+// Returns actions for a specific layer within a step (memoized for performance)
+export const selectLayerActionsInStep = createSelector(
+  [(state, sceneId, stepId, layerId) => selectSceneMotionStep(state, sceneId, stepId), (state, sceneId, stepId, layerId) => layerId],
+  (step, layerId) => {
+    if (!step || !step.layerActions) return EMPTY_ARRAY
+    return step.layerActions[layerId] || EMPTY_ARRAY
+  }
+)
 
 // Thunk action to add a layer and automatically select it
 export const addLayerAndSelect = (layerConfig) => (dispatch, getState) => {
@@ -1457,5 +1799,11 @@ export const selectMotionEditingSceneId = (state) => state.project.motionEditing
 export const selectMotionEditingStepId = (state) => state.project.motionEditingMode.stepId
 // Returns the initial transforms of all layers captured at edit start
 export const selectMotionEditingInitialTransforms = (state) => state.project.motionEditingMode.initialTransforms
+
+// Save/Load status selectors
+export const selectIsSaving = (state) => state.project.isSaving
+export const selectSaveError = (state) => state.project.saveError
+export const selectProjectStatus = (state) => state.project.status
+export const selectProjectError = (state) => state.project.error
 
 export default projectSlice.reducer

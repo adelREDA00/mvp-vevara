@@ -19,8 +19,6 @@ function ToolsPanel({ onClose }) {
       description: 'Upscale and improve image clarity',
       isComingSoon: true
     },
-    { icon: Palette, name: 'Color Picker', description: 'Extract colors from images' },
-    { icon: Layers, name: 'Layer Manager', description: 'Organize and manage layers' },
   ]
 
   const filteredTools = tools.filter(tool =>

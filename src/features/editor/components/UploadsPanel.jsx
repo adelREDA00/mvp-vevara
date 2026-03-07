@@ -1,23 +1,27 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film } from 'lucide-react'
+import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2 } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import {
   selectUploadedImagesArray,
   selectIsUploading,
+  selectIsFetching,
   selectUploadError,
+  selectFetchError,
   selectImageCount,
   selectVideoCount,
   selectTotalCount,
   uploadFile,
-  deleteUploadedImage,
+  deleteUpload,
   clearUploadError,
-  initializeUploadsFromStorage,
+  clearFetchError,
+  fetchUploads,
   selectLastUploadedId,
+  selectHasLargeUpload,
 } from '../../../store/slices/uploadsSlice'
 
 // NEW: Added imports for creating image layers on the canvas
-import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
+import { addLayerAndSelect, selectCurrentSceneId, selectLayers } from '../../../store/slices/projectSlice'
 
 // Utility functions
 const formatFileSize = (bytes) => {
@@ -33,22 +37,52 @@ const formatDimensions = (width, height) => {
   return `${width} × ${height}`
 }
 
+// Skeleton shimmer component for loading state
+function SkeletonGrid() {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div
+          key={i}
+          className="aspect-square rounded-xl bg-white/5 overflow-hidden relative"
+        >
+          <div
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]"
+            style={{ transform: 'translateX(-100%)', animation: `shimmer 1.5s ease-in-out infinite ${i * 200}ms` }}
+          />
+        </div>
+      ))}
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 function UploadsPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState('All')
   const [width, setWidth] = useState(320)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const fileInputRef = useRef(null)
 
   const uploadedImages = useSelector(selectUploadedImagesArray)
   const isUploading = useSelector(selectIsUploading)
+  const isFetching = useSelector(selectIsFetching)
   const uploadError = useSelector(selectUploadError)
+  const fetchError = useSelector(selectFetchError)
   const lastUploadedId = useSelector(selectLastUploadedId)
   const totalCount = useSelector(selectTotalCount)
   const imageCount = useSelector(selectImageCount)
   const videoCount = useSelector(selectVideoCount)
+  const hasLargeUpload = useSelector(selectHasLargeUpload)
   const currentSceneId = useSelector(selectCurrentSceneId)
+  const allLayers = useSelector(selectLayers)
 
   const getCurrentAspectRatio = () => aspectRatio || '16:9'
 
@@ -71,7 +105,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const { worldWidth, worldHeight } = getWorldDimensions()
 
   useEffect(() => {
-    dispatch(initializeUploadsFromStorage())
+    dispatch(fetchUploads())
   }, [dispatch])
 
   const filteredImages = useMemo(() => {
@@ -99,8 +133,34 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const handleDragOver = (e) => { e.preventDefault(); setIsDragOver(true) }
   const handleDragLeave = (e) => { e.preventDefault(); setIsDragOver(false) }
   const handleDrop = (e) => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files) }
-  const handleDeleteImage = (imageId, e) => { e.stopPropagation(); dispatch(deleteUploadedImage(imageId)) }
+
+  // Check if an asset is used by any layer in the project
+  const isAssetInUse = useCallback((assetUrl) => {
+    return Object.values(allLayers).some(layer => {
+      const layerUrl = layer.data?.url || layer.data?.src
+      return layerUrl && (layerUrl === assetUrl || layerUrl.endsWith(assetUrl?.split('/').pop()))
+    })
+  }, [allLayers])
+
+  const handleDeleteImage = useCallback((imageId, e) => {
+    e.stopPropagation()
+    const image = uploadedImages.find(img => img.id === imageId)
+    if (!image) return
+
+    const inUse = isAssetInUse(image.url)
+    if (inUse) {
+      const confirmed = window.confirm(
+        'This asset is currently used in your project. Deleting it will cause affected layers to show a placeholder. Continue?'
+      )
+      if (!confirmed) return
+    }
+
+    setDeletingId(imageId)
+    dispatch(deleteUpload(imageId)).finally(() => setDeletingId(null))
+  }, [dispatch, uploadedImages, isAssetInUse])
+
   const handleClearError = () => dispatch(clearUploadError())
+  const handleRetryFetch = () => { dispatch(clearFetchError()); dispatch(fetchUploads()) }
 
   const handleAddImageLayer = useCallback((image) => {
     if (!currentSceneId) return
@@ -116,10 +176,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
       finalHeight *= scale
     }
 
+    const isVideo = image.metadata?.type?.startsWith('video/')
+
     dispatch(addLayerAndSelect({
       sceneId: currentSceneId,
-      type: image.metadata?.type?.startsWith('video/') ? 'video' : 'image',
-      name: image.name || (image.metadata?.type?.startsWith('video/') ? 'Video' : 'Image'),
+      type: isVideo ? 'video' : 'image',
+      name: image.name || (isVideo ? 'Video' : 'Image'),
       x: worldWidth / 2,
       y: worldHeight / 2,
       width: finalWidth,
@@ -128,7 +190,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
       anchorY: 0.5,
       mediaWidth: imageWidth,
       mediaHeight: imageHeight,
-      data: { url: image.url, src: image.url, ...image.metadata }
+      data: {
+        url: image.url,
+        src: image.url,
+        ...(image.metadata || {}),
+        // For videos, include duration for proper scene timing
+        ...(isVideo && image.metadata?.duration ? { duration: image.metadata.duration } : {}),
+      }
     }))
   }, [dispatch, currentSceneId, worldWidth, worldHeight])
 
@@ -172,17 +240,44 @@ function UploadsPanel({ onClose, aspectRatio }) {
           disabled={isUploading}
           className="w-full mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2"
         >
-          <UploadIcon className="h-4 w-4" />
-          {isUploading ? 'Uploading...' : 'Upload Files'}
+          {isUploading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <UploadIcon className="h-4 w-4" />
+              Upload Files
+            </>
+          )}
         </button>
         <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" onChange={handleFileInputChange} className="hidden" />
       </div>
 
+      {/* Upload Error */}
       {uploadError && (
         <div className="mx-4 mt-2 p-3 bg-red-900/50 border border-red-700 rounded-lg flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 text-red-400" />
+          <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
           <p className="text-red-300 text-sm flex-1">{uploadError}</p>
-          <button onClick={handleClearError} className="text-red-400"><X className="h-4 w-4" /></button>
+          <button onClick={handleClearError} className="text-red-400 flex-shrink-0"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
+      {/* Fetch Error */}
+      {fetchError && (
+        <div className="mx-4 mt-2 p-3 bg-red-900/50 border border-red-700 rounded-lg flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
+            <p className="text-red-300 text-sm flex-1">{fetchError}</p>
+          </div>
+          <button
+            onClick={handleRetryFetch}
+            className="self-end flex items-center gap-1.5 text-xs text-red-300 hover:text-white px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-md transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Retry
+          </button>
         </div>
       )}
 
@@ -208,30 +303,47 @@ function UploadsPanel({ onClose, aspectRatio }) {
         {isUploading && (
           <div className="mb-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-purple-400">Processing media...</span>
+              <span className="text-xs font-medium text-purple-400">
+                {hasLargeUpload ? 'Uploading large files...' : 'Processing media...'}
+              </span>
               <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
             </div>
-            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+            <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mb-2">
               <div className="h-full bg-purple-500 animate-[progress_2s_ease-in-out_infinite]" style={{ width: '40%' }} />
             </div>
+            {hasLargeUpload && (
+              <p className="text-[10px] text-zinc-400 leading-tight">
+                This file is large and may take some time. Please don't leave the page.
+              </p>
+            )}
           </div>
         )}
 
-        {filteredImages.length === 0 ? (
+        {/* Loading skeleton */}
+        {isFetching && !uploadedImages.length ? (
+          <SkeletonGrid />
+        ) : filteredImages.length === 0 ? (
           <div className="h-48 flex flex-col items-center justify-center text-center opacity-40">
-            <p className="text-sm">No media found</p>
+            <UploadIcon className="h-8 w-8 mb-3 text-zinc-600" />
+            <p className="text-sm text-zinc-500">
+              {searchQuery ? 'No matching media' : 'Drop files here or click Upload'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {filteredImages.map((image) => {
               const isProcessing = isUploading && image.id === lastUploadedId
+              const isDeleting = deletingId === image.id
               const isVideo = image.metadata?.type?.startsWith('video/')
 
               return (
                 <div
                   key={image.id}
-                  className={`group relative aspect-square rounded-xl overflow-hidden bg-white/5 border border-white/10 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-purple-500/50'}`}
-                  onClick={() => !isProcessing && handleAddImageLayer(image)}
+                  className={`group relative aspect-square rounded-xl overflow-hidden bg-white/5 border border-white/10 transition-all ${isProcessing || isDeleting
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'cursor-pointer hover:border-purple-500/50'
+                    }`}
+                  onClick={() => !isProcessing && !isDeleting && handleAddImageLayer(image)}
                 >
                   {isVideo ? (
                     <div className="w-full h-full relative">
@@ -243,10 +355,23 @@ function UploadsPanel({ onClose, aspectRatio }) {
                       <div className="absolute top-2 right-2 px-1 py-0.5 rounded bg-black/60 text-[8px] font-bold text-white tracking-widest">VIDEO</div>
                     </div>
                   ) : (
-                    <img src={image.url} className="w-full h-full object-cover" alt="" />
+                    <img
+                      src={image.url}
+                      className="w-full h-full object-cover"
+                      alt=""
+                      onError={(e) => {
+                        // Show placeholder for broken images
+                        e.target.onerror = null
+                        e.target.style.display = 'none'
+                        e.target.parentElement.classList.add('flex', 'items-center', 'justify-center')
+                        const icon = document.createElement('div')
+                        icon.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-white/20"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
+                        e.target.parentElement.appendChild(icon)
+                      }}
+                    />
                   )}
 
-                  {!isProcessing && (
+                  {!isProcessing && !isDeleting && (
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <button
                         onClick={(e) => handleDeleteImage(image.id, e)}
@@ -254,6 +379,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
+                    </div>
+                  )}
+
+                  {isDeleting && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <Loader2 className="h-5 w-5 text-white animate-spin" />
                     </div>
                   )}
                 </div>

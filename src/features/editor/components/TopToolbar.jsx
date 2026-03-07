@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useSelector } from 'react-redux'
+import { Link } from 'react-router-dom'
 import {
   Share2,
   Download,
@@ -7,6 +9,8 @@ import {
   Maximize2,
   ChevronDown,
   Layers,
+  Shapes,
+  User,
 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 
@@ -16,13 +20,16 @@ function TopToolbar({
   onExport,
   onPreview,
   onProjectNameChange,
+  onSave,
+  isSaving,
   lastSaved = null,
   onCanvasSizeChange,
+  onToggleSidebar,
+  onNavigate,
 }) {
+  const { isAuthenticated, user } = useSelector((state) => state.auth)
   const [isEditingName, setIsEditingName] = useState(false)
   const [editedName, setEditedName] = useState(projectName)
-
-
 
   const handleNameSubmit = () => {
     setIsEditingName(false)
@@ -30,7 +37,6 @@ function TopToolbar({
       onProjectNameChange(editedName)
     }
   }
-
 
   return (
     <div className="relative z-50">
@@ -44,22 +50,32 @@ function TopToolbar({
           borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
         }}
       >
-        {/* Left Section: Logo, File and Resize buttons with dropdowns */}
+        {/* Left Section: Logo (desktop only), Save, Resize */}
         <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-          {/* App Logo */}
-          <div className="flex items-center justify-center h-7 w-7 md:h-8 md:w-8 flex-shrink-0">
+          {/* App Logo - Desktop Only */}
+          <Link to="/" className="hidden lg:flex items-center justify-center h-7 w-7 md:h-8 md:w-8 flex-shrink-0 hover:opacity-80 transition-opacity">
             <img
               src="/logo.svg"
               alt="App Logo"
               className="h-full w-full object-contain"
             />
-          </div>
+          </Link>
 
+          {/* Save Button */}
+          <button
+            onClick={onSave}
+            disabled={isSaving}
+            className="text-white hover:bg-white/10 active:bg-white/20 h-8 px-2.5 sm:px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-semibold border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
+            title="Save Project"
+          >
+            <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <span className="xs:inline">{isSaving ? 'Saving...' : 'Save'}</span>
+          </button>
 
           {/* Resize Button with Dropdown */}
           <DropdownMenu
             trigger={
-              <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5">
+              <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-2.5 sm:px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5">
                 <Maximize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">Resize</span>
                 <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={1.5} />
@@ -97,42 +113,37 @@ function TopToolbar({
                   setIsEditingName(false)
                 }
               }}
-              className="bg-transparent text-white text-center font-normal outline-none max-w-[140px] sm:max-w-xs md:max-w-md text-[11px] sm:text-xs md:text-sm truncate border-none placeholder:text-white/80"
+              className="bg-transparent text-white text-center font-normal outline-none max-w-[100px] sm:max-w-xs md:max-w-md text-[11px] sm:text-xs md:text-sm truncate border-none placeholder:text-white/80"
               placeholder="Untitled"
             />
           </div>
         </div>
 
-        {/* Right Section: Share, Export, Preview, Chat */}
-        <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
-          {/* Mobile Menu Toggle - Visible only on mobile/tablet */}
+        {/* Right Section: User (Circle), Export, Sidebar Toggle (Mobile) */}
+        <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
+          {/* [FIX] Use <a> instead of <Link> to force a full page navigation.
+              This ensures the WebGL context and ALL PIXI global GPU state is
+              completely released by the browser before loading the dashboard.
+              Same approach used by Canva for project isolation. */}
           <button
-            onClick={() => onPreview && onPreview()} // Use a prop to signify menu toggle if needed, or I'll just update EditorPage to handle it
-            className="lg:hidden text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation border border-white/5"
-            title="Menu"
-            id="mobile-menu-button"
+            onClick={() => onNavigate && onNavigate(isAuthenticated ? "/dashboard" : "/login")}
+            className="h-8 w-8 rounded-full bg-[#1a1b23] hover:bg-[#25262e] active:bg-[#2a2b33] flex items-center justify-center transition-all border border-white/10 overflow-hidden flex-shrink-0"
+            title={isAuthenticated ? "Dashboard" : "Login"}
           >
-            <Layers className="h-4.5 w-4.5" strokeWidth={1.5} />
+            {isAuthenticated && user?.email ? (
+              <span className="text-white text-[11px] font-bold uppercase tracking-tight">
+                {user.email.substring(0, 2)}
+              </span>
+            ) : (
+              <User className="h-4 w-4 text-white" strokeWidth={1.5} />
+            )}
           </button>
-
-          {/* Share Button */}
-          <button
-            onClick={onShare}
-            className="hidden xs:flex text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-3 rounded-lg transition-all items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5"
-            title="Share"
-          >
-            <Share2 className="h-3.5 w-3.5" strokeWidth={1.5} />
-            <span className="hidden sm:inline">Share</span>
-          </button>
-
-
-
 
           {/* Export Button with Resolution Dropdown */}
           <DropdownMenu
             trigger={
               <button
-                className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-8 px-3 text-[11px] rounded-lg transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
+                className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-8 px-2.5 sm:px-3 text-[11px] rounded-lg transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
                 title="Export"
               >
                 <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -158,14 +169,15 @@ function TopToolbar({
             </DropdownMenuItem>
           </DropdownMenu>
 
+          {/* Mobile Panel Toggle - Always ends right on mobile */}
+          <button
+            onClick={onToggleSidebar}
+            className="lg:hidden bg-[#000]/20 text-white hover:bg-[#000]/30 active:bg-[#000]/40 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation border border-white/10 shadow-sm"
+            title="Open Sidebar"
+          >
+            <Shapes className="h-4 w-4" strokeWidth={1.5} />
+          </button>
         </div>
-      </div>
-
-      {/* Status Text - Under Header Right */}
-      <div className="absolute top-14 right-3 md:right-4 text-xs text-gray-500" style={{
-        borderTop: '1px solid rgba(255, 255, 255, 0.1)'
-      }}>
-        {/* Status text will be displayed here */}
       </div>
     </div>
   )

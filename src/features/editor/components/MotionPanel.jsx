@@ -86,7 +86,6 @@ function MotionPanel({
   const layers = useSelector(selectLayers)
 
   // Get motion flow data for the current scene (not per-layer anymore)
-  // Use stable DEFAULT_MOTION_FLOW reference when no scene is active
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
   )

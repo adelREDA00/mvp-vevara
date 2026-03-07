@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import * as PIXI from 'pixi.js'
 import { createApp } from '../../engine/pixi/createApp'
 
 
@@ -32,7 +33,7 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         })
 
         if (!isMounted) {
-          result.app.destroy({ children: true, texture: true })
+          result.app.destroy({ removeView: true })
           return
         }
 
@@ -69,20 +70,38 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
       isMounted = false
       if (appRef.current?.app) {
         const { app } = appRef.current
+        // [FIX] Signal to the webglcontextlost handler that this is an intentional
+        // destruction. Without this flag, the handler calls preventDefault() which
+        // tells the browser to hold onto GPU resources — starving the new context.
+        app._isBeingDestroyed = true
+        // [FIX] Stop the ticker FIRST to prevent in-flight render calls from
+        // drawing on a destroyed WebGL context (causes GL_INVALID_OPERATION)
+        if (app.ticker) app.ticker.stop()
         if (containerRef.current && app.canvas && containerRef.current.contains(app.canvas)) {
           containerRef.current.removeChild(app.canvas)
         }
-        // [FIX] Safety check before destroy
         if (app.renderer && !app.destroyed) {
-          app.destroy({ children: true, texture: true })
+          app.destroy({ removeView: true })
         }
         appRef.current = null
       } else if (pendingApp) {
         // [FIX] Safety check for pending app
         if (pendingApp.renderer && !pendingApp.destroyed) {
-          pendingApp.destroy({ children: true, texture: true })
+          pendingApp.destroy({ removeView: true })
         }
       }
+      // [FIX] Deep Cleanup: Clear global PIXI Assets cache to prevent memory leaks 
+      // when repeatedly switching between Dashboard and Editor.
+      try {
+        PIXI.Assets.unloadAll()
+        // Also clear the internal cache to ensure fresh loads next time
+        if (PIXI.Assets.cache) {
+          PIXI.Assets.cache.reset()
+        }
+      } catch (e) {
+        // Ignore cleanup errors during unmount
+      }
+
       setIsReady(false)
     }
   }, [containerRef, retryCount])

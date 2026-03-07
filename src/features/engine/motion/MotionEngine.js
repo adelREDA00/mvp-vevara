@@ -11,6 +11,7 @@ export class MotionEngine {
   constructor() {
     this.activeTimelines = new Map() // layerId -> MotionTimeline
     this.registeredObjects = new Map() // layerId -> PIXI.DisplayObject
+    this.backgroundMedia = new Map() // layerId -> { _videoElement, _sceneId, _sourceStartTime, _sourceEndTime }
 
     this.isPlaying = false
     this.onAllCompleteCallbacks = []
@@ -24,27 +25,126 @@ export class MotionEngine {
       onComplete: () => this._handleAllComplete(),
       onUpdate: () => {
         const time = this.masterTimeline.time()
-        this.syncMedia(time, false) // Standard sync
+        // [SCRIB SYNC] Standard sync handles playhead movement and scrubbing
+        this.syncMedia(time, false)
         this._handleUpdate()
       }
     })
 
+    // [DEADLOCK FIX] Global Ticker Heartbeat
+    // When the engine is paused due to buffering (isInternalPaused), 
+    // timeline updates stop. We need a persistent loop to:
+    // 1. Keep checking if buffering is finished.
+    // 2. Keep the UI's isBuffering state updated.
+    this._tickHandler = () => this._tick()
+    gsap.ticker.add(this._tickHandler)
+
     // Scene timing mapping for media synchronization
     this.sceneRanges = new Map() // sceneId -> { startTime, endTime }
+
+    // TRACKING: State for UI buffering indicator
+    this._activeVideoElements = new Set()
+    this.isInternalPaused = false // Track if engine paused itself due to buffering
+    // When true, syncMedia forces all in-range videos muted (fast preview / tweenTo)
+    this._muteVideosForFastPreview = false
+  }
+
+  get isBuffering() {
+    // Engine is buffering ONLY if an ACTIVE (in-range) video is seeking OR not ready
+    for (const video of this._activeVideoElements) {
+      if (video.seeking || video.readyState < 3) return true
+    }
+    return false
   }
 
   /**
    * Register a PIXI object so the engine knows what to animate
    */
   registerLayerObject(layerId, pixiObject, customData = {}) {
+    // [FIX] Clear from background media if it's now a formal PIXI object
+    this.backgroundMedia.delete(layerId)
+
     this.registeredObjects.set(layerId, pixiObject)
     if (customData.sceneId) {
       pixiObject._sceneId = customData.sceneId
     }
+    // Set fallback media info if provided
+    if (customData.sourceStartTime !== undefined) pixiObject._sourceStartTime = customData.sourceStartTime
+    if (customData.sourceEndTime !== undefined) pixiObject._sourceEndTime = customData.sourceEndTime
 
     // [FIX] Immediate Sync: Sync media state immediately when a new layer is added.
     const currentTime = this.masterTimeline.time()
     this.syncMedia(currentTime, false)
+  }
+
+  /**
+   * Unregister a PIXI object from the engine
+   */
+  unregisterLayerObject(layerId) {
+    this.registeredObjects.delete(layerId)
+    this.unloadMotionFlow(layerId)
+  }
+
+  /**
+   * Clear all registered objects
+   */
+  clearRegisteredObjects() {
+    this.registeredObjects.clear()
+    this.backgroundMedia.clear()
+  }
+
+  /**
+   * Reset the entire engine. Stops playback, clears all memory, removes GSAP tickers.
+   */
+  reset() {
+    // 1. Unload all layer motions
+    this.unloadAllMotions()
+
+    // 2. Kill master timeline
+    if (this.masterTimeline) {
+      this.masterTimeline.kill()
+    }
+
+    // 3. Remove ticker
+    if (this._tickHandler) {
+      gsap.ticker.remove(this._tickHandler)
+    }
+
+    // 4. Clear all callbacks
+    this.onAllCompleteCallbacks = []
+    this.onUpdateCallbacks = []
+    this.onPlayCallbacks = []
+    this.onPauseCallbacks = []
+
+    // 5. Clear sets and maps
+    this._activeVideoElements.clear()
+    this.clearRegisteredObjects()
+    this.sceneRanges.clear()
+
+    // 6. Reset state variables
+    this.isPlaying = false
+    this.isInternalPaused = false
+  }
+
+  /**
+   * Register a video element for a layer that isn't currently on the stage.
+   * This allows the engine to pre-seek videos in upcoming scenes.
+   */
+  registerBackgroundMedia(layerId, videoElement, data = {}) {
+    // If already registered as a formal object, don't override with background
+    if (this.registeredObjects.has(layerId)) return
+
+    this.backgroundMedia.set(layerId, {
+      _videoElement: videoElement,
+      _sceneId: data.sceneId,
+      _sourceStartTime: data.sourceStartTime || 0,
+      _sourceEndTime: data.sourceEndTime,
+      isBackground: true
+    })
+  }
+
+  unregisterBackgroundMedia(layerId) {
+    this.backgroundMedia.delete(layerId)
   }
 
   /**
@@ -148,20 +248,23 @@ export class MotionEngine {
     // ONLY initialize state tracker if we aren't continuing from a previous scene
     if (layerStateTracker.size === 0) {
       objectsToUse.forEach((obj, id) => {
-        const baseLayer = allLayers[id]
+        // [FIX] Safety check: Ensure obj exists and isn't destroyed
+        if (!obj || obj.destroyed) return
+
+        const baseLayer = allLayers?.[id]
         layerStateTracker.set(id, {
-          x: baseLayer?.x ?? obj.x,
-          y: baseLayer?.y ?? obj.y,
-          scaleX: baseLayer?.scaleX ?? obj.scale.x,
-          scaleY: baseLayer?.scaleY ?? obj.scale.y,
-          rotation: baseLayer?.rotation ?? (obj.rotation * 180) / Math.PI,
+          x: baseLayer?.x ?? obj.x ?? 0,
+          y: baseLayer?.y ?? obj.y ?? 0,
+          scaleX: baseLayer?.scaleX ?? obj.scale?.x ?? 1,
+          scaleY: baseLayer?.scaleY ?? obj.scale?.y ?? 1,
+          rotation: baseLayer?.rotation ?? (obj.rotation ? (obj.rotation * 180) / Math.PI : 0),
           // Track crop state
           cropX: baseLayer?.cropX ?? (obj._storedCropX ?? 0),
           cropY: baseLayer?.cropY ?? (obj._storedCropY ?? 0),
-          cropWidth: baseLayer?.cropWidth ?? (obj._storedCropWidth ?? obj._originalWidth ?? obj.width),
-          cropHeight: baseLayer?.cropHeight ?? (obj._storedCropHeight ?? obj._originalHeight ?? obj.height),
-          mediaWidth: baseLayer?.mediaWidth ?? (obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width),
-          mediaHeight: baseLayer?.mediaHeight ?? (obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height),
+          cropWidth: baseLayer?.cropWidth ?? (obj._storedCropWidth ?? obj._originalWidth ?? obj.width ?? 100),
+          cropHeight: baseLayer?.cropHeight ?? (obj._storedCropHeight ?? obj._originalHeight ?? obj.height ?? 100),
+          mediaWidth: baseLayer?.mediaWidth ?? (obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100),
+          mediaHeight: baseLayer?.mediaHeight ?? (obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height ?? 100),
           trimStart: baseLayer?.data?.trimStart ?? (obj._storedTrimStart ?? 0),
           trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0)
         })
@@ -169,8 +272,9 @@ export class MotionEngine {
     }
 
     steps.forEach((step, stepIndex) => {
-      // ... same logic for timing ...
-      const stepStartTime = startTimeOffset + (stepIndex * stepDurationMs) / 1000
+      // Use absolute startTime if available, fallback to index-based calculation
+      const stepStartTimeMs = step.startTime != null ? step.startTime : (stepIndex * stepDurationMs)
+      const stepStartTime = startTimeOffset + stepStartTimeMs / 1000
       if (!step.layerActions) return
 
       // Iterate over each layer's actions in this step
@@ -193,16 +297,28 @@ export class MotionEngine {
         }
 
         const builder = layerTimelineBuilders.get(layerId)
-        const stepDuration = stepDurationMs / 1000
+        // Use the step's effective duration (respects customDuration)
+        const stepDuration = (step.duration || stepDurationMs) / 1000
 
         // Add all actions for this layer in this step
+        // Scene end boundary in seconds — tweens must not exceed this
+        const sceneEndTime = startTimeOffset + pageDuration / 1000
+
         actions.forEach((action) => {
           const handler = getActionHandler(action.type)
           if (!handler) return
 
-          const actionDuration = action.values?.duration
+          let actionDuration = action.values?.duration
             ? action.values.duration / 1000
             : stepDuration
+
+          // Clamp: never let a tween extend past the scene boundary
+          const maxDuration = sceneEndTime - stepStartTime
+          if (maxDuration > 0) {
+            actionDuration = Math.min(actionDuration, maxDuration)
+          } else {
+            return
+          }
 
           builder.timeline.add((gsapTimeline) => {
             const tween = handler.execute(pixiObject, action, {
@@ -347,14 +463,12 @@ export class MotionEngine {
     if (force || this._lastSyncIsPlaying !== this.isPlaying) {
       this._lastSyncIsPlaying = this.isPlaying
     }
-    // Two intents per video element:
-    //  - shouldPlay: true only when this.isPlaying AND the video is in range AND not at end
-    //  - targetTime: the video-element local time we want to seek to (for paused/force syncs)
+
     const mediaIntents = new Map() // videoElement -> { shouldPlay, targetTime, inAnyRange, layerId }
 
-    this.registeredObjects.forEach((obj, layerId) => {
+    // Logic to calculate intent for a given object/data
+    const processObject = (obj, id) => {
       let videoElement = obj._videoElement
-
       if (!videoElement && obj._videoSprite) {
         const source = obj._videoSprite.texture?.source
         if (source && source.resource instanceof HTMLVideoElement) {
@@ -363,60 +477,123 @@ export class MotionEngine {
         }
       }
 
-      if (videoElement) {
-        const sceneId = obj._sceneId
-        const range = this.sceneRanges.get(sceneId)
+      if (!videoElement) return
 
+      const sceneId = obj._sceneId
+      const range = this.sceneRanges.get(sceneId)
+
+      if (range) {
         if (!mediaIntents.has(videoElement)) {
-          mediaIntents.set(videoElement, { shouldPlay: false, targetTime: -1, inAnyRange: false, layerId })
+          mediaIntents.set(videoElement, { shouldPlay: false, targetTime: -1, inAnyRange: false, layerId: id })
         }
 
         const intent = mediaIntents.get(videoElement)
-        if (range) {
-          const localTime = currentTime - range.startTime
-          // Small epsilon at start to handle floating-point boundaries cleanly
-          const inRange = currentTime >= range.startTime - 0.001 && currentTime < range.endTime
+        const startTime = range.startTime
+        const endTime = range.endTime
+        const inRange = currentTime >= startTime - 0.001 && currentTime < endTime
 
-          if (inRange) {
+        if (inRange) {
+          const sourceStart = obj._sourceStartTime || 0
+          const sourceEnd = obj._sourceEndTime
+          const localTime = currentTime - startTime
+          const adjustedLocalTime = Math.max(0, localTime + sourceStart)
+          const finalTime = sourceEnd !== undefined ? Math.min(adjustedLocalTime, sourceEnd) : adjustedLocalTime
+
+          const isAtEnd = sourceEnd !== undefined && adjustedLocalTime >= sourceEnd - 0.01
+
+          if (this.isPlaying && !isAtEnd) {
+            intent.shouldPlay = true
+          }
+          intent.targetTime = finalTime
+          intent.inAnyRange = true
+          intent.layerId = id
+        } else {
+          // Pass 2: Pre-seek lookahead
+          const timeUntilStart = startTime - currentTime
+          if (timeUntilStart > 0 && timeUntilStart <= 0.8 && this.isPlaying) {
             const sourceStart = obj._sourceStartTime || 0
-            const sourceEnd = obj._sourceEndTime
-            const adjustedLocalTime = Math.max(0, localTime + sourceStart)
-            const finalTime = sourceEnd !== undefined ? Math.min(adjustedLocalTime, sourceEnd) : adjustedLocalTime
-
-            const isAtEnd = sourceEnd !== undefined && adjustedLocalTime >= sourceEnd - 0.01
-
-            // Only allow play intent when engine is actively playing
-            if (this.isPlaying && !isAtEnd) {
-              intent.shouldPlay = true
-            }
-            // Use the target time for the most relevant (current) layer
-            intent.targetTime = finalTime
-            intent.inAnyRange = true
-            intent.layerId = layerId
-          } else {
-            // [Bug 4 Fix] Pre-seek: if this scene starts within the next 200ms, pre-seek
-            // the video to its sourceStartTime so the decoder buffers ahead of time.
-            const timeUntilStart = range.startTime - currentTime
-            if (timeUntilStart > 0 && timeUntilStart <= 0.2 && this.isPlaying) {
-              const sourceStart = obj._sourceStartTime || 0
-              // Only pre-seek if offset from sourceStart is significant
-              if (Math.abs(videoElement.currentTime - sourceStart) > 0.05) {
-                console.log(`[MotionEngine] Pre-seeking next scene video: layerId=${layerId}, target=${sourceStart}`)
-                videoElement.currentTime = sourceStart
-              }
+            // If not already active, set a pre-seek target
+            if (!intent.inAnyRange && intent.targetTime === -1) {
+              intent.targetTime = sourceStart
             }
           }
         }
       }
+    }
+
+    // 1. Process active PIXI objects
+    this.registeredObjects.forEach((obj, id) => processObject(obj, id))
+
+    // 2. Process background media (not on stage but in project)
+    this.backgroundMedia.forEach((data, id) => {
+      if (!this.registeredObjects.has(id)) {
+        processObject(data, id)
+      }
     })
 
+    // Update active video tracking for isBuffering getter
+    // [FIX] We ONLY include active (in-range) videos here.
+    // Background pre-seeks should NOT trigger the buffering spinner or pause the timeline
+    // until the playhead actually crosses into their scene boundary.
+    this._activeVideoElements.clear()
+    mediaIntents.forEach((intent, video) => {
+      if (intent.inAnyRange) {
+        this._activeVideoElements.add(video)
+      }
+    })
+
+    // [AUTO-PAUSE LOGIC]
+    // If the project is supposed to be playing but videos are buffering/seeking:
+    // 1. Pause the master timeline internally
+    // 2. Clear the internal-pause flag and resume when ready
+    const needsBuffering = this.isBuffering
+    if (this.isPlaying) {
+      if (needsBuffering && !this.isInternalPaused) {
+        // console.log('⏸️ [MotionEngine] Buffering... Internal Pause')
+        this.masterTimeline.pause()
+        this.isInternalPaused = true
+      } else if (!needsBuffering && this.isInternalPaused) {
+        // console.log('▶️ [MotionEngine] Buffering complete. Internal Resume')
+        this.masterTimeline.play()
+        this.isInternalPaused = false
+      }
+    } else {
+      // Ensure internal pause is cleared if user manually stops playback
+      this.isInternalPaused = false
+    }
+
+    // 3. Final Pass: Apply intents to DOM video elements
     mediaIntents.forEach((intent, videoElement) => {
       // [Bug 1 Fix] Tighter sync tolerance:
-      const threshold = (isPaused || force) ? 0.03 : 0.08
+      // - 100ms (0.1s) for active playback (standard A/V sync window)
+      // - 40ms (0.04s) for paused/static sync (perfect alignment)
+      // - 0 for forced seeks (ensure exact frame match)
+      const threshold = force ? 0 : (isPaused ? 0.04 : 0.1)
       const deviation = Math.abs(videoElement.currentTime - intent.targetTime)
 
-      if (intent.targetTime !== -1 && (force || deviation > threshold)) {
+      const isSeeking = videoElement.seeking
+
+      // [REFINED SEEK GUARD]
+      // Allow overriding a seek if:
+      // 1. We are NOT seeking (standard deviation check)
+      // 2. OR we ARE seeking, but the targetTime has moved significantly (>0.2s) 
+      //    since the last time we updated this videoElement. This prevents "decoder lockout"
+      //    where a slow decoder stays stale while the playhead has moved on.
+      const lastTarget = videoElement._lastMotionTargetTime || -1
+      const targetMovedSignificantly = Math.abs(intent.targetTime - lastTarget) > 0.2
+
+      if (intent.targetTime !== -1 && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
+        // [LOOKAHEAD LOG]
+        if (deviation > 0.1 && (force || isPaused)) {
+          // console.log(`[MotionEngine] Seek: ${videoElement.src.split('/').pop()} -> ${intent.targetTime.toFixed(2)}s (dev=${deviation.toFixed(2)}s, override=${targetMovedSignificantly})`)
+        }
         videoElement.currentTime = intent.targetTime
+        videoElement._lastMotionTargetTime = intent.targetTime // Track last request
+      }
+
+      // [FAST PREVIEW] Mute all videos during tweenTo so preview is silent
+      if (this._muteVideosForFastPreview) {
+        videoElement.muted = true
       }
 
       // [Bug 2 Fix] Play/Pause with isPlaying guard:
@@ -439,6 +616,24 @@ export class MotionEngine {
         // Failing to do so causes the "video continues playing after pause/cut" bugs.
         if (!videoElement.paused) {
           videoElement.pause()
+        }
+      }
+
+      // [A/V SYNC FIX] Force the PIXI VideoSource to update its WebGL texture immediately.
+      // Because audio plays instantly from the HTMLAudio/Video element, but WebGL takes 
+      // an extra frame to pull from the canvas/video, visual playback appears ~1-2 frames behind.
+      // By forcing update here (tied to GSAP ticker), we minimize that pipeline delay.
+      if (intent.shouldPlay || (!isPaused && deviation > 0)) {
+        // Find the PIXI object for this video
+        const obj = [...this.registeredObjects.values()].find(o =>
+          o._videoElement === videoElement ||
+          (o._videoSprite && o._videoSprite.texture?.source?.resource === videoElement)
+        );
+        if (obj) {
+          const sprite = obj._videoSprite;
+          if (sprite && sprite.texture && sprite.texture.source) {
+            sprite.texture.source.update();
+          }
         }
       }
     })
@@ -532,6 +727,7 @@ export class MotionEngine {
    * Pause every moving layer
    */
   pauseAll() {
+    this._muteVideosForFastPreview = false
     this.masterTimeline.pause()
     this.isPlaying = false
     this.onPauseCallbacks.forEach(cb => cb())
@@ -542,6 +738,7 @@ export class MotionEngine {
    * Reset everything back to the starting frame
    */
   stopAll() {
+    this._muteVideosForFastPreview = false
     this.masterTimeline.pause(0)
     this.isPlaying = false
   }
@@ -550,6 +747,7 @@ export class MotionEngine {
    * Seek to a specific time (seconds)
    */
   seek(time) {
+    this._muteVideosForFastPreview = false
     // [FIX] Kill any active scrubbing tweens from tweenTo() to prevent fighting
     gsap.killTweensOf(this.masterTimeline, { time: true })
 
@@ -600,6 +798,7 @@ export class MotionEngine {
     gsap.killTweensOf(this.masterTimeline, { time: true })
 
     this.isPlaying = true
+    this._muteVideosForFastPreview = true
     console.log(`⚡ [MotionEngine] Initializing GSAP tweenTo: start=${start.toFixed(2)}s, target=${targetTime.toFixed(2)}s`)
 
     // Use native GSAP timeline.tweenTo() for more robust scrubbing
@@ -619,6 +818,7 @@ export class MotionEngine {
       },
       onComplete: () => {
         console.log(`🟢 [MotionEngine] GSAP tween complete at ${this.masterTimeline.time().toFixed(2)}s`)
+        this._muteVideosForFastPreview = false
         this.isPlaying = false
         if (onComplete) onComplete()
         this._handleAllComplete()
@@ -663,11 +863,29 @@ export class MotionEngine {
    * Complete reset: stop animations and clear all registrations
    */
   destroy() {
-    this.unloadAllMotions()
+    this.stopAll()
+    if (this._tickHandler) {
+      gsap.ticker.remove(this._tickHandler)
+    }
     this.registeredObjects.clear()
+    this.backgroundMedia.clear()
+    this.activeTimelines.clear()
     this.isPlaying = false
     this.onAllCompleteCallbacks = []
     this.onUpdateCallbacks = []
+  }
+
+  /**
+   * Private heartbeat: runs every frame to handle state recovery.
+   * This is critical for resuming playback after buffering.
+   * @private
+   */
+  _tick() {
+    // If the engine is waiting for media, we MUST keep checking buffering status
+    // even though the master timeline is paused.
+    if (this.isInternalPaused && this.isPlaying) {
+      this.syncMedia(this.masterTimeline.time(), false)
+    }
   }
 
   /**

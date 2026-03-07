@@ -23,3 +23,10 @@ export function getGlobalMotionEngine() {
   return globalMotionEngine
 }
 
+export function resetGlobalMotionEngine() {
+  if (globalMotionEngine) {
+    globalMotionEngine.reset()
+    globalMotionEngine = null // Force recreation on next use
+  }
+}
+

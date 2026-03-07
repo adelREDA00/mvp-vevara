@@ -33,7 +33,7 @@ import { useMultiSelectionBox } from '../hooks/useMultiSelectionBox'
 import TextEditOverlay from './TextEditOverlay'
 import { isLayerCompletelyOutside } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
-import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds } from '../../../store/slices/selectionSlice'
+import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
 
 // =============================================================================
@@ -42,9 +42,10 @@ import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bring
 
 // Combined selector for stage-related state to prevent unnecessary re-renders
 const selectStageState = createSelector(
-  [selectSelectedLayerIds, selectLayers, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, selectProjectTimelineInfo],
-  (selectedLayerIds, layers, currentSceneId, currentScene, sceneMotionFlows, scenes, timelineInfo) => ({
+  [selectSelectedLayerIds, selectSelectedCanvas, selectLayers, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, selectProjectTimelineInfo],
+  (selectedLayerIds, selectedCanvas, layers, currentSceneId, currentScene, sceneMotionFlows, scenes, timelineInfo) => ({
     selectedLayerIds,
+    selectedCanvas,
     layers,
     currentSceneId,
     currentScene,
@@ -108,9 +109,8 @@ function Stage({
   zoom = 100,
   onZoomChange,
   onViewportChange, // Add onViewportChange prop
-  bottomSectionHeight = 0,
   topToolbarHeight = 0,
-  isResizingBottom = false,
+  onReady, // Callback fired when PIXI canvas is initialized
   //motion capture mode & playback controls
   motionCaptureMode = null,
   onMotionStateChange,
@@ -139,7 +139,6 @@ function Stage({
   const canvasWrapperRef = useRef(null)
   const stageContainerRef = useRef(null)
   const viewportInitializedRef = useRef(false)
-  const prevBottomSectionHeightRef = useRef(bottomSectionHeight)
   const prevAspectRatioRef = useRef(aspectRatio)
 
   // Cache PIXI objects to avoid recreating them
@@ -160,7 +159,7 @@ function Stage({
   const interactionsAPIRef = useRef(null)
 
   // Redux state - memoized combined selectors for optimal performance
-  const { selectedLayerIds, layers, currentSceneId, currentScene, sceneMotionFlows, scenes, timelineInfo } = useSelector(selectStageState)
+  const { selectedLayerIds, selectedCanvas, layers, currentSceneId, currentScene, sceneMotionFlows, scenes, timelineInfo } = useSelector(selectStageState)
 
   // =============================================================================
   // CANVAS DIMENSIONS & ASPECT RATIO
@@ -181,20 +180,6 @@ function Stage({
         : { width: 800, height: 600 } // Fallback for initial render
   }, [containerDimensions.width, containerDimensions.height])
 
-  // [FIX] Freeze canvas dimensions during bottom section resize to prevent flicker.
-  // PIXI renderer.resize() during rapid layout changes causes dark flashes.
-  const frozenDimensionsRef = useRef(null)
-  const effectiveStageSize = useMemo(() => {
-    if (isResizingBottom) {
-      if (frozenDimensionsRef.current && frozenDimensionsRef.current.width > 0 && frozenDimensionsRef.current.height > 0) {
-        return frozenDimensionsRef.current
-      }
-      frozenDimensionsRef.current = { width: stageSize.width, height: stageSize.height }
-      return frozenDimensionsRef.current
-    }
-    frozenDimensionsRef.current = { width: stageSize.width, height: stageSize.height }
-    return stageSize
-  }, [isResizingBottom, stageSize.width, stageSize.height])
 
   // =============================================================================
   // ZOOM & CAMERA MANAGEMENT
@@ -219,15 +204,55 @@ function Stage({
   // =============================================================================
 
   // Initialize Pixi canvas
-  // Screen dimensions match container, world dimensions are fixed.
-  // During bottom resize we use frozen dimensions to avoid PIXI resize flicker.
+  // Screen dimensions match container, world dimensions are fixed
   const { viewport, stageContainer, layersContainer, pixiApp, isReady, error, retry } = usePixiCanvas(containerRef, {
-    width: effectiveStageSize.width || 800,
-    height: effectiveStageSize.height || 600,
+    width: stageSize.width || 800,
+    height: stageSize.height || 600,
     worldWidth,
     worldHeight,
     zoom: effectiveZoom, // Pass zoom for camera scaling
   })
+
+  const getViewportSyncData = useCallback(() => {
+    if (!viewport) return null
+    const vp = viewport
+
+    // Explicitly calculate world coordinates
+    const calculatedLeft = (0 - vp.x) / vp.scale.x
+    const calculatedTop = (0 - vp.y) / vp.scale.y
+    const calculatedRight = calculatedLeft + vp.screenWidth / vp.scale.x
+    const calculatedBottom = calculatedTop + vp.screenHeight / vp.scale.y
+
+    const data = {
+      x: vp.x,
+      y: vp.y,
+      scale: vp.scale.x,
+      worldWidth,
+      worldHeight,
+      screenWidth: vp.screenWidth,
+      screenHeight: vp.screenHeight,
+      left: calculatedLeft,
+      top: calculatedTop,
+      right: calculatedRight,
+      bottom: calculatedBottom
+    }
+
+    return data
+  }, [viewport, worldWidth, worldHeight])
+
+  const triggerViewportChange = useCallback(() => {
+    if (onViewportChange && viewport) {
+      const data = getViewportSyncData()
+      if (data) onViewportChange(data)
+    }
+  }, [viewport, onViewportChange, getViewportSyncData])
+
+  // Fire onReady prop when Pixi canvas is initialized
+  useEffect(() => {
+    if (isReady && onReady) {
+      onReady()
+    }
+  }, [isReady, onReady])
 
   // Expose viewport controls to parent
   React.useImperativeHandle(ref, () => ({
@@ -239,8 +264,11 @@ function Stage({
     },
     getViewportData: () => {
       return getViewportSyncData()
-    }
-  }), [viewport, worldWidth, worldHeight, onViewportChange])
+    },
+    // Expose PixiJS objects for thumbnail capture and external rendering
+    getApp: () => pixiApp,
+    getLayersContainer: () => layersContainer,
+  }), [viewport, worldWidth, worldHeight, onViewportChange, getViewportSyncData, triggerViewportChange, pixiApp, layersContainer])
 
   // Create shared drag state API for both canvas interactions and selection box
   const dragStateAPI = useDragState()
@@ -264,7 +292,7 @@ function Stage({
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -346,34 +374,42 @@ function Stage({
     }
   }, [onMotionStateChange, playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, layerObjects])
 
-  // [FIX] REFINE AUTO-PAUSE: Track previous selection to only pause on NEW selection events.
-  // This prevents pre-selected layers from blocking automated transitions (like add/update step).
-  const prevSelectedLayerIdsRef = useRef(selectedLayerIds)
   // [PREVIEW FIX] Track motion capture state transitions to avoid auto-pausing during apply/cancel previews
   const wasMotionCaptureActiveRef = useRef(false)
+  const prevIsPlayingRef = useRef(isPlaying)
 
   // Pause playback when selecting layers/canvas while playing
   useEffect(() => {
     const isCurrentlyActive = !!motionCaptureMode?.isActive
-    const selectionChanged = selectedLayerIds && selectedLayerIds.length > 0
+    const isTransitioning = !!motionCaptureMode?.isTransitioning
+    const selectionChanged = (selectedLayerIds && selectedLayerIds.length > 0) || selectedCanvas
+    const playheadJustStarted = isPlaying && !prevIsPlayingRef.current
 
-    // Only pause if: 
-    // 1. We are playing
-    // 2. We are NOT in motion capture mode
-    // 3. Something is selected
-    // 4. The selection set has actually CHANGED since the last check
-    const selectionSetIdentical =
-      prevSelectedLayerIdsRef.current.length === selectedLayerIds.length &&
-      prevSelectedLayerIdsRef.current.every((id, index) => id === selectedLayerIds[index])
+    // Update ref for next run
+    prevIsPlayingRef.current = isPlaying
 
-    if (isPlaying && !isCurrentlyActive && selectionChanged && !selectionSetIdentical) {
+    // If we just exited capture mode AND we are currently playing,
+    // it's likely the auto-preview from handleApplyMotion/handleCancelMotion.
+    // We should NOT pause in this specific transition.
+    if (wasMotionCaptureActiveRef.current && !isCurrentlyActive && isPlaying) {
+      wasMotionCaptureActiveRef.current = isCurrentlyActive
+      return
+    }
+    wasMotionCaptureActiveRef.current = isCurrentlyActive
+
+    // [SCENE SYNC FIX] Skip auto-pause when playhead JUST started.
+    // This avoids the loop where starting playback with a selection 
+    // immediately triggers a pause before the 'clearLayerSelection' effect below can run.
+    if (playheadJustStarted) return
+
+    // [BUG 1 FIX] Skip auto-pause when Add Step is transitioning (fast-play preview).
+    // During the transition, isActive is false but isTransitioning is true.
+    // Without this guard, the effect would pause the tween, preventing onComplete
+    // from firing and leaving the editor in a broken state.
+    if (selectionChanged && isPlaying && !isCurrentlyActive && !isTransitioning) {
       pausePlayback()
     }
-
-    // Always update ref for next run
-    prevSelectedLayerIdsRef.current = selectedLayerIds
-    wasMotionCaptureActiveRef.current = isCurrentlyActive
-  }, [selectedLayerIds, isPlaying, motionCaptureMode, pausePlayback])
+  }, [selectedLayerIds, selectedCanvas, isPlaying, motionCaptureMode, pausePlayback])
 
   // Clear selection boxes when playback starts for clean animation preview
   useEffect(() => {
@@ -673,39 +709,6 @@ function Stage({
   }, [onZoomChange])
 
 
-  const getViewportSyncData = useCallback(() => {
-    if (!viewportRef.current) return null
-    const vp = viewportRef.current
-
-    // Explicitly calculate world coordinates
-    const calculatedLeft = (0 - vp.x) / vp.scale.x
-    const calculatedTop = (0 - vp.y) / vp.scale.y
-    const calculatedRight = calculatedLeft + vp.screenWidth / vp.scale.x
-    const calculatedBottom = calculatedTop + vp.screenHeight / vp.scale.y
-
-    const data = {
-      x: vp.x,
-      y: vp.y,
-      scale: vp.scale.x,
-      worldWidth,
-      worldHeight,
-      screenWidth: vp.screenWidth,
-      screenHeight: vp.screenHeight,
-      left: calculatedLeft,
-      top: calculatedTop,
-      right: calculatedRight,
-      bottom: calculatedBottom
-    }
-
-    return data
-  }, [worldWidth, worldHeight])
-
-  const triggerViewportChange = useCallback(() => {
-    if (onViewportChange && viewportRef.current) {
-      const data = getViewportSyncData()
-      if (data) onViewportChange(data)
-    }
-  }, [onViewportChange, getViewportSyncData])
 
   const handleWheel = useCallback((e) => {
     e.preventDefault()

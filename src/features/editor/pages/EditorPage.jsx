@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { Layers } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
+import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -12,6 +13,7 @@ import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import TopToolbar from '../components/TopToolbar'
 import LeftSidebar, { SIDEBAR_ITEMS } from '../components/LeftSidebar'
+import Modal from '../components/Modal'
 import ScenesBar from '../components/ScenesBar'
 import CanvasControls from '../components/CanvasControls'
 import PlaybackControls from '../components/PlaybackControls'
@@ -19,6 +21,7 @@ import ElementsPanel from '../components/ElementsPanel'
 import DesignPanel from '../components/DesignPanel'
 import TextPanel from '../components/TextPanel'
 import UploadsPanel from '../components/UploadsPanel'
+import ImagesPanel from '../components/ImagesPanel'
 import ToolsPanel from '../components/ToolsPanel'
 import ProjectsPanel from '../components/ProjectsPanel'
 import AppsPanel from '../components/AppsPanel'
@@ -29,6 +32,10 @@ import { useEditorPlayback } from '../hooks/useEditorPlayback'
 import { useEditorLayout } from '../hooks/useEditorLayout'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
+import { resetGlobalMotionEngine } from '../../engine/motion'
+import ErrorBoundary from '../../../components/ErrorBoundary'
+import * as PIXI from 'pixi.js'
+import { useAssetPreloader } from '../hooks/useAssetPreloader'
 
 function EditorPage() {
   const dispatch = useDispatch()
@@ -37,10 +44,15 @@ function EditorPage() {
   const selectedLayerIds = useSelector(selectSelectedLayerIds)
   const selectedCanvas = useSelector(selectSelectedCanvas)
   const layers = useSelector(selectLayers)
+  const { isAuthenticated } = useSelector((state) => state.auth)
 
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
-
-  const [aspectRatio, setAspectRatio] = useState('16:9')
+  const { projectId: urlProjectId } = useParams()
+  const projectName = useSelector(selectProjectName)
+  const projectId = useSelector(selectProjectId)
+  const projectStatus = useSelector(state => state.project.status)
+  const [isSaving, setIsSaving] = useState(false)
+  const aspectRatio = useSelector(selectAspectRatio)
   const [showGrid, setShowGrid] = useState(false)
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
@@ -58,7 +70,6 @@ function EditorPage() {
   }, [zoom])
   const [editingTextLayerId, setEditingTextLayerId] = useState(null)
   const [activeTool, setActiveTool] = useState('select')
-  const [projectName, setProjectName] = useState('Untitled Project')
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('3.5rem')
@@ -81,6 +92,10 @@ function EditorPage() {
 
   // Calculate world dimensions
   const { worldWidth, worldHeight } = useWorldDimensions(aspectRatio)
+
+  // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
+  const [isPixiReady, setIsPixiReady] = useState(false)
+  const isPreloading = useAssetPreloader(layers, isPixiReady)
 
   const handleViewportChange = useCallback((data) => {
     if (!data) return
@@ -220,9 +235,100 @@ function EditorPage() {
     progress: 0,
     error: null
   })
+  const exportAbortControllerRef = useRef(null)
+  const isExportActiveRef = useRef(false)
+
+  useEffect(() => {
+    isExportActiveRef.current = exportState.isActive
+  }, [exportState.isActive])
+
+  const lastSavedStateRef = useRef(null)
+
+  const handleSave = useCallback(async (options = {}) => {
+    if (!isAuthenticated) return
+    if (isExportActiveRef.current) return
+
+    const { force = false } = options
+
+    // [PERFORMANCE] Dirty check: Compare current state with last saved state
+    // to avoid redundant saves and expensive thumbnail captures.
+    const projectState = {
+      name: projectName,
+      scenes,
+      layers,
+      sceneMotionFlows,
+      aspectRatio
+    }
+
+    const stateString = JSON.stringify(projectState)
+    if (!force && stateString === lastSavedStateRef.current) {
+      // console.log('[Save] Skipping save: No changes detected.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      // Capture a high-quality thumbnail from the ARTBOARD area
+      let thumbnail = null
+      try {
+        const app = stageRef.current?.getApp?.()
+        const layersContainer = stageRef.current?.getLayersContainer?.()
+
+        if (app?.renderer && layersContainer) {
+          // [QUALITY] Target the layersContainer instead of app.stage.
+          // Since layersContainer is a child of the viewport but represents
+          // the world space, capturing it with 1:1 scale ensures the thumbnail
+          // is never affected by editor zoom/pan.
+          const targetWidth = 800
+          const targetResolution = Math.min(1, targetWidth / worldWidth)
+
+          thumbnail = await app.renderer.extract.base64({
+            target: layersContainer,
+            frame: new PIXI.Rectangle(0, 0, worldWidth, worldHeight),
+            format: 'image/webp',
+            quality: 0.8,
+            resolution: targetResolution
+          })
+        }
+      } catch (thumbErr) {
+        console.error('[Save] Could not capture thumbnail:', thumbErr)
+      }
+
+      await dispatch(saveProject({ thumbnail })).unwrap()
+      lastSavedStateRef.current = stateString
+      setLastSaved(Date.now())
+    } catch (error) {
+      console.error('Failed to save project:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [dispatch, isAuthenticated, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight])
+
+  // handleNavigate ensures we save the project before leaving the editor
+  // when the user clicks the dashboard/user icon.
+  const handleNavigate = useCallback(async (path) => {
+    if (isAuthenticated) {
+      await handleSave()
+    }
+    // [FIX] Force full page reload to release WebGL context
+    window.location.href = path
+  }, [isAuthenticated, handleSave])
+
+  const handleCancelExport = useCallback(() => {
+    if (exportAbortControllerRef.current) {
+      exportAbortControllerRef.current.abort()
+      exportAbortControllerRef.current = null
+    }
+  }, [])
 
   const handleExport = useCallback(async (resolution) => {
     if (exportState.isActive) return
+
+    const savedTime = playheadTimeRef.current || 0
+
+    if (motionControls?.isPlaying) {
+      try { motionControls.pauseAll() } catch (e) { /* ignore */ }
+    }
 
     setExportState({
       isActive: true,
@@ -230,6 +336,9 @@ function EditorPage() {
       progress: 0,
       error: null
     })
+
+    const controller = new AbortController()
+    exportAbortControllerRef.current = controller
 
     try {
       const videoBlob = await exportVideo({
@@ -246,7 +355,9 @@ function EditorPage() {
             status: update.status,
             progress: update.progress
           }))
-        }
+        },
+        signal: controller.signal,
+        editorMotionControls: motionControls
       })
 
       saveAs(videoBlob, `${projectName || 'video'}_${resolution}.mp4`)
@@ -263,6 +374,11 @@ function EditorPage() {
       }, 2000)
 
     } catch (error) {
+      if (error.message === 'cancelled') {
+        console.log('Export cancellation confirmed')
+        setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
+        return
+      }
       console.error('Export failed:', error)
       setExportState({
         isActive: true,
@@ -270,8 +386,13 @@ function EditorPage() {
         progress: 0,
         error: error.message
       })
+    } finally {
+      exportAbortControllerRef.current = null
+      if (motionControls) {
+        try { motionControls.seek(savedTime) } catch (e) { /* ignore */ }
+      }
     }
-  }, [scenes, layers, sceneMotionFlows, timelineInfo, projectName, exportState.isActive])
+  }, [scenes, layers, sceneMotionFlows, timelineInfo, projectName, exportState.isActive, motionControls, aspectRatio])
 
   const handleFinishEditing = useCallback(() => {
     setEditingTextLayerId(null)
@@ -352,6 +473,16 @@ function EditorPage() {
     handleBottomResizeMouseDown,
   } = useEditorLayout({ aspectRatio, selectedLayerIds })
 
+  // [LAYOUT FIX] Capture initial bottom section height for stable canvas centering
+  // The user wants the canvas to be centered based on the INITIAL layout,
+  // and NOT resize or "flinch" when the timeline is later resized.
+  const [initialBottomHeight, setInitialBottomHeight] = useState(0)
+  useEffect(() => {
+    if (bottomSectionHeight > 0 && initialBottomHeight === 0) {
+      setInitialBottomHeight(bottomSectionHeight)
+    }
+  }, [bottomSectionHeight, initialBottomHeight])
+
   // Centralized seek function to sync UI and Engine
   const seek = useCallback((time) => {
     const clampedTime = Math.max(0, Math.min(time, totalTime))
@@ -369,9 +500,17 @@ function EditorPage() {
     }
   }, [motionControls])
 
-  // Initialize default scene if none exists (only once)
+  // Load project if ID is provided in URL
   useEffect(() => {
-    if (!hasInitializedScene.current && scenes.length === 0) {
+    if (urlProjectId && urlProjectId !== projectId) {
+      dispatch(fetchProjectById(urlProjectId))
+    }
+  }, [urlProjectId, dispatch, projectId])
+
+  // Initialize default scene if none exists (only once and if not loading)
+  useEffect(() => {
+    if (projectStatus === 'loading') return
+    if (!hasInitializedScene.current && scenes.length === 0 && !urlProjectId) {
       hasInitializedScene.current = true
       dispatch(addScene({
         name: 'Scene 1',
@@ -379,7 +518,38 @@ function EditorPage() {
         transition: 'None',
       }))
     }
-  }, [dispatch, scenes.length])
+  }, [dispatch, scenes.length, projectStatus, urlProjectId])
+
+  // Reset global motion engine and project state on unmount to prevent
+  // WebGL/GSAP leaks and stale Redux state on re-entry
+  useEffect(() => {
+    // [FIX] Reset hasInitializedScene on mount so new editor sessions
+    // always initialize a default scene if needed.
+    hasInitializedScene.current = false
+    return () => {
+      resetGlobalMotionEngine()
+      // [FIX] Clean re-entry: Reset project state on unmount so the next
+      // editor session starts with a clean slate. Doing this on unmount
+      // (instead of mount) avoids crashing PIXI objects mid-lifecycle.
+      dispatch(resetProject())
+    }
+  }, [])
+
+  // [FIX] Best-effort auto-save on tab/window closure.
+  // We use beforeunload to trigger a save. Since saveProject is async,
+  // this is "best effort" and may not always complete depending on the browser.
+  useEffect(() => {
+    const handleTabClose = (e) => {
+      if (isAuthenticated && projectId) {
+        // We don't block the exit with a confirmation, just fire the save.
+        // Some browsers allow async work to finish if it's fast enough.
+        handleSave()
+      }
+    }
+
+    window.addEventListener('beforeunload', handleTabClose)
+    return () => window.removeEventListener('beforeunload', handleTabClose)
+  }, [isAuthenticated, projectId, handleSave])
 
   // Get current scene data from Redux
   const currentSceneData = useSelector(selectCurrentScene)
@@ -414,7 +584,7 @@ function EditorPage() {
   // Handle canvas size change
   const handleCanvasSizeChange = (width, height) => {
     const newAspectRatio = calculateAspectRatio(width, height)
-    setAspectRatio(newAspectRatio)
+    dispatch(setAspectRatio(newAspectRatio))
   }
 
 
@@ -444,6 +614,7 @@ function EditorPage() {
   const [editingStepId, setEditingStepId] = useState(null)
   const isNewStepRef = useRef(false) // Track if the current session is for a NEW step vs editing an EXISTING one
   const motionCaptureRef = useRef(null) // Ref to hold capture data for apply/cancel
+  const savedStepTimingsRef = useRef(null) // Snapshot of step timings before adding a new step (for cancel restoration)
   const motionControlsRef = useRef(null) // Ref to hold motion playback controls from Stage
 
   // Get motion flow for current scene
@@ -462,6 +633,23 @@ function EditorPage() {
   // Check if motion capture is active
   const isMotionCaptureActive = !!motionCaptureMode?.isActive
 
+  // Determine which step (if any) the playhead is currently over
+  const playheadStepId = useMemo(() => {
+    if (!currentSceneId || !currentSceneMotionFlow?.steps?.length) return null
+    if (!currentSceneTimelineInfo) return null
+
+    const timeInSceneMs = (playheadTime - currentSceneTimelineInfo.startTime) * 1000
+    if (timeInSceneMs < 0) return null
+
+    const step = currentSceneMotionFlow.steps.find(s => {
+      const start = s.startTime || 0
+      const duration = s.duration || 0
+      return timeInSceneMs >= start && timeInSceneMs <= start + duration
+    })
+
+    return step?.id || null
+  }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime])
+
   // Effect: Exit motion capture mode when switching scenes
   // We use a ref to track the previous scene ID to detect changes
   const prevSceneIdRef = useRef(currentSceneId)
@@ -469,25 +657,39 @@ function EditorPage() {
   useEffect(() => {
     // If scene changed and we are in motion capture mode, cancel it
     if (prevSceneIdRef.current !== currentSceneId) {
+      // [BUG 2 FIX] Skip cleanup if we're in the Add Step transitioning state.
+      // During the fast-play preview, the playhead might briefly trigger a scene switch
+      // (e.g., due to floating-point precision at scene boundaries).
+      // Deleting the step in this case is incorrect — the user didn't navigate away.
+      if (motionCaptureMode?.isTransitioning) {
+        // Revert the scene switch — stay on the original scene
+        dispatch(setCurrentScene(prevSceneIdRef.current))
+        return
+      }
+
       if (motionCaptureRef.current) { // Check if we were capturing
         console.log('🔄 [EditorPage] Scene switched, cancelling active motion capture')
 
-        // 1. Remove the tentative step
-        if (motionCaptureRef.current.stepId) {
+        // 1. Remove the tentative step — restore saved timings if available
+        if (isNewStepRef.current && savedStepTimingsRef.current) {
+          dispatch(updateSceneMotionFlow({
+            sceneId: prevSceneIdRef.current,
+            steps: savedStepTimingsRef.current
+          }))
+          savedStepTimingsRef.current = null
+        } else if (motionCaptureRef.current.stepId) {
           dispatch(deleteSceneMotionStep({
-            sceneId: prevSceneIdRef.current, // Use previous scene ID
+            sceneId: prevSceneIdRef.current,
             stepId: motionCaptureRef.current.stepId
           }))
         }
 
         // [CROP FIX] Reset all PIXI objects to their base Redux state when scene switches
-        // This prevents crop values from persisting across scene changes
         if (motionControls && motionControls.layerObjects && layers) {
           const layerObjects = motionControls.layerObjects
           layerObjects.forEach((pixiObject, layerId) => {
             const baseLayerData = layers[layerId]
             if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-              // Force reset to base Redux state
               applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
             }
           })
@@ -502,7 +704,7 @@ function EditorPage() {
 
     // Update ref
     prevSceneIdRef.current = currentSceneId
-  }, [currentSceneId, dispatch, motionControls, layers])
+  }, [currentSceneId, dispatch, motionControls, layers, motionCaptureMode])
 
   /**
    * Start motion capture: auto-add a new step and enter capture mode
@@ -510,13 +712,26 @@ function EditorPage() {
   const handleStartMotionCapture = useCallback(() => {
     if (!currentSceneId) return
 
+    // [BUG 1 FIX] Clear any layer selection BEFORE starting the tween.
+    // Without this, the auto-pause effect in Stage.jsx sees selectedLayerIds.length > 0
+    // and isPlaying=true (from tweenTo) but motionCaptureMode.isActive is still false
+    // (set in onComplete), so it calls pausePlayback() killing the tween.
+    dispatch(clearLayerSelection())
+
     // 1. Ensure motion flow exists
     dispatch(initializeSceneMotionFlow({ sceneId: currentSceneId }))
 
-    // 2. Create a new step ID
+    // 2. Snapshot current step timings BEFORE adding the new step.
+    // addSceneMotionStep triggers syncSceneMotionDuration which redistributes durations.
+    // If the user cancels, we restore this snapshot to undo the redistribution.
+    savedStepTimingsRef.current = currentSceneMotionFlow?.steps
+      ? JSON.parse(JSON.stringify(currentSceneMotionFlow.steps))
+      : []
+
+    // 3. Create a new step ID
     const newStepId = `step-${Date.now()}`
 
-    // 3. Dispatch action to add the step
+    // 4. Dispatch action to add the step
     dispatch(addSceneMotionStep({
       sceneId: currentSceneId,
       stepId: newStepId
@@ -698,6 +913,7 @@ function EditorPage() {
       // 8. Set motion capture mode (this will be picked up by MotionPanel via onMotionEditingChange)
       setMotionCaptureMode({
         isActive: true,
+        isTransitioning: false,
         stepId: newStepId, // CRITICAL: Ensure stepId is set for global interactions!
         onPositionUpdate: (data) => {
           // Update tracked layers
@@ -753,55 +969,43 @@ function EditorPage() {
       })
     }
 
+    // [BUG 1 FIX] Set transitioning state BEFORE the tween starts.
+    // This prevents the auto-pause effect in Stage.jsx from interfering
+    // even if selection clearing and isPlaying batching has timing issues.
+    setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId: newStepId })
+
     if (motionControls && stepIndex > 0) {
       const pageDuration = currentSceneMotionFlow?.pageDuration || 5000
-      const stepCount = existingFlow.length + 1 // Include new step
-      const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
-      const stepStartTimeSeconds = startTimeOffset + (stepIndex * stepDuration) / 1000
 
-      // OPTIMIZATION: Create detailed optimistic flow to ensure accurate preview
-      // We manually construct the flow with updated durations to avoid "drift"
-      // caused by animating with old 5s steps to a 2.5s timestamp.
-      const optimisticSteps = existingFlow.map(step => {
-        const newStep = { ...step, layerActions: {} }
-        if (step.layerActions) {
-          Object.keys(step.layerActions).forEach(layerId => {
-            // Update action durations
-            newStep.layerActions[layerId] = step.layerActions[layerId].map(action => ({
-              ...action,
-              values: { ...action.values, duration: stepDuration }
-            }))
-          })
-        }
-        return newStep
-      })
+      // [FIX] Use the OLD flow's timing for the target — the engine still has this layout.
+      // The engine will rebuild with the new layout after React re-renders.
+      // existingFlow is from stale React state (before addSceneMotionStep dispatch),
+      // which is EXACTLY what the engine's internal masterTimeline currently matches.
+      const lastExisting = existingFlow[existingFlow.length - 1]
+      const lastStepEnd = lastExisting
+        ? (lastExisting.startTime || 0) + (lastExisting.duration || Math.round(pageDuration / existingFlow.length))
+        : pageDuration
+      let stepStartTimeSeconds = startTimeOffset + lastStepEnd / 1000
 
-      // Add the new empty step to complete the flow structure
-      optimisticSteps.push({ id: newStepId, layerActions: {} })
+      // [BUG 2 FIX] Clamp the tween target to stay safely within the current scene boundary.
+      // Without this, when existing steps fill the entire scene duration, the target equals
+      // the scene's end time. The tween can overshoot (floating point), causing
+      // useEditorPlayback to auto-switch to the next scene, which triggers the scene-switch
+      // effect that deletes the newly created step.
+      const sceneEndTime = currentSceneTimelineInfo?.endTime || (startTimeOffset + 5)
+      stepStartTimeSeconds = Math.min(stepStartTimeSeconds, sceneEndTime - 0.05)
 
-      const optimisticFlow = {
-        ...currentSceneMotionFlow,
-        steps: optimisticSteps
-      }
+      console.log(`🎬 [EditorPage] Fast-play: target=${stepStartTimeSeconds.toFixed(3)}s (lastStepEnd=${lastStepEnd}ms, pageDuration=${pageDuration}ms, existingSteps=${existingFlow.length}, sceneEnd=${sceneEndTime.toFixed(3)}s)`)
 
-      // Animate from scene start to the start of the new step (fast-play previous steps)
-      console.log(`🎬 [EditorPage] Fast-play previous ${stepIndex} steps: 0s -> ${stepStartTimeSeconds}s`)
-
-      // Use a Promise-like approach or onComplete if supported
-      // We assume tweenTo supports onComplete in its options or returns a promise
       try {
-        const tweenResult = motionControls.tweenTo(stepStartTimeSeconds, {
-          duration: Math.min(stepIndex * 0.3, 1.5), // Quick animation: 0.3s per step, max 1.5s
+        motionControls.tweenTo(stepStartTimeSeconds, {
+          duration: Math.min(stepIndex * 0.3, 1.5),
           startTime: startTimeOffset,
-          flow: optimisticFlow, // Use the optimistic flow with correct durations
           onComplete: () => {
             console.log('✅ [EditorPage] Fast-play complete, enabling capture mode')
             enableCaptureMode()
           }
         })
-
-        // Fallback: If onComplete isn't called for some reason (e.g. immediate return), 
-        // ensure we enable capture mode. But GSAP onComplete is reliable.
       } catch (e) {
         console.error('Fast-play error:', e)
         enableCaptureMode()
@@ -813,7 +1017,7 @@ function EditorPage() {
     } else {
       enableCaptureMode()
     }
-  }, [currentSceneId, currentSceneMotionFlow, layers, dispatch, motionControls, startTimeOffset])
+  }, [currentSceneId, currentSceneMotionFlow, layers, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo])
 
   /**
    * Apply captured motion and exit capture mode
@@ -821,8 +1025,14 @@ function EditorPage() {
   const handleApplyMotion = useCallback((options = {}) => {
     // Check if we have captured motion data
     if (!motionCaptureMode || !motionCaptureMode.trackedLayers || motionCaptureMode.trackedLayers.size === 0) {
-      // Nothing was captured, just cancel and delete the empty step
-      if (editingStepId && currentSceneId) {
+      // Nothing was captured — restore original step timings if this was a new step
+      if (editingStepId && currentSceneId && isNewStepRef.current && savedStepTimingsRef.current) {
+        dispatch(updateSceneMotionFlow({
+          sceneId: currentSceneId,
+          steps: savedStepTimingsRef.current
+        }))
+        savedStepTimingsRef.current = null
+      } else if (editingStepId && currentSceneId) {
         dispatch(deleteSceneMotionStep({
           sceneId: currentSceneId,
           stepId: editingStepId
@@ -992,11 +1202,16 @@ function EditorPage() {
       const pageDuration = currentFlow.pageDuration || 5000
       const stepCount = motionFlow.length
       const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
-      const stepStartTimeSeconds = startTimeOffset + (stepIndex * stepDuration) / 1000
-      const calculatedEndTime = startTimeOffset + ((stepIndex + 1) * stepDuration) / 1000
-      // Clamp to scene boundary
+      // Use absolute startTime for timing
+      const timingStep = motionFlow[stepIndex]
+      const stepStartMs = timingStep?.startTime != null ? timingStep.startTime : (stepIndex * stepDuration)
+      const effectiveDuration = timingStep?.duration || stepDuration
+      const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+      const calculatedEndTime = stepStartTimeSeconds + effectiveDuration / 1000
+      // Clamp to scene boundary with a safe buffer to prevent the playhead from
+      // overshooting into the next scene (which triggers auto scene-switch and step deletion).
       const sceneEndTime = currentSceneTimelineInfo?.endTime || calculatedEndTime
-      const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.01)
+      const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
 
       // Build updated flow for transition preview
       // [PERFORMANCE] Use structured clone for better performance than JSON.parse/stringify
@@ -1056,9 +1271,8 @@ function EditorPage() {
                 ...existingValues,
                 dx: deltaX,
                 dy: deltaY,
-                // [CRITICAL] Always preserve control points - they define the curve path
                 controlPoints: preservedControlPoints,
-                duration: stepDuration,
+                duration: effectiveDuration,
                 easing: 'power4.out'
               }
             }
@@ -1068,7 +1282,6 @@ function EditorPage() {
               actions.push(moveAction)
             }
           } else {
-            // Remove move action if it's not needed and doesn't have control points
             const moveIdx = actions.findIndex(a => a.type === 'move')
             if (moveIdx !== -1 && !hasControlPoints) {
               actions.splice(moveIdx, 1)
@@ -1086,7 +1299,7 @@ function EditorPage() {
                 values: {
                   dsx: scaleX / (initialTransform?.scaleX || 1),
                   dsy: scaleY / (initialTransform?.scaleY || 1),
-                  duration: stepDuration,
+                  duration: effectiveDuration,
                   easing: 'power4.out'
                 }
               }
@@ -1102,7 +1315,7 @@ function EditorPage() {
               type: 'rotate',
               values: {
                 dangle: rotation - (initialTransform?.rotation || 0),
-                duration: stepDuration,
+                duration: effectiveDuration,
                 easing: 'power4.out'
               }
             }
@@ -1123,11 +1336,9 @@ function EditorPage() {
                 cropHeight: cropHeight ?? initialCropH,
                 mediaWidth: mediaWidth ?? initialTransform?.mediaWidth,
                 mediaHeight: mediaHeight ?? initialTransform?.mediaHeight,
-                // [FIX] Prevent dx/dy conflict - only include if move action doesn't exist
-                // This prevents GSAP overwrite conflicts where CropAction's x/y tweens kill the MoveAction curve
                 dx: moveActionExists ? undefined : deltaX,
                 dy: moveActionExists ? undefined : deltaY,
-                duration: stepDuration,
+                duration: effectiveDuration,
                 easing: 'power4.out'
               }
             }
@@ -1153,27 +1364,12 @@ function EditorPage() {
         startTime: stepStartTimeSeconds,
         flow: optimisticFlow,
         onComplete: () => {
-          // [SNAP-BACK FIX] After preview completes, we need to:
-          // 1. Wait for Redux to update (next tick)
-          // 2. Force engine rebuild with updated Redux state
-          // 3. Then seek to maintain position
-          // This prevents the engine from rebuilding with stale data and causing snap-back
-          console.log(`✅ [EditorPage] Fast-play complete, waiting for Redux update then seeking to ${stepEndTimeSeconds}s`)
-
-          // Use setTimeout to wait for Redux update to propagate through the store
-          // Redux Toolkit updates are synchronous, but React re-renders are async
-          setTimeout(() => {
-            // Force engine rebuild with latest Redux state (this will use the updated flows from Redux)
-            if (motionControls && typeof motionControls.prepareEngine === 'function') {
-              console.log(`🔄 [EditorPage] Forcing engine rebuild with updated Redux state`)
-              motionControls.prepareEngine(true)
-            }
-
-            // Now seek to maintain position with the updated engine
-            // This ensures we're using the correct flow data, not the stale preview flow
-            motionControls.seek(stepEndTimeSeconds)
-            console.log(`✅ [EditorPage] Position maintained at ${stepEndTimeSeconds}s with updated engine`)
-          }, 0) // Use 0ms timeout to defer to next event loop tick
+          // The tween has scrubbed to stepEndTimeSeconds with correct action durations.
+          // The overridden flow matches what was dispatched to Redux, so the visual state
+          // is already correct. Just seek to hold position — the natural engine rebuild
+          // (triggered by the React re-render when isPlaying changes to false) will
+          // sync the engine with the latest Redux state without any visible jump.
+          motionControls.seek(stepEndTimeSeconds)
         }
       })
 
@@ -1183,11 +1379,13 @@ function EditorPage() {
       setMotionCaptureMode(null)
       setEditingStepId(null)
       motionCaptureRef.current = null
+      savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
     } else {
       // No motionControls available, just clear capture mode
       setMotionCaptureMode(null)
       setEditingStepId(null)
       motionCaptureRef.current = null
+      savedStepTimingsRef.current = null
     }
   }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo])
 
@@ -1197,25 +1395,31 @@ function EditorPage() {
    */
   const handleCancelMotion = useCallback(() => {
     if (editingStepId && currentSceneId) {
-      // Delete the step ONLY if it was NEWLY created in this session
       if (isNewStepRef.current) {
-        dispatch(deleteSceneMotionStep({
-          sceneId: currentSceneId,
-          stepId: editingStepId
-        }))
+        // Restore the saved step timings snapshot from BEFORE addSceneMotionStep was dispatched.
+        // This removes the new step AND undoes the duration redistribution in one operation,
+        // so existing steps return to their original durations.
+        if (savedStepTimingsRef.current) {
+          dispatch(updateSceneMotionFlow({
+            sceneId: currentSceneId,
+            steps: savedStepTimingsRef.current
+          }))
+          savedStepTimingsRef.current = null
+        } else {
+          dispatch(deleteSceneMotionStep({
+            sceneId: currentSceneId,
+            stepId: editingStepId
+          }))
+        }
       }
     }
 
     // [CROP FIX] Reset all PIXI objects to their base Redux state before exiting capture mode
-    // This prevents crop values (and other transform values) from persisting on PIXI objects
-    // after canceling, which would then be read as initial state in the next capture session
     if (motionControls && motionControls.layerObjects && layers) {
       const layerObjects = motionControls.layerObjects
       layerObjects.forEach((pixiObject, layerId) => {
         const baseLayerData = layers[layerId]
         if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-          // Force reset to base Redux state (force=true ensures visual alignment)
-          // This resets crop values, position, rotation, scale, etc. to match Redux
           applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
         }
       })
@@ -1227,6 +1431,49 @@ function EditorPage() {
     motionCaptureRef.current = null
     isNewStepRef.current = false
   }, [editingStepId, currentSceneId, dispatch, motionControls, layers])
+
+  /**
+   * Select a step (highlight + seek) WITHOUT entering capture mode.
+   * This is the default click behavior for step blocks.
+   * Editing only happens via explicit controls (context menu "Update Step", MotionPanel buttons).
+   */
+  const handleSelectStep = useCallback((stepId) => {
+    if (!currentSceneId) return
+
+    // If currently in capture mode, apply or cancel first
+    if (isMotionCaptureActive) {
+      if (stepId === 'base') {
+        handleCancelMotion()
+      } else {
+        handleApplyMotion({ skipPreview: true })
+      }
+    }
+
+    // Set the visual selection
+    setEditingStepId(stepId)
+
+    // Seek to the step's timeline position
+    if (stepId === 'base') {
+      seek(startTimeOffset)
+      setMotionCaptureMode(null)
+      motionCaptureRef.current = null
+      return
+    }
+
+    // Find step timing and seek to its start position
+    const motionFlow = currentSceneMotionFlow?.steps || []
+    const stepIndex = motionFlow.findIndex(s => s.id === stepId)
+    if (stepIndex === -1) return
+
+    const step = motionFlow[stepIndex]
+    const pageDuration = currentSceneMotionFlow?.pageDuration || 5000
+    const stepCount = motionFlow.length
+    const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+    const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
+    const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+
+    seek(stepStartTimeSeconds)
+  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow])
 
   /**
    * Edit an existing motion step (Centralized logic for both Panel and Timeline)
@@ -1425,6 +1672,7 @@ function EditorPage() {
       }
       setMotionCaptureMode({
         isActive: true,
+        isTransitioning: false,
         stepId,
         onPositionUpdate: (data) => {
           const capture = motionCaptureRef.current
@@ -1459,20 +1707,25 @@ function EditorPage() {
     }
 
     // 3. Sequential Playback / Fast-Preview
+    // Clear selection and set transitioning state to prevent auto-pause and scene-switch during tween
+    dispatch(clearLayerSelection())
+    setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId })
+
     if (motionControls) {
       const pageDuration = currentSceneMotionFlow.pageDuration || 5000
       const stepCount = motionFlow.length
       const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
-      const stepStartTimeSeconds = startTimeOffset + (stepIndex * stepDuration) / 1000
-      const calculatedEndTime = startTimeOffset + ((stepIndex + 1) * stepDuration) / 1000
+      const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
+      const effectiveDuration = step.duration || stepDuration
+      const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+      const calculatedEndTime = stepStartTimeSeconds + effectiveDuration / 1000
+      // Clamp to scene boundary with safe buffer to prevent overshoot into next scene
       const sceneEndTime = currentSceneTimelineInfo?.endTime || calculatedEndTime
-      const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.01)
+      const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
 
       const hasActions = step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)
       const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
 
-      // Immediately seek to a near-target position if it's very close or if we want faster feedback
-      // For now, let GSAP handle the 0.3s transition which is already quite fast.
       console.log(`🎬 [EditorPage] Transitioning to step for edit: -> ${targetTime.toFixed(2)}s`)
       motionControls.tweenTo(targetTime, {
         duration: 0.3,
@@ -1482,7 +1735,7 @@ function EditorPage() {
     } else {
       enableEditCapture()
     }
-  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek, handleCancelMotion])
+  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek, handleCancelMotion, dispatch])
 
 
 
@@ -1691,13 +1944,13 @@ function EditorPage() {
     return () => window.removeEventListener('resize', updateSidebarWidth)
   }, [])
 
-  // Auto-save simulation
+  // Real Auto-save: Save project every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      setLastSaved(Date.now())
-    }, 3000)
+      handleSave()
+    }, 60000)
     return () => clearInterval(interval)
-  }, [])
+  }, [handleSave])
 
 
 
@@ -1706,27 +1959,29 @@ function EditorPage() {
   // [UI FIX] Global Browser Interruption Control
   // Prevent browser context menu and text selection from interfering with the editor
   useEffect(() => {
-    const handleGlobalContextMenu = (e) => {
-      // Allow context menu on inputs, textareas, and contenteditable elements
-      const isInput = e.target.tagName === 'INPUT' ||
-        e.target.tagName === 'TEXTAREA' ||
-        e.target.isContentEditable ||
-        e.target.closest('[contenteditable="true"]')
+    const getElementTarget = (e) => {
+      let t = e.target
+      if (t && t.nodeType === Node.TEXT_NODE) t = t.parentElement
+      return t
+    }
 
-      if (!isInput) {
+    const isEditableTarget = (t) => {
+      if (!t) return false
+      return t.tagName === 'INPUT' ||
+        t.tagName === 'TEXTAREA' ||
+        t.isContentEditable ||
+        (t.closest && t.closest('[contenteditable="true"]'))
+    }
+
+    const handleGlobalContextMenu = (e) => {
+      if (!isEditableTarget(getElementTarget(e))) {
         e.preventDefault()
         return false
       }
     }
 
     const handleGlobalSelectStart = (e) => {
-      // Allow selection inside inputs and textareas
-      const isInput = e.target.tagName === 'INPUT' ||
-        e.target.tagName === 'TEXTAREA' ||
-        e.target.isContentEditable ||
-        e.target.closest('[contenteditable="true"]')
-
-      if (!isInput) {
+      if (!isEditableTarget(getElementTarget(e))) {
         e.preventDefault()
         return false
       }
@@ -1817,7 +2072,15 @@ function EditorPage() {
   // This ensures that when actions (like controlPoints) are updated in Redux,
   // the canvas immediately sees them, preventing the "snap back" to straight lines.
   const effectiveMotionCaptureMode = useMemo(() => {
-    if (!motionCaptureMode || !motionCaptureMode.isActive) return null
+    if (!motionCaptureMode) return null
+
+    // [BUG 1 FIX] During Add Step transition (fast-play preview), pass through the
+    // transitioning flag so Stage.jsx's auto-pause effect can check it.
+    if (motionCaptureMode.isTransitioning) {
+      return { isActive: false, isTransitioning: true }
+    }
+
+    if (!motionCaptureMode.isActive) return null
 
     // If we have an editing step, try to find it in the live flow
     const activeStepId = motionCaptureMode.stepId || editingStepId
@@ -1874,6 +2137,13 @@ function EditorPage() {
         e.preventDefault()
       }}
     >
+      {/* Loading Overlay */}
+      {projectStatus === 'loading' && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#0f1015]/60 backdrop-blur-sm">
+          <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+        </div>
+      )}
+
       {/* Top Toolbar */}
       <div
         ref={topToolbarRef}
@@ -1881,27 +2151,23 @@ function EditorPage() {
       >
         <TopToolbar
           projectName={projectName}
-          onShare={() => { }}
-          onExport={handleExport}
-          onPreview={() => {
-            // Mobile Menu Toggle: if any panel is open, close it. Otherwise open Elements.
-            if (activeSidebarItem) {
-              setActiveSidebarItem(null)
-            } else {
-              setActiveSidebarItem('Elements')
-            }
-          }}
-          onProjectNameChange={setProjectName}
+          onSave={handleSave}
+          onNavigate={handleNavigate}
+          isSaving={isSaving}
           lastSaved={lastSaved}
+          onProjectNameChange={(newName) => dispatch(setProjectName(newName))}
+          onExport={handleExport}
           onCanvasSizeChange={handleCanvasSizeChange}
+          onToggleSidebar={() => handleSidebarItemClick('Elements')}
         />
       </div>
 
       <div
-        className="hidden lg:block absolute left-0 z-50 transition-all duration-300"
+        className="hidden lg:block absolute left-0 z-50"
         style={{
           top: `${topToolbarHeight}px`,
-          height: `calc(100vh - ${topToolbarHeight}px - ${bottomSectionHeight}px)`
+          height: `calc(100vh - ${topToolbarHeight}px - ${bottomSectionHeight}px)`,
+          transition: isResizingBottom ? 'none' : 'height 0.3s ease',
         }}
       >
         <LeftSidebar
@@ -1933,6 +2199,9 @@ function EditorPage() {
               )}
               {activeSidebarItem === 'Uploads' && (
                 <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+              )}
+              {activeSidebarItem === 'Images' && (
+                <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
               {activeSidebarItem === 'Tools' && (
                 <ToolsPanel onClose={handleClosePanel} />
@@ -2090,6 +2359,9 @@ function EditorPage() {
                   )}
                   {activeSidebarItem === 'Uploads' && (
                     <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                  )}
+                  {activeSidebarItem === 'Images' && (
+                    <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
                   {activeSidebarItem === 'Tools' && (
                     <ToolsPanel onClose={handleClosePanel} />
@@ -2250,11 +2522,11 @@ function EditorPage() {
             className="absolute flex-1 overflow-hidden select-none"
             style={{
               top: topToolbarHeight,
-              bottom: bottomSectionHeight,
+              bottom: initialBottomHeight || 0,
               left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
               right: 0,
-              backgroundColor: '#0f1015', // Darker background for the canvas area
-              zIndex: 10
+              backgroundColor: '#0f1015',
+              zIndex: 10,
             }}
           >
             <Stage
@@ -2273,9 +2545,9 @@ function EditorPage() {
               zoom={zoom}
               onZoomChange={setZoom}
               onViewportChange={handleViewportChange}
-              bottomSectionHeight={bottomSectionHeight}
               topToolbarHeight={topToolbarHeight}
               isResizingBottom={isResizingBottom}
+              onReady={() => setIsPixiReady(true)}
               //motion capture mode & playback controls
               motionCaptureMode={effectiveMotionCaptureMode}
               onMotionStateChange={setMotionControls}
@@ -2287,6 +2559,19 @@ function EditorPage() {
               onStartTextEditing={startTextEditing}
               totalTime={totalTime}
             />
+
+            {/* Asset Preloading Overlay */}
+            {isPreloading && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] transition-opacity duration-500">
+                <div className="relative">
+                  <div className="w-16 h-16 border-4 border-[#6940c9]/20 rounded-full"></div>
+                  <div className="w-16 h-16 border-4 border-[#6940c9] border-t-transparent rounded-full animate-spin absolute inset-0"></div>
+                  <Layers className="w-6 h-6 text-[#6940c9] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+                </div>
+                <h3 className="mt-6 text-lg font-medium text-white tracking-tight">Loading Project Assets</h3>
+                <p className="mt-2 text-sm text-white/50">Preparing your canvas...</p>
+              </div>
+            )}
 
             {/* Vertical Scrollbar Container */}
             <div
@@ -2357,13 +2642,12 @@ function EditorPage() {
             } : {})
           }}
         >
-          {/* Height Resize Handle - Invisible but wide enough for easy grabbing */}
+          {/* Height Resize Handle */}
           <div
             className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
             onMouseDown={handleBottomResizeMouseDown}
             style={{ top: '-1px' }}
           >
-            {/* Visible Indicator: Solid purple line that fades out at ends */}
             <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
           </div>
           {/* Content Container - Scrollable if content overflows */}
@@ -2395,6 +2679,16 @@ function EditorPage() {
                     }
                   }}
                   onSplit={handleSplitScene}
+                  playheadStepId={playheadStepId}
+                  onUpdateStep={handleEditStep}
+                  onDeleteStep={(stepId) => {
+                    if (currentSceneId && stepId) {
+                      dispatch(deleteSceneMotionStep({
+                        sceneId: currentSceneId,
+                        stepId: stepId
+                      }))
+                    }
+                  }}
                 />
               </div>
 
@@ -2422,7 +2716,8 @@ function EditorPage() {
                   worldHeight={worldHeight}
                   currentTimeStepId={editingStepId}
                   isMotionCaptureActive={isMotionCaptureActive}
-                  onStepClick={handleEditStep}
+                  onStepClick={handleSelectStep}
+                  onStepEdit={handleEditStep}
                   bottomSectionHeight={customBottomHeight}
                   onSeek={seek}
                   onMotionStop={handleMotionStop}
@@ -2461,97 +2756,133 @@ function EditorPage() {
       />
 
       {/* Export Progress Overlay */}
-      {exportState.isActive && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-white">
-          <div className="w-full max-w-md bg-[#1a1f24] rounded-xl p-8 border border-white/10 shadow-2xl relative overflow-hidden">
-            {/* Animated Background Pulse */}
-            <div className="absolute inset-0 bg-purple-600/5 animate-pulse" />
+      <Modal
+        isOpen={exportState.isActive}
+        onClose={() => setExportState(prev => ({ ...prev, isActive: false }))}
+        showCloseButton={exportState.status === 'completed' || exportState.status === 'error'}
+        maxWidth="max-w-md"
+      >
+        <div className="relative">
+          {/* Animated Background Pulse */}
+          <div className="absolute -inset-6 bg-purple-600/5 animate-pulse pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col items-center w-full">
-              {exportState.status !== 'error' && exportState.status !== 'completed' && (
-                <div className="mb-6 relative">
-                  <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
-                  <Loader2 className="h-12 w-12 text-purple-400 animate-spin relative z-10" />
+          <div className="relative z-10 flex flex-col items-center w-full">
+            {exportState.status !== 'error' && exportState.status !== 'completed' && (
+              <div className="mb-6 relative">
+                <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
+                <Loader2 className="h-10 w-10 text-purple-400 animate-spin relative z-10" />
+              </div>
+            )}
+
+            {exportState.status === 'completed' && (
+              <div className="h-10 w-10 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
+                <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            )}
+
+            {exportState.status === 'error' && (
+              <div className="h-10 w-10 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+                <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+            )}
+
+            <h3 className="text-lg font-bold mb-2 tracking-tight text-white">
+              {exportState.status === 'initializing' && 'Preparing Export...'}
+              {exportState.status === 'rendering' && 'Rendering Frames...'}
+              {exportState.status === 'encoding' && 'Finalizing Video...'}
+              {exportState.status === 'completed' && 'Export Successful!'}
+              {exportState.status === 'error' && 'Export Failed'}
+            </h3>
+
+            <p className="text-white/40 text-[13px] mb-8 text-center max-w-[280px] leading-relaxed">
+              {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
+              {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
+              {exportState.status === 'completed' && 'Your download has started automatically.'}
+              {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
+            </p>
+
+            {exportState.status !== 'error' && exportState.status !== 'completed' && (
+              <div className="w-full">
+                <div className="flex justify-between items-end mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]">Progress</span>
+                  <span className="text-base font-mono font-medium text-white/90">{exportState.progress}%</span>
                 </div>
-              )}
-
-              {exportState.status === 'completed' && (
-                <div className="h-12 w-12 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
-                  <svg className="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
+                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#7c4af0] to-indigo-500 shadow-[0_0_15px_rgba(124,74,240,0.4)] transition-all duration-300 ease-out"
+                    style={{ width: `${exportState.progress}%` }}
+                  />
                 </div>
-              )}
+              </div>
+            )}
 
-              {exportState.status === 'error' && (
-                <div className="h-12 w-12 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
-                  <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </div>
-              )}
+            {exportState.status !== 'error' && exportState.status !== 'completed' && (
+              <button
+                onClick={handleCancelExport}
+                className="mt-8 w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
+              >
+                Cancel Export
+              </button>
+            )}
 
-              <h3 className="text-xl font-bold mb-2 tracking-tight">
-                {exportState.status === 'initializing' && 'Preparing Export...'}
-                {exportState.status === 'rendering' && 'Rendering Frames...'}
-                {exportState.status === 'encoding' && 'Finalizing Video...'}
-                {exportState.status === 'completed' && 'Export Successful!'}
-                {exportState.status === 'error' && 'Export Failed'}
-              </h3>
+            {exportState.status === 'completed' && (
+              <button
+                onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
+                className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
+              >
+                Close Window
+              </button>
+            )}
 
-              <p className="text-gray-400 text-sm mb-8 text-center max-w-[280px] leading-relaxed">
-                {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
-                {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
-                {exportState.status === 'completed' && 'Your download has started automatically.'}
-                {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
-              </p>
-
-              {exportState.status !== 'error' && exportState.status !== 'completed' && (
-                <div className="w-full">
-                  <div className="flex justify-between items-end mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400/80">Progress</span>
-                    <span className="text-lg font-mono font-medium">{exportState.progress}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
-                    <div
-                      className="h-full bg-gradient-to-r from-purple-600 to-indigo-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 ease-out"
-                      style={{ width: `${exportState.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {exportState.status === 'completed' && (
+            {exportState.status === 'error' && (
+              <div className="w-full flex flex-col gap-3 mt-2">
+                <button
+                  onClick={() => handleExport('1080p')}
+                  className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#8d61f2] text-white rounded-xl text-[12px] font-bold transition-all shadow-lg shadow-purple-500/20"
+                >
+                  Try Again
+                </button>
                 <button
                   onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                  className="mt-2 text-sm text-gray-400 hover:text-white transition-colors"
+                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
                 >
-                  Close Window
+                  Cancel
                 </button>
-              )}
-
-              {exportState.status === 'error' && (
-                <div className="w-full flex flex-col gap-3 mt-2">
-                  <button
-                    onClick={() => handleExport('1080p')} // Default retry
-                    className="w-full py-2.5 bg-white/10 hover:bg-white/20 rounded-lg font-medium transition-colors"
-                  >
-                    Try Again
-                  </button>
-                  <button
-                    onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                    className="w-full py-2.5 bg-transparent border border-white/10 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </Modal>
+      {/* Project Status Loading Modal */}
+      <Modal
+        isOpen={isSaving}
+        showCloseButton={false}
+        maxWidth="max-w-[280px]"
+        className="border-white/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]"
+      >
+        <div className="flex flex-col items-center justify-center py-4 gap-4">
+          <div className="relative">
+            <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full scale-150 animate-pulse" />
+            <Loader2 className="w-10 h-10 text-blue-400 animate-spin relative z-10" strokeWidth={1.5} />
+          </div>
+          <div className="flex flex-col items-center gap-1 text-center">
+            <h3 className="text-white font-medium text-[15px] tracking-tight">Saving Project</h3>
+            <p className="text-white/40 text-[12px]">Please wait a moment...</p>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
 
-export default EditorPage
+export default function EditorPageWrapper(props) {
+  return (
+    <ErrorBoundary>
+      <EditorPage {...props} />
+    </ErrorBoundary>
+  )
+}

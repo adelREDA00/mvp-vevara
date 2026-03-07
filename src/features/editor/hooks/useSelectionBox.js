@@ -36,7 +36,7 @@ import {
 } from '../utils/badgeUtils'
 import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/viewportUtils'
 import { LAYER_TYPES } from '../../../store/models'
-import { resolveAnchors, calculateTextDimensions, getTextDimensions } from '../utils/geometry'
+import { resolveAnchors, calculateTextDimensions, getTextDimensions, getEffectiveLayerDimensions } from '../utils/geometry'
 import { applyCenterSnapping, applySafeZoneSnapping } from '../utils/centerSnapping'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 
@@ -406,10 +406,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     return currentLayer.rotation || 0
   }, [layer?.id])
 
-  // Get current dimensions, prioritizing captured state or animated visual state
+  // Get current dimensions — single source of truth via getEffectiveLayerDimensions for media
   const getCurrentLayerDimensions = useCallback((currentLayer, currentLayerObject) => {
-    const isCaptureActive = latestMotionCaptureModeRef.current?.isActive
-    const trackedLayer = isCaptureActive ? latestMotionCaptureModeRef.current.trackedLayers?.get(currentLayer.id) : null
+    const motionCaptureMode = latestMotionCaptureModeRef.current
+    const isCaptureActive = motionCaptureMode?.isActive
+    const trackedLayer = isCaptureActive ? motionCaptureMode.trackedLayers?.get(currentLayer.id) : null
 
     if (trackedLayer) {
       if (currentLayer.type === 'text' && currentLayerObject instanceof PIXI.Text) {
@@ -425,29 +426,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       return calculateTextDimensions(currentLayerObject, currentLayer)
     }
 
-    // [FIX] In Normal Mode, check PIXI object for animated crop dimensions
-    if (currentLayerObject && !currentLayerObject.destroyed) {
-      const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO
-      if (isMediaElement) {
-        const engine = getGlobalMotionEngine()
-        const currentTime = engine?.masterTimeline?.time() || 0
-        if (currentTime !== 0) {
-          // If we have reactive crop properties (from CropAction), use them for exact visual match
-          if (currentLayerObject._hasReactiveCropProperties) {
-            return {
-              width: currentLayerObject.cropWidth,
-              height: currentLayerObject.cropHeight
-            }
-          }
-        }
-      }
-    }
-
     const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO
-    if (isMediaElement && currentLayer.cropWidth !== undefined && currentLayer.cropHeight !== undefined) {
-      return {
-        width: currentLayer.cropWidth,
-        height: currentLayer.cropHeight
+    if (isMediaElement && currentLayerObject && !currentLayerObject.destroyed) {
+      const mediaDims = getEffectiveLayerDimensions(currentLayer, currentLayerObject, motionCaptureMode)
+      if (mediaDims) {
+        return { width: mediaDims.width, height: mediaDims.height }
       }
     }
 
@@ -1754,6 +1737,14 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       updateThrottleRef.current = null
     }
     if (pendingUpdateRef.current && latestOnUpdateRef.current) {
+      const isMedia = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO
+      if (typeof console !== 'undefined' && console.log && isMedia && currentLayerObject) {
+        console.log('[useSelectionBox] handleResizeEnd flushing pending (media)', {
+          layerId: currentLayer?.id,
+          pendingUpdate: pendingUpdateRef.current,
+          pixiBefore: { x: currentLayerObject.x, y: currentLayerObject.y, pivotX: currentLayerObject.pivot?.x, pivotY: currentLayerObject.pivot?.y }
+        })
+      }
       latestOnUpdateRef.current(pendingUpdateRef.current)
       pendingUpdateRef.current = null
     }
@@ -2192,9 +2183,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       if (hoverBoxRef.current?.visible && latestObj && !latestObj.destroyed) {
         const isMedia = latestL.type === LAYER_TYPES.IMAGE || latestL.type === LAYER_TYPES.VIDEO
-        const dims = {
-          width: captured?.cropWidth ?? (isMedia ? (latestL.cropWidth ?? latestL.width ?? 100) : (latestL.width ?? 100)),
-          height: captured?.cropHeight ?? (isMedia ? (latestL.cropHeight ?? latestL.height ?? 100) : (latestL.height ?? 100))
+        const effectiveDims = isMedia
+          ? getEffectiveLayerDimensions(latestL, latestObj, latestMotionCaptureModeRef.current)
+          : null
+        const dims = effectiveDims ?? {
+          width: captured?.cropWidth ?? (latestL.cropWidth ?? latestL.width ?? 100),
+          height: captured?.cropHeight ?? (latestL.cropHeight ?? latestL.height ?? 100)
         }
         updateHoverBox(latestObj.x, latestObj.y, dims.width, dims.height, newRotation, 0.5, 0.5, captured?.scaleX ?? latestL.scaleX ?? 1, captured?.scaleY ?? latestL.scaleY ?? 1, 1 / v.scale.x)
       }
@@ -2608,9 +2602,28 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       width = layer.width || 100
       height = textDims.height
     } else if (layerObject instanceof PIXI.Sprite || (layerObject instanceof PIXI.Container && (layerObject._imageSprite || layerObject._videoSprite))) {
-      // Image and Video layers: Use explicit width/height from Redux (logical dimensions)
-      width = layer.width || 100
-      height = layer.height || 100
+      // Image and Video: single source of truth — cropped visible area (reactive PIXI or Redux)
+      const mediaDims = getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode)
+      if (mediaDims) {
+        width = mediaDims.width
+        height = mediaDims.height
+      } else {
+        width = layer.cropWidth ?? layer.width ?? 100
+        height = layer.cropHeight ?? layer.height ?? 100
+      }
+      if (typeof console !== 'undefined' && console.log) {
+        const isVideo = layerObject._videoSprite != null
+        console.log('[useSelectionBox] sync media layer', {
+          layerId: layer?.id,
+          isVideo,
+          selectionBoxCenter: { x, y },
+          layerObjectPos: { x: layerObject.x, y: layerObject.y },
+          layerObjectPivot: layerObject.pivot ? { x: layerObject.pivot.x, y: layerObject.pivot.y } : null,
+          width,
+          height,
+          tracked: !!trackedLayer
+        })
+      }
     } else {
       // For shapes, use actual visual bounds from PIXI object
       let actualBounds
@@ -2763,6 +2776,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     onUpdate,
     layer?.width,
     layer?.height,
+    layer?.cropWidth,
+    layer?.cropHeight,
     // Removed layer?.x and layer?.y to prevent recreation during drag operations
     // Position updates are handled exclusively by updateLoop
     layer?.rotation,
@@ -2775,7 +2790,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     layer?.data?.fontFamily,
     layer?.type,
     forceUpdate,
-    motionCaptureMode, // Add motionCaptureMode to dependencies
+    motionCaptureMode,
   ])
 
   // =========================================================================

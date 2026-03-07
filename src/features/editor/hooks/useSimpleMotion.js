@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { selectSceneMotionFlow, selectLayers, selectProjectTimelineInfo, selectTotalProjectDuration, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
 import { applyTransformInline } from './useCanvasLayers'
+import { createVideoLayer } from '../../engine/pixi/createLayer'
 
 /**
  * Hook for managing motion playback on the canvas.
@@ -13,11 +14,16 @@ import { applyTransformInline } from './useCanvasLayers'
  * @param {number} totalTimeInSeconds - Total scene duration in seconds
  * @param {function} onPlayingChange - Callback when playing state changes (optional)
  */
-export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null) {
+export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null, motionCaptureMode = null) {
     const dispatch = useDispatch()
 
     // Get all layers for resetting state during transitions
     const layers = useSelector(selectLayers)
+
+    // When capture is active or transitioning (e.g. after add-step fast preview), skip resetting
+    // PIXI objects to base in prepareEngine so the video/layer stays at end-of-step position.
+    const motionCaptureModeRef = useRef(motionCaptureMode)
+    motionCaptureModeRef.current = motionCaptureMode
 
     // Get project timeline info for all scenes
     const timelineInfo = useSelector(selectProjectTimelineInfo)
@@ -99,11 +105,14 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
         }).join('|')
 
+        const sceneTimingsHash = timelineInfo?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
+
         const currentDataSignature = JSON.stringify({
             sceneCount: timelineInfo.length,
             layerCount: objects.size,
             totalDuration: totalProjectDuration,
             layerPositionsHash,
+            sceneTimingsHash, // [FIX] Include scene timings to detect trims/moves
             // Check if any scene's steps or actions have changed
             flowsHash: JSON.stringify(flowsMap)
         })
@@ -124,14 +133,24 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // Even if they are hidden in current scene, they need to be registered for seamless transitions
         // Initial transform handled by useCanvasLayers
 
-        // 2. Reset PIXI objects to their base Redux state BEFORE rebuilding timelines
-        // This ensures the first scene's first step starts from correctly aligned objects.
+        // 2. Reset PIXI objects to their base Redux state BEFORE rebuilding timelines —
+        // unless we're in motion capture (or transitioning into it). In that case layers must
+        // stay at their current visual position (e.g. end of step-1 when entering step-2).
+        const capture = motionCaptureModeRef.current
+        const skipResetForCapture = capture?.isActive || capture?.isTransitioning
+        if (typeof console !== 'undefined' && console.log) {
+            console.log('[useSimpleMotion] prepareEngine', {
+                skipResetForCapture,
+                captureActive: capture?.isActive,
+                captureTransitioning: capture?.isTransitioning,
+                stepId: capture?.stepId
+            })
+        }
         const currentLayers = layersRef.current
-        if (objects && currentLayers) {
+        if (objects && currentLayers && !skipResetForCapture) {
             objects.forEach((pixiObject, layerId) => {
                 const baseLayerData = currentLayers[layerId]
                 if (baseLayerData) {
-                    // Force = true to ensure visual alignment with Redux
                     applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
                 }
             })
@@ -237,36 +256,51 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         return () => clearInterval(interval)
     }, [motionEngine, isPlayingInternal])
 
-    // Track video buffering state
+    // [PROJECT-WIDE SYNC] Pre-warm and register all video layers in the project 
+    // This allows the engine to pre-seek videos in upcoming scenes even before they are mounted on stage.
     useEffect(() => {
-        let bufferedVideos = new Set()
-        let didSetBuffering = false
+        if (!timelineInfo || !allMotionFlows || !layers) return
 
-        const handleWaiting = (e) => {
-            bufferedVideos.add(e.target)
-            if (!didSetBuffering) {
-                setIsBuffering(true)
-                didSetBuffering = true
+        // Scan all scenes for video layers
+        timelineInfo.forEach(sceneInfo => {
+            const sceneLayers = sceneInfo.layers || []
+            sceneLayers.forEach(layerId => {
+                const layer = layers[layerId]
+                if (layer && layer.type === 'video' && layer.data?.url) {
+                    // Pre-warm the video element (gets it into createLayer's cache)
+                    // We call createVideoLayer but don't add the result to anything.
+                    // It will ensure the HTMLVideoElement is created and stored in videoElementCache.
+                    createVideoLayer(layer, { id: layerId }).then(container => {
+                        const videoElement = container?._videoElement
+                        if (videoElement) {
+                            // Register with engine for background syncing
+                            motionEngine.registerBackgroundMedia(layerId, videoElement, {
+                                sceneId: sceneInfo.id,
+                                sourceStartTime: layer.data.sourceStartTime,
+                                sourceEndTime: layer.data.sourceEndTime
+                            })
+                        }
+                    }).catch(err => {
+                        console.warn(`[useSimpleMotion] Failed to pre-warm video ${layerId}:`, err)
+                    })
+                }
+            })
+        })
+    }, [timelineInfo, allMotionFlows, layers, motionEngine])
+
+    // Track project-wide buffering state from MotionEngine
+    useEffect(() => {
+        const checkBuffering = () => {
+            const buffering = motionEngine.isBuffering
+            if (buffering !== isBuffering) {
+                setIsBuffering(buffering)
             }
         }
-        const handleReady = (e) => {
-            bufferedVideos.delete(e.target)
-            if (bufferedVideos.size === 0) {
-                setIsBuffering(false)
-                didSetBuffering = false
-            }
-        }
 
-        document.addEventListener('waiting', handleWaiting, true)
-        document.addEventListener('canplay', handleReady, true)
-        document.addEventListener('playing', handleReady, true)
-
-        return () => {
-            document.removeEventListener('waiting', handleWaiting, true)
-            document.removeEventListener('canplay', handleReady, true)
-            document.removeEventListener('playing', handleReady, true)
-        }
-    }, [])
+        // Sync more frequently during playback for smoother UI
+        const interval = setInterval(checkBuffering, isPlayingInternal ? 100 : 500)
+        return () => clearInterval(interval)
+    }, [motionEngine, isBuffering, isPlayingInternal])
 
     // ============================================================================
     // PLAYBACK CONTROLS

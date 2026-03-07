@@ -59,7 +59,7 @@ export async function createApp(config = {}) {
     } catch (fallbackError) {
       console.error('PixiJS fallback init also failed:', fallbackError)
       if (app.renderer) {
-        app.destroy(true, { children: true, texture: true })
+        app.destroy({ removeView: true })
       }
       throw new Error(`Failed to initialize PixiJS: ${fallbackError.message}`)
     }
@@ -88,11 +88,18 @@ export async function createApp(config = {}) {
     const canvas = app.canvas
     const attachContextListeners = () => {
       canvas.addEventListener('webglcontextlost', (event) => {
+        // If the app is already destroyed or in the process of being destroyed, 
+        // this is an intentional loss (e.g., page navigation) and should be silent.
+        // CRITICAL: Do NOT call preventDefault() during intentional destruction —
+        // it tells the browser to hold onto GPU resources, starving the new context.
+        if (app.destroyed || app._isBeingDestroyed) return
+
         event.preventDefault()
         console.warn('[PIXI] WebGL context lost — attempting recovery')
       }, false)
 
       canvas.addEventListener('webglcontextrestored', () => {
+        if (app.destroyed) return
         console.log('[PIXI] WebGL context restored')
       }, false)
     }

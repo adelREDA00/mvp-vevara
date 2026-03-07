@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit'
 import projectReducer from './slices/projectSlice'
+import authReducer from './slices/authSlice'
 import selectionReducer from './slices/selectionSlice'
 import playbackReducer from './slices/playbackSlice'
 import historyReducer from './slices/historySlice'
@@ -9,6 +10,7 @@ import { historyMiddleware } from './middleware/historyMiddleware'
 export const store = configureStore({
   reducer: {
     project: projectReducer,
+    auth: authReducer,
     selection: selectionReducer,
     playback: playbackReducer,
     history: historyReducer,
