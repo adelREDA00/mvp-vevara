@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -36,6 +36,99 @@ import { resetGlobalMotionEngine } from '../../engine/motion'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
+
+const GUEST_TEMPLATE = {
+  name: 'Practice Project',
+  aspectRatio: '16:9',
+  scenes: [
+    {
+      id: 'scene-guest-1',
+      name: 'Scene 1',
+      duration: 5.0,
+      transition: 'None',
+      backgroundColor: 0xffffff,
+      layers: ['bg-guest-1', 'shape-guest-1', 'text-guest-1'],
+    }
+  ],
+  layers: {
+    'bg-guest-1': {
+      id: 'bg-guest-1',
+      sceneId: 'scene-guest-1',
+      type: 'background',
+      name: 'Background',
+      visible: true,
+      locked: false,
+      opacity: 1.0,
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      anchorX: 0,
+      anchorY: 0,
+      data: { color: 0xffffff },
+    },
+    'shape-guest-1': {
+      id: 'shape-guest-1',
+      sceneId: 'scene-guest-1',
+      type: 'shape',
+      name: 'Practice Box',
+      visible: true,
+      locked: false,
+      opacity: 1.0,
+      x: 400,
+      y: 540,
+      width: 200,
+      height: 200,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      data: {
+        shapeType: 'rect',
+        fill: '#000000',
+        stroke: '',
+        strokeWidth: 0,
+      },
+    },
+    'text-guest-1': {
+      id: 'text-guest-1',
+      sceneId: 'scene-guest-1',
+      type: 'text',
+      name: 'Instructions',
+      visible: true,
+      locked: false,
+      opacity: 1.0,
+      x: 960,
+      y: 200,
+      width: 1000,
+      height: 100,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      data: {
+        content: "Click Add Step, move or change the box, then click Add Step again to apply",
+        fontSize: 54,
+        color: '#000000',
+        fontFamily: 'Inter',
+        fontWeight: 'bold',
+        textAlign: 'center',
+      },
+    }
+  },
+  sceneMotionFlows: {
+    'scene-guest-1': {
+      steps: [],
+      pageDuration: 5000,
+    }
+  },
+  currentSceneId: 'scene-guest-1'
+}
 
 function EditorPage() {
   const dispatch = useDispatch()
@@ -517,13 +610,20 @@ function EditorPage() {
     if (projectStatus === 'loading') return
     if (!hasInitializedScene.current && scenes.length === 0 && !urlProjectId) {
       hasInitializedScene.current = true
-      dispatch(addScene({
-        name: 'Scene 1',
-        duration: 5.0,
-        transition: 'None',
-      }))
+
+      if (!isAuthenticated) {
+        // [GUEST TEMPLATE] Initialize with a practice project for guest users
+        dispatch(initializeProject(GUEST_TEMPLATE))
+      } else {
+        // Default empty scene for authenticated users
+        dispatch(addScene({
+          name: 'Scene 1',
+          duration: 5.0,
+          transition: 'None',
+        }))
+      }
     }
-  }, [dispatch, scenes.length, projectStatus, urlProjectId])
+  }, [dispatch, scenes.length, projectStatus, urlProjectId, isAuthenticated])
 
   // Reset global motion engine and project state on unmount to prevent
   // WebGL/GSAP leaks and stale Redux state on re-entry

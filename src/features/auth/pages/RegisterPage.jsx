@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useNavigate } from 'react-router-dom'
 import { register, clearError } from '../../../store/slices/authSlice'
-import { UserPlus, User, Lock, AlertCircle, Mail, ExternalLink } from 'lucide-react'
+import { UserPlus, User, Lock, AlertCircle, Mail, ExternalLink, Globe } from 'lucide-react'
+import { isInAppBrowser } from '../../../utils/inAppBrowser'
+import InAppBrowserModal from '../components/InAppBrowserModal'
 
 const RegisterPage = () => {
     const [email, setEmail] = useState('')
@@ -13,6 +15,12 @@ const RegisterPage = () => {
     const dispatch = useDispatch()
     const navigate = useNavigate()
     const { status, error, isAuthenticated } = useSelector((state) => state.auth)
+    const [showInAppModal, setShowInAppModal] = useState(false)
+    const [isInApp, setIsInApp] = useState(false)
+
+    useEffect(() => {
+        setIsInApp(isInAppBrowser())
+    }, [])
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -35,6 +43,13 @@ const RegisterPage = () => {
         const resultAction = await dispatch(register({ username, email, password }))
         if (register.fulfilled.match(resultAction)) {
             navigate('/dashboard')
+        }
+    }
+
+    const handleGoogleClick = (e) => {
+        if (isInApp) {
+            e.preventDefault()
+            setShowInAppModal(true)
         }
     }
 
@@ -183,6 +198,7 @@ const RegisterPage = () => {
 
                         <a
                             href="/api/auth/google"
+                            onClick={handleGoogleClick}
                             className="w-full bg-white text-black font-semibold py-2.5 md:py-3.5 rounded-2xl shadow-xl transition-all duration-300 transform active:scale-[0.98] flex items-center justify-center gap-3 text-[14px] hover:bg-white/90"
                         >
                             <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -203,6 +219,11 @@ const RegisterPage = () => {
                     </div>
                 </div>
             </div>
+
+            <InAppBrowserModal
+                isOpen={showInAppModal}
+                onClose={() => setShowInAppModal(false)}
+            />
         </div>
     )
 }
