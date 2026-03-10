@@ -2752,6 +2752,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // If clicked on multi-selection box and we have multiple layers selected, start multi-drag
       if (clickedOnMultiSelectionBox && hasMultiSelect) {
+        // [FIX] iOS Magnifier/Selection prevention
+        if (event.nativeEvent) {
+          event.nativeEvent.preventDefault?.()
+        }
+        event.stopPropagation?.()
+
         // [FIX] Block multi-drag if ANY selected layer is animated and we are past base step
         const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
         if (anyLocked) {
@@ -2835,6 +2841,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         if (selectedLayerId && latestLayersRef.current[selectedLayerId]) {
           // Start drag for this single layer
+          // [FIX] iOS Magnifier/Selection prevention
+          if (event.nativeEvent) {
+            event.nativeEvent.preventDefault?.()
+          }
+          event.stopPropagation?.()
+
           // [FIX] Block single-layer drag if it's animated and we are past base step
           // Only show modal if the layer was ALREADY selected (prevents showing on initial selection)
           if (isLayerLocked(selectedLayerId) && currentSelectedLayerIds.includes(selectedLayerId)) {
@@ -3040,6 +3052,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             pointerIsDownRef.current = true
             dragStartRef.current = { x: screenPos.x, y: screenPos.y }
 
+
+            // [FIX] iOS Magnifier/Selection prevention
+            if (event.nativeEvent) {
+              event.nativeEvent.preventDefault?.()
+            }
+            event.stopPropagation?.()
 
             return // Don't continue with single-select logic
           }

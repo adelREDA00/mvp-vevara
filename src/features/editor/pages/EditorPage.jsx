@@ -189,7 +189,7 @@ function EditorPage() {
 
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
-  const isPreloading = useAssetPreloader(layers, isPixiReady)
+  const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
 
   const handleViewportChange = useCallback((data) => {
     if (!data) return
@@ -2689,14 +2689,33 @@ function EditorPage() {
 
             {/* Asset Preloading Overlay */}
             {isPreloading && (
-              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] transition-opacity duration-500">
-                <div className="relative">
-                  <div className="w-16 h-16 border-4 border-[#6940c9]/20 rounded-full"></div>
-                  <div className="w-16 h-16 border-4 border-[#6940c9] border-t-transparent rounded-full animate-spin absolute inset-0"></div>
-                  <Layers className="w-6 h-6 text-[#6940c9] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] p-6 text-center transition-opacity duration-500">
+                <div className="relative mb-8">
+                  <div className="w-20 h-20 border-[3px] border-white/5 rounded-full" />
+                  <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
+                  <Layers className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[#6940c9] animate-pulse" />
                 </div>
-                <h3 className="mt-6 text-lg font-medium text-white tracking-tight">Loading Project Assets</h3>
-                <p className="mt-2 text-sm text-white/50">Preparing your canvas...</p>
+
+                <div className="space-y-3 max-w-xs">
+                  <h2 className="text-xl font-medium tracking-tight text-white">Preparing your creative space</h2>
+                  <p className="text-[13px] text-white/40 leading-relaxed">
+                    We're optimizing your assets for high-performance motion design...
+                  </p>
+
+                  {/* Progress Bar */}
+                  <div className="pt-4 space-y-2">
+                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#6940c9] transition-all duration-500 ease-out"
+                        style={{ width: `${progress?.percent || 0}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/20">
+                      <span>Loading Assets</span>
+                      <span>{progress?.loaded || 0} / {progress?.total || 0}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

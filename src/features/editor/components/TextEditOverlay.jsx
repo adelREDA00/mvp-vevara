@@ -78,20 +78,35 @@ function TextEditOverlay({
     const canvasRect = canvasContainer.getBoundingClientRect()
 
     const scaledWidth = Math.floor((layer.width || 200) * zoomScale)
-    const fontSize = (layer.data?.fontSize || 24) * zoomScale
-    const lineHeight = fontSize * 1.2
 
+    // [FIX] Mobile auto-zoom prevention: use 16px min font size and scale visually
+    const targetFontSize = (layer.data?.fontSize || 24) * zoomScale
+    const isMobile = window.matchMedia('(pointer: coarse)').matches
+    const mobileMinFont = 16
+
+    let fontSize = targetFontSize
+    let visualScale = 1
+
+    if (isMobile && targetFontSize < mobileMinFont) {
+      fontSize = mobileMinFont
+      visualScale = targetFontSize / mobileMinFont
+    }
+
+    const lineHeight = fontSize * 1.2
     const style = editableDivRef.current.style
 
+    // Use fixed positioning relative to viewport to avoid jumping when keyboard opens
     style.left = `${canvasRect.left + screenPos.x}px`
     style.top = `${canvasRect.top + screenPos.y}px`
-    style.width = `${scaledWidth}px`
+    style.width = `${scaledWidth / visualScale}px`
 
     style.fontSize = `${fontSize}px`
     style.lineHeight = `${lineHeight}px`
 
     const rotation = layer.rotation || 0
-    style.transform = `translate(-50%, -50%) rotate(${rotation}deg) translateY(0.35px)`
+    // Combined transform: translate to center, rotate, and apply visual scale for mobile zoom prevention
+    style.transform = `translate(-50%, -50%) rotate(${rotation}deg) scale(${visualScale})`
+    style.transformOrigin = 'center center'
 
     style.fontFamily = layer.data?.fontFamily || 'Arial'
     style.fontWeight = layer.data?.fontWeight || 'normal'

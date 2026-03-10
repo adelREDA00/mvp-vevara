@@ -858,8 +858,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const canvasEl = canvasRef.current
       if (canvasEl) canvasEl.style.cursor = isLocked ? 'not-allowed' : 'default'
     })
-
     handle.on('pointerdown', (e) => {
+      if (e.nativeEvent) {
+        e.nativeEvent.preventDefault?.()
+      }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
       if (isLocked) {
@@ -944,6 +946,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Start resize when clicking anywhere on the side
     hitArea.on('pointerdown', (e) => {
+      if (e.nativeEvent) {
+        e.nativeEvent.preventDefault?.()
+      }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
       if (isLocked) {
@@ -1081,6 +1086,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     })
 
     rotationHandle.on('pointerdown', (e) => {
+      if (e.nativeEvent) {
+        e.nativeEvent.preventDefault?.()
+      }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
       if (isLocked) {

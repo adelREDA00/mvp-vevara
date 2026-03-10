@@ -145,7 +145,7 @@ function TopToolbar({
                   setIsEditingName(false)
                 }
               }}
-              className="bg-transparent text-white text-center font-normal outline-none max-w-[80px] sm:max-w-xs md:max-w-md text-[11px] sm:text-xs md:text-sm truncate border-none placeholder:text-white/80"
+              className="bg-transparent text-white text-center font-normal outline-none max-w-[80px] sm:max-w-xs md:max-w-md text-[16px] md:text-sm scale-[0.6875] md:scale-100 origin-center truncate border-none placeholder:text-white/80"
               placeholder="Untitled"
             />
           </div>
