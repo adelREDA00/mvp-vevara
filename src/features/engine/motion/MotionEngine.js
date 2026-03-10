@@ -388,7 +388,6 @@ export class MotionEngine {
       }
     })
 
-    console.log(`✅ [MotionEngine] Loaded Flow at offset ${startTimeOffset}s: ${layerTimelineBuilders.size} layers, ${totalTwensCreated} actions. Total Engine Duration: ${this.masterTimeline.duration().toFixed(2)}s`)
   }
 
   /**
@@ -399,7 +398,6 @@ export class MotionEngine {
    * @param {Object} options - Animation options
    */
   loadProjectMotionFlow(timelineInfo, sceneMotionFlowsMap, allLayerObjects, options = {}) {
-    console.log(`🎬 [MotionEngine] Loading Project Flow: ${timelineInfo.length} scenes`)
 
     // IMPORTANT: Clear ALL previous animations before loading the new project state.
     this.unloadAllMotions()
@@ -449,7 +447,6 @@ export class MotionEngine {
       this.setTotalDuration(lastScene.endTime)
     }
 
-    console.log(`✅ [MotionEngine] Project Flow Loaded. Total Duration: ${this.masterTimeline.duration().toFixed(2)}s`)
   }
 
   /**
@@ -701,7 +698,6 @@ export class MotionEngine {
     const isAtEnd = this.masterTimeline.progress() >= 1
 
     if (isAtEnd) {
-      console.log('🔄 Animation complete, restarting from beginning')
       // Reset all individual timelines first
       this.activeTimelines.forEach((tl) => {
         if (tl.instance) {
@@ -711,7 +707,6 @@ export class MotionEngine {
       // Restart the master timeline from the beginning
       this.masterTimeline.restart()
     } else {
-      console.log('▶️ Resuming/playing animation')
       this.syncMedia(this.masterTimeline.time())
       // Ensure all individual timelines are resumed
       this.activeTimelines.forEach((tl) => {
@@ -781,10 +776,8 @@ export class MotionEngine {
     } = options
 
     const start = this.masterTimeline.time()
-    console.log(`🔵 [MotionEngine] Tweening playhead: ${start.toFixed(2)}s -> ${targetTime.toFixed(2)}s (Duration: ${duration}s)`)
 
     if (Math.abs(start - targetTime) < 0.001) {
-      console.log('🟡 [MotionEngine] Target time is current time, skipping transition.')
       if (onComplete) onComplete()
       return null
     }
@@ -799,25 +792,18 @@ export class MotionEngine {
 
     this.isPlaying = true
     this._muteVideosForFastPreview = true
-    console.log(`⚡ [MotionEngine] Initializing GSAP tweenTo: start=${start.toFixed(2)}s, target=${targetTime.toFixed(2)}s`)
 
     // Use native GSAP timeline.tweenTo() for more robust scrubbing
     const tween = this.masterTimeline.tweenTo(targetTime, {
       duration,
       ease,
       onStart: () => {
-        console.log(`⚡ [MotionEngine] GSAP tween started. Current timeline progress: ${this.masterTimeline.progress().toFixed(2)}`)
       },
       onUpdate: () => {
         // Internal tick for UI/React sync
         this._handleUpdate()
-        // Heartbeat log for debugging (every 10 frames approx)
-        if (Math.random() < 0.1) {
-          console.log(`💓 [MotionEngine] Ticking... time: ${this.masterTimeline.time().toFixed(2)}s`)
-        }
       },
       onComplete: () => {
-        console.log(`🟢 [MotionEngine] GSAP tween complete at ${this.masterTimeline.time().toFixed(2)}s`)
         this._muteVideosForFastPreview = false
         this.isPlaying = false
         if (onComplete) onComplete()
@@ -825,7 +811,6 @@ export class MotionEngine {
       }
     })
 
-    console.log(`⚡ [MotionEngine] Tween instance created: duration=${tween.duration()}s`)
     return tween
   }
 

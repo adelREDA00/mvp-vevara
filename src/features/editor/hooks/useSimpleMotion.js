@@ -79,73 +79,55 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     }, [layers])
 
     // Prepare engine with PROJECT-WIDE motion data
+    // [PERFORMANCE FIX] Use refs for data that changes frequently to keep the callback stable.
+    // This stops the infinite re-render loop caused by prepareEngine recreating while playing/scrubbing.
+    const timelineInfoRef = useRef(timelineInfo)
+    useEffect(() => {
+        timelineInfoRef.current = timelineInfo
+    }, [timelineInfo])
+
     const prepareEngine = useCallback((force = false) => {
         const objects = layerObjectsRef.current
+        const timeline = timelineInfoRef.current
 
         // [FIX] Anti-Reset: Skip prepare if a manual override is in progress
-        // This prevents Redux state updates (from dispatching actions) 
-        // from clearing the engine right as a preview starts.
         if (!force && lastPreparedDataRef.current && typeof lastPreparedDataRef.current === 'string' && lastPreparedDataRef.current.startsWith('preview-override-')) {
             return
         }
 
+        const flowsMap = sceneMotionFlowsRef.current
 
-        const flowsMap = sceneMotionFlowsRef.current // We need access to all flows
+        if (!objects || !timeline || !flowsMap) return
 
-        if (!objects || !timelineInfo || !flowsMap) return
-
-        // [BASE EDITING FIX] Ensure layersRef is up to date before calculating hash
-        // This is critical because layers might have changed but ref hasn't been updated yet
-        layersRef.current = layers
+        layersRef.current = layersRef.current || layers
 
         // Create a signature of the project-wide data
-        // [FIX] Include base layer transforms to ensure engine rebuilds when layers move/rotate in normal mode
-        const layerPositionsHash = timelineInfo?.flatMap(s => s.layers || []).map(layerId => {
+        const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
             const l = layersRef.current[layerId]
             return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
         }).join('|')
 
-        const sceneTimingsHash = timelineInfo?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
+        const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
 
         const currentDataSignature = JSON.stringify({
-            sceneCount: timelineInfo.length,
+            sceneCount: timeline.length,
             layerCount: objects.size,
             totalDuration: totalProjectDuration,
             layerPositionsHash,
-            sceneTimingsHash, // [FIX] Include scene timings to detect trims/moves
-            // Check if any scene's steps or actions have changed
+            sceneTimingsHash,
             flowsHash: JSON.stringify(flowsMap)
         })
 
-        // Skip prepare if the data hasn't changed (unless forced)
         if (!force && lastPreparedDataRef.current === currentDataSignature) {
             return
         }
 
-
-        // CRITICAL: Save current playhead position for resume after rebuild
         const currentPlayheadTime = motionEngine.masterTimeline?.time() || 0
-
-        // 1. Unload all to avoid leaking timelines
         motionEngine.unloadAllMotions()
 
-        // 2. Register all objects from the project
-        // Even if they are hidden in current scene, they need to be registered for seamless transitions
-        // Initial transform handled by useCanvasLayers
-
-        // 2. Reset PIXI objects to their base Redux state BEFORE rebuilding timelines —
-        // unless we're in motion capture (or transitioning into it). In that case layers must
-        // stay at their current visual position (e.g. end of step-1 when entering step-2).
         const capture = motionCaptureModeRef.current
         const skipResetForCapture = capture?.isActive || capture?.isTransitioning
-        if (typeof console !== 'undefined' && console.log) {
-            console.log('[useSimpleMotion] prepareEngine', {
-                skipResetForCapture,
-                captureActive: capture?.isActive,
-                captureTransitioning: capture?.isTransitioning,
-                stepId: capture?.stepId
-            })
-        }
+
         const currentLayers = layersRef.current
         if (objects && currentLayers && !skipResetForCapture) {
             objects.forEach((pixiObject, layerId) => {
@@ -156,22 +138,17 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             })
         }
 
-        // 3. Load Project-Wide Motion Flow
-        // This loads all scenes into a single masterTimeline at their respective offsets.
-        // We pass layersRef.current as 'allLayers' for the engine's internal state tracker.
-        motionEngine.loadProjectMotionFlow(timelineInfo, flowsMap, objects, {
+        motionEngine.loadProjectMotionFlow(timeline, flowsMap, objects, {
             allLayers: currentLayers
         })
 
-        // CRITICAL: Restore playhead position after rebuild
         if (currentPlayheadTime > 0) {
             motionEngine.seek(currentPlayheadTime)
             setPlayheadTime(currentPlayheadTime)
         }
 
-        // Remember what we prepared
         lastPreparedDataRef.current = currentDataSignature
-    }, [motionEngine, timelineInfo, totalProjectDuration, layers])
+    }, [motionEngine, totalProjectDuration])
 
     // Get all motion flows for project-wide tracking
     const allMotionFlows = useSelector(selectSceneMotionFlows)
@@ -375,6 +352,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     const tweenTo = useCallback((time, options = {}) => {
         const objects = layerObjectsRef.current
         const flowsMap = sceneMotionFlowsRef.current
+        const timeline = timelineInfoRef.current
 
         // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine 
         // but with the OVERRIDDEN flow for the specific scene.
@@ -401,7 +379,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             }
 
             // Load all scenes, but use the provided OVERRIDDEN flow for the current active scene
-            timelineInfo.forEach(sceneInfo => {
+            timeline.forEach(sceneInfo => {
                 const flowToLoad = sceneInfo.id === currentSceneIdRef.current ? options.flow : flowsMap[sceneInfo.id]
                 if (flowToLoad) {
                     motionEngine.loadSceneMotionFlow(flowToLoad, objects || new Map(), {
@@ -451,7 +429,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }
 
         return motionEngine.tweenTo(time, wrappedOptions)
-    }, [motionEngine, prepareEngine, setIsPlaying, timelineInfo, totalProjectDuration])
+    }, [motionEngine, prepareEngine, setIsPlaying, totalProjectDuration])
 
     /**
      * Get current visual transforms for all registered layers.

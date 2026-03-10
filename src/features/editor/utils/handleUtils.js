@@ -70,12 +70,13 @@ export function createResizeHandle({
   handle.zIndex = 10002
   handle.handleType = handleType
 
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
   // Set hit area - more generous for easier interaction
   if (isCorner) {
-    const hitAreaRadius = Math.max(20, 32 * baseScale)
+    const hitAreaRadius = isTouch ? Math.max(48, 64 * baseScale) : Math.max(20, 32 * baseScale)
     handle.hitArea = new PIXI.Circle(0, 0, hitAreaRadius)
   } else {
-    const hitAreaSize = Math.max(32, 56 * baseScale)
+    const hitAreaSize = isTouch ? Math.max(64, 80 * baseScale) : Math.max(32, 56 * baseScale)
     handle.hitArea = new PIXI.Rectangle(-hitAreaSize / 2, -hitAreaSize / 2, hitAreaSize, hitAreaSize)
   }
 
@@ -277,8 +278,9 @@ export function createRotateHandle({
   handle.cursor = 'grab'
   handle.zIndex = 10003
 
-  // Hit area - match visual radius for precision
-  handle.hitArea = new PIXI.Circle(0, 0, radius)
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+  // Hit area - match visual radius for precision, increase for touch
+  handle.hitArea = new PIXI.Circle(0, 0, isTouch ? Math.max(48, radius * 2.5) : radius)
 
   // Hover animations
   handle.on('pointerenter', () => {

@@ -273,12 +273,6 @@ function Stage({
   // Create shared drag state API for both canvas interactions and selection box
   const dragStateAPI = useDragState()
 
-  // DEBUG: Trace selection and drag state
-  useEffect(() => {
-    if (dragStateAPI.isDragging()) {
-      console.log(`[Stage] isDragging=true draggingLayerId=${dragStateAPI.getDraggingLayerId()} selectedCount=${selectedLayerIds.length}`);
-    }
-  }, [dragStateAPI.isDragging(), dragStateAPI.getDraggingLayerId(), selectedLayerIds])
 
   // =============================================================================
   // LAYER MANAGEMENT & SYNCHRONIZATION
@@ -357,22 +351,26 @@ function Stage({
   }, [lockedTooltip])
 
   // Pass motion controls up to parent
+  // [PERFORMANCE FIX] Memoize the motion state object to prevent unnecessary 
+  // re-renders in EditorPage when Stage re-renders due to internal layer updates.
+  const motionState = useMemo(() => ({
+    playAll,
+    pauseAll,
+    stopAndSeekToSceneStart,
+    stopAll,
+    seek,
+    tweenTo,
+    isPlaying,
+    isBuffering,
+    getLayerCurrentTransforms,
+    layerObjects
+  }), [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, layerObjects])
+
   useEffect(() => {
     if (onMotionStateChange) {
-      onMotionStateChange({
-        playAll,
-        pauseAll,
-        stopAndSeekToSceneStart,
-        stopAll,
-        seek,
-        tweenTo,
-        isPlaying,
-        isBuffering,
-        getLayerCurrentTransforms, // Expose this new helper
-        layerObjects
-      })
+      onMotionStateChange(motionState)
     }
-  }, [onMotionStateChange, playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, layerObjects])
+  }, [onMotionStateChange, motionState])
 
   // [PREVIEW FIX] Track motion capture state transitions to avoid auto-pausing during apply/cancel previews
   const wasMotionCaptureActiveRef = useRef(false)
@@ -472,11 +470,17 @@ function Stage({
   }, [currentScene?.layers, layers])
 
   // Update background layer dimensions when world dimensions change
+  const lastSyncedBgRef = useRef(null)
   useEffect(() => {
     if (!isReady || !backgroundLayer) return
 
+    // [FIX] Double-check against ref to prevent potential update loops
+    const currentSig = `${backgroundLayer.id}-${worldWidth}-${worldHeight}`
+    if (lastSyncedBgRef.current === currentSig) return
+
     // Ensure background matches world dimensions exactly
     if (Math.abs(backgroundLayer.width - worldWidth) > 0.1 || Math.abs(backgroundLayer.height - worldHeight) > 0.1) {
+      lastSyncedBgRef.current = currentSig
       dispatch(updateLayer({
         id: backgroundLayer.id,
         width: worldWidth,
@@ -646,31 +650,38 @@ function Stage({
   // =============================================================================
 
   // Handle layer update from selection box
+  // [PERFORMANCE FIX] Use refs for frequently changing data to stabilize the callback
+  const latestSelectedLayerDataRef = useRef(selectedLayerData)
+  useEffect(() => {
+    latestSelectedLayerDataRef.current = selectedLayerData
+  }, [selectedLayerData])
+
   const handleLayerUpdate = useCallback((updates) => {
-    if (!selectedLayerData.selectedLayerId) {
+    const data = latestSelectedLayerDataRef.current
+    if (!data.selectedLayerId) {
       return
     }
 
     // Create updated layer object for checking
-    const updatedLayer = { ...selectedLayerData.selectedLayer, ...updates }
-    const layerObject = layerObjects.get(selectedLayerData.selectedLayerId)
+    const updatedLayer = { ...data.selectedLayer, ...updates }
+    const layerObject = layerObjects.get(data.selectedLayerId)
 
     // Check if layer is completely outside canvas after update
     if (isLayerCompletelyOutside(updatedLayer, layerObject, worldWidth, worldHeight)) {
       // Layer is completely outside canvas - delete it
-      dispatch(deleteLayer(selectedLayerId))
+      dispatch(deleteLayer(data.selectedLayerId))
       dispatch(clearLayerSelection())
     } else {
       // Layer is still inside or partially inside - update it
       // Simplified data merging: always preserve existing data and merge updates
       const updatePayload = {
-        id: selectedLayerData.selectedLayerId,
+        id: data.selectedLayerId,
         ...updates
       }
 
       dispatch(updateLayer(updatePayload))
     }
-  }, [selectedLayerData.selectedLayerId, selectedLayerData.selectedLayer, layerObjects, worldWidth, worldHeight, selectedLayerId, dispatch])
+  }, [layerObjects, worldWidth, worldHeight, dispatch])
 
   useSelectionBox(
     stageContainer,
@@ -1191,26 +1202,32 @@ function Stage({
         )}
 
         {/* Pixi canvas container - fills the entire canvas container */}
-          <div
-            ref={containerRef}
-            id="pixi-container"
-            className="absolute inset-0 pixi-container"
-            style={{ touchAction: 'none' }}
-            onMouseDown={(e) => {
-              if (isPlaying) {
-                return
-              }
-              e.preventDefault()
-            }}
-            onTouchStart={(e) => {
-              if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-                e.stopPropagation()
-              }
-            }}
-            onDragStart={(e) => {
-              e.preventDefault()
-            }}
-          />
+        <div
+          ref={containerRef}
+          id="pixi-container"
+          className="absolute inset-0 pixi-container"
+          style={{
+            touchAction: 'none',
+            WebkitTouchCallout: 'none',
+            WebkitUserSelect: 'none',
+            userSelect: 'none',
+            outline: 'none'
+          }}
+          onMouseDown={(e) => {
+            if (isPlaying) {
+              return
+            }
+            e.preventDefault()
+          }}
+          onTouchStart={(e) => {
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+              e.stopPropagation()
+            }
+          }}
+          onDragStart={(e) => {
+            e.preventDefault()
+          }}
+        />
 
         {/* Error State */}
         {error ? (

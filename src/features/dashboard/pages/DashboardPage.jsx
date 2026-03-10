@@ -394,7 +394,7 @@ const DashboardPage = () => {
                     {templateProjects.length > 0 && (
                         <section id="template-projects">
                             <div className="flex items-center justify-between mb-10 border-b border-white/5 pb-6">
-                                <h2 className="text-2xl font-extralight tracking-tight">Example <span className="font-normal italic">Projects</span></h2>
+                                <h2 className="text-2xl font-extralight tracking-tight">Templates <span className="font-normal italic">Projects</span></h2>
                             </div>
 
                             {loading ? (

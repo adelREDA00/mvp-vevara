@@ -125,13 +125,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // No, simple sync is safer to avoid drift. The drag event will re-update it immediately after if needed.)
     liveMotionCaptureRef.current = motionCaptureMode
 
-    if (motionCaptureMode) {
-      console.log('[DEBUG-HOOK] motionCaptureMode updated:', {
-        isActive: motionCaptureMode.isActive,
-        stepId: motionCaptureMode.stepId,
-        layerActions: motionCaptureMode.layerActions ? Object.keys(motionCaptureMode.layerActions).length : 0
-      })
-    }
 
     latestParamsRef.current = interactionParams
     latestIsPlayingRef.current = isPlaying
@@ -486,23 +479,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
   }, [])
 
-  // Log performance stats periodically for debugging
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const stats = getPerformanceStats()
-      if (stats && stats.totalPointerMoves > 100) { // Only log if there's been significant activity
-        console.log('Canvas Interaction Performance Stats:', {
-          avgSnappingTime: `${stats.averageSnappingCalculationTime.toFixed(2)}ms`,
-          maxSnappingTime: `${stats.maxSnappingCalculationTime.toFixed(2)}ms`,
-          pointerMoves: stats.totalPointerMoves,
-          frameDrops: stats.frameDropCount,
-          snappingCalcs: stats.snappingCalculationsCount
-        })
-      }
-    }, 10000) // Log every 10 seconds
-
-    return () => clearInterval(interval)
-  }, [getPerformanceStats])
 
   // Helper to determine if a layer should be locked for interaction
   const isLayerLocked = useCallback((layerId) => {
@@ -1242,14 +1218,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
    * Drags a motion control point or midpoint handle.
    */
   const handleMotionHandleDrag = useCallback((event, layerId, stepId, pointIndex, type) => {
-    console.log('[DEBUG] Drag Start', { layerId, stepId, type, pointIndex })
     const handle = event.currentTarget
 
     // Fallback: If stepId is missing, check if we are in motion capture mode
     let actualStepId = stepId
     if (!actualStepId && latestMotionCaptureModeRef.current?.isActive) {
       actualStepId = latestMotionCaptureModeRef.current.stepId
-      console.log('[DEBUG] Using fallback ID', actualStepId)
     }
 
     if (!actualStepId) {
@@ -1259,7 +1233,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     const globalPos = event.global || event.data?.global
     if (!globalPos) {
-      console.log('[DEBUG] No global position found')
       return
     }
 
@@ -1395,7 +1368,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
 
     const onUp = () => {
-      console.log('[DEBUG] Handle Drag End')
 
       if (renderer?.events) {
         renderer.events.off('globalpointermove', onMove)

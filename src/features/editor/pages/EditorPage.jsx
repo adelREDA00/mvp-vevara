@@ -473,7 +473,6 @@ function EditorPage() {
 
     } catch (error) {
       if (error.message === 'cancelled') {
-        console.log('Export cancellation confirmed')
         setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
         return
       }
@@ -773,7 +772,6 @@ function EditorPage() {
       }
 
       if (motionCaptureRef.current) { // Check if we were capturing
-        console.log('🔄 [EditorPage] Scene switched, cancelling active motion capture')
 
         // 1. Remove the tentative step — restore saved timings if available
         if (isNewStepRef.current && savedStepTimingsRef.current) {
@@ -1100,14 +1098,12 @@ function EditorPage() {
       const sceneEndTime = currentSceneTimelineInfo?.endTime || (startTimeOffset + 5)
       stepStartTimeSeconds = Math.min(stepStartTimeSeconds, sceneEndTime - 0.05)
 
-      console.log(`🎬 [EditorPage] Fast-play: target=${stepStartTimeSeconds.toFixed(3)}s (lastStepEnd=${lastStepEnd}ms, pageDuration=${pageDuration}ms, existingSteps=${existingFlow.length}, sceneEnd=${sceneEndTime.toFixed(3)}s)`)
 
       try {
         motionControls.tweenTo(stepStartTimeSeconds, {
           duration: Math.min(stepIndex * 0.3, 1.5),
           startTime: startTimeOffset,
           onComplete: () => {
-            console.log('✅ [EditorPage] Fast-play complete, enabling capture mode')
             enableCaptureMode()
           }
         })
@@ -1462,7 +1458,6 @@ function EditorPage() {
       // This ensures preview uses the exact same data structure that will be in Redux after update
       const optimisticFlow = { ...currentFlow, steps: updatedSteps }
 
-      console.log(`🎬 [EditorPage] Fast-play trigger: ${stepStartTimeSeconds.toFixed(2)}s -> ${stepEndTimeSeconds.toFixed(2)}s. Flow steps: ${optimisticFlow.steps.length}`)
 
       motionControls.tweenTo(stepEndTimeSeconds, {
         duration: 1,
@@ -1831,7 +1826,6 @@ function EditorPage() {
       const hasActions = step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)
       const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
 
-      console.log(`🎬 [EditorPage] Transitioning to step for edit: -> ${targetTime.toFixed(2)}s`)
       motionControls.tweenTo(targetTime, {
         duration: 0.3,
         startTime: startTimeOffset,

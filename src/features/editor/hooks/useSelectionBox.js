@@ -213,19 +213,26 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
   }, [])
 
-  // Track motion capture mode in ref to avoid stale closures in event handlers
+  // Track latest props in refs to avoid stale closures and reduce effect dependencies
+  const latestLayerRef = useRef(layer)
+  const latestLayerObjectRef = useRef(layerObject)
+  const latestViewportRef = useRef(viewport)
+  const latestOnUpdateRef = useRef(onUpdate)
+  const latestSceneMotionFlowRef = useRef(sceneMotionFlow)
   const latestMotionCaptureModeRef = useRef(motionCaptureMode)
+
   useEffect(() => {
     // If capture mode state changes (on/off), force a redraw of the selection system
     if (latestMotionCaptureModeRef.current?.isActive !== motionCaptureMode?.isActive) {
       forceRedrawRef.current = true
     }
-    latestMotionCaptureModeRef.current = motionCaptureMode
+    latestLayerRef.current = layer
+    latestLayerObjectRef.current = layerObject
     latestViewportRef.current = viewport
+    latestOnUpdateRef.current = onUpdate
     latestSceneMotionFlowRef.current = sceneMotionFlow
-  }, [motionCaptureMode, viewport, sceneMotionFlow])
-
-  const latestSceneMotionFlowRef = useRef(sceneMotionFlow)
+    latestMotionCaptureModeRef.current = motionCaptureMode
+  }, [layer, layerObject, viewport, onUpdate, sceneMotionFlow, motionCaptureMode])
 
   // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
   // Backgrounds are static elements and should not have interactive handles
@@ -253,12 +260,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   // When rotation ends, this flag temporarily overrides the isResizing check
   // to ensure the selection box appears immediately instead of the hover box
   const rotationJustEndedRef = useRef(false)
-
-  // Latest value refs (to avoid stale closures in callbacks)
-  const latestLayerRef = useRef(layer)
-  const latestLayerObjectRef = useRef(layerObject)
-  const latestViewportRef = useRef(viewport)
-  const latestOnUpdateRef = useRef(onUpdate)
 
   // Update throttling and pending updates
   const pendingUpdateRef = useRef(null)
@@ -780,15 +781,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     handle.eventMode = 'static'
     handle.cursor = rotatedCursor
 
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
     // Much larger hit area for easier interaction, but scaled appropriately
     // Small layer optimization: reduce hit area if layer is very small to prevent overlap
     if (isCorner) {
       // Make corner hit areas generous but not overlapping on small layers
-      const hitAreaRadius = Math.max(20, 32 * baseScale * smallLayerScale)
+      const baseHitRadius = isTouch ? Math.max(48, 64 * baseScale) : Math.max(20, 32 * baseScale)
+      const hitAreaRadius = baseHitRadius * smallLayerScale
       handle.hitArea = new PIXI.Circle(0, 0, hitAreaRadius)
     } else {
       // Make edge hit areas larger and more forgiving
-      const hitAreaSize = Math.max(32, 60 * baseScale * smallLayerScale)
+      const baseHitSize = isTouch ? Math.max(64, 80 * baseScale) : Math.max(32, 60 * baseScale)
+      const hitAreaSize = baseHitSize * smallLayerScale
       handle.hitArea = new PIXI.Rectangle(-hitAreaSize / 2, -hitAreaSize / 2, hitAreaSize, hitAreaSize)
     }
     handle.zIndex = 10001
@@ -2770,16 +2774,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   }, [
     layersContainer,
     layer?.id,
-    layerObject,
-    viewport,
-    viewport?.scale?.x, // Re-added to ensure handles update screen size during zoom
-    onUpdate,
+    viewport, // Keep viewport for zoom scaling visibility
     layer?.width,
     layer?.height,
     layer?.cropWidth,
     layer?.cropHeight,
-    // Removed layer?.x and layer?.y to prevent recreation during drag operations
-    // Position updates are handled exclusively by updateLoop
     layer?.rotation,
     layer?.anchorX,
     layer?.anchorY,
@@ -2790,7 +2789,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     layer?.data?.fontFamily,
     layer?.type,
     forceUpdate,
-    motionCaptureMode,
+    motionCaptureMode?.isActive, // Only recreate if capture mode state changes
   ])
 
   // =========================================================================
