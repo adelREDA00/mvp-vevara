@@ -580,6 +580,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   // Get all project scenes to build the global layer order
   const scenes = useSelector(selectScenes)
   const timelineInfo = useSelector(selectProjectTimelineInfo)
+  const projectStatus = useSelector(state => state?.project?.status || 'idle')
 
   // Build a project-wide layer order (concatenating all scenes)
   const layerOrder = useMemo(() => {
@@ -648,17 +649,18 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     const layerObjects = layerObjectsRef.current
     const createdLayers = createdLayersRef.current
-
     const engine = getGlobalMotionEngine()
     const isActuallyPlaying = engine.getIsPlaying()
     const currentTime = engine.masterTimeline?.time() || 0
 
     // [FIX] checkReadiness uses ONLY refs (always current) to avoid stale closure issues.
     // The counter tracks in-flight async loads. On mobile, also check the queue length.
-    // isStageReady is reset to false whenever new async loads are queued (see below),
-    // so we only set it true when everything is genuinely done.
+    // CRITICAL: We also check projectStatus to ensure we don't signal readiness on 
+    // the very first render pass before project data has even arrived!
     const checkReadiness = () => {
-      if (asyncLoadCounterRef.current === 0 && mobileLoadQueueRef.current.length === 0) {
+      if (asyncLoadCounterRef.current === 0 && 
+          mobileLoadQueueRef.current.length === 0 && 
+          projectStatus === 'succeeded') {
         setIsStageReady(true)
       }
     }

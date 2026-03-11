@@ -553,37 +553,40 @@ export async function createVideoLayer(config) {
         // Cache it immediately with the partitioned key
         videoElementCache.set(cacheKey, videoElement)
 
-        // WEBGL FIX: We must wait for metadata and data
-        const startTime = Date.now()
+        // WEBGL FIX: We must wait for metadata and enough data for smooth playback
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        const targetReadyState = isMobile ? 4 : 3 // HAVE_ENOUGH_DATA for mobile, HAVE_FUTURE_DATA for desktop
+        const timeoutMs = isMobile ? 20000 : 10000 // Higher timeout for mobile network/decoding
+
         await new Promise((resolve) => {
           let timeoutId
           const onMetadata = () => {
-            videoElement.removeEventListener('loadedmetadata', onMetadata)
-            if (videoElement.readyState >= 3) {
+            if (videoElement.readyState >= targetReadyState) {
+              videoElement.removeEventListener('loadedmetadata', onMetadata)
               if (timeoutId) clearTimeout(timeoutId)
               resolve()
             }
           }
 
           const onCanPlay = () => {
-            videoElement.removeEventListener('canplay', onCanPlay)
-            videoElement.removeEventListener('canplaythrough', onCanPlay)
-            if (videoElement.videoWidth > 0) {
+            if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
+              videoElement.removeEventListener('canplay', onCanPlay)
+              videoElement.removeEventListener('canplaythrough', onCanPlay)
               if (timeoutId) clearTimeout(timeoutId)
               resolve()
             }
           }
 
-          if (videoElement.readyState >= 3 && videoElement.videoWidth > 0) {
+          if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
             resolve()
           } else {
             videoElement.addEventListener('loadedmetadata', onMetadata)
             videoElement.addEventListener('canplay', onCanPlay)
             videoElement.addEventListener('canplaythrough', onCanPlay)
             timeoutId = setTimeout(() => {
-              console.warn(`[createVideoLayer] readiness timeout (10s) for: ${videoUrl}`)
+              console.warn(`[createVideoLayer] readiness timeout (${timeoutMs / 1000}s) for: ${videoUrl}`)
               resolve()
-            }, 10000)
+            }, timeoutMs)
           }
         })
         videoElement.pause()

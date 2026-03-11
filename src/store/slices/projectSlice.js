@@ -292,6 +292,7 @@ const projectSlice = createSlice({
       if (!state.currentSceneId && state.scenes.length === 1) {
         state.currentSceneId = newScene.id
       }
+      state.status = 'succeeded'
     },
 
     updateScene: (state, action) => {
@@ -1094,6 +1095,7 @@ const projectSlice = createSlice({
       state.sceneMotionFlows = project.sceneMotionFlows || {} // Initialize scene motion flows from saved project
       state.projectName = project.name || 'Untitled Project'
       state.currentSceneId = project.currentSceneId || project.currentProjectId || (state.scenes[0]?.id || null)
+      state.status = 'succeeded'
     },
 
     // Restore project state from history (for undo/redo)

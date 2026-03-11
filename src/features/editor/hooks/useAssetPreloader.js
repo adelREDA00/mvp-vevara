@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import * as PIXI from 'pixi.js'
-
-const isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 export function useAssetPreloader(layers, isCanvasReady) {
     const [isPreloading, setIsPreloading] = useState(true)
@@ -36,17 +35,6 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
-        // [MOBILE FIX] On mobile, skip ALL preloading — let useCanvasLayers handle it
-        // sequentially through loadTextureRobust. This eliminates the double-loading
-        // crash vector where both the preloader AND useCanvasLayers load the same
-        // textures simultaneously, doubling GPU memory usage.
-        if (isMobileDevice) {
-            setProgress({ loaded: assetUrls.length, total: assetUrls.length, percent: 100 })
-            completedKeyRef.current = assetKey
-            setIsPreloading(false)
-            return
-        }
-
         if (assetUrls.length === 0) {
             setIsPreloading(false)
             setProgress({ loaded: 0, total: 0, percent: 100 })
@@ -54,7 +42,6 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
-        // --- Desktop preloading path (unchanged) ---
         let loadedCount = 0
         let isMounted = true
 
@@ -65,22 +52,31 @@ export function useAssetPreloader(layers, isCanvasReady) {
             const { url, type } = asset
             try {
                 if (type === 'image') {
-                    await PIXI.Assets.load(url)
+                    // [UNIFIED LOAD] Use loadTextureRobust so preloader and layers share the same 
+                    // image cache and mobile capping logic. This prevents double-memory usage.
+                    await loadTextureRobust(url)
                 } else if (type === 'video') {
-                    if (!url.startsWith('blob:')) {
-                        await PIXI.Assets.load({
-                            src: url,
-                            data: {
-                                resourceOptions: {
-                                    autoPlay: false,
-                                    muted: true,
-                                    playsinline: true,
-                                    preload: 'auto',
-                                    crossOrigin: 'anonymous'
-                                }
-                            }
-                        })
-                    }
+                    // For videos, we create a temporary element to ensure it's buffered
+                    await new Promise((resolve) => {
+                        const video = document.createElement('video')
+                        video.src = url
+                        video.muted = true
+                        video.playsInline = true
+                        video.preload = 'auto'
+                        
+                        const onCanPlay = () => {
+                            video.removeEventListener('canplaythrough', onCanPlay)
+                            video.removeEventListener('error', onCanPlay)
+                            resolve()
+                        }
+                        
+                        // Wait for enough data (readyState 4) for smooth playback start
+                        video.addEventListener('canplaythrough', onCanPlay)
+                        video.addEventListener('error', onCanPlay)
+                        
+                        // 15s timeout for preloading individual video
+                        setTimeout(resolve, 15000)
+                    })
                 }
             } catch (err) {
                 console.warn(`[useAssetPreloader] Failed to preload asset: ${url}`, err)
@@ -94,20 +90,23 @@ export function useAssetPreloader(layers, isCanvasReady) {
         }
 
         const runPreloader = async () => {
-            // Wait for fonts first
+            // [STRICT] Wait for fonts first on ALL devices. 
+            // This is critical for accurate text metrics on the first render.
             try {
                 if (document.fonts) {
                     await Promise.race([
                         document.fonts.ready,
-                        new Promise(resolve => setTimeout(resolve, 3000))
+                        new Promise(resolve => setTimeout(resolve, 5000))
                     ])
                 }
             } catch (e) { /* non-fatal */ }
 
             if (!isMounted) return
 
-            // Desktop: parallel loading (3 at a time)
-            const CONCURRENCY_LIMIT = 3
+            // Sequential loading on mobile to prevent CPU/memory spikes
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+            const CONCURRENCY_LIMIT = isMobile ? 1 : 3
+
             for (let i = 0; i < assetUrls.length; i += CONCURRENCY_LIMIT) {
                 if (!isMounted) return
                 const chunk = assetUrls.slice(i, i + CONCURRENCY_LIMIT)

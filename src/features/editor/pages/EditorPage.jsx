@@ -209,17 +209,17 @@ function EditorPage() {
   }, [layers])
 
   const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed, hasAsyncAssets }) => {
-    // [FIX] Gate on ALL conditions:
-    // 1. Preloading done (desktop only — mobile skips preloading)
-    // 2. Stage objects created (isStageReady set by useCanvasLayers)
-    // 3. Project data loaded
-    // 4. Minimum display time elapsed
-    // 5. If project has async assets, isStageReady MUST be explicitly true
-    const isLoading = isPreloading 
-      || projectStatus === 'loading' 
-      || !minTimeElapsed
-      || (hasAsyncAssets && !isStageReady)
-      || (!hasAsyncAssets && !isStageReady && projectStatus !== 'succeeded');
+    // [STRICT] Loading gate must be the bridge to total readiness.
+    // 1. projectStatus must be 'succeeded' (we have the data)
+    // 2. isPreloading must be false (binary assets: fonts, textures, video buffers are ready)
+    // 3. isStageReady must be true (PIXI objects are on the stage)
+    // 4. minTimeElapsed must be true (prevent flicker)
+    
+    const projectDataReady = projectStatus === 'succeeded';
+    const binaryAssetsReady = !isPreloading;
+    const pixiObjectsReady = isStageReady;
+
+    const isLoading = !projectDataReady || !binaryAssetsReady || !pixiObjectsReady || !minTimeElapsed;
     if (!isLoading) return null;
 
     return (
