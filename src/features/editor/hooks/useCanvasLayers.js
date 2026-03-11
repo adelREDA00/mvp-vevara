@@ -653,10 +653,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const isActuallyPlaying = engine.getIsPlaying()
     const currentTime = engine.masterTimeline?.time() || 0
 
-    // [FIX] Use persistent ref counter instead of per-render variable to fix the race condition
-    // where isStageReady could prematurely trigger between render cycles
+    // [FIX] checkReadiness uses ONLY refs (always current) to avoid stale closure issues.
+    // The counter tracks in-flight async loads. On mobile, also check the queue length.
+    // isStageReady is reset to false whenever new async loads are queued (see below),
+    // so we only set it true when everything is genuinely done.
     const checkReadiness = () => {
-      if (asyncLoadCounterRef.current === 0) {
+      if (asyncLoadCounterRef.current === 0 && mobileLoadQueueRef.current.length === 0) {
         setIsStageReady(true)
       }
     }
@@ -748,6 +750,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
+        // [FIX] Reset isStageReady when new async loads are queued — this ensures
+        // the loading modal stays visible until ALL async layers are created
+        setIsStageReady(false)
 
         // [MOBILE FIX] On mobile, push async loads into a queue processed sequentially.
         // On desktop, fire immediately (parallel) for maximum speed.
@@ -790,6 +795,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
+        setIsStageReady(false)
 
         const handleVideoLoad = () => createVideoLayer(layer).then((container) => {
           asyncLoadCounterRef.current--

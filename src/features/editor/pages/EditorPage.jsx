@@ -199,9 +199,27 @@ function EditorPage() {
     return () => { if (minTimeRef.current) clearTimeout(minTimeRef.current) }
   }, [])
 
-  const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed }) => {
-    // [FIX] Gate on ALL conditions: preloading done, stage objects created, project data loaded, minimum display time
-    const isLoading = isPreloading || !isStageReady || projectStatus === 'loading' || !minTimeElapsed;
+  // [FIX] Detect if project has any assets requiring async loading.
+  // This prevents the loading modal from dismissing during the gap between 
+  // project data arriving (projectStatus='succeeded') and useCanvasLayers
+  // processing the new layers (which sets isStageReady=false then back to true).
+  const hasAsyncAssets = useMemo(() => {
+    if (!layers) return false
+    return Object.values(layers).some(l => l && (l.type === 'image' || l.type === 'video'))
+  }, [layers])
+
+  const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed, hasAsyncAssets }) => {
+    // [FIX] Gate on ALL conditions:
+    // 1. Preloading done (desktop only — mobile skips preloading)
+    // 2. Stage objects created (isStageReady set by useCanvasLayers)
+    // 3. Project data loaded
+    // 4. Minimum display time elapsed
+    // 5. If project has async assets, isStageReady MUST be explicitly true
+    const isLoading = isPreloading 
+      || projectStatus === 'loading' 
+      || !minTimeElapsed
+      || (hasAsyncAssets && !isStageReady)
+      || (!hasAsyncAssets && !isStageReady && projectStatus !== 'succeeded');
     if (!isLoading) return null;
 
     return (
@@ -2742,6 +2760,7 @@ function EditorPage() {
               isStageReady={isStageReady}
               projectStatus={projectStatus}
               minTimeElapsed={minTimeElapsed}
+              hasAsyncAssets={hasAsyncAssets}
             />
 
             {/* Vertical Scrollbar Container */}
