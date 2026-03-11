@@ -191,8 +191,17 @@ function EditorPage() {
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
   const [isStageReady, setIsStageReady] = useState(false) // Track PIXI object population
-  const FullScreenLoading = ({ progress, isPreloading, isStageReady }) => {
-    const isLoading = isPreloading || !isStageReady;
+  // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
+  const [minTimeElapsed, setMinTimeElapsed] = useState(false)
+  const minTimeRef = useRef(null)
+  useEffect(() => {
+    minTimeRef.current = setTimeout(() => setMinTimeElapsed(true), 300)
+    return () => { if (minTimeRef.current) clearTimeout(minTimeRef.current) }
+  }, [])
+
+  const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed }) => {
+    // [FIX] Gate on ALL conditions: preloading done, stage objects created, project data loaded, minimum display time
+    const isLoading = isPreloading || !isStageReady || projectStatus === 'loading' || !minTimeElapsed;
     if (!isLoading) return null;
 
     return (
@@ -2726,11 +2735,13 @@ function EditorPage() {
               totalTime={totalTime}
             />
 
-            {/* Asset Preloading Overlay */}
+            {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
             <FullScreenLoading
               progress={progress}
               isPreloading={isPreloading}
               isStageReady={isStageReady}
+              projectStatus={projectStatus}
+              minTimeElapsed={minTimeElapsed}
             />
 
             {/* Vertical Scrollbar Container */}

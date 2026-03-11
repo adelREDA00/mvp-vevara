@@ -10,6 +10,9 @@ import { drawDashedRect } from './dashUtils'
 import { loadTextureRobust } from './textureUtils'
 import { getGlobalMotionEngine } from '../motion/index'
 
+// [MOBILE FIX] Detect mobile devices to conditionally disable GPU-heavy features
+const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 /**
  * Create a Pixi Text object from layer config
  * @param {Object} config - Layer configuration
@@ -365,9 +368,14 @@ export async function createImageLayer(config) {
   const sprite = new PIXI.Sprite(texture)
 
   // PERFORMANCE: Enable mipmapping for images to prevent aliasing when zoomed out
+  // [MOBILE FIX] Disable mipmapping on mobile to save ~3x GPU memory per texture
   if (texture.source) {
-    texture.source.autoGenerateMipmaps = true
-    texture.source.mipMap = 'on'
+    if (!_isMobileDevice) {
+      texture.source.autoGenerateMipmaps = true
+      texture.source.mipMap = 'on'
+    } else {
+      texture.source.autoGenerateMipmaps = false
+    }
     texture.source.scaleMode = 'linear'
   }
 
@@ -627,9 +635,14 @@ export async function createVideoLayer(config) {
   videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
 
   // PERFORMANCE: Enable mipmapping for videos if possible
+  // [MOBILE FIX] Disable mipmapping on mobile to save ~3x GPU memory per texture
   if (texture.source) {
-    texture.source.autoGenerateMipmaps = true
-    texture.source.mipMap = 'on'
+    if (!_isMobileDevice) {
+      texture.source.autoGenerateMipmaps = true
+      texture.source.mipMap = 'on'
+    } else {
+      texture.source.autoGenerateMipmaps = false
+    }
     texture.source.scaleMode = 'linear'
   }
 
@@ -639,9 +652,14 @@ export async function createVideoLayer(config) {
   container.addChild(sprite)
 
   // PERFORMANCE: Enable mipmapping for videos if possible
+  // [MOBILE FIX] Disable mipmapping on mobile
   if (texture.source) {
-    texture.source.autoGenerateMipmaps = true
-    texture.source.mipMap = 'on'
+    if (!_isMobileDevice) {
+      texture.source.autoGenerateMipmaps = true
+      texture.source.mipMap = 'on'
+    } else {
+      texture.source.autoGenerateMipmaps = false
+    }
     texture.source.scaleMode = 'linear'
   }
 

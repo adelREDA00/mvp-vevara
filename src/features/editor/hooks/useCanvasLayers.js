@@ -528,6 +528,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   // This gives useCanvasInteractions a stable dep to rebind pointer handlers after async creation.
   const [layerObjectsVersion, setLayerObjectsVersion] = useState(0)
   const [isStageReady, setIsStageReady] = useState(false)
+  // [FIX] Persistent ref counter for async loads — survives across render cycles
+  // This prevents the race condition where asyncLoadsPending briefly hits 0 between renders
+  const asyncLoadCounterRef = useRef(0)
 
   const layers = useSelector((state) => {
     try {
@@ -644,10 +647,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const isActuallyPlaying = engine.getIsPlaying()
     const currentTime = engine.masterTimeline?.time() || 0
 
-    // [STABILITY] Track pending loads for readiness reporting
-    let asyncLoadsPending = 0
+    // [FIX] Use persistent ref counter instead of per-render variable to fix the race condition
+    // where isStageReady could prematurely trigger between render cycles
     const checkReadiness = () => {
-      if (asyncLoadsPending === 0) {
+      if (asyncLoadCounterRef.current === 0) {
         setIsStageReady(true)
       }
     }
@@ -738,9 +741,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       }
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
-        asyncLoadsPending++
+        asyncLoadCounterRef.current++
         createImageLayer(layer).then((sprite) => {
-          asyncLoadsPending--
+          asyncLoadCounterRef.current--
           if (!stageContainer || !sprite || sprite.destroyed) {
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
             checkReadiness()
@@ -765,7 +768,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           checkReadiness()
         }).catch((error) => {
           // console.error(`Failed to create image layer ${layerId}:`, error)
-          asyncLoadsPending--
+          asyncLoadCounterRef.current--
           createdLayers.delete(layerId)
           checkReadiness()
         })
@@ -773,9 +776,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       }
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
-        asyncLoadsPending++
+        asyncLoadCounterRef.current++
         createVideoLayer(layer).then((container) => {
-          asyncLoadsPending--
+          asyncLoadCounterRef.current--
           if (!stageContainer || !container || container.destroyed) {
             if (container && !container.destroyed) {
               const sprite = container._videoSprite
@@ -810,7 +813,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           checkReadiness()
         }).catch((error) => {
           // console.error(`Failed to create video layer ${layerId}:`, error)
-          asyncLoadsPending--
+          asyncLoadCounterRef.current--
           createdLayers.delete(layerId)
           checkReadiness()
         })
