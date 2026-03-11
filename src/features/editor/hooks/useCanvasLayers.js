@@ -13,6 +13,9 @@ import { updateLayerZOrder } from '../utils/layerUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
+// [MOBILE FIX] Detect mobile for sequential asset loading
+const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 // Helper function to properly destroy image sprites based on texture source
 const destroyImageSprite = (sprite, layer) => {
   if (!sprite || sprite.destroyed) return
@@ -529,8 +532,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   const [layerObjectsVersion, setLayerObjectsVersion] = useState(0)
   const [isStageReady, setIsStageReady] = useState(false)
   // [FIX] Persistent ref counter for async loads — survives across render cycles
-  // This prevents the race condition where asyncLoadsPending briefly hits 0 between renders
   const asyncLoadCounterRef = useRef(0)
+  // [MOBILE FIX] Sequential loading queue — on mobile, async layer creations are queued
+  // and processed one-at-a-time to prevent simultaneous image decoding that crashes iOS
+  const mobileLoadQueueRef = useRef([])
+  const mobileLoadRunningRef = useRef(false)
 
   const layers = useSelector((state) => {
     try {
@@ -742,7 +748,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
-        createImageLayer(layer).then((sprite) => {
+
+        // [MOBILE FIX] On mobile, push async loads into a queue processed sequentially.
+        // On desktop, fire immediately (parallel) for maximum speed.
+        const handleImageLoad = () => createImageLayer(layer).then((sprite) => {
           asyncLoadCounterRef.current--
           if (!stageContainer || !sprite || sprite.destroyed) {
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
@@ -763,21 +772,26 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           sprite.visible = isVisible
           applyTransformInline(sprite, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
           engine.registerLayerObject(layerId, sprite, { sceneId: currentLayer.sceneId })
-          // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
           checkReadiness()
         }).catch((error) => {
-          // console.error(`Failed to create image layer ${layerId}:`, error)
           asyncLoadCounterRef.current--
           createdLayers.delete(layerId)
           checkReadiness()
         })
+
+        if (_isMobileDevice) {
+          mobileLoadQueueRef.current.push(handleImageLoad)
+        } else {
+          handleImageLoad()
+        }
         return
       }
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
-        createVideoLayer(layer).then((container) => {
+
+        const handleVideoLoad = () => createVideoLayer(layer).then((container) => {
           asyncLoadCounterRef.current--
           if (!stageContainer || !container || container.destroyed) {
             if (container && !container.destroyed) {
@@ -789,7 +803,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           }
           const currentLayer = layers?.[layerId]
           if (!currentLayer) {
-            // console.warn(`[useCanvasLayers] Video layer creation resolved but layer missing from state: ${layerId}`)
             const sprite = container._videoSprite
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
@@ -797,8 +810,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             checkReadiness()
             return
           }
-          // [Bug 4 Fix] Set video time range from Redux layer data so MotionEngine.syncMedia
-          // knows which portion of the video file to play (critical for split scenes).
           container._sourceStartTime = currentLayer.data?.sourceStartTime ?? 0
           container._sourceEndTime = currentLayer.data?.sourceEndTime ?? undefined
 
@@ -808,15 +819,19 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           container.visible = isVisible
           applyTransformInline(container, currentLayer, dragStateAPI, layerId, motionCaptureMode, false, editingTextLayerId, editingStepId)
           engine.registerLayerObject(layerId, container, { sceneId: currentLayer.sceneId })
-          // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
           checkReadiness()
         }).catch((error) => {
-          // console.error(`Failed to create video layer ${layerId}:`, error)
           asyncLoadCounterRef.current--
           createdLayers.delete(layerId)
           checkReadiness()
         })
+
+        if (_isMobileDevice) {
+          mobileLoadQueueRef.current.push(handleVideoLoad)
+        } else {
+          handleVideoLoad()
+        }
         return
       }
 
@@ -850,6 +865,25 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }
       }
     })
+
+    // [MOBILE FIX] Drain the mobile load queue sequentially
+    if (_isMobileDevice && mobileLoadQueueRef.current.length > 0 && !mobileLoadRunningRef.current) {
+      mobileLoadRunningRef.current = true
+      const drainQueue = async () => {
+        while (mobileLoadQueueRef.current.length > 0) {
+          const task = mobileLoadQueueRef.current.shift()
+          try {
+            await task()
+          } catch (e) {
+            // Individual task errors are already handled in their .catch() blocks
+          }
+          // Small yield between loads to let the browser GC and avoid memory spikes
+          await new Promise(r => setTimeout(r, 50))
+        }
+        mobileLoadRunningRef.current = false
+      }
+      drainQueue()
+    }
 
     // If no async loads were triggered this render, we might be ready
     checkReadiness()

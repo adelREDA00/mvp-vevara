@@ -17,13 +17,15 @@ export async function createApp(config = {}) {
   } = config
 
   const baseDPR = window.devicePixelRatio || 1
-  // Cap resolution at 2 to avoid memory issues on high-DPI mobile devices
-  // Use Math.min instead of Math.max to avoid forcing supersampling on standard screens
-  const defaultResolution = resolution || Math.min(baseDPR, 2)
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  // [MOBILE FIX] Cap resolution to 1 on mobile to massively reduce GPU memory.
+  // On iPhone 3x, resolution 2 creates a canvas backbuffer 4x larger than the screen.
+  // The quality difference at 1x is negligible on small mobile screens.
+  const defaultResolution = resolution || (isMobile ? 1 : Math.min(baseDPR, 2))
   const fixedWorldWidth = worldWidth || width
   const fixedWorldHeight = worldHeight || height
 
-  // Set global text resolution
+  // [MOBILE FIX] Set global text resolution to match canvas resolution
   PIXI.TextStyle.defaultTextStyle.resolution = defaultResolution
 
   const app = new PIXI.Application()
@@ -37,10 +39,10 @@ export async function createApp(config = {}) {
       resolution: defaultResolution,
       autoDensity,
       preference: 'webgl',
-      // 'default' lets the browser/driver pick; 'high-performance' can cause
-      // thermal throttling and context loss on low-end / integrated GPUs.
-      powerPreference: 'default',
-      antialias: true,
+      // [MOBILE FIX] Use 'low-power' on mobile to avoid thermal throttling and OOM.
+      // On desktop, 'default' lets the browser pick the best GPU.
+      powerPreference: isMobile ? 'low-power' : 'default',
+      antialias: !isMobile, // [MOBILE FIX] Disable antialiasing on mobile to save GPU memory
       premultipliedAlpha: true,
     })
   } catch (error) {

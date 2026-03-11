@@ -1,8 +1,15 @@
 import * as PIXI from 'pixi.js'
 
+const _isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 /**
  * Robust texture loading utility that handles PIXI Asset cache and blob URLs.
  * Checks PIXI cache first to avoid redundant fetches, especially critical for blobs.
+ * 
+ * [MOBILE FIX] On mobile:
+ *   - Caps textures to 1536px (from 2048) to reduce GPU memory
+ *   - Disables mipmapping to save ~3x GPU memory per texture
+ *   - Forces Image() path for all URLs to ensure capping is applied
  * 
  * @param {string} imageUrl - The URL of the image to load.
  * @returns {Promise<PIXI.Texture|null>} - Resolves with the PIXI Texture or null.
@@ -16,16 +23,16 @@ export const loadTextureRobust = async (imageUrl) => {
         if (cachedAsset) return cachedAsset
     }
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-    const MAX_DIMENSION = isMobile ? 2048 : 4096
+    // [MOBILE FIX] Lowered from 2048 to 1536 for more GPU headroom on iOS
+    const MAX_DIMENSION = _isMobile ? 1536 : 4096
 
-    // Helper to resize image or canvas
+    // Helper to resize image via offscreen canvas if it exceeds mobile limits
     const getCappedSource = (img) => {
-        if (isMobile && (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION)) {
+        if (_isMobile && (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION)) {
             const canvas = document.createElement('canvas')
             const scale = Math.min(MAX_DIMENSION / img.width, MAX_DIMENSION / img.height)
-            canvas.width = img.width * scale
-            canvas.height = img.height * scale
+            canvas.width = Math.round(img.width * scale)
+            canvas.height = Math.round(img.height * scale)
             const ctx = canvas.getContext('2d')
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
             return canvas
@@ -33,8 +40,8 @@ export const loadTextureRobust = async (imageUrl) => {
         return img
     }
 
-    // 2. For blobs or when manual control is needed
-    if (imageUrl.startsWith('blob:') || isMobile) {
+    // 2. For blobs or mobile: use manual Image() path for guaranteed dimension capping
+    if (imageUrl.startsWith('blob:') || _isMobile) {
         return new Promise((resolve, reject) => {
             const img = new Image()
             img.crossOrigin = 'anonymous'
@@ -43,8 +50,15 @@ export const loadTextureRobust = async (imageUrl) => {
                     const source = getCappedSource(img)
                     const texture = PIXI.Texture.from(source)
                     if (texture.source) {
-                        texture.source.autoGenerateMipmaps = true
-                        texture.source.mipMap = 'on'
+                        // [MOBILE FIX] Disable mipmapping on mobile — saves ~3x GPU memory per texture
+                        // This was the #1 remaining crash vector: this function runs BEFORE createLayer.js
+                        // and sets source properties that createLayer.js cannot override.
+                        if (_isMobile) {
+                            texture.source.autoGenerateMipmaps = false
+                        } else {
+                            texture.source.autoGenerateMipmaps = true
+                            texture.source.mipMap = 'on'
+                        }
                         texture.source.scaleMode = 'linear'
                     }
                     PIXI.Assets.cache.set(imageUrl, texture)

@@ -3,15 +3,11 @@ import * as PIXI from 'pixi.js'
 
 const isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 
-// Mobile: cap texture dimensions to prevent GPU OOM
-const MOBILE_MAX_TEXTURE_SIZE = 1024
-
 export function useAssetPreloader(layers, isCanvasReady) {
     const [isPreloading, setIsPreloading] = useState(true)
     const [progress, setProgress] = useState({ loaded: 0, total: 0, percent: 0 })
 
-    // Stabilize the dependency: only re-trigger when the SET of asset URLs changes,
-    // not when any layer property (position, opacity, etc.) changes.
+    // Stabilize the dependency: only re-trigger when the SET of asset URLs changes
     const assetUrls = useMemo(() => {
         if (!layers) return []
         const urls = []
@@ -21,17 +17,14 @@ export function useAssetPreloader(layers, isCanvasReady) {
                 if (url) urls.push({ url, type: layer.type })
             }
         }
-        // Sort for stable comparison
         urls.sort((a, b) => a.url.localeCompare(b.url))
         return urls
     }, [layers])
 
-    // Serialize to a string key so the effect only re-runs when the actual URL set changes
     const assetKey = useMemo(() => {
         return assetUrls.map(a => `${a.type}:${a.url}`).join('|')
     }, [assetUrls])
 
-    // Track whether we've already completed a preload cycle to avoid re-running
     const completedKeyRef = useRef(null)
 
     useEffect(() => {
@@ -43,6 +36,17 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
+        // [MOBILE FIX] On mobile, skip ALL preloading — let useCanvasLayers handle it
+        // sequentially through loadTextureRobust. This eliminates the double-loading
+        // crash vector where both the preloader AND useCanvasLayers load the same
+        // textures simultaneously, doubling GPU memory usage.
+        if (isMobileDevice) {
+            setProgress({ loaded: assetUrls.length, total: assetUrls.length, percent: 100 })
+            completedKeyRef.current = assetKey
+            setIsPreloading(false)
+            return
+        }
+
         if (assetUrls.length === 0) {
             setIsPreloading(false)
             setProgress({ loaded: 0, total: 0, percent: 100 })
@@ -50,6 +54,7 @@ export function useAssetPreloader(layers, isCanvasReady) {
             return
         }
 
+        // --- Desktop preloading path (unchanged) ---
         let loadedCount = 0
         let isMounted = true
 
@@ -60,18 +65,8 @@ export function useAssetPreloader(layers, isCanvasReady) {
             const { url, type } = asset
             try {
                 if (type === 'image') {
-                    // Load into PIXI asset cache
-                    const texture = await PIXI.Assets.load(url)
-
-                    // [MOBILE FIX] Disable mipmapping on mobile to save ~3x GPU memory per texture
-                    if (isMobileDevice && texture?.source) {
-                        texture.source.autoGenerateMipmaps = false
-                        texture.source.scaleMode = 'linear'
-                    }
+                    await PIXI.Assets.load(url)
                 } else if (type === 'video') {
-                    // For videos, use the robust configuration but DON'T create video elements here.
-                    // createVideoLayer() in useCanvasLayers handles the actual element creation.
-                    // We only warm the network cache for non-blob URLs.
                     if (!url.startsWith('blob:')) {
                         await PIXI.Assets.load({
                             src: url,
@@ -80,14 +75,12 @@ export function useAssetPreloader(layers, isCanvasReady) {
                                     autoPlay: false,
                                     muted: true,
                                     playsinline: true,
-                                    preload: isMobileDevice ? 'metadata' : 'auto',
+                                    preload: 'auto',
                                     crossOrigin: 'anonymous'
                                 }
                             }
                         })
                     }
-                    // For blob URLs: skip — createVideoLayer will handle them directly.
-                    // This prevents creating duplicate video elements (the main cause of mobile OOM).
                 }
             } catch (err) {
                 console.warn(`[useAssetPreloader] Failed to preload asset: ${url}`, err)
@@ -101,23 +94,20 @@ export function useAssetPreloader(layers, isCanvasReady) {
         }
 
         const runPreloader = async () => {
-            // [MOBILE FIX] Wait for fonts first — they're small but critical for text rendering
+            // Wait for fonts first
             try {
                 if (document.fonts) {
                     await Promise.race([
                         document.fonts.ready,
-                        new Promise(resolve => setTimeout(resolve, 3000)) // 3s timeout
+                        new Promise(resolve => setTimeout(resolve, 3000))
                     ])
                 }
-            } catch (e) {
-                // Font loading failure is non-fatal
-            }
+            } catch (e) { /* non-fatal */ }
 
             if (!isMounted) return
 
-            // Sequential on mobile (1 at a time), parallel on desktop (3 at a time)
-            const CONCURRENCY_LIMIT = isMobileDevice ? 1 : 3
-
+            // Desktop: parallel loading (3 at a time)
+            const CONCURRENCY_LIMIT = 3
             for (let i = 0; i < assetUrls.length; i += CONCURRENCY_LIMIT) {
                 if (!isMounted) return
                 const chunk = assetUrls.slice(i, i + CONCURRENCY_LIMIT)
