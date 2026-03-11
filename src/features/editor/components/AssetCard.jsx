@@ -5,7 +5,8 @@ import { selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 export function AssetCard({ image, isUploading, deletingId, onDelete, onAdd }) {
   const assetUrl = image.url || image.src
   const isPreparing = useSelector(state => selectIsAssetPreparing(state, assetUrl))
-  const isDeleting = deletingId === image.id
+  const assetId = image.id || image._id
+  const isDeleting = deletingId != null && deletingId === assetId
   const isVideo = image.metadata?.type?.startsWith('video/') || image.type === 'video'
 
   const isDisabled = isUploading || isDeleting || isPreparing

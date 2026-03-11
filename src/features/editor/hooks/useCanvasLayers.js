@@ -575,7 +575,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
   const layerObjectsRef = useRef(new Map())
   const createdLayersRef = useRef(new Set())
-  const failedLayersRef = useRef(new Set()) // [NEW] Track layers that failed to load to prevent infinite retries
   const previousLayerValuesRef = useRef(new Map())
   const previousSelectedLayerIdsRef = useRef(new Set())
 
@@ -660,9 +659,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     // CRITICAL: We also check projectStatus to ensure we don't signal readiness on 
     // the very first render pass before project data has even arrived!
     const checkReadiness = () => {
-      if (asyncLoadCounterRef.current === 0 && 
-          mobileLoadQueueRef.current.length === 0 && 
-          projectStatus === 'succeeded') {
+      if (asyncLoadCounterRef.current === 0 &&
+        mobileLoadQueueRef.current.length === 0 &&
+        projectStatus === 'succeeded') {
         setIsStageReady(true)
       }
     }
@@ -752,7 +751,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
       }
       else if (layer.type === LAYER_TYPES.IMAGE) {
-        if (failedLayersRef.current.has(layerId)) return
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
         dispatch(startPreparingLayer(layerId))
@@ -788,10 +786,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           setLayerObjectsVersion(v => v + 1)
           checkReadiness()
         }).catch((error) => {
-          console.error(`[useCanvasLayers] Failed to load image layer ${layerId}:`, error)
           asyncLoadCounterRef.current--
-          dispatch(finishPreparingLayer(layerId))
-          failedLayersRef.current.add(layerId)
+          createdLayers.delete(layerId)
           checkReadiness()
         })
 
@@ -803,7 +799,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         return
       }
       else if (layer.type === LAYER_TYPES.VIDEO) {
-        if (failedLayersRef.current.has(layerId)) return
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
         dispatch(startPreparingLayer(layerId))
@@ -843,17 +838,20 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           setLayerObjectsVersion(v => v + 1)
           checkReadiness()
         }).catch((error) => {
-          console.error(`[useCanvasLayers] Failed to load video layer ${layerId}:`, error)
           asyncLoadCounterRef.current--
-          dispatch(finishPreparingLayer(layerId))
-          failedLayersRef.current.add(layerId)
+          createdLayers.delete(layerId)
           checkReadiness()
         })
 
         if (_isMobileDevice) {
           mobileLoadQueueRef.current.push(handleVideoLoad)
         } else {
-          handleVideoLoad()
+          handleVideoLoad().catch(() => {
+            asyncLoadCounterRef.current--
+            dispatch(finishPreparingLayer(layerId))
+            createdLayers.delete(layerId)
+            checkReadiness()
+          })
         }
         return
       }

@@ -1842,10 +1842,7 @@ export const selectIsAssetPreparing = createSelector(
       const layer = layers[layerId]
       if (!layer || !layer.data) return false
       
-      const layerUrlRaw = layer.data.url || layer.data.src;
-      if (!layerUrlRaw) return false;
-      
-      const layerUrl = normalize(layerUrlRaw);
+      const layerUrl = normalize(layer.data.url || layer.data.src);
       return layerUrl === target;
     })
   }

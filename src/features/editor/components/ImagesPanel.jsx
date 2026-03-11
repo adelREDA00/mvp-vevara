@@ -63,7 +63,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                 setIsFetching(true)
                 const data = await api.get('/uploads/shared')
                 if (mounted) {
-                    setSharedAssets(Array.isArray(data) ? data : [])
+                    setSharedAssets(data)
                     setFetchError(null)
                 }
             } catch (err) {
