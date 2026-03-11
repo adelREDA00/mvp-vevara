@@ -1833,9 +1833,20 @@ export const selectIsAssetPreparing = createSelector(
   [selectLayers, selectPreparingLayers, (state, assetUrl) => assetUrl],
   (layers, preparingLayers, assetUrl) => {
     if (!assetUrl) return false
+    
+    // Convert to absolute path or standardized format if needed for matching
+    const normalize = (url) => typeof url === 'string' ? url.split('?')[0].split('#')[0] : url;
+    const target = normalize(assetUrl);
+    
     return Object.keys(preparingLayers).some(layerId => {
       const layer = layers[layerId]
-      return layer && (layer.data?.url === assetUrl || layer.data?.src === assetUrl)
+      if (!layer || !layer.data) return false
+      
+      const layerUrlRaw = layer.data.url || layer.data.src;
+      if (!layerUrlRaw) return false;
+      
+      const layerUrl = normalize(layerUrlRaw);
+      return layerUrl === target;
     })
   }
 )

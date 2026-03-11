@@ -101,14 +101,36 @@ async function request(path, options = {}) {
         finalOptions.body = JSON.stringify(finalOptions.body);
     }
 
-    const response = await fetch(url, finalOptions);
-    const data = await response.json().catch(() => ({}));
+    // [NEW] Default timeout of 30 seconds for all fetch requests
+    const TIMEOUT_MS = 30000;
+    let timeoutId;
+    let signal = finalOptions.signal;
 
-    if (!response.ok) {
-        throw new Error(data.error || `Request failed with status ${response.status}`);
+    if (!signal) {
+        const controller = new AbortController();
+        signal = controller.signal;
+        finalOptions.signal = signal;
+        timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
     }
 
-    return data;
+    try {
+        const response = await fetch(url, finalOptions);
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            throw new Error(data.error || `Request failed with status ${response.status}`);
+        }
+
+        return data;
+    } catch (error) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (error.name === 'AbortError' && !options.signal) {
+            throw new Error('Request timed out after 30 seconds');
+        }
+        throw error;
+    }
 }
 
 export const api = {

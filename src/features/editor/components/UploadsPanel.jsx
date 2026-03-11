@@ -113,7 +113,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
   }, [dispatch])
 
   const filteredImages = useMemo(() => {
-    if (!uploadedImages.length) return []
+    if (!Array.isArray(uploadedImages) || !uploadedImages.length) return []
     return uploadedImages.filter(image => {
       const matchesSearch = searchQuery === '' || image.name.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesTab = activeTab === 'All' ||

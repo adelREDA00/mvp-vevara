@@ -63,7 +63,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                 setIsFetching(true)
                 const data = await api.get('/uploads/shared')
                 if (mounted) {
-                    setSharedAssets(data)
+                    setSharedAssets(Array.isArray(data) ? data : [])
                     setFetchError(null)
                 }
             } catch (err) {
@@ -121,8 +121,8 @@ function ImagesPanel({ onClose, aspectRatio }) {
             mediaWidth: imageWidth,
             mediaHeight: imageHeight,
             data: {
-                url: image.url,
-                src: image.url,
+                url: image.url || image.src,
+                src: image.url || image.src,
                 ...(image.metadata || {}),
                 ...(isVideo && image.metadata?.duration ? { duration: image.metadata.duration } : {}),
             }
