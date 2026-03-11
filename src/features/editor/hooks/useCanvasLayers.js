@@ -8,7 +8,7 @@ import * as PIXI from 'pixi.js'
 import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, drawShapePath, releaseVideoElement } from '../../engine/pixi/createLayer'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { LAYER_TYPES } from '../../../store/models'
-import { updateLayer, selectScenes, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
+import { updateLayer, selectScenes, selectProjectTimelineInfo, selectLoadingMode, startPreparingLayer, finishPreparingLayer } from '../../../store/slices/projectSlice'
 import { updateLayerZOrder } from '../utils/layerUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
@@ -486,6 +486,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
 export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null) {
   const dispatch = useDispatch()
+  const loadingMode = useSelector(selectLoadingMode)
 
   // Trigger a full redraw of text layers when web fonts finish loading
   const [fontsLoadedVersion, setFontsLoadedVersion] = useState(0)
@@ -752,14 +753,17 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
+        dispatch(startPreparingLayer(layerId))
         // [FIX] Reset isStageReady when new async loads are queued — this ensures
         // the loading modal stays visible until ALL async layers are created
-        setIsStageReady(false)
+        if (loadingMode === 'global') {
+          setIsStageReady(false)
+        }
 
         // [MOBILE FIX] On mobile, push async loads into a queue processed sequentially.
-        // On desktop, fire immediately (parallel) for maximum speed.
         const handleImageLoad = () => createImageLayer(layer).then((sprite) => {
           asyncLoadCounterRef.current--
+          dispatch(finishPreparingLayer(layerId))
           if (!stageContainer || !sprite || sprite.destroyed) {
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
             checkReadiness()
@@ -797,10 +801,14 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
-        setIsStageReady(false)
+        dispatch(startPreparingLayer(layerId))
+        if (loadingMode === 'global') {
+          setIsStageReady(false)
+        }
 
         const handleVideoLoad = () => createVideoLayer(layer).then((container) => {
           asyncLoadCounterRef.current--
+          dispatch(finishPreparingLayer(layerId))
           if (!stageContainer || !container || container.destroyed) {
             if (container && !container.destroyed) {
               const sprite = container._videoSprite
@@ -838,7 +846,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         if (_isMobileDevice) {
           mobileLoadQueueRef.current.push(handleVideoLoad)
         } else {
-          handleVideoLoad()
+          handleVideoLoad().catch(() => {
+            asyncLoadCounterRef.current--
+            dispatch(finishPreparingLayer(layerId))
+            createdLayers.delete(layerId)
+            checkReadiness()
+          })
         }
         return
       }

@@ -75,13 +75,23 @@ export const loadTextureRobust = async (imageUrl) => {
     // 3. For regular URLs on Desktop: Use PIXI's asset loader
     try {
         const isSVG = imageUrl.includes('.svg')
-        const loadConfig = isSVG ? { data: { resolution: 2, scale: 2 } } : undefined
+        const loadConfig = isSVG ? { data: { resolution: 2, scale: 2 } } : {
+            data: {
+                resourceOptions: {
+                    crossOrigin: 'anonymous'
+                }
+            }
+        }
         const texture = await PIXI.Assets.load(imageUrl, loadConfig)
         return texture
     } catch (error) {
         console.warn(`Failed to load texture via Assets.load: ${imageUrl}`, error)
         try {
-            const texture = PIXI.Texture.from(imageUrl)
+            const texture = PIXI.Texture.from(imageUrl, {
+                resourceOptions: {
+                    crossOrigin: 'anonymous'
+                }
+            })
             return texture
         } catch (fallbackError) {
             console.error(`Final fallback failed for: ${imageUrl}`, fallbackError)

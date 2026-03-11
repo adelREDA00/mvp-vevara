@@ -528,6 +528,7 @@ export async function createVideoLayer(config) {
         console.log(`[createVideoLayer] Creating new video element for ${config.sceneId}: ${videoUrl}`)
         // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
         videoElement = document.createElement('video')
+        videoElement.crossOrigin = 'anonymous'
         videoElement.src = videoUrl
         videoElement.muted = data.muted !== false
         videoElement.loop = false
@@ -597,7 +598,8 @@ export async function createVideoLayer(config) {
           autoPlay: false,
           muted: data.muted !== false,
           loop: false,
-          playsinline: true
+          playsinline: true,
+          crossOrigin: 'anonymous'
         }
       })
       texture._nativeVideo = videoElement
@@ -618,9 +620,19 @@ export async function createVideoLayer(config) {
       })
     }
   } catch (loadError) {
-    console.warn(`Assets.load failed for video: ${videoUrl}, trying fallback...`, loadError)
     try {
-      texture = PIXI.Texture.from(videoUrl)
+      texture = await PIXI.Assets.load({
+        src: videoUrl,
+        data: {
+          resourceOptions: {
+            autoPlay: false,
+            muted: data.muted !== false,
+            loop: false,
+            playsinline: true,
+            crossOrigin: 'anonymous',
+          }
+        }
+      })
     } catch (fallbackError) {
       console.error(`Final fallback failed for video: ${videoUrl}`, fallbackError)
       throw new Error(`Failed to load video texture: ${videoUrl}`)

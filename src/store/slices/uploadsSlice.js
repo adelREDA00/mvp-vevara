@@ -1,6 +1,10 @@
 import { createSlice, createSelector, createAsyncThunk } from '@reduxjs/toolkit'
 import api from '../../api/client'
 
+// [NEW] Module-level variable to store the abort controller for the current upload
+// This avoids putting non-serializable values in the Redux state
+let currentAbortController = null;
+
 export const fetchUploads = createAsyncThunk(
   'uploads/fetch',
   async (_, { rejectWithValue }) => {
@@ -85,6 +89,11 @@ export const uploadFile = createAsyncThunk(
   'uploads/upload',
   async (file, { dispatch, rejectWithValue }) => {
     try {
+      // Create a new AbortController for this upload
+      if (currentAbortController) currentAbortController.abort();
+      currentAbortController = new AbortController()
+      const signal = currentAbortController.signal;
+
       const formData = new FormData()
       formData.append('file', file)
 
@@ -111,12 +120,16 @@ export const uploadFile = createAsyncThunk(
       formData.append('metadata', JSON.stringify(dimensions))
 
       const data = await api.upload('/uploads', formData, {
+        signal, // [NEW] Pass the abort signal
         onProgress: (percent) => {
           dispatch(setUploadProgress(percent))
         }
       })
       return data
     } catch (error) {
+      if (error.message === 'cancelled') {
+        return rejectWithValue('cancelled')
+      }
       return rejectWithValue(error.message)
     }
   }
@@ -178,7 +191,16 @@ const uploadsSlice = createSlice({
     },
     setUploadProgress: (state, action) => {
       state.uploadProgress = action.payload
-    }
+    },
+    cancelUpload: (state) => {
+      if (currentAbortController) {
+        currentAbortController.abort()
+        currentAbortController = null
+      }
+      state.uploadingCount = 0
+      state.uploadProgress = 0
+      state.hasLargeUpload = false
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -245,7 +267,7 @@ const uploadsSlice = createSlice({
   },
 })
 
-export const { clearUploadError, clearFetchError } = uploadsSlice.actions
+export const { clearUploadError, clearFetchError, cancelUpload } = uploadsSlice.actions
 
 // Selectors
 export const selectUploadedImages = (state) => state.uploads.uploadedImages

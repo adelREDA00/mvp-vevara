@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2 } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
+import { AssetCard } from './AssetCard'
 import {
   selectUploadedImagesArray,
   selectIsUploading,
@@ -19,10 +20,11 @@ import {
   selectLastUploadedId,
   selectHasLargeUpload,
   selectUploadProgress,
+  cancelUpload,
 } from '../../../store/slices/uploadsSlice'
 
 // NEW: Added imports for creating image layers on the canvas
-import { addLayerAndSelect, selectCurrentSceneId, selectLayers } from '../../../store/slices/projectSlice'
+import { addLayerAndSelect, selectCurrentSceneId, selectLayers, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 
 // Utility functions
 const formatFileSize = (bytes) => {
@@ -123,7 +125,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
   const handleFileSelect = useCallback((files) => {
     if (!files || files.length === 0) return
-    Array.from(files).forEach(file => dispatch(uploadFile(file)))
+    const file = files[0] // Support single upload for simplicity or iterate
+    dispatch(uploadFile(file))
   }, [dispatch])
 
   const handleFileInputChange = useCallback((e) => {
@@ -332,7 +335,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
                   <span className="text-xs font-medium text-purple-400">
                     {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : 'Processing media...'}
                   </span>
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                  <button
+                    onClick={() => dispatch(cancelUpload())}
+                    className="text-[10px] font-bold uppercase tracking-wider text-purple-400/50 hover:text-purple-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
                 <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mb-2">
                   <div
@@ -360,65 +368,16 @@ function UploadsPanel({ onClose, aspectRatio }) {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                {filteredImages.map((image) => {
-                  const isProcessing = isUploading && image.id === lastUploadedId
-                  const isDeleting = deletingId === image.id
-                  const isVideo = image.metadata?.type?.startsWith('video/')
-
-                  return (
-                    <div
-                      key={image.id}
-                      className={`group relative aspect-square rounded-xl overflow-hidden bg-white/5 border border-white/10 transition-all ${isProcessing || isDeleting
-                        ? 'opacity-50 cursor-not-allowed'
-                        : 'cursor-pointer hover:border-purple-500/50'
-                        }`}
-                      onClick={() => !isProcessing && !isDeleting && handleAddImageLayer(image)}
-                    >
-                      {isVideo ? (
-                        <div className="w-full h-full relative">
-                          {image.metadata?.thumbnail ? (
-                            <img src={image.metadata.thumbnail} className="w-full h-full object-cover" alt="" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-zinc-900"><Film className="w-6 h-6 text-white/20" /></div>
-                          )}
-                          <div className="absolute top-2 right-2 px-1 py-0.5 rounded bg-black/60 text-[8px] font-bold text-white tracking-widest">VIDEO</div>
-                        </div>
-                      ) : (
-                        <img
-                          src={image.metadata?.thumbnail || image.url}
-                          className="w-full h-full object-cover"
-                          alt=""
-                          onError={(e) => {
-                            // Show placeholder for broken images
-                            e.target.onerror = null
-                            e.target.style.display = 'none'
-                            e.target.parentElement.classList.add('flex', 'items-center', 'justify-center')
-                            const icon = document.createElement('div')
-                            icon.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-white/20"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>'
-                            e.target.parentElement.appendChild(icon)
-                          }}
-                        />
-                      )}
-
-                      {!isProcessing && !isDeleting && (
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <button
-                            onClick={(e) => handleDeleteImage(image.id, e)}
-                            className="p-2 bg-red-500/80 hover:bg-red-500 rounded-full text-white"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-
-                      {isDeleting && (
-                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                          <Loader2 className="h-5 w-5 text-white animate-spin" />
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                {filteredImages.map((image) => (
+                  <AssetCard
+                    key={image.id}
+                    image={image}
+                    isUploading={isUploading && image.id === lastUploadedId}
+                    deletingId={deletingId}
+                    onDelete={handleDeleteImage}
+                    onAdd={handleAddImageLayer}
+                  />
+                ))}
               </div>
             )}
           </div>

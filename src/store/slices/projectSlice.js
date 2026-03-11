@@ -71,6 +71,9 @@ const initialState = {
   error: null,
   isSaving: false,
   saveError: null,
+  // [NEW] Asset loading management
+  loadingMode: 'global', // 'global' (full screen preloader) or 'local' (card spinners)
+  preparingLayers: {}, // Map of layerId -> true for layers being initialized in PIXI
 }
 
 // Resolve step layout: auto steps get default duration, manual steps are preserved.
@@ -222,6 +225,16 @@ const projectSlice = createSlice({
     resetProject: () => initialState,
     setProjectName: (state, action) => {
       state.projectName = action.payload
+    },
+    // Asset loading management
+    setLoadingMode: (state, action) => {
+      state.loadingMode = action.payload // 'global' or 'local'
+    },
+    startPreparingLayer: (state, action) => {
+      state.preparingLayers[action.payload] = true
+    },
+    finishPreparingLayer: (state, action) => {
+      delete state.preparingLayers[action.payload]
     },
     setAspectRatio: (state, action) => {
       state.aspectRatio = action.payload
@@ -1671,6 +1684,10 @@ export const {
   removeBackgroundImage,
   detachBackgroundImage,
   setAspectRatio,
+  // Asset loading management
+  setLoadingMode,
+  startPreparingLayer,
+  finishPreparingLayer,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders
@@ -1805,6 +1822,22 @@ export const selectMotionEditingSceneId = (state) => state.project.motionEditing
 export const selectMotionEditingStepId = (state) => state.project.motionEditingMode.stepId
 // Returns the initial transforms of all layers captured at edit start
 export const selectMotionEditingInitialTransforms = (state) => state.project.motionEditingMode.initialTransforms
+
+// Asset loading selectors
+export const selectLoadingMode = (state) => state.project.loadingMode
+export const selectPreparingLayers = (state) => state.project.preparingLayers
+export const selectIsLayerPreparing = (state, layerId) => !!state.project.preparingLayers[layerId]
+
+// Returns true if any layer with the given asset URL is being prepared
+export const selectIsAssetPreparing = createSelector(
+  [selectLayers, selectPreparingLayers, (state, assetUrl) => assetUrl],
+  (layers, preparingLayers, assetUrl) => {
+    return Object.keys(preparingLayers).some(layerId => {
+      const layer = layers[layerId]
+      return layer && (layer.data?.url === assetUrl || layer.data?.src === assetUrl)
+    })
+  }
+)
 
 // Save/Load status selectors
 export const selectIsSaving = (state) => state.project.isSaving

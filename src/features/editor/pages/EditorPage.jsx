@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -147,6 +147,7 @@ function EditorPage() {
   const projectStatus = useSelector(state => state.project.status)
   const [isSaving, setIsSaving] = useState(false)
   const aspectRatio = useSelector(selectAspectRatio)
+  const loadingMode = useSelector(selectLoadingMode)
   const [showGrid, setShowGrid] = useState(false)
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
@@ -220,7 +221,10 @@ function EditorPage() {
     const pixiObjectsReady = isStageReady;
 
     const isLoading = !projectDataReady || !binaryAssetsReady || !pixiObjectsReady || !minTimeElapsed;
-    if (!isLoading) return null;
+    
+    // [NEW] If we are in local loading mode, we never show the full-screen preloader
+    // This allows single assets to be added without blocking the entire UI.
+    if (!isLoading || loadingMode === 'local') return null;
 
     return (
       <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] p-6 text-center transition-opacity duration-500">
@@ -254,6 +258,17 @@ function EditorPage() {
     );
   };
   const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
+
+  // [NEW] Transition to local loading mode once initially ready
+  useEffect(() => {
+    if (loadingMode === 'global' && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed) {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        dispatch(setLoadingMode('local'))
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [loadingMode, projectStatus, isStageReady, isPreloading, minTimeElapsed, dispatch])
 
   const handleViewportChange = useCallback((data) => {
     if (!data) return

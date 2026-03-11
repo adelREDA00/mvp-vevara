@@ -45,7 +45,19 @@ async function request(path, options = {}) {
                 }
             };
 
-            xhr.onerror = () => reject(new Error('Network error'));
+            if (options.onerror) {
+                xhr.onerror = () => reject(new Error('Network error'));
+            } else {
+                xhr.onerror = () => reject(new Error('Network error'));
+            }
+
+            // [NEW] Support for cancellation via AbortSignal
+            if (options.signal) {
+                options.signal.addEventListener('abort', () => {
+                    xhr.abort();
+                    reject(new Error('cancelled'));
+                });
+            }
 
             // Only set Content-Type for non-FormData requests.
             // For FormData, the browser MUST set it automatically to include the boundary.
