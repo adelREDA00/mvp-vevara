@@ -1832,6 +1832,7 @@ export const selectIsLayerPreparing = (state, layerId) => !!state.project.prepar
 export const selectIsAssetPreparing = createSelector(
   [selectLayers, selectPreparingLayers, (state, assetUrl) => assetUrl],
   (layers, preparingLayers, assetUrl) => {
+    if (!assetUrl) return false
     return Object.keys(preparingLayers).some(layerId => {
       const layer = layers[layerId]
       return layer && (layer.data?.url === assetUrl || layer.data?.src === assetUrl)

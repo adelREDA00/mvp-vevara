@@ -3,7 +3,8 @@ import { useSelector } from 'react-redux'
 import { selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 
 export function AssetCard({ image, isUploading, deletingId, onDelete, onAdd }) {
-  const isPreparing = useSelector(state => selectIsAssetPreparing(state, image.url))
+  const assetUrl = image.url || image.src
+  const isPreparing = useSelector(state => selectIsAssetPreparing(state, assetUrl))
   const isDeleting = deletingId === image.id
   const isVideo = image.metadata?.type?.startsWith('video/') || image.type === 'video'
 
@@ -19,8 +20,8 @@ export function AssetCard({ image, isUploading, deletingId, onDelete, onAdd }) {
     >
       {isVideo ? (
         <div className="w-full h-full relative">
-          {image.metadata?.thumbnail ? (
-            <img src={image.metadata.thumbnail} className="w-full h-full object-cover" alt="" />
+          {image.metadata?.thumbnail || image.thumbnail ? (
+            <img src={image.metadata?.thumbnail || image.thumbnail} className="w-full h-full object-cover" alt="" />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-zinc-900">
               <Film className="w-6 h-6 text-white/20" />
@@ -30,7 +31,7 @@ export function AssetCard({ image, isUploading, deletingId, onDelete, onAdd }) {
         </div>
       ) : (
         <img
-          src={image.metadata?.thumbnail || image.url}
+          src={image.metadata?.thumbnail || image.thumbnail || assetUrl}
           className="w-full h-full object-cover"
           alt=""
           onError={(e) => {
