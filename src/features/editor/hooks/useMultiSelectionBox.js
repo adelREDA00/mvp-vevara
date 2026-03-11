@@ -19,7 +19,7 @@ import { createResizeHandle, createRotateHandle, calculateAdaptedScale } from '.
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 
-export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null, onLockedInteraction = null) {
+export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null, onLockedInteraction = null, zoom = 1) {
   const dispatch = useDispatch()
   const selectionBoxRef = useRef(null)
   const [forceUpdate, setForceUpdate] = useState(0)
@@ -48,6 +48,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
   const dimensionsBadgeRef = useRef(null)
   const rotationBadgeRef = useRef(null)
   const latestCurrentSceneIdRef = useRef(currentSceneId)
+  const latestSceneMotionFlowRef = useRef(sceneMotionFlow)
 
   // Object pooling for performance optimization
   const pooledObjectsRef = useRef({
@@ -68,6 +69,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
   latestStageContainerRef.current = stageContainer
   latestLayersContainerRef.current = layersContainer
   latestCurrentSceneIdRef.current = currentSceneId
+  latestSceneMotionFlowRef.current = sceneMotionFlow
   const latestMotionCaptureModeRef = useRef(motionCaptureMode)
 
   useEffect(() => {
@@ -321,11 +323,22 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             handleType,
             cursor,
             onResizeStart: (handleType, cursor, e) => {
+              // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
+              const engine = getGlobalMotionEngine()
+              const currentTime = engine?.masterTimeline?.time() || 0
+              // Use ref to avoid stale closures in pooled handles
+              const sceneFlow = latestSceneMotionFlowRef.current
+              const startOffset = sceneFlow?.sceneStartOffset || 0
+              const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && 
+                latestSelectedLayerIdsRef.current.some(layerId => getLayerFirstActionTime(layerId, sceneFlow) !== Infinity)
+
+              if (isActuallyLocked) {
+                if (onLockedInteraction) onLockedInteraction(e)
+                return
+              }
               handleMultiResizeStart(handleType, cursor, e, minX, minY, width, height, initialLayerStates)
             },
-            zoomScale: 1 / (viewport?.scale?.x || 1),
-            isLocked,
-            onLockedInteraction
+            zoomScale: 1 / (viewport?.scale?.x || 1)
           })
           pooledObjectsRef.current.handles[index] = handle
         } else {
@@ -384,11 +397,21 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             x: width / 2,
             y: rotationYPosition,
             onRotateStart: (e) => {
+              // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
+              const engine = getGlobalMotionEngine()
+              const currentTime = engine?.masterTimeline?.time() || 0
+              const sceneFlow = latestSceneMotionFlowRef.current
+              const startOffset = sceneFlow?.sceneStartOffset || 0
+              const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && 
+                latestSelectedLayerIdsRef.current.some(layerId => getLayerFirstActionTime(layerId, sceneFlow) !== Infinity)
+
+              if (isActuallyLocked) {
+                if (onLockedInteraction) onLockedInteraction(e)
+                return
+              }
               handleMultiRotateStart(e)
             },
-            zoomScale: zoomScale,
-            isLocked,
-            onLockedInteraction
+            zoomScale: zoomScale
           })
           rotateHandle._cachedZoom = zoomScale
           pooledObjectsRef.current.rotateHandle = rotateHandle
@@ -1591,7 +1614,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         selectionBoxRef.current = null
       }
     }
-  }, [stageContainer, selectedLayerIds, layerObjectsMap, layers, viewport, isPlaying, motionCaptureMode, forceUpdate, currentSceneId])
+  }, [stageContainer, selectedLayerIds, layerObjectsMap, layers, viewport, isPlaying, motionCaptureMode, forceUpdate, currentSceneId, zoom])
 
   // API for external control (e.g. from useCanvasInteractions)
   const updateBoxPosition = (x, y) => {

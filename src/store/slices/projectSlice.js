@@ -162,6 +162,10 @@ const syncSceneMotionDuration = (state, sceneId) => {
 
   const sceneDurationMs = Math.round((scene.duration || 5) * 1000)
   motionFlow.pageDuration = sceneDurationMs
+  // Preserve or initialize sceneStartOffset
+  if (motionFlow.sceneStartOffset === undefined) {
+    motionFlow.sceneStartOffset = 0
+  }
 
   const steps = motionFlow.steps || []
   if (steps.length === 0) return

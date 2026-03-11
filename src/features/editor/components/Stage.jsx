@@ -111,6 +111,7 @@ function Stage({
   onViewportChange, // Add onViewportChange prop
   topToolbarHeight = 0,
   onReady, // Callback fired when PIXI canvas is initialized
+  setStageReady, // Callback to signal when stage initially populates with layers
   //motion capture mode & playback controls
   motionCaptureMode = null,
   onMotionStateChange,
@@ -281,8 +282,13 @@ function Stage({
 
 
   // Sync layers from Redux store to canvas
-  const { layerObjects, layerObjectsVersion } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId)
+  const { layerObjects, layerObjectsVersion, isStageReady } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId)
 
+  useEffect(() => {
+    if (isStageReady && setStageReady) {
+      setStageReady(true)
+    }
+  }, [isStageReady, setStageReady])
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
@@ -591,7 +597,8 @@ function Stage({
     interactionsAPIRef, // Pass interactions API ref for direct arrow synchronization
     currentSceneId, // Pass current scene ID for filtering
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
-    handleLockedInteraction // Pass locked interaction callback
+    handleLockedInteraction, // Pass locked interaction callback
+    effectiveZoom // Pass zoom for handle scaling
   )
 
   // =============================================================================
@@ -607,8 +614,9 @@ function Stage({
     worldHeight,
     effectiveZoom,
     sceneMotionFlows,
+    sceneStartOffset: currentSceneMotionFlow?.sceneStartOffset || 0,
     currentSceneId
-  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId])
+  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow])
 
   // Set up interactions (selection, drag)
   const interactionsAPI = useCanvasInteractions(
@@ -696,7 +704,8 @@ function Stage({
     motionCaptureMode,
     isPlaying, // Pass playing state to hide selection box during playback
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
-    handleLockedInteraction // Pass locked interaction callback
+    handleLockedInteraction, // Pass locked interaction callback
+    effectiveZoom // Pass zoom for handle scaling
   )
 
   // =============================================================================

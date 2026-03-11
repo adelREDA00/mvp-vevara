@@ -527,6 +527,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   // [Bug 3 Fix] Counter that increments whenever an async layer (video/image) resolves.
   // This gives useCanvasInteractions a stable dep to rebind pointer handlers after async creation.
   const [layerObjectsVersion, setLayerObjectsVersion] = useState(0)
+  const [isStageReady, setIsStageReady] = useState(false)
 
   const layers = useSelector((state) => {
     try {
@@ -643,6 +644,14 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const isActuallyPlaying = engine.getIsPlaying()
     const currentTime = engine.masterTimeline?.time() || 0
 
+    // [STABILITY] Track pending loads for readiness reporting
+    let asyncLoadsPending = 0
+    const checkReadiness = () => {
+      if (asyncLoadsPending === 0) {
+        setIsStageReady(true)
+      }
+    }
+
     // 1. LAYER CREATION & ADOPTION
     layerOrder.forEach((layerId) => {
       const layer = layers?.[layerId]
@@ -729,9 +738,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       }
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
+        asyncLoadsPending++
         createImageLayer(layer).then((sprite) => {
+          asyncLoadsPending--
           if (!stageContainer || !sprite || sprite.destroyed) {
             if (sprite && !sprite.destroyed) destroyImageSprite(sprite, layer)
+            checkReadiness()
             return
           }
           const currentLayer = layers?.[layerId]
@@ -739,6 +751,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
             createdLayers.delete(layerId)
+            checkReadiness()
             return
           }
           layerObjects.set(layerId, sprite)
@@ -749,20 +762,26 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           engine.registerLayerObject(layerId, sprite, { sceneId: currentLayer.sceneId })
           // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
+          checkReadiness()
         }).catch((error) => {
           // console.error(`Failed to create image layer ${layerId}:`, error)
+          asyncLoadsPending--
           createdLayers.delete(layerId)
+          checkReadiness()
         })
         return
       }
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
+        asyncLoadsPending++
         createVideoLayer(layer).then((container) => {
+          asyncLoadsPending--
           if (!stageContainer || !container || container.destroyed) {
             if (container && !container.destroyed) {
               const sprite = container._videoSprite
               destroyImageSprite(sprite, layer)
             }
+            checkReadiness()
             return
           }
           const currentLayer = layers?.[layerId]
@@ -772,6 +791,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             destroyImageSprite(sprite, layer)
             layerObjects.delete(layerId)
             createdLayers.delete(layerId)
+            checkReadiness()
             return
           }
           // [Bug 4 Fix] Set video time range from Redux layer data so MotionEngine.syncMedia
@@ -787,9 +807,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           engine.registerLayerObject(layerId, container, { sceneId: currentLayer.sceneId })
           // [Bug 3 Fix] Increment version counter so interaction handlers re-bind to this new object.
           setLayerObjectsVersion(v => v + 1)
+          checkReadiness()
         }).catch((error) => {
           // console.error(`Failed to create video layer ${layerId}:`, error)
+          asyncLoadsPending--
           createdLayers.delete(layerId)
+          checkReadiness()
         })
         return
       }
@@ -824,6 +847,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }
       }
     })
+
+    // If no async loads were triggered this render, we might be ready
+    checkReadiness()
 
     // 2. LAYER UPDATES & Z-ORDER SYNC
     layerOrder.forEach((layerId, desiredIndex) => {
@@ -1216,7 +1242,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it
@@ -1304,7 +1330,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     layerObjects: layerObjectsRef.current,
     getLayerObject: (layerId) => layerObjectsRef.current.get(layerId),
     layerObjectsVersion, // [Bug 3 Fix] Increments after each async layer creation
+    isStageReady,
   }
 }
-
-

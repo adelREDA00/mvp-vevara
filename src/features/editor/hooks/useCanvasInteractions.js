@@ -88,7 +88,7 @@ const cancelIdleCallback = (typeof window !== 'undefined' && window.cancelIdleCa
  * @param {number} [zoom=100] - Current zoom level (percentage, e.g., 100 = 100%)
  */
 export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, onLockedInteraction = null, layerObjectsVersion = 0) {
-  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId } = interactionParams
+  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0 } = interactionParams
   const dispatch = useDispatch()
 
   // =============================================================================
@@ -487,16 +487,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     const engine = getGlobalMotionEngine()
     const currentTime = engine?.masterTimeline?.time() || 0
 
-    // Get flow for the current scene
-    const sceneFlow = sceneMotionFlows?.[currentSceneId]
-    const sceneStartTime = sceneFlow?.sceneStartOffset || 0
-    const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
+    // [FIX] Use the provided sceneStartOffset for accurate locking (Bug 2 logic fix)
+    const isPastBaseStep = Math.abs(currentTime - sceneStartOffset) > 0.02
 
     if (!isPastBaseStep) return false
 
+    // Get flow for the current scene
+    const sceneFlow = sceneMotionFlows?.[currentSceneId]
     const firstActionTime = getLayerFirstActionTime(layerId, sceneFlow)
     return firstActionTime !== Infinity
-  }, [motionCaptureMode, sceneMotionFlows, currentSceneId])
+  }, [motionCaptureMode, sceneMotionFlows, currentSceneId, sceneStartOffset])
 
   // Spatial index for fast position-based queries
   const spatialIndexRef = useRef(new Map()) // layerId -> { x, y, width, height, bounds }
@@ -2848,8 +2848,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           event.stopPropagation?.()
 
           // [FIX] Block single-layer drag if it's animated and we are past base step
-          // Only show modal if the layer was ALREADY selected (prevents showing on initial selection)
-          if (isLayerLocked(selectedLayerId) && currentSelectedLayerIds.includes(selectedLayerId)) {
+          // Enforce lock even on initial selection (Bug 1 Fix)
+          if (isLayerLocked(selectedLayerId)) {
             event.stopPropagation()
             event.stopImmediatePropagation?.()
             if (onLockedInteraction) onLockedInteraction(event)
@@ -3085,8 +3085,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       // Prepare for drag if using select tool
       if (activeTool === 'select' || activeTool === 'move') {
         // [FIX] Block single-layer drag from element click if locked
-        // Only show modal if the layer was ALREADY selected
-        if (!hasMultiSelect && isLayerLocked(layerId) && currentSelectedLayerIds.includes(layerId)) {
+        // Enforce lock even on initial selection (Bug 1 Fix)
+        if (!hasMultiSelect && isLayerLocked(layerId)) {
           event.stopPropagation()
           event.stopImmediatePropagation?.()
           if (onLockedInteraction) onLockedInteraction(event)

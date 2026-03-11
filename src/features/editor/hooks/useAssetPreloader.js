@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import * as PIXI from 'pixi.js'
 
 export function useAssetPreloader(layers, isCanvasReady) {
     const [isPreloading, setIsPreloading] = useState(true)
@@ -10,11 +11,10 @@ export function useAssetPreloader(layers, isCanvasReady) {
 
         const layerValues = Object.values(layers)
 
-        // Only trigger full preload on initial load (when going from 0 to N layers or initial mount)
+        // Only trigger full preload on initial load
         if (lastLayersCount.current === -1) {
             lastLayersCount.current = layerValues.length
         } else if (lastLayersCount.current > 0 && !isPreloading) {
-            // If we already preloaded and are just adding/removing layers, don't show the full screen loader again
             return
         }
 
@@ -29,8 +29,6 @@ export function useAssetPreloader(layers, isCanvasReady) {
         }
 
         const isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-        const targetPercent = isMobileDevice ? 1.0 : 0.5
-        const targetCount = Math.max(1, Math.ceil(loadableLayers.length * targetPercent))
         let loadedCount = 0
         let isMounted = true
 
@@ -38,58 +36,40 @@ export function useAssetPreloader(layers, isCanvasReady) {
             setProgress({ loaded: 0, total: loadableLayers.length, percent: 0 })
         }
 
-        const loadAsset = (layer) => {
-            return new Promise((resolve) => {
-                let isResolved = false
-                const handleResolve = () => {
-                    if (!isResolved) {
-                        isResolved = true
-                        loadedCount++
-
-                        if (isMounted) {
-                            const percent = Math.round((loadedCount / loadableLayers.length) * 100)
-                            setProgress({ loaded: loadedCount, total: loadableLayers.length, percent })
-
-                            if (loadedCount >= targetCount && isPreloading) {
-                                setIsPreloading(false)
+        const loadAsset = async (layer) => {
+            const url = layer.data.url || layer.data.src
+            try {
+                if (layer.type === 'image') {
+                    // Use PIXI.Assets to ensure it's in the cache
+                    await PIXI.Assets.load(url)
+                } else if (layer.type === 'video') {
+                    // For videos, we still use the more robust configuration
+                    await PIXI.Assets.load({
+                        src: url,
+                        data: {
+                            resourceOptions: {
+                                autoPlay: false,
+                                muted: true,
+                                playsinline: true,
+                                preload: 'auto', // Force full buffering on mobile
+                                crossOrigin: 'anonymous'
                             }
                         }
-                        resolve()
-                    }
+                    })
                 }
-
-                // Increased timeout for mobile/slow networks
-                const timeoutId = setTimeout(handleResolve, 30000)
-
-                const url = layer.data.url || layer.data.src
-                if (layer.type === 'image') {
-                    const img = new Image()
-                    img.onload = () => { clearTimeout(timeoutId); handleResolve() }
-                    img.onerror = () => { clearTimeout(timeoutId); handleResolve() }
-                    img.src = url
-                } else if (layer.type === 'video') {
-                    const video = document.createElement('video')
-                    video.muted = true
-                    video.playsInline = true
-
-                    // On mobile, we wait for canplaythrough for better stability
-                    if (isMobileDevice) {
-                        video.preload = 'auto'
-                        video.oncanplaythrough = () => { clearTimeout(timeoutId); handleResolve() }
-                    } else {
-                        video.preload = 'metadata'
-                        video.onloadedmetadata = () => { clearTimeout(timeoutId); handleResolve() }
-                    }
-
-                    video.onerror = () => { clearTimeout(timeoutId); handleResolve() }
-                    video.src = url
-                    video.load()
+            } catch (err) {
+                console.warn(`[useAssetPreloader] Failed to preload asset: ${url}`, err)
+            } finally {
+                if (isMounted) {
+                    loadedCount++
+                    const percent = Math.round((loadedCount / loadableLayers.length) * 100)
+                    setProgress({ loaded: loadedCount, total: loadableLayers.length, percent })
                 }
-            })
+            }
         }
 
         const runPreloader = async () => {
-            // Limit concurrency to save memory
+            // Sequential loading on mobile to prevent OOM
             const CONCURRENCY_LIMIT = isMobileDevice ? 1 : 3
 
             for (let i = 0; i < loadableLayers.length; i += CONCURRENCY_LIMIT) {
@@ -99,10 +79,7 @@ export function useAssetPreloader(layers, isCanvasReady) {
             }
 
             if (!isMounted) return
-
-            if (isPreloading) {
-                setIsPreloading(false)
-            }
+            setIsPreloading(false)
         }
 
         runPreloader()

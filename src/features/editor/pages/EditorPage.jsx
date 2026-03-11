@@ -125,6 +125,7 @@ const GUEST_TEMPLATE = {
     'scene-guest-1': {
       steps: [],
       pageDuration: 5000,
+      sceneStartOffset: 0,
     }
   },
   currentSceneId: 'scene-guest-1'
@@ -189,6 +190,42 @@ function EditorPage() {
 
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
+  const [isStageReady, setIsStageReady] = useState(false) // Track PIXI object population
+  const FullScreenLoading = ({ progress, isPreloading, isStageReady }) => {
+    const isLoading = isPreloading || !isStageReady;
+    if (!isLoading) return null;
+
+    return (
+      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] p-6 text-center transition-opacity duration-500">
+        <div className="relative mb-8">
+          <div className="w-20 h-20 border-[3px] border-white/5 rounded-full" />
+          <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
+          <Layers className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[#6940c9] animate-pulse" />
+        </div>
+
+        <div className="space-y-3 max-w-xs">
+          <h2 className="text-xl font-medium tracking-tight text-white">Preparing your creative space</h2>
+          <p className="text-[13px] text-white/40 leading-relaxed">
+            We're optimizing your assets for high-performance motion design...
+          </p>
+
+          {/* Progress Bar */}
+          <div className="pt-4 space-y-2">
+            <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#6940c9] transition-all duration-500 ease-out"
+                style={{ width: `${progress?.percent || 0}%` }}
+              />
+            </div>
+            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/20">
+              <span>Loading Assets</span>
+              <span>{progress?.loaded || 0} / {progress?.total || 0}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
   const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
 
   const handleViewportChange = useCallback((data) => {
@@ -502,6 +539,7 @@ function EditorPage() {
     }
     prevZoomRef.current = zoom
   }, [zoom, editingTextLayerId, handleFinishEditing])
+
 
   // Finish text editing when selection changes (another layer selected or canvas clicked)
   useEffect(() => {
@@ -2675,6 +2713,7 @@ function EditorPage() {
               topToolbarHeight={topToolbarHeight}
               isResizingBottom={isResizingBottom}
               onReady={() => setIsPixiReady(true)}
+              setStageReady={setIsStageReady} // Pass the setter
               //motion capture mode & playback controls
               motionCaptureMode={effectiveMotionCaptureMode}
               onMotionStateChange={setMotionControls}
@@ -2688,36 +2727,11 @@ function EditorPage() {
             />
 
             {/* Asset Preloading Overlay */}
-            {isPreloading && (
-              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] p-6 text-center transition-opacity duration-500">
-                <div className="relative mb-8">
-                  <div className="w-20 h-20 border-[3px] border-white/5 rounded-full" />
-                  <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
-                  <Layers className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[#6940c9] animate-pulse" />
-                </div>
-
-                <div className="space-y-3 max-w-xs">
-                  <h2 className="text-xl font-medium tracking-tight text-white">Preparing your creative space</h2>
-                  <p className="text-[13px] text-white/40 leading-relaxed">
-                    We're optimizing your assets for high-performance motion design...
-                  </p>
-
-                  {/* Progress Bar */}
-                  <div className="pt-4 space-y-2">
-                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#6940c9] transition-all duration-500 ease-out"
-                        style={{ width: `${progress?.percent || 0}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/20">
-                      <span>Loading Assets</span>
-                      <span>{progress?.loaded || 0} / {progress?.total || 0}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            <FullScreenLoading
+              progress={progress}
+              isPreloading={isPreloading}
+              isStageReady={isStageReady}
+            />
 
             {/* Vertical Scrollbar Container */}
             <div

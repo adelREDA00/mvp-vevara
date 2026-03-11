@@ -202,7 +202,7 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
 // =============================================================================
 
 
-export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, onLockedInteraction = null) {
+export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, onLockedInteraction = null, zoom = 1) {
   // ===========================================================================
   // STATE MANAGEMENT - React refs and state variables for tracking interactions
   // ===========================================================================
@@ -864,7 +864,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
-      if (isLocked) {
+
+      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
+      const engine = getGlobalMotionEngine()
+      const currentTime = engine?.masterTimeline?.time() || 0
+      const sceneFlow = latestSceneMotionFlowRef.current
+      const startOffset = sceneFlow?.sceneStartOffset || 0
+      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
+
+      if (isActuallyLocked) {
         if (onLockedInteraction) onLockedInteraction(e)
         return
       }
@@ -951,7 +959,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
-      if (isLocked) {
+
+      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
+      const engine = getGlobalMotionEngine()
+      const currentTime = engine?.masterTimeline?.time() || 0
+      const sceneFlow = latestSceneMotionFlowRef.current
+      const startOffset = sceneFlow?.sceneStartOffset || 0
+      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
+
+      if (isActuallyLocked) {
         if (onLockedInteraction) onLockedInteraction(e)
         return
       }
@@ -1091,7 +1107,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
       e.stopPropagation()
       e.stopImmediatePropagation?.()
-      if (isLocked) {
+
+      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
+      const engine = getGlobalMotionEngine()
+      const currentTime = engine?.masterTimeline?.time() || 0
+      const sceneFlow = latestSceneMotionFlowRef.current
+      const startOffset = sceneFlow?.sceneStartOffset || 0
+      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
+
+      if (isActuallyLocked) {
         if (onLockedInteraction) onLockedInteraction(e)
         return
       }
@@ -2798,6 +2822,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     layer?.type,
     forceUpdate,
     motionCaptureMode?.isActive, // Only recreate if capture mode state changes
+    zoom, // Force redraw when zoom changes to update handle sizes
   ])
 
   // =========================================================================
