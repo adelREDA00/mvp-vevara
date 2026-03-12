@@ -248,8 +248,8 @@ const GUEST_TEMPLATE = {
                   "type": "scale",
                   "duration": 3350,
                   "values": {
-                    "dsx": 1.330849723057734,
-                    "dsy": 1.330849723057734,
+                    "dsx": 1.630849723057734,
+                    "dsy": 1.630849723057734,
                     "easing": "power4.out",
                     "duration": 3350
                   }

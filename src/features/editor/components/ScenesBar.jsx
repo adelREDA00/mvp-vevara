@@ -2367,41 +2367,6 @@ const ScenesBar = React.memo(({
                   onContextMenu={(e) => handleContextMenu(e, scene.id)}
                 />
               </div>
-              {/* Transition button */}
-              {index < scenes.length - 1 && (
-                <div
-                  key={`gap-button-${index}`}
-                  className="absolute z-40"
-                  style={{
-                    left: `${buttonPosition}px`,
-                    bottom: '0px',
-                    transform: 'translateX(-50%)',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  <button
-                    className="w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150"
-                    style={{
-                      backgroundColor: '#2a2a30',
-                      border: '1px solid #3f3f46',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#3f3f46'
-                      e.currentTarget.style.borderColor = '#52525b'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#2a2a30'
-                      e.currentTarget.style.borderColor = '#3f3f46'
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                    }}
-                    title="Add transition"
-                  >
-                    <Plus className="h-3 w-3 text-zinc-400" strokeWidth={2} />
-                  </button>
-                </div>
-              )}
             </React.Fragment>
           )
         })}
