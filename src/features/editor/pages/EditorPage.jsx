@@ -242,6 +242,17 @@ const GUEST_TEMPLATE = {
                     "easing": "power4.out",
                     "duration": 3350
                   }
+                },
+                {
+                  "id": "action-1773276726025-scale-1773275934580-xdl3ye76k",
+                  "type": "scale",
+                  "duration": 3350,
+                  "values": {
+                    "dsx": 1.330849723057734,
+                    "dsy": 1.330849723057734,
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
                 }
               ]
             },
@@ -376,13 +387,13 @@ function EditorPage() {
     // 2. isPreloading must be false (binary assets: fonts, textures, video buffers are ready)
     // 3. isStageReady must be true (PIXI objects are on the stage)
     // 4. minTimeElapsed must be true (prevent flicker)
-    
+
     const projectDataReady = projectStatus === 'succeeded';
     const binaryAssetsReady = !isPreloading;
     const pixiObjectsReady = isStageReady;
 
     const isLoading = !projectDataReady || !binaryAssetsReady || !pixiObjectsReady || !minTimeElapsed;
-    
+
     // [NEW] If we are in local loading mode, we never show the full-screen preloader
     // This allows single assets to be added without blocking the entire UI.
     if (!isLoading || loadingMode === 'local') return null;
@@ -847,7 +858,7 @@ function EditorPage() {
         const layerId = "1773275934580-xdl3ye76k"; // Blue iPhone
         const transforms = motionControls?.getLayerCurrentTransforms();
         const t = transforms?.get(layerId);
-        
+
         // Get the ACTUAL canvas element for absolute precision
         const canvasEl = document.querySelector('[data-tutorial="canvas-area"]');
         const pixiCanvas = canvasEl?.querySelector('canvas');
@@ -879,7 +890,7 @@ function EditorPage() {
     if (isPlaying && !prevIsPlaying.current) {
       playStartTime.current = Date.now();
     }
-    
+
     if (tutorialActive && tutorialStep === 1 && prevIsPlaying.current && !isPlaying) {
       // Only advance if it played for at least 500ms to avoid flicker issues
       if (Date.now() - playStartTime.current > 500) {
@@ -3383,8 +3394,8 @@ function EditorPage() {
           </div>
         </div>
       </Modal>
-      <TutorialOverlay 
-        isPlaying={isPlaying} 
+      <TutorialOverlay
+        isPlaying={isPlaying}
         manualTargetRect={manualTutorialRect}
         onNext={() => dispatch(nextStep())}
       />

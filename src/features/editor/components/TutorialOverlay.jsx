@@ -181,7 +181,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
   return (
     <div className="fixed inset-0 z-[10000] pointer-events-none overflow-hidden">
       {/* Dark Overlay with Holes */}
-      {step < 5 && (
+      {step < 5 && !(step === 4 && typeof window !== 'undefined' && window.innerWidth < 1024) && (
         <div
           className="absolute inset-0 bg-black/40 pointer-events-auto transition-[clip-path] duration-300"
           style={{
@@ -192,7 +192,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
       )}
 
       {/* Target Highlight (Visual only) */}
-      {targetRect && step < 5 && (
+      {targetRect && step < 5 && !(step === 4 && typeof window !== 'undefined' && window.innerWidth < 1024) && (
         <div
           className="absolute border-2 border-[#6940c9] rounded-xl transition-all duration-300 shadow-[0_0_20px_rgba(105,64,201,0.6)] pointer-events-none"
           style={{
