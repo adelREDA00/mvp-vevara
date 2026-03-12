@@ -411,6 +411,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       ref={containerRef}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation() }}
       onMouseDown={(e) => e.stopPropagation()}
+      data-tutorial="steps-area"
       className="absolute left-0 right-0 z-[120]"
       style={{
         top: '-36px',

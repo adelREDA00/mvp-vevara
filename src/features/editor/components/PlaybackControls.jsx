@@ -107,6 +107,7 @@ function PlaybackControls({
           </div>
 
           <button
+            data-tutorial="play-button"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()

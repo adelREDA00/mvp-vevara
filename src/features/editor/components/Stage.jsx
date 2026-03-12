@@ -314,7 +314,16 @@ function Stage({
         cropWidth: obj.cropWidth ?? obj._storedCropWidth ?? obj._originalWidth ?? obj.width ?? 100,
         cropHeight: obj.cropHeight ?? obj._storedCropHeight ?? obj._originalHeight ?? obj.height ?? 100,
         mediaWidth: obj.mediaWidth ?? obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,
-        mediaHeight: obj.mediaHeight ?? obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height ?? 100
+        mediaHeight: obj.mediaHeight ?? obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height ?? 100,
+        visualRect: obj.getBounds ? (() => {
+          const bounds = obj.getBounds();
+          return {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height
+          };
+        })() : null
       })
     })
     return transforms

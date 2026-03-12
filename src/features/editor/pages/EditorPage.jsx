@@ -27,108 +27,266 @@ import ProjectsPanel from '../components/ProjectsPanel'
 import AppsPanel from '../components/AppsPanel'
 import ColorPickerPanel from '../components/ColorPickerPanel'
 import PositionPanel from '../components/PositionPanel'
+import TutorialOverlay from '../components/TutorialOverlay'
 import { useEditorSidebar } from '../hooks/useEditorSidebar'
 import { useEditorPlayback } from '../hooks/useEditorPlayback'
 import { useEditorLayout } from '../hooks/useEditorLayout'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
 import { resetGlobalMotionEngine } from '../../engine/motion'
+import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
 
 const GUEST_TEMPLATE = {
-  name: 'Practice Project',
-  aspectRatio: '16:9',
-  scenes: [
-    {
-      id: 'scene-guest-1',
-      name: 'Scene 1',
-      duration: 5.0,
-      transition: 'None',
-      backgroundColor: 0xffffff,
-      layers: ['bg-guest-1', 'shape-guest-1', 'text-guest-1'],
-    }
-  ],
-  layers: {
-    'bg-guest-1': {
-      id: 'bg-guest-1',
-      sceneId: 'scene-guest-1',
-      type: 'background',
-      name: 'Background',
-      visible: true,
-      locked: false,
-      opacity: 1.0,
-      x: 0,
-      y: 0,
-      width: 1920,
-      height: 1080,
-      rotation: 0,
-      scaleX: 1,
-      scaleY: 1,
-      anchorX: 0,
-      anchorY: 0,
-      data: { color: 0xffffff },
-    },
-    'shape-guest-1': {
-      id: 'shape-guest-1',
-      sceneId: 'scene-guest-1',
-      type: 'shape',
-      name: 'Practice Box',
-      visible: true,
-      locked: false,
-      opacity: 1.0,
-      x: 400,
-      y: 540,
-      width: 200,
-      height: 200,
-      rotation: 0,
-      scaleX: 1,
-      scaleY: 1,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      data: {
-        shapeType: 'rect',
-        fill: '#000000',
-        stroke: '',
-        strokeWidth: 0,
-      },
-    },
-    'text-guest-1': {
-      id: 'text-guest-1',
-      sceneId: 'scene-guest-1',
-      type: 'text',
-      name: 'Instructions',
-      visible: true,
-      locked: false,
-      opacity: 1.0,
-      x: 960,
-      y: 200,
-      width: 1000,
-      height: 100,
-      rotation: 0,
-      scaleX: 1,
-      scaleY: 1,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      data: {
-        content: "Click Add Step, move or change the box, then click Add Step again to apply",
-        fontSize: 54,
-        color: '#000000',
-        fontFamily: 'Inter',
-        fontWeight: 'bold',
-        textAlign: 'center',
-      },
-    }
+  "_id": {
+    "$oid": "69b207cca3561e58b8d41b65"
   },
-  sceneMotionFlows: {
-    'scene-guest-1': {
-      steps: [],
-      pageDuration: 5000,
-      sceneStartOffset: 0,
-    }
-  },
-  currentSceneId: 'scene-guest-1'
+  "name": "Practice Project",
+  "data": {
+    "scenes": [
+      {
+        "id": "1773275084285-llzfb33zs",
+        "name": "Scene 1",
+        "duration": 6.7,
+        "transition": "None",
+        "backgroundColor": 16777215,
+        "layers": [
+          "1773275084285-8743ocm8q",
+          "1773275115933-4qvfswnih",
+          "1773275104029-lyea26644",
+          "1773275934580-xdl3ye76k"
+        ]
+      }
+    ],
+    "layers": {
+      "1773275084285-8743ocm8q": {
+        "id": "1773275084285-8743ocm8q",
+        "sceneId": "1773275084285-llzfb33zs",
+        "type": "background",
+        "name": "Background",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "color": 16777215
+        },
+        "createdAt": 1773275084285,
+        "updatedAt": 1773275084285
+      },
+      "1773275104029-lyea26644": {
+        "id": "1773275104029-lyea26644",
+        "sceneId": "1773275084285-llzfb33zs",
+        "type": "image",
+        "name": "img2.svg",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 959.3750062403474,
+        "y": 739.863565962716,
+        "width": 223.75001248069486,
+        "height": 397.7777999656798,
+        "rotation": 90,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "data": {
+          "url": "/img2.svg",
+          "src": "/img2.svg",
+          "width": 1080,
+          "height": 1920,
+          "duration": 0,
+          "mimeType": "image/svg+xml",
+          "size": 7248471
+        },
+        "createdAt": 1773275104029,
+        "updatedAt": 1773276607596,
+        "cropX": 0,
+        "cropY": 0,
+        "cropWidth": 223.75001248069486,
+        "cropHeight": 397.7777999656798,
+        "mediaWidth": 223.75001248069486,
+        "mediaHeight": 397.7777999656798
+      },
+      "1773275115933-4qvfswnih": {
+        "id": "1773275115933-4qvfswnih",
+        "sceneId": "1773275084285-llzfb33zs",
+        "type": "text",
+        "name": "text Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 960,
+        "y": 552.0797948585858,
+        "width": 550.471772757446,
+        "height": 57,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "content": "making animation chill",
+          "fontSize": 44.81946001248375,
+          "color": "#000000",
+          "fontFamily": "Poppins",
+          "fontWeight": "bold",
+          "textAlign": "center"
+        },
+        "createdAt": 1773275115933,
+        "updatedAt": 1773276725209
+      },
+      "1773275934580-xdl3ye76k": {
+        "id": "1773275934580-xdl3ye76k",
+        "sceneId": "1773275084285-llzfb33zs",
+        "type": "image",
+        "name": "img1.svg",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 960,
+        "y": 372.08578221001176,
+        "width": 225,
+        "height": 400,
+        "rotation": 90,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "data": {
+          "url": "/img1.svg",
+          "src": "/img1.svg",
+          "width": 1080,
+          "height": 1920,
+          "duration": 0,
+          "mimeType": "image/svg+xml",
+          "size": 7248473
+        },
+        "createdAt": 1773275934580,
+        "updatedAt": 1773276606230
+      }
+    },
+    "sceneMotionFlows": {
+      "1773275084285-llzfb33zs": {
+        "steps": [
+          {
+            "id": "step-1773276709178",
+            "layerActions": {
+              "1773275104029-lyea26644": [
+                {
+                  "id": "action-1773276726025-move-1773275104029-lyea26644",
+                  "type": "move",
+                  "duration": 3350,
+                  "values": {
+                    "dx": -726.6665988498264,
+                    "dy": 4.44437646379788,
+                    "controlPoints": [],
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                },
+                {
+                  "id": "action-1773276726025-rotate-1773275104029-lyea26644",
+                  "type": "rotate",
+                  "duration": 3350,
+                  "values": {
+                    "dangle": -90,
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                }
+              ],
+              "1773275115933-4qvfswnih": [
+                {
+                  "id": "action-1773276726025-scale-1773275115933-4qvfswnih",
+                  "type": "scale",
+                  "duration": 3350,
+                  "values": {
+                    "dsx": 2.1695906001672753,
+                    "dsy": 2.1695906001672753,
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                }
+              ],
+              "1773275934580-xdl3ye76k": [
+                {
+                  "id": "action-1773276726025-move-1773275934580-xdl3ye76k",
+                  "type": "move",
+                  "duration": 3350,
+                  "values": {
+                    "dx": 764.4444783528645,
+                    "dy": 0.00012715657078388176,
+                    "controlPoints": [],
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                },
+                {
+                  "id": "action-1773276726025-rotate-1773275934580-xdl3ye76k",
+                  "type": "rotate",
+                  "duration": 3350,
+                  "values": {
+                    "dangle": -90,
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                }
+              ]
+            },
+            "duration": 3350,
+            "startTime": 0
+          },
+          {
+            "id": "step-1773276728282",
+            "layerActions": {
+              "1773275104029-lyea26644": [
+                {
+                  "id": "action-1773276738777-move-1773275104029-lyea26644",
+                  "type": "move",
+                  "duration": 3350,
+                  "values": {
+                    "dx": -4.882389993363432,
+                    "dy": -690.307417,
+                    "controlPoints": [],
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                },
+                {
+                  "id": "action-1773276738777-scale-1773275104029-lyea26644",
+                  "type": "scale",
+                  "duration": 3350,
+                  "values": {
+                    "dsx": 2.330849723057734,
+                    "dsy": 2.330849723057734,
+                    "easing": "power4.out",
+                    "duration": 3350
+                  }
+                }
+              ]
+            },
+            "duration": 3350,
+            "startTime": 3350
+          }
+        ],
+        "pageDuration": 6700,
+        "sceneStartOffset": 0
+      }
+    },
+    "aspectRatio": "16:9"
+  }
 }
 
 function EditorPage() {
@@ -139,6 +297,8 @@ function EditorPage() {
   const selectedCanvas = useSelector(selectSelectedCanvas)
   const layers = useSelector(selectLayers)
   const { isAuthenticated } = useSelector((state) => state.auth)
+  const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
+
 
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
   const { projectId: urlProjectId } = useParams()
@@ -151,6 +311,7 @@ function EditorPage() {
   const [showGrid, setShowGrid] = useState(false)
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
+  const [manualTutorialRect, setManualTutorialRect] = useState(null);
   const [zoom, setZoom] = useState(43)
   const [showGuestModal, setShowGuestModal] = useState(false)
   const zoomRef = useRef(43) // Ref to track current zoom without causing re-renders
@@ -269,6 +430,9 @@ function EditorPage() {
       return () => clearTimeout(timer)
     }
   }, [loadingMode, projectStatus, isStageReady, isPreloading, minTimeElapsed, dispatch])
+
+
+
 
   const handleViewportChange = useCallback((data) => {
     if (!data) return
@@ -660,6 +824,131 @@ function EditorPage() {
     }
   }, [bottomSectionHeight, initialBottomHeight])
 
+  // =============================================================================
+  // TUTORIAL LOGIC
+  // =============================================================================
+  useEffect(() => {
+    dispatch(setGuestMode(!isAuthenticated));
+  }, [isAuthenticated, dispatch]);
+
+  useEffect(() => {
+    if (!isAuthenticated && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed) {
+      const isGuestTemplate = projectName === "blomberg style video " || projectName === "Practice Project";
+      if (isGuestTemplate) {
+        dispatch(startTutorial());
+      }
+    }
+  }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch]);
+
+  // Handle manual target rect calculation for Step 4 (PIXI layer)
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 4) {
+      const updateRect = () => {
+        const layerId = "1773275934580-xdl3ye76k"; // Blue iPhone
+        const transforms = motionControls?.getLayerCurrentTransforms();
+        const t = transforms?.get(layerId);
+        
+        // Get the ACTUAL canvas element for absolute precision
+        const canvasEl = document.querySelector('[data-tutorial="canvas-area"]');
+        const pixiCanvas = canvasEl?.querySelector('canvas');
+        const canvasRect = pixiCanvas?.getBoundingClientRect() || canvasEl?.getBoundingClientRect();
+
+        if (t?.visualRect && canvasRect) {
+          // PIXI visualRect is already in pixels relative to the canvas origin
+          // We just add the canvas's absolute screen position to get perfect window-space coordinates
+          setManualTutorialRect({
+            x: canvasRect.left + t.visualRect.x,
+            y: canvasRect.top + t.visualRect.y,
+            width: t.visualRect.width,
+            height: t.visualRect.height
+          });
+        }
+      };
+      updateRect();
+      const interval = setInterval(updateRect, 32);
+      return () => clearInterval(interval);
+    } else {
+      setManualTutorialRect(null);
+    }
+  }, [tutorialActive, tutorialStep, motionControls]);
+
+  // Handle playback stop for Step 1 -> 2
+  const prevIsPlaying = useRef(isPlaying);
+  const playStartTime = useRef(0);
+  useEffect(() => {
+    if (isPlaying && !prevIsPlaying.current) {
+      playStartTime.current = Date.now();
+    }
+    
+    if (tutorialActive && tutorialStep === 1 && prevIsPlaying.current && !isPlaying) {
+      // Only advance if it played for at least 500ms to avoid flicker issues
+      if (Date.now() - playStartTime.current > 500) {
+        dispatch(nextStep());
+      }
+    }
+    prevIsPlaying.current = isPlaying;
+  }, [isPlaying, tutorialActive, tutorialStep, dispatch]);
+
+  // Ensure target layer is selected for Step 4
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 4) {
+      const layerId = "1773275934580-xdl3ye76k"; // Switched to img1.svg (Blue iPhone)
+      if (!selectedLayerIds.includes(layerId)) {
+        dispatch(setSelectedLayer(layerId));
+      }
+    }
+  }, [tutorialActive, tutorialStep, selectedLayerIds, dispatch]);
+
+  // Handle Step 3 -> 4 transition (Entering capture mode)
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 3 && motionCaptureMode?.isActive) {
+      dispatch(nextStep());
+    }
+  }, [motionCaptureMode?.isActive, tutorialActive, tutorialStep, dispatch]);
+
+  // Handle Step 4 -> 5 transition (Performing a transformation)
+  // [FIX] We wait until the user actually performs a significant transformation
+  const initialTransformRef = useRef(null);
+  useEffect(() => {
+    let interval;
+    if (tutorialActive && tutorialStep === 4 && motionCaptureMode?.isActive) {
+      // Capture initial state
+      const transforms = motionControls?.getLayerCurrentTransforms();
+      const target = transforms?.get("1773275934580-xdl3ye76k");
+      if (target && !initialTransformRef.current) {
+        initialTransformRef.current = { x: target.x, y: target.y, scaleX: target.scaleX };
+      }
+
+      // Start polling for change
+      interval = setInterval(() => {
+        const currentTransforms = motionControls?.getLayerCurrentTransforms();
+        const current = currentTransforms?.get("1773275934580-xdl3ye76k");
+        const initial = initialTransformRef.current;
+
+        if (current && initial) {
+          const dx = Math.abs(current.x - initial.x);
+          const dy = Math.abs(current.y - initial.y);
+          const ds = Math.abs(current.scaleX - initial.scaleX);
+
+          if (dx > 20 || dy > 20 || ds > 0.05) {
+            dispatch(nextStep());
+          }
+        }
+      }, 200);
+    } else {
+      initialTransformRef.current = null;
+    }
+    return () => clearInterval(interval);
+  }, [tutorialActive, tutorialStep, motionCaptureMode?.isActive, motionControls, dispatch]);
+
+  // Handle Step 5 -> Completion (Applying motion)
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 5 && !motionCaptureMode) {
+      dispatch(nextStep()); // Finish tutorial
+    }
+  }, [motionCaptureMode, tutorialActive, tutorialStep, dispatch]);
+
+
   // Centralized seek function to sync UI and Engine
   const seek = useCallback((time) => {
     const clampedTime = Math.max(0, Math.min(time, totalTime))
@@ -692,7 +981,7 @@ function EditorPage() {
 
       if (!isAuthenticated) {
         // [GUEST TEMPLATE] Initialize with a practice project for guest users
-        dispatch(initializeProject(GUEST_TEMPLATE))
+        dispatch(initializeProject({ ...GUEST_TEMPLATE.data, name: GUEST_TEMPLATE.name }))
       } else {
         // Default empty scene for authenticated users
         dispatch(addScene({
@@ -2726,6 +3015,7 @@ function EditorPage() {
           {/* Canvas - Takes all available space */}
           <div
             ref={canvasContainerRef}
+            data-tutorial="canvas-area"
             className="absolute flex-1 overflow-hidden select-none"
             style={{
               top: topToolbarHeight,
@@ -2777,6 +3067,8 @@ function EditorPage() {
               minTimeElapsed={minTimeElapsed}
               hasAsyncAssets={hasAsyncAssets}
             />
+
+
 
             {/* Vertical Scrollbar Container */}
             <div
@@ -3091,6 +3383,11 @@ function EditorPage() {
           </div>
         </div>
       </Modal>
+      <TutorialOverlay 
+        isPlaying={isPlaying} 
+        manualTargetRect={manualTutorialRect}
+        onNext={() => dispatch(nextStep())}
+      />
     </div>
   )
 }

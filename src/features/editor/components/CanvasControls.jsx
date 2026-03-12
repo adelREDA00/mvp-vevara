@@ -407,6 +407,7 @@ function CanvasControls({
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {/* Motion Button - Toggle capture mode */}
           <button
+            data-tutorial="add-step-button"
             onClick={() => {
               if (isMotionCaptureActive) {
                 onApplyMotion?.()

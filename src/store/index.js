@@ -5,6 +5,7 @@ import selectionReducer from './slices/selectionSlice'
 import playbackReducer from './slices/playbackSlice'
 import historyReducer from './slices/historySlice'
 import uploadsReducer from './slices/uploadsSlice'
+import tutorialReducer from './slices/tutorialSlice'
 import { historyMiddleware } from './middleware/historyMiddleware'
 
 export const store = configureStore({
@@ -15,6 +16,7 @@ export const store = configureStore({
     playback: playbackReducer,
     history: historyReducer,
     uploads: uploadsReducer,
+    tutorial: tutorialReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
