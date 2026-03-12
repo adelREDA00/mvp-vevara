@@ -101,6 +101,11 @@ const DashboardPage = () => {
         navigate('/login')
     }
 
+    const handleTutorialClick = async () => {
+        await dispatch(logoutUser())
+        window.location.href = '/'
+    }
+
     const handleCreateProject = async () => {
         try {
             const sceneId = uid()
@@ -336,6 +341,48 @@ const DashboardPage = () => {
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8">
+                                {/* 10 Second Tutorial Special Card */}
+                                <div
+                                    className="group cursor-pointer"
+                                    onClick={handleTutorialClick}
+                                >
+                                    <div className="aspect-video bg-[#1a1b23] border border-[#6940c9]/30 rounded-xl overflow-hidden relative mb-4 group-hover:border-[#6940c9] transition-all flex flex-col items-center justify-center p-6 text-center bg-[radial-gradient(circle_at_center,_rgba(105,64,201,0.15)_0%,_transparent_70%)]">
+                                        {/* Aesthetic Background Image */}
+                                        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-700 flex items-center justify-center p-4">
+                                            <img 
+                                                src="/img2.png" 
+                                                alt="Tutorial Preview" 
+                                                className="h-[120%] w-auto object-contain scale-[0.7] rotate-[8deg] group-hover:rotate-[4deg] group-hover:scale-[0.75] transition-all duration-1000 drop-shadow-2xl" 
+                                            />
+                                            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1015]/60 via-transparent to-transparent"></div>
+                                        </div>
+
+                                        <div className="absolute inset-0 opacity-10 group-hover:opacity-20 transition-opacity bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+                                        
+                                        <div className="relative z-10 space-y-2 group-hover:opacity-0 transition-opacity duration-300">
+                                            <div className="w-10 h-10 bg-[#6940c9]/20 rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6940c9]/30 group-hover:scale-110 transition-transform duration-500">
+                                                <Wand2 className="w-5 h-5 text-[#6940c9]" />
+                                            </div>
+                                            <h3 className="text-base font-bold text-white tracking-tight group-hover:text-[#7c4af0] transition-colors">10 second tutorial</h3>
+                                            <p className="text-[9px] text-white/40 font-medium uppercase tracking-[0.2em] leading-tight">create your first iphone ad</p>
+                                        </div>
+
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#0f1015]/60 backdrop-blur-[4px] z-20">
+                                            <div className="px-5 py-2 bg-white text-black text-[10px] font-black rounded-full flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-all duration-500 shadow-2xl">
+                                                START GUIDE <Sparkles className="w-3 h-3 text-[#6940c9]" />
+                                            </div>
+                                        </div>
+
+                                        <div className="absolute top-3 left-3 bg-[#6940c9] rounded px-1.5 py-0.5 text-[8px] font-black text-white tracking-widest uppercase shadow-lg shadow-[#6940c9]/20">
+                                            SPECIAL
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <h3 className="text-[13px] font-medium text-white group-hover:text-[#6940c9] transition-colors">10 second tutorial</h3>
+                                        <p className="text-[10px] text-white/40 mt-1 font-light italic">Start your journey here</p>
+                                    </div>
+                                </div>
+
                                 {projects.map((project) => (
                                     <div
                                         key={project._id}
