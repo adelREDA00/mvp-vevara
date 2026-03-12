@@ -262,10 +262,10 @@ const DashboardPage = () => {
                                         </div>
 
                                         <div className="space-y-3 text-white/70 text-[13px] leading-relaxed font-light">
-                                            <p>Thanks for being one of the first 140 creators exploring Vevara.</p>
+                                            <p>Thanks for being one of the first + 200 creators exploring Vevara.</p>
                                             <p>This is an early beta to test a new approach to motion design, so you may encounter bugs in places. I’ll continue improving the app based on your feedback.</p>
                                             <p className="text-red-500 font-medium">For now, Vevara works best on desktop, mobile support is still unstable.</p>
-                                            <p className="text-white font-normal italic">Your feedback will help shape the future of the product.</p>
+                                            {/* <p className="text-white font-normal italic">Your feedback will help shape the future of the product.</p> */}
                                             <div className="pt-2">
                                                 <a href="#learn-vevara" className="inline-flex items-center gap-1.5 text-[#6940c9] hover:text-[#7b52da] font-bold transition-colors">
                                                     Learn Vevara in 40 seconds <ExternalLink className="w-3 h-3" />
