@@ -15,6 +15,17 @@ const CANVAS_ACTIONS = [
   'project/updateScene', // For canvas background color changes
   'project/pasteLayers',
   'project/pasteScene',
+  // Motion flow actions (MotionCaptureMode & MotionPanel)
+  'project/addSceneMotionStep',
+  'project/deleteSceneMotionStep',
+  'project/addSceneMotionAction',
+  'project/updateSceneMotionAction',
+  'project/deleteSceneMotionAction',
+  'project/updateStepTiming',
+  'project/duplicateSceneMotionStep',
+  'project/reorderSceneMotionSteps',
+  'project/updateSceneMotionStep',
+  'project/clearSceneMotionFlow',
 ]
 
 // Actions that should NOT be tracked (app-level actions)
@@ -34,6 +45,7 @@ const EXCLUDED_ACTIONS = [
   'history/undo',
   'history/redo',
   'history/clearHistory',
+  'history/flushPending', // Internal: flush debounced state
 ]
 
 // Debounce time for batching rapid updates (e.g., during drag)
@@ -49,16 +61,42 @@ function cloneProjectState(state) {
   return {
     scenes: JSON.parse(JSON.stringify(state.project.scenes)),
     layers: JSON.parse(JSON.stringify(state.project.layers)),
+    sceneMotionFlows: JSON.parse(JSON.stringify(state.project.sceneMotionFlows || {})),
     segmentsByLayer: JSON.parse(JSON.stringify(state.project.segmentsByLayer || {})),
     currentSceneId: state.project.currentSceneId,
+  }
+}
+
+/**
+ * Flush any pending debounced state into history immediately.
+ * Must be called before undo/redo to ensure the history stack is complete.
+ */
+function flushPendingState(store) {
+  if (pendingState) {
+    clearTimeout(debounceTimer)
+    store.dispatch({
+      type: 'history/addToHistory',
+      payload: pendingState,
+    })
+    pendingState = null
+    debounceTimer = null
   }
 }
 
 export const historyMiddleware = (store) => (next) => (action) => {
   const actionType = action.type
 
+  // Flush pending debounced state on demand (used by handleApplyMotion before exiting capture)
+  if (actionType === 'history/flushPending') {
+    flushPendingState(store)
+    return
+  }
+
   // Handle undo/redo actions
   if (actionType === 'history/undo') {
+    // Flush pending state BEFORE undo so the history stack is complete
+    flushPendingState(store)
+
     const state = store.getState()
     const historyState = state.history
 
@@ -84,6 +122,9 @@ export const historyMiddleware = (store) => (next) => (action) => {
   }
 
   if (actionType === 'history/redo') {
+    // Flush pending state BEFORE redo so the history stack is complete
+    flushPendingState(store)
+
     const state = store.getState()
     const historyState = state.history
 

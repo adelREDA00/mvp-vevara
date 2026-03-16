@@ -13,9 +13,12 @@ import {
   User,
   LayoutDashboard,
   MoreVertical,
+  Undo2,
+  Redo2,
 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import Modal from './Modal'
+import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
 
 function TopToolbar({
   projectName = 'Untitled Project',
@@ -29,8 +32,12 @@ function TopToolbar({
   onCanvasSizeChange,
   onToggleSidebar,
   onNavigate,
+  onUndo,
+  onRedo,
 }) {
   const { isAuthenticated, user } = useSelector((state) => state.auth)
+  const canUndo = useSelector(selectCanUndo)
+  const canRedo = useSelector(selectCanRedo)
   const [isEditingName, setIsEditingName] = useState(false)
   const [editedName, setEditedName] = useState(projectName)
   const [isResizeModalOpen, setIsResizeModalOpen] = useState(false)
@@ -89,6 +96,26 @@ function TopToolbar({
               className="h-full w-full object-contain"
             />
           </button>
+
+          {/* Undo / Redo */}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="h-4 w-4" strokeWidth={1.5} />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <Redo2 className="h-4 w-4" strokeWidth={1.5} />
+            </button>
+          </div>
 
           {/* Desktop Only Actions */}
           <div className="hidden md:flex items-center gap-2 md:gap-3">

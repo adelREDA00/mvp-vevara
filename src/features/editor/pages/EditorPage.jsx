@@ -1100,6 +1100,8 @@ function EditorPage() {
   const motionCaptureRef = useRef(null) // Ref to hold capture data for apply/cancel
   const savedStepTimingsRef = useRef(null) // Snapshot of step timings before adding a new step (for cancel restoration)
   const motionControlsRef = useRef(null) // Ref to hold motion playback controls from Stage
+  const captureUndoSyncRef = useRef(false) // Signals that trackedLayers needs syncing from Redux after undo/redo
+  const captureActionIdsRef = useRef(new Map()) // Tracks dispatched action IDs during capture: "layerId:type" -> actionId
 
   // Get motion flow for current scene
   const currentSceneMotionFlow = useSelector((state) =>
@@ -1394,10 +1396,105 @@ function EditorPage() {
       }
 
       // 8. Set motion capture mode (this will be picked up by MotionPanel via onMotionEditingChange)
+      captureActionIdsRef.current.clear()
       setMotionCaptureMode({
         isActive: true,
         isTransitioning: false,
         stepId: newStepId, // CRITICAL: Ensure stepId is set for global interactions!
+        // Called when a drag/resize/rotate interaction ENDS during capture.
+        // Dispatches motion actions to Redux so each interaction creates a history entry for undo.
+        onInteractionEnd: (layerId) => {
+          const capture = motionCaptureRef.current
+          if (!capture) return
+          const tracked = capture.trackedLayers?.get(layerId)
+          if (!tracked) return
+          const stepId = capture.stepId
+          const sceneId = currentSceneId
+          if (!stepId || !sceneId) return
+
+          const init = tracked.initialTransform
+
+          // Move
+          const hasMoved = (tracked.didMove) || (tracked.controlPoints?.length > 0)
+          if (hasMoved) {
+            const key = `${layerId}:move`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-move-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          }
+
+          // Scale
+          const initialScaleX = init.scaleX || 1
+          const initialScaleY = init.scaleY || 1
+          const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
+            (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
+          if (scaleChanged) {
+            const key = `${layerId}:scale`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-scale-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // Scale returned to initial — remove the action if it exists
+            const key = `${layerId}:scale`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Rotate
+          const initialRotation = init.rotation || 0
+          const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
+          if (rotateChanged) {
+            const key = `${layerId}:rotate`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { dangle: tracked.rotation - initialRotation }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-rotate-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // Rotation returned to initial — remove the action if it exists
+            const key = `${layerId}:rotate`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+        },
         onPositionUpdate: (data) => {
           // Update tracked layers
           const { layerId, x, y, scaleX, scaleY, rotation, interactionType } = data
@@ -1533,28 +1630,30 @@ function EditorPage() {
       return
     }
 
+    // Flush any pending debounced history state from onInteractionEnd before applying.
+    // This ensures the last interaction's snapshot is committed to history.
+    dispatch({ type: 'history/flushPending' })
+
     // [RACE CONDITION FIX] Get the current step to check for existing actions
     // Redux updates are synchronous, but React re-renders are async, so currentSceneMotionFlow
     // might be from a previous render. We'll build the preview optimistically anyway.
     const currentFlow = currentSceneMotionFlow || { steps: [] }
     const step = currentFlow.steps?.find(s => s.id === stepId)
 
-    // Dispatch updates to Redux for each tracked layer
+    // Move/scale/rotate actions are already dispatched to Redux by onInteractionEnd during capture.
+    // Only dispatch crop actions here (not handled by onInteractionEnd).
     motionCaptureMode.trackedLayers.forEach((layerData, layerId) => {
-      const { deltaX, deltaY, scaleX, scaleY, rotation, initialTransform, didMove } = layerData
+      const { deltaX, initialTransform } = layerData
 
       const existingLayerActions = step?.layerActions?.[layerId] || []
-      const moveAction = existingLayerActions.find(a => a.type === 'move')
-      const scaleAction = existingLayerActions.find(a => a.type === 'scale')
-      const rotateAction = existingLayerActions.find(a => a.type === 'rotate')
+      const cropAction = existingLayerActions.find(a => a.type === 'crop')
 
-      // Position (Absolute position)
-      const targetX = (initialTransform?.x || 0) + (deltaX || 0)
-      const targetY = (initialTransform?.y || 0) + (deltaY || 0)
+      // Check if a move action exists (from onInteractionEnd or prior editing)
+      const hasMoveAction = captureActionIdsRef.current.has(`${layerId}:move`) ||
+        existingLayerActions.some(a => a.type === 'move')
 
       // Sync Crop
       const { cropX, cropY, cropWidth, cropHeight, mediaWidth, mediaHeight } = layerData
-      const cropAction = existingLayerActions.find(a => a.type === 'crop')
 
       const initialCropX = initialTransform?.cropX || 0
       const initialCropY = initialTransform?.cropY || 0
@@ -1568,97 +1667,20 @@ function EditorPage() {
         (cropHeight !== undefined && Math.abs(cropHeight - initialCropH) > 0.1)
       )
 
-      // Only create/update MOVE action if:
-      // 1. User explicitly moved the layer (interactionType 'move' recorded in didMove)
-      // 2. OR the layer has control points (curved path being edited)
-      const hasControlPoints = (layerData.controlPoints && layerData.controlPoints.length > 0)
-      const shouldUpdateMoveAction = (didMove || hasControlPoints) && (Math.abs(deltaX || 0) > 0.1 || Math.abs(deltaY || 0) > 0.1 || hasControlPoints)
-
-      // BUNDLE POSITION INFO INTO CROP ACTION (Pivot Shift Compensation)
-      const cropValues = hasCropChanged ? {
-        cropX: cropX ?? initialCropX,
-        cropY: cropY ?? initialCropY,
-        cropWidth: cropWidth ?? initialCropW,
-        cropHeight: cropHeight ?? initialCropH,
-        mediaWidth: mediaWidth ?? initialTransform?.mediaWidth,
-        mediaHeight: mediaHeight ?? initialTransform?.mediaHeight,
-        // Only pass dx/dy directly to CropAction if MoveAction isn't managing it.
-        // This prevents GSAP overwrite conflicts where CropAction's x/y tweens kill the MoveAction curve.
-        dx: (shouldUpdateMoveAction || moveAction) ? undefined : deltaX,
-        dy: (shouldUpdateMoveAction || moveAction) ? undefined : deltaY,
-        easing: 'power4.out'
-      } : null
-
-      if (shouldUpdateMoveAction) {
-        if (moveAction) {
-          dispatch(updateSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: moveAction.id,
-            values: {
-              ...moveAction.values,
-              dx: deltaX,
-              dy: deltaY,
-              controlPoints: layerData.controlPoints || moveAction.values?.controlPoints || []
-            }
-          }))
-        } else {
-          dispatch(addSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: `action-${Date.now()}-move-${layerId}`,
-            type: 'move', values: {
-              dx: deltaX,
-              dy: deltaY,
-              controlPoints: layerData.controlPoints || [],
-              easing: 'power4.out'
-            }
-          }))
-        }
-      }
-
-      // Scale (Absolute scale values)
-      if (scaleX !== undefined && scaleY !== undefined) {
-        const initialScaleX = initialTransform?.scaleX || 1
-        const initialScaleY = initialTransform?.scaleY || 1
-        const isInitialScale = Math.abs(scaleX - initialScaleX) <= 0.001 && Math.abs(scaleY - initialScaleY) <= 0.001
-
-        if (!isInitialScale) {
-          if (scaleAction) {
-            dispatch(updateSceneMotionAction({
-              sceneId: currentSceneId, stepId, layerId, actionId: scaleAction.id,
-              values: { ...scaleAction.values, dsx: scaleX / initialScaleX, dsy: scaleY / initialScaleY }
-            }))
-          } else {
-            dispatch(addSceneMotionAction({
-              sceneId: currentSceneId, stepId, layerId, actionId: `action-${Date.now()}-scale-${layerId}`,
-              type: 'scale', values: { dsx: scaleX / initialScaleX, dsy: scaleY / initialScaleY, easing: 'power4.out' }
-            }))
-          }
-        } else if (scaleAction) {
-          // If returned to initial scale, delete the existing action
-          dispatch(deleteSceneMotionAction({ sceneId: currentSceneId, stepId, layerId, actionId: scaleAction.id }))
-        }
-      }
-
-      // Rotate
-      const initialRotation = initialTransform?.rotation || 0
-      const isInitialRotation = Math.abs(rotation - initialRotation) <= 0.1
-
-      if (rotation !== undefined && !isInitialRotation) {
-        if (rotateAction) {
-          dispatch(updateSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: rotateAction.id,
-            values: { ...rotateAction.values, dangle: rotation - initialRotation }
-          }))
-        } else {
-          dispatch(addSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: `action-${Date.now()}-rotate-${layerId}`,
-            type: 'rotate', values: { dangle: rotation - initialRotation, easing: 'power4.out' }
-          }))
-        }
-      } else if (rotateAction && isInitialRotation) {
-        // If returned to initial rotation, delete the existing action
-        dispatch(deleteSceneMotionAction({ sceneId: currentSceneId, stepId, layerId, actionId: rotateAction.id }))
-      }
-
       if (hasCropChanged) {
+        const cropValues = {
+          cropX: cropX ?? initialCropX,
+          cropY: cropY ?? initialCropY,
+          cropWidth: cropWidth ?? initialCropW,
+          cropHeight: cropHeight ?? initialCropH,
+          mediaWidth: mediaWidth ?? initialTransform?.mediaWidth,
+          mediaHeight: mediaHeight ?? initialTransform?.mediaHeight,
+          // Only pass dx/dy directly to CropAction if MoveAction isn't managing it.
+          dx: hasMoveAction ? undefined : deltaX,
+          dy: hasMoveAction ? undefined : (layerData.deltaY || 0),
+          easing: 'power4.out'
+        }
+
         if (cropAction) {
           dispatch(updateSceneMotionAction({
             sceneId: currentSceneId, stepId, layerId, actionId: cropAction.id,
@@ -1874,6 +1896,9 @@ function EditorPage() {
    * CRITICAL: Reset all PIXI objects to their base Redux state to prevent crop value leaks
    */
   const handleCancelMotion = useCallback(() => {
+    // Flush any pending debounced history state before canceling
+    dispatch({ type: 'history/flushPending' })
+
     if (editingStepId && currentSceneId) {
       if (isNewStepRef.current) {
         // Restore the saved step timings snapshot from BEFORE addSceneMotionStep was dispatched.
@@ -1911,6 +1936,99 @@ function EditorPage() {
     motionCaptureRef.current = null
     isNewStepRef.current = false
   }, [editingStepId, currentSceneId, dispatch, motionControls, layers])
+
+  // =========================================================================
+  // Sync trackedLayers from Redux after undo/redo during active capture mode.
+  // When undo restores sceneMotionFlows, we reconstruct the capture visual state
+  // from the restored step's layerActions so the PIXI ticker stays in sync.
+  // =========================================================================
+  useEffect(() => {
+    if (!captureUndoSyncRef.current || !isMotionCaptureActive || !editingStepId || !currentSceneId) return
+    captureUndoSyncRef.current = false
+
+    const step = currentSceneMotionFlow?.steps?.find(s => s.id === editingStepId)
+
+    // If the step no longer exists (undo went past step creation), exit capture
+    if (!step) {
+      setMotionCaptureMode(null)
+      setEditingStepId(null)
+      motionCaptureRef.current = null
+      isNewStepRef.current = false
+      return
+    }
+
+    // Reconstruct trackedLayers from the restored Redux state
+    const currentTracked = motionCaptureRef.current?.trackedLayers
+    if (!currentTracked) return
+
+    const newTrackedLayers = new Map()
+    currentTracked.forEach((entry, layerId) => {
+      const init = entry.initialTransform
+      const actions = step.layerActions?.[layerId] || []
+
+      const moveAction = actions.find(a => a.type === 'move')
+      const scaleAction = actions.find(a => a.type === 'scale')
+      const rotateAction = actions.find(a => a.type === 'rotate')
+      const cropAction = actions.find(a => a.type === 'crop')
+
+      const deltaX = moveAction?.values?.dx || 0
+      const deltaY = moveAction?.values?.dy || 0
+      const controlPoints = moveAction?.values?.controlPoints || []
+
+      const scaleX = scaleAction
+        ? init.scaleX * (scaleAction.values?.dsx ?? 1)
+        : init.scaleX
+      const scaleY = scaleAction
+        ? init.scaleY * (scaleAction.values?.dsy ?? 1)
+        : init.scaleY
+
+      const rotation = rotateAction
+        ? init.rotation + (rotateAction.values?.dangle ?? 0)
+        : init.rotation
+
+      newTrackedLayers.set(layerId, {
+        ...entry,
+        currentPosition: { x: init.x + deltaX, y: init.y + deltaY },
+        deltaX,
+        deltaY,
+        scaleX,
+        scaleY,
+        rotation,
+        controlPoints,
+        cropX: cropAction?.values?.cropX ?? init.cropX ?? 0,
+        cropY: cropAction?.values?.cropY ?? init.cropY ?? 0,
+        cropWidth: cropAction?.values?.cropWidth ?? init.cropWidth ?? entry.width,
+        cropHeight: cropAction?.values?.cropHeight ?? init.cropHeight ?? entry.height,
+        mediaWidth: cropAction?.values?.mediaWidth ?? init.mediaWidth ?? entry.mediaWidth,
+        mediaHeight: cropAction?.values?.mediaHeight ?? init.mediaHeight ?? entry.mediaHeight,
+        didMove: Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5 || controlPoints.length > 0,
+        interactionType: null,
+      })
+    })
+
+    // Update ref (used by onPositionUpdate callback)
+    motionCaptureRef.current = {
+      ...motionCaptureRef.current,
+      trackedLayers: newTrackedLayers,
+    }
+
+    // Rebuild captureActionIdsRef from the restored step so subsequent interactions
+    // correctly use update (not add) for actions that still exist after undo
+    captureActionIdsRef.current.clear()
+    if (step.layerActions) {
+      Object.entries(step.layerActions).forEach(([lId, actions]) => {
+        actions.forEach(action => {
+          captureActionIdsRef.current.set(`${lId}:${action.type}`, action.id)
+        })
+      })
+    }
+
+    // Update React state (propagates to liveMotionCaptureRef → PIXI ticker)
+    setMotionCaptureMode(prev => ({
+      ...prev,
+      trackedLayers: newTrackedLayers,
+    }))
+  }, [currentSceneMotionFlow, isMotionCaptureActive, editingStepId, currentSceneId])
 
   /**
    * Select a step (highlight + seek) WITHOUT entering capture mode.
@@ -2150,10 +2268,113 @@ function EditorPage() {
         stepId,
         trackedLayers: initialTrackedLayers
       }
+      // Pre-populate captureActionIdsRef with existing actions for this step
+      captureActionIdsRef.current.clear()
+      if (step?.layerActions) {
+        Object.entries(step.layerActions).forEach(([lId, actions]) => {
+          actions.forEach(action => {
+            captureActionIdsRef.current.set(`${lId}:${action.type}`, action.id)
+          })
+        })
+      }
       setMotionCaptureMode({
         isActive: true,
         isTransitioning: false,
         stepId,
+        // Called when a drag/resize/rotate interaction ENDS during capture.
+        // Dispatches motion actions to Redux so each interaction creates a history entry for undo.
+        onInteractionEnd: (layerId) => {
+          const capture = motionCaptureRef.current
+          if (!capture) return
+          const tracked = capture.trackedLayers?.get(layerId)
+          if (!tracked) return
+          const captureStepId = capture.stepId
+          const sceneId = currentSceneId
+          if (!captureStepId || !sceneId) return
+
+          const init = tracked.initialTransform
+
+          // Move
+          const hasMoved = (tracked.didMove) || (tracked.controlPoints?.length > 0)
+          if (hasMoved) {
+            const key = `${layerId}:move`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-move-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          }
+
+          // Scale
+          const initialScaleX = init.scaleX || 1
+          const initialScaleY = init.scaleY || 1
+          const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
+            (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
+          if (scaleChanged) {
+            const key = `${layerId}:scale`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-scale-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // Scale returned to initial — remove the action if it exists
+            const key = `${layerId}:scale`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Rotate
+          const initialRotation = init.rotation || 0
+          const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
+          if (rotateChanged) {
+            const key = `${layerId}:rotate`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { dangle: tracked.rotation - initialRotation }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-rotate-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // Rotation returned to initial — remove the action if it exists
+            const key = `${layerId}:rotate`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+        },
         onPositionUpdate: (data) => {
           const capture = motionCaptureRef.current
           if (!capture) return
@@ -2238,13 +2459,18 @@ function EditorPage() {
       }
 
       // Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z — Undo/Redo
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         e.preventDefault()
-        dispatch(undo())
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
-        e.preventDefault()
-        dispatch(redo())
+        if (isMotionCaptureActive) {
+          // During active capture, undo/redo works granularly (same as normal mode).
+          // After dispatch, the sync effect (below) reconstructs trackedLayers from Redux.
+          captureUndoSyncRef.current = true
+        }
+        if (!e.shiftKey) {
+          dispatch(undo())
+        } else {
+          dispatch(redo())
+        }
       }
 
       // Space — Play/Pause
@@ -2394,7 +2620,7 @@ function EditorPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isPlaying, showGrid, zoom, selectedLayerIds, currentSceneId, dispatch, playheadTime, totalTime])
+  }, [isPlaying, showGrid, zoom, selectedLayerIds, currentSceneId, dispatch, playheadTime, totalTime, isMotionCaptureActive])
 
   // Select pasted layers after paste
   useEffect(() => {
@@ -2666,6 +2892,14 @@ function EditorPage() {
           onExport={handleExport}
           onCanvasSizeChange={handleCanvasSizeChange}
           onToggleSidebar={() => handleSidebarItemClick('Elements')}
+          onUndo={() => {
+            if (isMotionCaptureActive) captureUndoSyncRef.current = true
+            dispatch(undo())
+          }}
+          onRedo={() => {
+            if (isMotionCaptureActive) captureUndoSyncRef.current = true
+            dispatch(redo())
+          }}
         />
       </div>
 

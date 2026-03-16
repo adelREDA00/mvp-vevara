@@ -1829,6 +1829,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
     }
 
+    // Commit capture state to Redux for undo history
+    const captureMode = latestMotionCaptureModeRef.current
+    if (captureMode?.isActive && captureMode.onInteractionEnd && currentLayer?.id) {
+      captureMode.onInteractionEnd(currentLayer.id)
+    }
+
     interactionStateRef.current.resize = null
     dragStateAPI.setInteractionState(false, false)
 
@@ -2275,6 +2281,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (rotationBadgeRef.current) {
         if (rotationBadgeRef.current.parent) rotationBadgeRef.current.parent.removeChild(rotationBadgeRef.current)
         rotationBadgeRef.current.destroy({ children: true }); rotationBadgeRef.current = null
+      }
+
+      // Commit capture state to Redux for undo history
+      const captureMode = latestMotionCaptureModeRef.current
+      if (captureMode?.isActive && captureMode.onInteractionEnd && state?.layerId) {
+        captureMode.onInteractionEnd(state.layerId)
       }
 
       interactionStateRef.current.rotate = null

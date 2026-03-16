@@ -1425,14 +1425,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       if (moveAction) {
-        // Calculate relative offset from predicted start state
-        const engine = getGlobalMotionEngine()
-        const sceneStartTime = sceneMotionFlows[currentSceneId]?.startTime || 0
-        const startState = engine.predictLayerStateAtTime(layerId, currentSceneId, step.startTime || sceneStartTime)
-
-        const dx = targetX - (startState?.x ?? layer.x ?? 0)
-        const dy = targetY - (startState?.y ?? layer.y ?? 0)
-
+        // Only update controlPoints — preserve existing dx/dy from the drag interaction.
+        // Recalculating dx/dy here (via engine.predictLayerStateAtTime) would use a different
+        // reference point than onInteractionEnd, causing position snaps on undo/redo.
         dispatch(updateSceneMotionAction({
           sceneId: currentSceneId,
           stepId: actualStepId,
@@ -1440,8 +1435,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           actionId: moveAction.id,
           values: {
             controlPoints: finalPoints,
-            dx,
-            dy
           }
         }))
       } else {
@@ -4054,6 +4047,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             }
           }
         })
+      }
+
+      // Commit capture state to Redux for undo history (one dispatch per drag interaction)
+      if (wasDragging && latestMotionCaptureModeRef.current?.isActive && latestMotionCaptureModeRef.current.onInteractionEnd) {
+        const draggedIds = currentSelectedLayerIds || []
+        draggedIds.forEach(id => latestMotionCaptureModeRef.current.onInteractionEnd(id))
       }
 
       // Clear dragging flag from text elements (on both object and cached sprite if it exists)
