@@ -47,6 +47,11 @@ export class MotionEngine {
     this.isInternalPaused = false // Track if engine paused itself due to buffering
     // When true, syncMedia forces all in-range videos muted (fast preview / tweenTo)
     this._muteVideosForFastPreview = false
+
+    // [BLUR SCRUB FIX] Timestamp of last seek/scrub so getIsPlaying() can treat "recently seeked"
+    // as "playing" for a short grace period. This stops useCanvasLayers from resetting layers
+    // (e.g. blur filter) to Redux base state during timeline scrubbing.
+    this._lastInteractionTime = 0
   }
 
   get isBuffering() {
@@ -234,8 +239,10 @@ export class MotionEngine {
     // If sharedContext is provided, we use those maps to accumulate across scenes
     const layerTimelineBuilders = sharedContext?.builders || new Map() // layerId -> { timeline, currentTimeOffset }
 
-    // [FIX] STATE TRACKER: Tracks predicted state of each layer as we build steps.
+        // [FIX] STATE TRACKER: Tracks predicted state of each layer as we build steps.
     const layerStateTracker = sharedContext?.stateTracker || new Map() // layerId -> { x, y, scaleX, scaleY, rotation }
+
+    // [DEBUG]
 
     // CRITICAL: Use the passed objects Map if available, fallback to internal registry
     const objectsToUse = (layerObjects && layerObjects.size > 0) ? layerObjects : this.registeredObjects
@@ -252,12 +259,14 @@ export class MotionEngine {
         if (!obj || obj.destroyed) return
 
         const baseLayer = allLayers?.[id]
+        
         layerStateTracker.set(id, {
           x: baseLayer?.x ?? obj.x ?? 0,
           y: baseLayer?.y ?? obj.y ?? 0,
           scaleX: baseLayer?.scaleX ?? obj.scale?.x ?? 1,
           scaleY: baseLayer?.scaleY ?? obj.scale?.y ?? 1,
           rotation: baseLayer?.rotation ?? (obj.rotation ? (obj.rotation * 180) / Math.PI : 0),
+          opacity: baseLayer?.opacity ?? obj.alpha ?? 1,
           // Track crop state
           cropX: baseLayer?.cropX ?? (obj._storedCropX ?? 0),
           cropY: baseLayer?.cropY ?? (obj._storedCropY ?? 0),
@@ -266,7 +275,9 @@ export class MotionEngine {
           mediaWidth: baseLayer?.mediaWidth ?? (obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100),
           mediaHeight: baseLayer?.mediaHeight ?? (obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height ?? 100),
           trimStart: baseLayer?.data?.trimStart ?? (obj._storedTrimStart ?? 0),
-          trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0)
+          trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0),
+          blur: baseLayer?.blur ?? (obj._blurFilter?.strength ?? 0),
+          color: baseLayer?.data?.fill || baseLayer?.data?.color || null
         })
       })
     }
@@ -278,9 +289,27 @@ export class MotionEngine {
       if (!step.layerActions) return
 
       // Iterate over each layer's actions in this step
-      Object.entries(step.layerActions).forEach(([layerId, actions]) => {
+      Object.entries(step.layerActions).forEach(([layerId, originalActions]) => {
         const pixiObject = objectsToUse.get(layerId)
         if (!pixiObject || pixiObject.destroyed) return
+
+        // [FIX] ACTION SANITIZATION: If a single step has BOTH a MoveAction and a CropAction, 
+        // they can contain conflicting dx/dy values due to legacy data or concurrent resizing.
+        // The MoveAction is the absolute source of truth for positional translation. 
+        // We strip dx/dy from CropAction here to prevent GSAP from creating two fighting X/Y tweens.
+        const hasMove = originalActions.some(a => a.type === 'move')
+        const actions = originalActions.map(a => {
+          if (a.type === 'crop') {
+             // [DEBUG] Ensure we understand the state of this crop action
+             if (hasMove) {
+                const safeValues = { ...a.values }
+                delete safeValues.dx
+                delete safeValues.dy
+                return { ...a, values: safeValues }
+             }
+          }
+          return a
+        })
 
         // Get predicted start state for this layer at this step
         const startState = { ...layerStateTracker.get(layerId) }
@@ -294,6 +323,32 @@ export class MotionEngine {
           const timeline = new MotionTimeline(layerId)
           timeline.create()
           layerTimelineBuilders.set(layerId, { timeline, currentTimeOffset: 0 })
+
+          // [GSAP STATE CACHE FIX]
+          // Force a 0-duration baseline state into the GSAP timeline exactly at the scene's start time.
+          // This absolutely prevents GSAP's `fromTo` `immediateRender: false` logic from accidentally
+          // caching dirty visual PIXI coordinates if the playhead uses `seek()` to jump over 
+          // the first frame (which happens during Fast Previews, backward scrubbing, and Video Exports).
+          // We use `startState` because the first time this block runs for a layer, `startState` 
+          // perfectly represents the layer's predicted origin state at the beginning of the scene.
+          if (startState) {
+            timeline.add((gsapTimeline) => {
+              gsapTimeline.set(pixiObject, {
+                x: startState.x,
+                y: startState.y,
+                rotation: startState.rotation,
+                alpha: startState.opacity !== undefined ? startState.opacity : 1,
+              }, startTimeOffset) // Anchor explicitly at the beginning of the scene
+              
+              // Scale must be set on the inner .scale object natively
+              if (pixiObject.scale) {
+                gsapTimeline.set(pixiObject.scale, {
+                  x: startState.scaleX,
+                  y: startState.scaleY,
+                }, startTimeOffset)
+              }
+            })
+          }
         }
 
         const builder = layerTimelineBuilders.get(layerId)
@@ -303,6 +358,10 @@ export class MotionEngine {
         // Add all actions for this layer in this step
         // Scene end boundary in seconds — tweens must not exceed this
         const sceneEndTime = startTimeOffset + pageDuration / 1000
+
+        // Track which properties we've already updated deltas for in THIS STEP
+        // to avoid double-counting if multiple actions has dx/dy/dsx/dsy
+        const updatedDeltas = new Set()
 
         actions.forEach((action) => {
           const handler = getActionHandler(action.type)
@@ -328,36 +387,29 @@ export class MotionEngine {
               sceneStartOffset: startTimeOffset,
               startState // [FIX] Pass predicted state to handler
             })
-            gsapTimeline.add(tween, stepStartTime)
+            if (tween) {
+              gsapTimeline.add(tween, stepStartTime)
+            }
           })
 
           // UPDATE STATE TRACKER: Predict where the layer will be after this action
           // This ensures the NEXT step's MoveAction knows the correct start point.
-          if (action.type === 'move') {
-            const state = layerStateTracker.get(layerId)
-            if (state) {
+          // [FIX] Avoid double-counting: only apply deltas once per layer/step
+          const state = layerStateTracker.get(layerId)
+          if (!state) return
+
+          if (action.type === 'move' || action.type === 'crop') {
+            if (!updatedDeltas.has('position')) {
               const dx = action.values?.dx !== undefined ? action.values.dx : 0
               const dy = action.values?.dy !== undefined ? action.values.dy : 0
               state.x += dx
               state.y += dy
+              if (dx !== 0 || dy !== 0) {
+                updatedDeltas.add('position')
+              }
             }
-          } else if (action.type === 'scale') {
-            const state = layerStateTracker.get(layerId)
-            if (state) {
-              const dsx = action.values?.dsx !== undefined ? action.values.dsx : 1
-              const dsy = action.values?.dsy !== undefined ? action.values.dsy : 1
-              state.scaleX *= dsx
-              state.scaleY *= dsy
-            }
-          } else if (action.type === 'rotate') {
-            const state = layerStateTracker.get(layerId)
-            if (state) {
-              const dangle = action.values?.dangle !== undefined ? action.values.dangle : 0
-              state.rotation += dangle
-            }
-          } else if (action.type === 'crop') {
-            const state = layerStateTracker.get(layerId)
-            if (state && action.values) {
+
+            if (action.type === 'crop' && action.values) {
               if (action.values.cropX !== undefined) state.cropX = action.values.cropX
               if (action.values.cropY !== undefined) state.cropY = action.values.cropY
               if (action.values.cropWidth !== undefined) state.cropWidth = action.values.cropWidth
@@ -366,6 +418,32 @@ export class MotionEngine {
               if (action.values.mediaHeight !== undefined) state.mediaHeight = action.values.mediaHeight
               if (action.values.trimStart !== undefined) state.trimStart = action.values.trimStart
               if (action.values.trimEnd !== undefined) state.trimEnd = action.values.trimEnd
+            }
+          } else if (action.type === 'scale') {
+            if (!updatedDeltas.has('scale')) {
+              const dsx = action.values?.dsx !== undefined ? action.values.dsx : 1
+              const dsy = action.values?.dsy !== undefined ? action.values.dsy : 1
+              state.scaleX *= dsx
+              state.scaleY *= dsy
+              if (dsx !== 1 || dsy !== 1) updatedDeltas.add('scale')
+            }
+          } else if (action.type === 'rotate') {
+            if (!updatedDeltas.has('rotation')) {
+              const dangle = action.values?.dangle !== undefined ? action.values.dangle : 0
+              state.rotation += dangle
+              if (dangle !== 0) updatedDeltas.add('rotation')
+            }
+          } else if (action.type === 'fade') {
+            if (action.values?.opacity !== undefined) {
+              state.opacity = action.values.opacity
+            }
+          } else if (action.type === 'blur') {
+            if (action.values?.blur !== undefined) {
+              state.blur = action.values.blur
+            }
+          } else if (action.type === 'colorChange') {
+            if (action.values?.color !== undefined) {
+              state.color = action.values.color
             }
           }
         })
@@ -494,9 +572,15 @@ export class MotionEngine {
           const sourceEnd = obj._sourceEndTime
           const localTime = currentTime - startTime
           const adjustedLocalTime = Math.max(0, localTime + sourceStart)
-          const finalTime = sourceEnd !== undefined ? Math.min(adjustedLocalTime, sourceEnd) : adjustedLocalTime
 
-          const isAtEnd = sourceEnd !== undefined && adjustedLocalTime >= sourceEnd - 0.01
+          // [FIX] Robust boundary check: Cap by physical video duration if available
+          const videoDuration = videoElement.duration
+          const effectiveEnd = (videoDuration && !isNaN(videoDuration) && videoDuration > 0)
+            ? (sourceEnd !== undefined ? Math.min(sourceEnd, videoDuration) : videoDuration)
+            : sourceEnd
+
+          const finalTime = effectiveEnd !== undefined ? Math.min(adjustedLocalTime, effectiveEnd) : adjustedLocalTime
+          const isAtEnd = effectiveEnd !== undefined && adjustedLocalTime >= effectiveEnd - 0.01
 
           if (this.isPlaying && !isAtEnd) {
             intent.shouldPlay = true
@@ -546,11 +630,9 @@ export class MotionEngine {
     const needsBuffering = this.isBuffering
     if (this.isPlaying) {
       if (needsBuffering && !this.isInternalPaused) {
-        // console.log('⏸️ [MotionEngine] Buffering... Internal Pause')
         this.masterTimeline.pause()
         this.isInternalPaused = true
       } else if (!needsBuffering && this.isInternalPaused) {
-        // console.log('▶️ [MotionEngine] Buffering complete. Internal Resume')
         this.masterTimeline.play()
         this.isInternalPaused = false
       }
@@ -580,10 +662,6 @@ export class MotionEngine {
       const targetMovedSignificantly = Math.abs(intent.targetTime - lastTarget) > 0.2
 
       if (intent.targetTime !== -1 && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
-        // [LOOKAHEAD LOG]
-        if (deviation > 0.1 && (force || isPaused)) {
-          // console.log(`[MotionEngine] Seek: ${videoElement.src.split('/').pop()} -> ${intent.targetTime.toFixed(2)}s (dev=${deviation.toFixed(2)}s, override=${targetMovedSignificantly})`)
-        }
         videoElement.currentTime = intent.targetTime
         videoElement._lastMotionTargetTime = intent.targetTime // Track last request
       }
@@ -743,6 +821,8 @@ export class MotionEngine {
    */
   seek(time) {
     this._muteVideosForFastPreview = false
+    this._lastInteractionTime = Date.now()
+
     // [FIX] Kill any active scrubbing tweens from tweenTo() to prevent fighting
     gsap.killTweensOf(this.masterTimeline, { time: true })
 
@@ -755,6 +835,19 @@ export class MotionEngine {
 
     this.masterTimeline.pause(time)
     this.isPlaying = false
+
+    // Apply GSAP-controlled state (color, blur) to PIXI objects after seek.
+    // Some properties (like filters or redraw-heavy color) need an explicit visual 
+    // update call because onUpdate callbacks may not reliably fire during 
+    // masterTimeline.pause(time) in nested timeline configurations.
+    this.registeredObjects.forEach((obj) => {
+      // [FIX] Safety check: skip destroyed objects that may still be in the map 
+      // (e.g. if unregisterLayerObject was delayed or missed)
+      if (obj.destroyed) return
+      
+      if (obj._applyAnimatedColor) obj._applyAnimatedColor()
+      if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
+    })
 
     // Force immediate media sync during seek
     this.syncMedia(time, true)
@@ -798,8 +891,10 @@ export class MotionEngine {
       duration,
       ease,
       onStart: () => {
+        this._lastInteractionTime = Date.now()
       },
       onUpdate: () => {
+        this._lastInteractionTime = Date.now()
         // Internal tick for UI/React sync
         this._handleUpdate()
       },
@@ -941,7 +1036,12 @@ export class MotionEngine {
   // Getters for status
   get currentTime() { return this.masterTimeline.time() }
   get totalDuration() { return this.masterTimeline.duration() }
-  getIsPlaying() { return this.isPlaying }
+  /** Returns true when playing OR within 200ms of a seek/scrub so canvas layer sync skips overwriting GSAP-driven state (e.g. blur). */
+  getIsPlaying() {
+    const graceMs = 200
+    const recentlySeeked = this._lastInteractionTime > 0 && (Date.now() - this._lastInteractionTime < graceMs)
+    return this.isPlaying || recentlySeeked
+  }
 
   // --- COMPATIBILITY SHIMS ---
   get timelines() { return this.activeTimelines }

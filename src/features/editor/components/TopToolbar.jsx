@@ -75,68 +75,64 @@ function TopToolbar({
     <div className="relative z-50">
       {/* Main Header Bar */}
       <div
-        className="h-10 md:h-12 flex items-center justify-between px-2 sm:px-3 md:px-4 gap-1 sm:gap-2 md:gap-4 flex-shrink-0 overflow-x-auto overflow-y-visible relative z-50"
+        className="h-10 md:h-[var(--header-height)] flex items-center justify-between pl-3 md:pl-5 pr-2 sm:px-3 md:px-4 gap-1 sm:gap-2 md:gap-3 flex-shrink-0 scrollbar-hide overflow-x-auto overflow-y-hidden relative z-50 transition-all duration-200"
         style={{
-          backgroundColor: 'rgba(124, 74, 240, 0.82)',
+          backgroundColor: '#7c4af0',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         }}
       >
         {/* Left Section: Logo, Save, Resize */}
-        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
-          {/* App Logo - Behaves like user/dash icon */}
+        <div className="flex items-center gap-3 md:gap-4 flex-shrink-0">
+          {/* App Logo - Text "vevara" */}
           <button
             onClick={handleLogoClick}
-            className="flex items-center justify-center h-7 w-7 md:h-8 md:w-8 flex-shrink-0 hover:opacity-80 transition-opacity"
+            className="flex items-center h-8 flex-shrink-0 hover:opacity-80 transition-opacity text-white text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] pr-2"
           >
-            <img
-              src="/logo.svg"
-              alt="App Logo"
-              className="h-full w-full object-contain"
-            />
+            vevara
           </button>
 
           {/* Undo / Redo */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1 bg-white/5 rounded-[12px] p-1 border border-white/5">
             <button
               onClick={onUndo}
               disabled={!canUndo}
-              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
+              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
               title="Undo (Ctrl+Z)"
             >
-              <Undo2 className="h-4 w-4" strokeWidth={1.5} />
+              <Undo2 className="h-4 w-4" strokeWidth={2} />
             </button>
             <button
               onClick={onRedo}
               disabled={!canRedo}
-              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-lg transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
+              className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none"
               title="Redo (Ctrl+Shift+Z)"
             >
-              <Redo2 className="h-4 w-4" strokeWidth={1.5} />
+              <Redo2 className="h-4 w-4" strokeWidth={2} />
             </button>
           </div>
 
           {/* Desktop Only Actions */}
-          <div className="hidden md:flex items-center gap-2 md:gap-3">
+          <div className="hidden md:flex items-center gap-3">
             {/* Save Button */}
             <button
               onClick={onSave}
               disabled={isSaving}
-              className="text-white hover:bg-white/10 active:bg-white/20 h-8 px-2.5 sm:px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-semibold border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
+              className="text-white hover:bg-white/10 active:bg-white/20 h-9 px-3.5 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap text-[13px] font-medium border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
               title="Save Project"
             >
-              <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <FileText className="h-3.5 w-3.5" strokeWidth={2} />
               <span className="xs:inline">{isSaving ? 'Saving...' : 'Save'}</span>
             </button>
 
             {/* Resize Button with Dropdown */}
             <DropdownMenu
               trigger={
-                <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-8 px-2.5 sm:px-3 rounded-lg transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[11px] font-medium border border-white/5">
-                  <Maximize2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-9 px-3.5 rounded-[10px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[13px] font-medium border border-white/5">
+                  <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
                   <span className="hidden sm:inline">Resize</span>
-                  <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={1.5} />
+                  <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={2} />
                 </button>
               }
             >
@@ -172,7 +168,7 @@ function TopToolbar({
                   setIsEditingName(false)
                 }
               }}
-              className="bg-transparent text-white text-center font-normal outline-none max-w-[80px] sm:max-w-xs md:max-w-md text-[16px] md:text-sm scale-[0.6875] md:scale-100 origin-center truncate border-none placeholder:text-white/80"
+              className="bg-transparent text-white text-center font-medium outline-none max-w-[100px] xs:max-w-[120px] sm:max-w-xs md:max-w-md text-[14px] md:text-sm origin-center truncate border-none placeholder:text-white/40 focus:placeholder:opacity-0 transition-all"
               placeholder="Untitled"
             />
           </div>
@@ -215,12 +211,12 @@ function TopToolbar({
             <DropdownMenu
               trigger={
                 <button
-                  className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-8 px-2.5 sm:px-3 text-[11px] rounded-lg transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
+                  className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-9 px-3.5 text-[13px] rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
                   title="Export"
                 >
-                  <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  <Download className="h-3.5 w-3.5" strokeWidth={2} />
                   <span className="hidden sm:inline">Export</span>
-                  <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" strokeWidth={1.5} />
+                  <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" strokeWidth={2} />
                 </button>
               }
             >
@@ -244,13 +240,13 @@ function TopToolbar({
 
           <button
             onClick={() => onNavigate && onNavigate(isAuthenticated ? "/dashboard" : "/login")}
-            className="h-8 w-8 rounded-full bg-[#1a1b23] hover:bg-[#25262e] active:bg-[#2a2b33] flex items-center justify-center transition-all border border-white/10 overflow-hidden flex-shrink-0"
+            className="h-9 w-9 rounded-[10px] bg-[#1a1b23] hover:bg-[#25262e] active:bg-[#2a2b33] flex items-center justify-center transition-all border border-white/10 overflow-hidden flex-shrink-0 shadow-sm"
             title={isAuthenticated ? "Dashboard" : "Login"}
           >
             {isAuthenticated ? (
-              <span className="text-white text-[10px] font-bold">{getUserInitials()}</span>
+              <span className="text-white text-[11px] font-bold">{getUserInitials()}</span>
             ) : (
-              <User className="h-4 w-4 text-white" strokeWidth={1.5} />
+              <User className="h-4.5 w-4.5 text-white" strokeWidth={2} />
             )}
           </button>
 

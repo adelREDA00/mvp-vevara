@@ -104,7 +104,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // Create a signature of the project-wide data
         const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
             const l = layersRef.current[layerId]
-            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
+            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.data?.fill || l.data?.color || ''},${l.opacity}` : ''
         }).join('|')
 
         const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
@@ -133,7 +133,10 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             objects.forEach((pixiObject, layerId) => {
                 const baseLayerData = currentLayers[layerId]
                 if (baseLayerData) {
-                    applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
+                    const sceneId = baseLayerData.sceneId
+                    const sceneInfo = timeline?.find(s => s.id === sceneId)
+                    const startTimeOffset = sceneInfo?.startTime || 0
+                    applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
                 }
             })
         }
@@ -165,7 +168,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // Create hash matching prepareEngine's format: only scene layers, same property order
         return timelineInfo?.flatMap(s => s.layers || []).map(layerId => {
             const l = layers[layerId]
-            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
+            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.data?.fill || l.data?.color || ''},${l.opacity}` : ''
         }).join('|')
     }, [layers, timelineInfo])
 
@@ -177,6 +180,14 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         if (isPlayingInternal) {
             return
         }
+
+        // [FIX] Skip engine rebuild during active motion capture to prevent snap-back.
+        // onInteractionEnd dispatches Redux actions that change flowsJson, triggering this effect.
+        // Rebuilding the engine resets PIXI positions via GSAP tween initialization and seek,
+        // causing a visible flicker before the ticker can re-enforce captured positions.
+        // The engine will be properly rebuilt when capture mode ends (via tweenTo or cancel).
+        const capture = motionCaptureModeRef.current
+        if (capture?.isActive) return
 
         // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
         // This is critical because prepareEngine uses layersRef.current for hash calculation
@@ -194,6 +205,9 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         // Use a single frame delay (16ms) instead of 100ms to ensure faster sync after splits
         const timer = setTimeout(() => {
+            // [FIX] Skip rebuild during active motion capture (same reason as above effect)
+            const capture = motionCaptureModeRef.current
+            if (capture?.isActive) return
             prepareEngine()
         }, 16)
         return () => clearTimeout(timer)
@@ -348,11 +362,12 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         setPlayheadTime(time)
     }, [motionEngine, prepareEngine])
 
-    // Tween to specific time (fast-play)
     const tweenTo = useCallback((time, options = {}) => {
         const objects = layerObjectsRef.current
         const flowsMap = sceneMotionFlowsRef.current
         const timeline = timelineInfoRef.current
+
+
 
         // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine 
         // but with the OVERRIDDEN flow for the specific scene.
@@ -360,17 +375,19 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
             // Force engine state to playing EARLY so applyTransformInline knows to stop overrides
             motionEngine.isPlaying = true
+            motionEngine.unloadAllMotions()
             const currentLayers = layersRef.current
             if (objects && currentLayers) {
                 objects.forEach((pixiObject, layerId) => {
                     const baseLayerData = currentLayers[layerId]
                     if (baseLayerData) {
-                        applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true) // force=true!
+                        const sceneId = baseLayerData.sceneId
+                        const sceneInfo = timeline?.find(s => s.id === sceneId)
+                        const startTimeOffset = sceneInfo?.startTime || 0
+                        applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset) // force=true!
                     }
                 })
             }
-
-            motionEngine.unloadAllMotions()
             // Object registration handled by useCanvasLayers
 
             const sharedContext = {
@@ -446,6 +463,9 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                         rotation: (obj.rotation * 180) / Math.PI,
                         scaleX: obj.scale.x,
                         scaleY: obj.scale.y,
+                        alpha: obj.alpha,
+                        blur: obj._blurFilter ? obj._blurFilter.strength : 0,
+                        color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? '#' + obj._storedColor.toString(16).padStart(6, '0') : null) ?? null,
                         // Visual crop properties (reactive)
                         cropX: obj.cropX,
                         cropY: obj.cropY,

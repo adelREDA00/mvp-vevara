@@ -352,7 +352,9 @@ const projectSlice = createSlice({
               // Only update if sourceEndTime was already set (e.g. by split or manual trim)
               if (layer.data.sourceEndTime !== undefined) {
                 const start = layer.data.sourceStartTime || 0
-                layer.data.sourceEndTime = start + updates.duration
+                const newEndTime = start + updates.duration
+                // [FIX] Cap sourceEndTime by the video's actual duration to prevent out-of-bounds seeking
+                layer.data.sourceEndTime = layer.data.duration ? Math.min(newEndTime, layer.data.duration) : newEndTime
               }
             }
           })
@@ -582,6 +584,7 @@ const projectSlice = createSlice({
         width: layerData.width || 100,
         height: layerData.height || 100,
         rotation: layerData.rotation || 0,
+        blur: layerData.blur !== undefined ? layerData.blur : 0,
         scaleX: layerData.scaleX !== undefined ? layerData.scaleX : 1,
         scaleY: layerData.scaleY !== undefined ? layerData.scaleY : 1,
         // Text layers should use top-left anchor (0,0) for consistent positioning
@@ -1009,8 +1012,13 @@ const projectSlice = createSlice({
 
           // Clean up step if no layers have actions left
           if (Object.keys(step.layerActions).length === 0) {
-            motionFlow.steps = motionFlow.steps.filter(s => s.id !== stepId)
-            syncSceneMotionDuration(state, sceneId)
+            // [FIX] DO NOT delete the step if it's currently being captured/edited!
+            // This prevents the step from vanishing while the user is still interacting.
+            const isEditingThisStep = state.motionEditingMode.isActive && state.motionEditingMode.stepId === stepId
+            if (!isEditingThisStep) {
+              motionFlow.steps = motionFlow.steps.filter(s => s.id !== stepId)
+              syncSceneMotionDuration(state, sceneId)
+            }
           }
         }
       }
@@ -1602,6 +1610,113 @@ const projectSlice = createSlice({
         }
       }
     },
+
+    // Attach an image/video asset to a frame layer (cover-fit crop)
+    attachAssetToFrame: (state, action) => {
+      const { layerId, assetUrl, assetWidth, assetHeight } = action.payload
+      const layer = state.layers[layerId]
+      if (!layer || layer.type !== 'frame') return
+
+      const frameW = layer.cropWidth ?? layer.width
+      const frameH = layer.cropHeight ?? layer.height
+
+      // Store old media dimensions for remapping existing motion crop actions
+      const oldMediaW = layer.mediaWidth ?? frameW
+      const oldMediaH = layer.mediaHeight ?? frameH
+
+      // Cover-fit: scale asset to fully cover frame
+      const scale = Math.max(frameW / assetWidth, frameH / assetHeight)
+      const mediaW = assetWidth * scale
+      const mediaH = assetHeight * scale
+      const cropX = (mediaW - frameW) / 2
+      const cropY = (mediaH - frameH) / 2
+
+      layer.data = { ...layer.data, assetUrl, assetWidth, assetHeight }
+      layer.mediaWidth = mediaW
+      layer.mediaHeight = mediaH
+      layer.cropX = cropX
+      layer.cropY = cropY
+      layer.cropWidth = frameW
+      layer.cropHeight = frameH
+      layer.updatedAt = Date.now()
+
+      // Remap existing motion crop actions to new media dimensions
+      // This prevents incorrect positions when the user adds new motion steps after attachment
+      const sceneId = layer.sceneId
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (motionFlow?.steps) {
+        const scaleX = mediaW / oldMediaW
+        const scaleY = mediaH / oldMediaH
+        for (const step of motionFlow.steps) {
+          const actions = step.layerActions?.[layerId]
+          if (!actions) continue
+          for (const action of actions) {
+            if (action.type === 'crop' && action.values) {
+              const v = action.values
+              if (v.cropX !== undefined) v.cropX = v.cropX * scaleX + cropX
+              if (v.cropY !== undefined) v.cropY = v.cropY * scaleY + cropY
+              if (v.cropWidth !== undefined) v.cropWidth = v.cropWidth * scaleX
+              if (v.cropHeight !== undefined) v.cropHeight = v.cropHeight * scaleY
+              if (v.mediaWidth !== undefined) v.mediaWidth = mediaW
+              if (v.mediaHeight !== undefined) v.mediaHeight = mediaH
+            }
+          }
+        }
+      }
+    },
+
+    // Detach the asset from a frame, leaving it empty again
+    detachAssetFromFrame: (state, action) => {
+      const { layerId } = action.payload
+      const layer = state.layers[layerId]
+      if (!layer || layer.type !== 'frame') return
+
+      const frameW = layer.cropWidth ?? layer.width
+      const frameH = layer.cropHeight ?? layer.height
+
+      // [FIX] Calculate current scale vs frame base BEFORE resetting
+      const currentMediaW = layer.mediaWidth ?? frameW
+      const currentMediaH = layer.mediaHeight ?? frameH
+      const currentCropX = layer.cropX ?? 0
+      const currentCropY = layer.cropY ?? 0
+
+      // Reset to empty frame state
+      delete layer.data.assetUrl
+      delete layer.data.assetWidth
+      delete layer.data.assetHeight
+      layer.mediaWidth = frameW
+      layer.mediaHeight = frameH
+      layer.cropX = 0
+      layer.cropY = 0
+      layer.cropWidth = frameW
+      layer.cropHeight = frameH
+      layer.updatedAt = Date.now()
+
+      // [FIX] Remap existing motion crop actions back to frame dimensions
+      // This reverses the mapping done in attachAssetToFrame and prevents visual jumps/corruption
+      const sceneId = layer.sceneId
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (motionFlow?.steps) {
+        const invScaleX = frameW / currentMediaW
+        const invScaleY = frameH / currentMediaH
+
+        for (const step of motionFlow.steps) {
+          const actions = step.layerActions?.[layerId]
+          if (!actions) continue
+          for (const action of actions) {
+            if (action.type === 'crop' && action.values) {
+              const v = action.values
+              if (v.cropX !== undefined) v.cropX = (v.cropX - currentCropX) * invScaleX
+              if (v.cropY !== undefined) v.cropY = (v.cropY - currentCropY) * invScaleY
+              if (v.cropWidth !== undefined) v.cropWidth = v.cropWidth * invScaleX
+              if (v.cropHeight !== undefined) v.cropHeight = v.cropHeight * invScaleY
+              v.mediaWidth = frameW
+              v.mediaHeight = frameH
+            }
+          }
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -1688,6 +1803,9 @@ export const {
   setLoadingMode,
   startPreparingLayer,
   finishPreparingLayer,
+  // Frame layer actions
+  attachAssetToFrame,
+  detachAssetFromFrame,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders

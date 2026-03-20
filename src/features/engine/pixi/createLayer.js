@@ -302,6 +302,20 @@ export function createShapeLayer(config) {
     }
   }
 
+  // [COLOR FIX] Store shape metadata for redrawing during colorChange actions
+  graphics._storedShapeData = {
+    shapeType,
+    cornerRadius: data.cornerRadius || 0,
+    shapeCenterX,
+    shapeCenterY
+  }
+  graphics._storedFill = data.fill || null
+  graphics._storedStroke = data.stroke || null
+  graphics._storedStrokeWidth = strokeWidth
+  graphics._storedStrokeStyle = strokeStyle
+  graphics._storedWidth = width
+  graphics._storedHeight = height
+
   // Position the graphics object
   graphics.x = x
   graphics.y = y
@@ -444,6 +458,265 @@ export async function createImageLayer(config) {
   return container
 }
 
+
+/**
+ * Create a Frame layer — an empty clipping container that can later receive
+ * an image or video asset via drag-and-drop.  Structurally identical to an
+ * image layer (Container → child Sprite + crop mask) so all existing crop,
+ * resize, move, and animation code paths work without special-casing.
+ *
+ * When empty the sprite shows a lightweight placeholder (solid fill + plus icon).
+ * When an asset is attached the sprite texture is swapped to the real image/video.
+ */
+export function createFrameLayer(config) {
+  const { data = {}, x = 0, y = 0, width = 200, height = 200, opacity = 1, anchorX = 0.5, anchorY = 0.5 } = config
+
+  const container = new PIXI.Container()
+
+  // If an asset is already attached (e.g. loading from saved project), hide placeholder
+  const hasAsset = !!(data.assetUrl || data.url || data.src)
+
+  // --- inner sprite (empty white texture when no asset) ---
+  const sprite = new PIXI.Sprite(hasAsset ? PIXI.Texture.WHITE : PIXI.Texture.WHITE)
+  sprite.width = width
+  sprite.height = height
+  sprite.anchor.set(0, 0)
+  sprite.x = 0
+  sprite.y = 0
+  sprite.alpha = hasAsset ? 1 : 0 // invisible when empty so placeholder shows
+  container.addChild(sprite)
+  container._imageSprite = sprite // reuse the same property name so existing code detects it
+
+  // --- placeholder group (Container to hold graphics + text) ---
+  // [UX FIX] Added AFTER sprite so the highlight (which reuses placeholder) renders on top of assets
+  const placeholderGroup = new PIXI.Container()
+  container.addChild(placeholderGroup)
+  container._framePlaceholder = placeholderGroup // used for visibility management
+
+  // --- placeholder background/icon graphics ---
+  const graphics = new PIXI.Graphics()
+  placeholderGroup.addChild(graphics)
+  container._framePlaceholderGraphics = graphics
+
+  // --- optional text label ---
+  const label = new PIXI.Text({
+    text: data.label || '',
+    style: {
+      fontFamily: 'Outfit, sans-serif',
+      fontSize: 60,
+      fontWeight: 'bold',
+      fill: 0x888888,
+      align: 'center',
+    }
+  })
+  label.anchor.set(0.5)
+  placeholderGroup.addChild(label)
+  container._frameLabel = label
+
+  // Use shared helper to draw placeholder consistently
+  redrawFramePlaceholder(container, width, height, data)
+
+  // If an asset is already attached, hide placeholder (as it's now on top)
+  if (hasAsset) {
+    placeholderGroup.visible = false
+  }
+
+  // CROP SYSTEM — identical to createImageLayer
+  const cropX = config.cropX ?? 0
+  const cropY = config.cropY ?? 0
+  const cropWidth = config.cropWidth ?? width
+  const cropHeight = config.cropHeight ?? height
+
+  container._mediaWidth = config.mediaWidth ?? width
+  container._mediaHeight = config.mediaHeight ?? height
+  container._originalWidth = width
+  container._originalHeight = height
+
+  // Crop mask
+  const cropMask = new PIXI.Graphics()
+  cropMask.rect(0, 0, cropWidth, cropHeight)
+  cropMask.fill(0xffffff)
+  container.addChild(cropMask)
+  container.mask = cropMask
+  container._cropMask = cropMask
+
+  // Pivot for anchor-based positioning
+  container.anchorX = anchorX
+  container.anchorY = anchorY
+  container.pivot.set(cropWidth * anchorX, cropHeight * anchorY)
+
+  container.x = x
+  container.y = y
+  container.alpha = opacity
+
+  if (config.id) {
+    container.label = `layer-${config.id}`
+  }
+
+  container.eventMode = 'static'
+  container.cursor = 'pointer'
+
+  // Mark as frame for easy detection
+  container._isFrame = true
+  container._frameHasAsset = hasAsset
+  container._frameData = data
+
+  return container
+}
+
+/**
+ * Attach a loaded texture to an existing frame container.
+ * Computes cover-fit crop so the asset fills the frame proportionally.
+ */
+export function attachAssetToFrame(container, texture, frameWidth, frameHeight) {
+  if (!container || !texture) return null
+
+  const sprite = container._imageSprite
+  if (!sprite) return null
+
+  // Compute cover-fit: scale asset so it fully covers the frame
+  const texW = texture.width
+  const texH = texture.height
+  const scale = Math.max(frameWidth / texW, frameHeight / texH)
+  const mediaW = texW * scale
+  const mediaH = texH * scale
+
+  // Center the asset within the frame (crop offsets)
+  const cropX = (mediaW - frameWidth) / 2
+  const cropY = (mediaH - frameHeight) / 2
+
+  sprite.texture = texture
+  sprite.width = mediaW
+  sprite.height = mediaH
+  sprite.anchor.set(0, 0)
+  sprite.x = -cropX
+  sprite.y = -cropY
+  sprite.alpha = 1
+
+  // Enable mipmapping
+  if (!_isMobileDevice && texture.source) {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.mipMap = 'on'
+    texture.source.scaleMode = 'linear'
+  }
+
+  // Update container metadata
+  container._mediaWidth = mediaW
+  container._mediaHeight = mediaH
+
+  // Update crop mask to frame dimensions
+  const cropMask = container._cropMask
+  if (cropMask) {
+    cropMask.clear()
+    cropMask.rect(0, 0, frameWidth, frameHeight)
+    cropMask.fill(0xffffff)
+  }
+
+  // Hide placeholder
+  if (container._framePlaceholder) {
+    container._framePlaceholder.visible = false
+  }
+  container._frameHasAsset = true
+
+  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX, cropY, cropWidth: frameWidth, cropHeight: frameHeight }
+}
+
+/**
+ * Redraw the frame placeholder graphic at new dimensions.
+ * Called during resize/sync so the placeholder scales with the frame.
+ */
+export function redrawFramePlaceholder(container, width, height, data = null) {
+  const group = container._framePlaceholder
+  const ph = container._framePlaceholderGraphics
+  const labelObj = container._frameLabel
+  if (!ph || (group && container._isDropTarget)) return
+
+  const frameData = data || container._frameData
+  const labelText = (frameData?.label || '').trim()
+
+  ph.clear()
+  ph.rect(0, 0, width, height)
+  ph.fill({ color: 0x2a2a30, alpha: 0.6 })
+
+  const cx = width / 2, cy = height / 2
+
+  if (labelObj) {
+    if (labelText) {
+      labelObj.text = labelText
+      labelObj.style.fill = 0xdddddd // More visible light gray
+      labelObj.style.fontSize = 60
+      labelObj.style.fontWeight = 'bold'
+      labelObj.style.wordWrap = true
+      labelObj.style.wordWrapWidth = Math.max(50, width - 20)
+      labelObj.position.set(cx, cy)
+      labelObj.visible = true
+    } else {
+      labelObj.text = ''
+      labelObj.visible = false
+      const arm = Math.min(width, height) * 0.12
+      ph.moveTo(cx - arm, cy).lineTo(cx + arm, cy)
+      ph.moveTo(cx, cy - arm).lineTo(cx, cy + arm)
+      ph.stroke({ color: 0x888888, width: 2 })
+    }
+  }
+}
+
+/**
+ * Highlight a frame as a drop target (purple tint + border).
+ * Sets _isDropTarget flag so the sync loop doesn't overwrite the highlight.
+ */
+export function highlightFrameDropTarget(container, width, height, data = null) {
+  const group = container._framePlaceholder
+  const ph = container._framePlaceholderGraphics
+  const labelObj = container._frameLabel
+  if (!ph || !group) return
+
+  const frameData = data || container._frameData
+  const labelText = (frameData?.label || '').trim()
+
+  container._isDropTarget = true
+  group.visible = true // [UX FIX] Ensure highlight is visible even if placeholder was hidden for asset
+  ph.clear()
+  ph.rect(0, 0, width, height)
+  ph.fill({ color: 0x7c3aed, alpha: 0.25 })
+  ph.rect(0, 0, width, height)
+  ph.stroke({ color: 0x7c3aed, width: 2 })
+
+  const cx = width / 2, cy = height / 2
+
+  if (labelObj) {
+    if (labelText) {
+      labelObj.text = labelText
+      labelObj.style.fill = 0xffffff
+      labelObj.style.fontSize = 60
+      labelObj.style.fontWeight = 'bold'
+      labelObj.style.wordWrap = true
+      labelObj.style.wordWrapWidth = Math.max(50, width - 20)
+      labelObj.position.set(cx, cy)
+      labelObj.visible = true
+    } else {
+      labelObj.text = ''
+      labelObj.visible = false
+      const arm = Math.min(width, height) * 0.12
+      ph.moveTo(cx - arm, cy).lineTo(cx + arm, cy)
+      ph.moveTo(cx, cy - arm).lineTo(cx, cy + arm)
+      ph.stroke({ color: 0xffffff, width: 2 })
+    }
+  }
+}
+
+/**
+ * Remove drop-target highlight from a frame (restore normal placeholder).
+ */
+export function unhighlightFrameDropTarget(container, width, height) {
+  container._isDropTarget = false
+  redrawFramePlaceholder(container, width, height)
+
+  // [UX FIX] If frame has an asset, hide the placeholder again (it was shown for the highlight)
+  if (container._frameHasAsset && container._framePlaceholder) {
+    container._framePlaceholder.visible = false
+  }
+}
 
 // GLOBAL VIDEO ELEMENT CACHE: Maps scene-specific segment keys -> HTMLVideoElement
 // Key format: videoUrl|sceneId|sourceStartTime|sourceEndTime

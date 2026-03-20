@@ -3,24 +3,16 @@ import { X, Search, Plus, FileText } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import AdvancedColorPickerModal from './AdvancedColorPickerModal'
 
-// Default solid colors - comprehensive palette
+// Default solid colors - comprehensive premium palette
 const DEFAULT_COLORS = [
-  // Grayscale
-  '#000000', '#333333', '#666666', '#999999', '#ffffff',
-  // Reds/Pinks/Purples
-  '#ff0000', '#ff6347', '#ff1493', '#e6e6fa', '#9370db',
-  // Teals/Blues
-  '#008080', '#87ceeb', '#4169e1', '#00008b', '#4b0082',
-  // Greens/Yellows/Oranges
-  '#90ee90', '#32cd32', '#00ff00', '#ffff00', '#ffa500',
-  // More oranges/reds
-  '#ff4500', '#dc143c', '#8b0000', '#ff69b4', '#da70d6',
-  // More blues/cyans
-  '#00ced1', '#1e90ff', '#0000cd', '#191970', '#7b68ee',
-  // More greens
-  '#228b22', '#2e8b57', '#3cb371', '#00fa9a', '#adff2f',
-  // Browns/yellows
-  '#a0522d', '#cd853f', '#deb887', '#f0e68c', '#ffd700',
+  // Modern Premium Palette 1 (Purples/Blues)
+  '#6367FF', '#8494FF', '#C9BEFF', '#FFDBFD', '#ffffff',
+  // Modern Premium Palette 2 (Dark/Teals)
+  '#222831', '#393E46', '#00ADB5', '#EEEEEE', '#000000',
+  // Modern Premium Palette 3 (Soft Pinks/Reds)
+  '#FFF5E4', '#FFE3E1', '#FFD1D1', '#FF9494', '#ff4500',
+  // Extra UI Colors
+  '#00d1b2', '#f5f5f5', '#209cee', '#ffdd57', '#ff3860'
 ]
 
 function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = 'fill' }) {
@@ -169,17 +161,19 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
               </div>
 
               {/* Transparent - Checkered Pattern */}
-              <button
-                onClick={handleTransparent}
-                className={`w-8 h-8 rounded-full cursor-pointer transition-all ${isSelected('transparent') ? 'ring-2 ring-purple-500' : 'hover:ring-2 hover:ring-zinc-600'
-                  }`}
-                style={{
-                  backgroundImage: 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)',
-                  backgroundSize: '6px 6px',
-                  backgroundPosition: '0 0, 3px 3px',
-                }}
-                title="No fill"
-              />
+              {colorType !== 'canvas' && (
+                <button
+                  onClick={handleTransparent}
+                  className={`w-8 h-8 rounded-full cursor-pointer transition-all ${isSelected('transparent') ? 'ring-2 ring-purple-500' : 'hover:ring-2 hover:ring-zinc-600'
+                    }`}
+                  style={{
+                    backgroundImage: 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)',
+                    backgroundSize: '6px 6px',
+                    backgroundPosition: '0 0, 3px 3px',
+                  }}
+                  title="No fill"
+                />
+              )}
 
               {/* Document Colors */}
               {documentColors.map((color, index) => (

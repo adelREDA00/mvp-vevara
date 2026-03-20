@@ -27,7 +27,7 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
-import { updateLayer, deleteLayer, updateSceneMotionAction, addSceneMotionAction } from '../../../store/slices/projectSlice'
+import { updateLayer, deleteLayer, attachAssetToFrame, updateSceneMotionAction, addSceneMotionAction } from '../../../store/slices/projectSlice'
 import { setSelectedLayer, clearLayerSelection, setSelectedCanvas, setSelectedLayers } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { applyCenterSnapping, applyObjectAlignmentSnapping, applySpacingSnapping, applySafeZoneSnapping } from '../utils/centerSnapping'
@@ -48,6 +48,8 @@ import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/view
 import { getScaledBadgeDimensions } from '../utils/badgeUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
+import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer'
+import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 
 // Polyfill for requestIdleCallback (needed for Safari/iOS)
@@ -99,6 +101,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
   const dragOffsetsRef = useRef(new Map()) // Map of layerId -> offset from drag start position for multi-select
   const multiSelectBoundsCenterRef = useRef(null) // Original bounding box center at drag start for multi-select
   const pointerIsDownRef = useRef(false) // Track if pointer is actually pressed down on the object
+  const highlightedFrameRef = useRef(null) // Track which frame is highlighted as drop target during drag
   const selectedLayerIdsRef = useRef(selectedLayerIds) // Keep latest selectedLayerIds in ref
   useEffect(() => {
     selectedLayerIdsRef.current = selectedLayerIds
@@ -874,7 +877,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // This avoids expensive getLocalBounds() calls during hover
     if (layer.type !== 'text' && !(pixiObject instanceof PIXI.Text)) {
       // CROP SYSTEM: For media elements, start dimensions should match the visible (cropped) area
-      const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+      const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
       const trackedLayer = motionCaptureMode?.isActive ? motionCaptureMode.trackedLayers?.get(layer.id) : null
 
       // Priority: Captured Crop > Object Visual Crop (Animated) > Redux Crop > Redux Width
@@ -1055,7 +1058,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
   const getLayerCenter = useCallback((layer, layerObject, xOverride, yOverride) => {
     if (!layer) return { x: xOverride || 0, y: yOverride || 0 }
-    const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+    const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
     const trackedLayer = motionCaptureMode?.isActive ? motionCaptureMode.trackedLayers?.get(layer.id) : null
     const { anchorX, anchorY } = resolveAnchors(layer, layerObject)
 
@@ -1227,7 +1230,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
 
     if (!actualStepId) {
-      console.warn('[DEBUG] No actualStepId found!')
+
       return
     }
 
@@ -1265,7 +1268,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       if (!stepStartAnchor) {
-        console.warn('Missing step start anchor for handle drag and could not recalculate', { layerId, actualStepId, anchorKey })
+
         return
       }
     }
@@ -3240,7 +3243,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             // CRITICAL FIX: Capture UNSCALED dimensions for accurate hover box
             // For media elements, we use the current crop dimensions as the logical base
             let width, height
-            const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+            const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
             const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(dragStartLayerId)
 
             if (layerObject instanceof PIXI.Text) {
@@ -3974,6 +3977,48 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           })
         }
       }
+
+      // --- Frame drop-target highlight during drag ---
+      if (layer && (layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO)) {
+        let overlappingFrameId = null
+        const allLayers = latestLayersRef.current
+        for (const [frameId, frameLayer] of Object.entries(allLayers)) {
+          if (frameLayer.type !== LAYER_TYPES.FRAME) continue
+          if (frameId === selectedLayerId) continue
+          if (frameLayer.sceneId !== layer.sceneId) continue
+          const frameObj = layerObjectsMap.get(frameId)
+          if (!frameObj || frameObj.destroyed) continue
+          const frameBounds = getLayerWorldBounds(frameLayer, frameObj)
+          if (!frameBounds) continue
+          if (newX >= frameBounds.left && newX <= frameBounds.right &&
+              newY >= frameBounds.top && newY <= frameBounds.bottom) {
+            overlappingFrameId = frameId
+            break
+          }
+        }
+        const prevHighlighted = highlightedFrameRef.current
+        if (overlappingFrameId !== prevHighlighted) {
+          if (prevHighlighted) {
+            const prevObj = layerObjectsMap.get(prevHighlighted)
+            const prevLayer = latestLayersRef.current[prevHighlighted]
+            if (prevObj && !prevObj.destroyed && prevLayer) {
+              const w = prevLayer.cropWidth ?? prevLayer.width
+              const h = prevLayer.cropHeight ?? prevLayer.height
+              unhighlightFrameDropTarget(prevObj, w, h)
+            }
+          }
+          if (overlappingFrameId) {
+            const frameObj = layerObjectsMap.get(overlappingFrameId)
+            const frameLayer = latestLayersRef.current[overlappingFrameId]
+            if (frameObj && !frameObj.destroyed && frameLayer) {
+              const w = frameLayer.cropWidth ?? frameLayer.width
+              const h = frameLayer.cropHeight ?? frameLayer.height
+              highlightFrameDropTarget(frameObj, w, h, frameLayer.data)
+            }
+          }
+          highlightedFrameRef.current = overlappingFrameId
+        }
+      }
     }
 
     // Local pointer move handler for viewport events
@@ -3996,6 +4041,39 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     const handleGlobalPointerUp = () => {
       // Check if there was an active drag before processing
       const wasDragging = dragStateAPI.isDragging()
+
+      // --- Frame drop: attach media layer to highlighted frame ---
+      if (wasDragging && highlightedFrameRef.current) {
+        const draggedLayerId = dragStateAPI.getDraggingLayerId()
+        const draggedLayer = latestLayersRef.current[draggedLayerId]
+        const frameId = highlightedFrameRef.current
+        const frameLayer = latestLayersRef.current[frameId]
+
+        if (draggedLayer && frameLayer) {
+          const assetUrl = draggedLayer.data?.url || draggedLayer.data?.src
+          if (assetUrl) {
+            dispatch(attachAssetToFrame({
+              layerId: frameId,
+              assetUrl,
+              assetWidth: draggedLayer.mediaWidth || draggedLayer.width,
+              assetHeight: draggedLayer.mediaHeight || draggedLayer.height
+            }))
+            const frameObj = layerObjectsMap.get(frameId)
+            if (frameObj) {
+              loadTextureRobust(assetUrl).then(texture => {
+                if (!texture || frameObj.destroyed) return
+                const frameW = frameLayer.cropWidth ?? frameLayer.width
+                const frameH = frameLayer.cropHeight ?? frameLayer.height
+                attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+              }).catch(() => {})
+            }
+            dispatch(deleteLayer(draggedLayerId))
+            dispatch(clearLayerSelection())
+            pendingDragUpdatesRef.current.delete(draggedLayerId)
+          }
+        }
+        highlightedFrameRef.current = null
+      }
 
       // No throttling - updates are immediate
 
@@ -4089,6 +4167,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       dragOffsetsRef.current.clear()
       multiSelectBoundsCenterRef.current = null
       dragHoverBoxDimensionsRef.current = null // Clear stored drag hover box dimensions
+      highlightedFrameRef.current = null
       dragMultiSelectBoundsCacheRef.current = { bounds: null, selectedIds: null } // Clear drag-specific multi-select bounds cache
       motionArrowBasesRef.current.clear()
 
@@ -4193,12 +4272,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         // Add hover effect for layer objects
         const handleLayerHoverEnter = () => {
-
           // Hide drag hover box when entering hover state to avoid conflicts
           hideDragHoverBox()
 
-          // Only show hover box if the layer is NOT currently selected AND we're not dragging
-          // Use ref to get latest selectedLayerIds to avoid stale closure issues
+          // [FIX] Use latest refs to avoid stale closure issues after screen split/transformations
+          const currentLayers = latestLayersRef.current
+          const currentLayer = currentLayers[layerId]
+          const currentSceneId = latestParamsRef.current.currentSceneId
+          const currentVisibleInScene = currentLayer && currentLayer.sceneId === currentSceneId
+
           const currentSelectedLayerIds = selectedLayerIdsRef.current
           const isSelected = currentSelectedLayerIds.includes(layerId)
           const isDragging = dragStateAPI.isDragging()
@@ -4211,12 +4293,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           // 1. Not selected and not interacting and no selection box (normal hover)
           // 2. AND not playing!
           // 3. AND layer belongs to currently active scene
-          const shouldShowHover = !isSelected && !isDragging && !hasSelectionBox && !latestIsPlayingRef.current && isVisibleInScene
+          const shouldShowHover = !isSelected && !isDragging && !hasSelectionBox && !latestIsPlayingRef.current && currentVisibleInScene
 
           if (shouldShowHover) {
-            const layer = layers[layerId]
-            if (layer && pixiObject) {
-              updateHoverBox(pixiObject, layer)
+            if (currentLayer && pixiObject) {
+              updateHoverBox(pixiObject, currentLayer)
             }
           }
         }

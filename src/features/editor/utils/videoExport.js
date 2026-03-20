@@ -2,7 +2,7 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL } from '@ffmpeg/util';
 import * as PIXI from 'pixi.js';
 import { MotionEngine } from '../../engine/motion/MotionEngine.js';
-import { createTextLayer, createShapeLayer, createImageLayer } from '../../engine/pixi/createLayer.js';
+import { createTextLayer, createShapeLayer, createImageLayer, createFrameLayer, attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer.js';
 
 let ffmpeg = null;
 
@@ -189,7 +189,7 @@ function captureFrame(canvas) {
     return new Promise(resolve => {
         canvas.toBlob(blob => {
             if (!blob) {
-                const b64 = canvas.toDataURL('image/jpeg', 0.95);
+                const b64 = canvas.toDataURL('image/jpeg', 0.85);
                 const bin = atob(b64.split(',')[1]);
                 const arr = new Uint8Array(bin.length);
                 for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -197,7 +197,7 @@ function captureFrame(canvas) {
                 return;
             }
             blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
-        }, 'image/jpeg', 0.95);
+        }, 'image/jpeg', 0.85);
     });
 }
 
@@ -239,22 +239,41 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
     try {
         onProgress?.({ status: 'encoding', progress: 96 });
 
+        // [MEMORY OPTIMIZATION] Deduplicate audio source files.
+        // Multiple layers may use the same source video. Writing it once saves MEMFS.
+        const writtenSources = new Map();
+
         for (let i = 0; i < audioSources.length; i++) {
-            const response = await fetch(audioSources[i].videoUrl);
+            const url = audioSources[i].videoUrl;
+            if (writtenSources.has(url)) {
+                audioSources[i].fsName = writtenSources.get(url);
+                continue;
+            }
+
+            const sessionId = ffmpegInst._session_id || 'v1';
+            const fileName = `${sessionId}_audio_src_${i}.mp4`;
+            const response = await fetch(url);
             const arrayBuffer = await response.arrayBuffer();
-            await ffmpegInst.writeFile(`audio_src_${i}.mp4`, new Uint8Array(arrayBuffer));
+            await ffmpegInst.writeFile(fileName, new Uint8Array(arrayBuffer));
+            
+            writtenSources.set(url, fileName);
+            audioSources[i].fsName = fileName;
         }
 
         onProgress?.({ status: 'encoding', progress: 97 });
 
-        const args = ['-i', 'video_only.mp4'];
+        const sessionId = ffmpegInst._session_id || 'v1';
+        const videoOnlyFile = `${sessionId}_video_only.mp4`;
+        const outputFile = `${sessionId}_output.mp4`;
+
+        const args = ['-i', videoOnlyFile];
         const filterParts = [];
 
         for (let i = 0; i < audioSources.length; i++) {
             const src = audioSources[i];
             args.push('-ss', src.sourceStartTime.toFixed(3));
             args.push('-t', src.duration.toFixed(3));
-            args.push('-i', `audio_src_${i}.mp4`);
+            args.push('-i', src.fsName);
 
             const delayMs = Math.round(src.globalStartTime * 1000);
             filterParts.push(`[${i + 1}:a]adelay=${delayMs}|${delayMs}[a${i}]`);
@@ -267,32 +286,38 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
         } else {
             const labels = audioSources.map((_, i) => `[a${i}]`).join('');
             filterComplex = filterParts.join('; ') +
-                `; ${labels}amix=inputs=${audioSources.length}:duration=first:dropout_transition=0[aout]`;
+                `; ${labels}amix=inputs=${audioSources.length}:duration=longest:dropout_transition=0[aout]`;
         }
 
         args.push('-filter_complex', filterComplex);
         args.push('-map', '0:v', '-map', '[aout]');
-        args.push('-c:v', 'copy', '-c:a', 'aac', '-shortest');
-        args.push('output.mp4');
+        args.push('-c:v', 'copy', '-c:a', 'aac');
+        args.push(outputFile);
 
         await ffmpegInst.exec(args);
 
-        try { await ffmpegInst.deleteFile('video_only.mp4'); } catch (e) { /* ignore */ }
-        for (let i = 0; i < audioSources.length; i++) {
-            try { await ffmpegInst.deleteFile(`audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
+        try { await ffmpegInst.deleteFile(videoOnlyFile); } catch (e) { /* ignore */ }
+        
+        // Cleanup only unique file names
+        const uniqueFiles = new Set(audioSources.map(s => s.fsName));
+        for (const fileName of uniqueFiles) {
+            try { await ffmpegInst.deleteFile(fileName); } catch (e) { /* ignore */ }
         }
 
         return true;
     } catch (audioError) {
         console.warn('Export: Audio mixing failed, falling back to silent video:', audioError);
+        const sessionId = ffmpegInst._session_id || 'v1';
+        const videoOnlyFile = `${sessionId}_video_only.mp4`;
+        const outputFile = `${sessionId}_output.mp4`;
         try {
-            const silentData = await ffmpegInst.readFile('video_only.mp4');
-            await ffmpegInst.writeFile('output.mp4', silentData);
-            await ffmpegInst.deleteFile('video_only.mp4');
+            const silentData = await ffmpegInst.readFile(videoOnlyFile);
+            await ffmpegInst.writeFile(outputFile, silentData);
+            await ffmpegInst.deleteFile(videoOnlyFile);
         } catch (e) { /* ignore */ }
 
         for (let i = 0; i < audioSources.length; i++) {
-            try { await ffmpegInst.deleteFile(`audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
+            try { await ffmpegInst.deleteFile(`${sessionId}_audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
         }
 
         return false;
@@ -412,24 +437,31 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
     }
 }
 
-async function cleanupTempFiles(ffmpegInst, totalFramesNum, audioSourceCount) {
+async function cleanupTempFiles(ffmpegInst, totalFramesNum, audioSourceCount, sessionId) {
     if (totalFramesNum > 0) {
-        const batchSize = 50;
-        for (let start = 0; start <= totalFramesNum; start += batchSize) {
-            const end = Math.min(start + batchSize, totalFramesNum);
-            const promises = [];
-            for (let i = start; i <= end; i++) {
-                promises.push(
-                    ffmpegInst.deleteFile(`frame_${String(i).padStart(5, '0')}.jpg`).catch(() => { })
-                );
-            }
-            await Promise.all(promises);
+        // We chunk in ~3 sec batches, max 180 frames per batch. Loop 200 just to be safe if aborted inside batch.
+        const batchPromises = [];
+        for (let i = 0; i <= 200; i++) {
+            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_${String(i).padStart(5, '0')}.jpg`).catch(() => { }));
         }
+        await Promise.all(batchPromises);
+
+        // Cleanup chunk.ts files in case of aborts before concatenation
+        const maxChunks = Math.ceil(totalFramesNum / 10);
+        const chunkPromises = [];
+        for (let i = 0; i < maxChunks; i++) {
+            chunkPromises.push(
+                ffmpegInst.deleteFile(`${sessionId}_chunk_${String(i).padStart(3, '0')}.mp4`).catch(() => { })
+            );
+        }
+        await Promise.all(chunkPromises);
+
+        try { await ffmpegInst.deleteFile(`${sessionId}_concat.txt`); } catch (e) { /* ignore */ }
     }
-    try { await ffmpegInst.deleteFile('output.mp4'); } catch (e) { /* ignore */ }
-    try { await ffmpegInst.deleteFile('video_only.mp4'); } catch (e) { /* ignore */ }
+    try { await ffmpegInst.deleteFile(`${sessionId}_output.mp4`); } catch (e) { /* ignore */ }
+    try { await ffmpegInst.deleteFile(`${sessionId}_video_only.mp4`); } catch (e) { /* ignore */ }
     for (let i = 0; i < audioSourceCount; i++) {
-        try { await ffmpegInst.deleteFile(`audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
+        try { await ffmpegInst.deleteFile(`${sessionId}_audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
     }
 }
 
@@ -449,7 +481,9 @@ export const exportVideo = async ({
         try { editorMotionControls.pauseAll(); } catch (e) { /* ignore */ }
     }
 
+    const sessionId = `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const ffmpegInst = await initFFmpeg();
+    ffmpegInst._session_id = sessionId; // Temporary stash for helper functions
 
     const [widthRatio, heightRatio] = aspectRatio.split(':').map(Number);
     const projectAspect = widthRatio / heightRatio;
@@ -484,6 +518,9 @@ export const exportVideo = async ({
     try {
         if (signal?.aborted) throw new Error('cancelled');
 
+        // Set global text resolution for export renderer
+        PIXI.TextStyle.defaultTextStyle.resolution = 1;
+
         app = new PIXI.Application();
         await app.init({
             width: targetWidth,
@@ -498,7 +535,9 @@ export const exportVideo = async ({
 
         const stageContainer = new PIXI.Container();
         app.stage.addChild(stageContainer);
-        stageContainer.scale.set(targetWidth / worldWidth, targetHeight / worldHeight);
+        const scaleX = targetWidth / worldWidth;
+        const scaleY = targetHeight / worldHeight;
+        stageContainer.scale.set(scaleX, scaleY);
 
         exportEngine = new MotionEngine();
         // [EXPORT FIX] Disable internal media sync in the engine.
@@ -530,11 +569,49 @@ export const exportVideo = async ({
                         if (pixiObject._videoElement) {
                             exportVideoElements.push(pixiObject._videoElement);
                         }
+                    } else if (layer.type === 'frame') {
+                        pixiObject = createFrameLayer(layer);
+                        // If the frame has an attached asset, load its texture and apply cover-fit
+                        const frameAssetUrl = layer.data?.assetUrl;
+                        if (frameAssetUrl) {
+                            try {
+                                const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
+                                const frameTexture = await loadTextureRobust(frameAssetUrl);
+                                if (frameTexture) {
+                                    const fw = layer.cropWidth ?? layer.width;
+                                    const fh = layer.cropHeight ?? layer.height;
+                                    attachAssetToFramePixi(pixiObject, frameTexture, fw, fh);
+                                    // Apply stored crop state from Redux (motion actions may have modified it)
+                                    const sprite = pixiObject._imageSprite;
+                                    if (sprite) {
+                                        sprite.width = layer.mediaWidth ?? fw;
+                                        sprite.height = layer.mediaHeight ?? fh;
+                                        sprite.x = -(layer.cropX ?? 0);
+                                        sprite.y = -(layer.cropY ?? 0);
+                                    }
+                                    const cropMask = pixiObject._cropMask;
+                                    if (cropMask) {
+                                        cropMask.clear();
+                                        cropMask.rect(0, 0, layer.cropWidth ?? fw, layer.cropHeight ?? fh);
+                                        cropMask.fill(0xffffff);
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('Export: Failed to load frame asset', e);
+                            }
+                        }
                     } else if (layer.type === 'background') {
                         const graphics = new PIXI.Graphics();
                         graphics.rect(0, 0, worldWidth, worldHeight);
                         graphics.fill(layer.data?.color || 0x000000);
                         pixiObject = graphics;
+
+                        // [COLOR FIX] Store background metadata for redrawing during colorChange actions in export
+                        pixiObject._storedWidth = worldWidth;
+                        pixiObject._storedHeight = worldHeight;
+                        pixiObject._storedAnchorX = 0;
+                        pixiObject._storedAnchorY = 0;
+                        pixiObject._storedColor = layer.data?.color || 0x000000;
 
                         if (layer.data?.imageUrl) {
                             try {
@@ -543,6 +620,12 @@ export const exportVideo = async ({
                                 if (bgTexture) {
                                     const bgContainer = new PIXI.Container();
                                     bgContainer.addChild(graphics);
+
+                                    // [COLOR FIX] Link the container to its background graphics for the color action
+                                    bgContainer._backgroundGraphics = graphics;
+                                    bgContainer._storedWidth = worldWidth;
+                                    bgContainer._storedHeight = worldHeight;
+
                                     const bgSprite = new PIXI.Sprite(bgTexture);
                                     const scale = Math.max(worldWidth / bgTexture.width, worldHeight / bgTexture.height);
                                     bgSprite.scale.set(scale);
@@ -568,7 +651,12 @@ export const exportVideo = async ({
             }
         }
 
-        exportEngine.loadProjectMotionFlow(timelineInfo, sceneMotionFlows, layerObjects, { allLayers: layers });
+        const exportScale = targetWidth / worldWidth;
+        exportEngine.loadProjectMotionFlow(timelineInfo, sceneMotionFlows, layerObjects, { 
+            allLayers: layers,
+            isExport: true,
+            exportScale: exportScale
+        });
 
         const totalDuration = timelineInfo.reduce((acc, s) => acc + s.duration, 0);
         totalFramesNum = Math.ceil(totalDuration * fps);
@@ -576,8 +664,13 @@ export const exportVideo = async ({
         onProgress?.({ status: 'rendering', progress: 0 });
 
         // =====================================================================
-        // FRAME-BY-FRAME RENDER LOOP
+        // CHUNKED FRAME-BY-FRAME RENDER LOOP
         // =====================================================================
+        const batchSize = fps * 3; // 3 seconds per batch
+        let currentBatchIndex = 0;
+        let framesInCurrentBatch = 0;
+        const chunkFiles = [];
+
         for (let frame = 0; frame <= totalFramesNum; frame++) {
             if (signal?.aborted) throw new Error('cancelled');
 
@@ -588,7 +681,10 @@ export const exportVideo = async ({
                 const sceneId = obj._sceneId;
                 const range = exportEngine?.sceneRanges?.get(sceneId);
                 if (range) {
-                    obj.visible = (time >= range.startTime - 0.001 && time < range.endTime);
+                    // [VISIBILITY FIX] Add epsilon to endTime check to ensure the last frame
+                    // of a scene (and the last frame of the project) is included.
+                    // This prevents the "black frame" flicker at scene transitions.
+                    obj.visible = (time >= range.startTime - 0.001 && time < range.endTime + 0.001);
                 } else {
                     obj.visible = false;
                 }
@@ -597,6 +693,24 @@ export const exportVideo = async ({
             if (exportEngine && !exportEngine._destroyed) {
                 exportEngine.seek(time);
             }
+            // [BLUR EXPORT FIX] Force blur filter padding recalculation after seek.
+            // [BLUR EXPORT FIX] Force blur filter padding recalculation after seek.
+            layerObjects.forEach((obj, id) => {
+                if (!obj || obj.destroyed || !obj.visible) return;
+                
+                try {
+                    if (obj._blurFilter && obj.filters && Array.isArray(obj.filters) && obj.filters.includes(obj._blurFilter)) {
+                        if (typeof obj._applyAnimatedBlur === 'function') {
+                            obj._applyAnimatedBlur();
+                        }
+                        if (obj._blurFilter.updatePadding) {
+                            obj._blurFilter.updatePadding();
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[videoExport] Error syncing blur for object ${id}:`, e);
+                }
+            });
 
             for (const video of exportVideoElements) {
                 if (!video) continue;
@@ -624,7 +738,8 @@ export const exportVideo = async ({
             }
 
             const frameData = await captureFrame(app.canvas);
-            await ffmpegInst.writeFile(`frame_${String(frame).padStart(5, '0')}.jpg`, frameData);
+            await ffmpegInst.writeFile(`${sessionId}_batch_${String(framesInCurrentBatch).padStart(5, '0')}.jpg`, frameData);
+            framesInCurrentBatch++;
 
             if (frame % 5 === 0) {
                 onProgress?.({
@@ -632,6 +747,35 @@ export const exportVideo = async ({
                     progress: Math.round((frame / totalFramesNum) * 90)
                 });
                 await new Promise(r => setTimeout(r, 0));
+            }
+
+            if (signal?.aborted) throw new Error('cancelled');
+
+            // If we reached batch size, or we are at the last frame
+            if (framesInCurrentBatch === batchSize || frame === totalFramesNum) {
+                const chunkName = `${sessionId}_chunk_${String(currentBatchIndex).padStart(3, '0')}.mp4`;
+                
+                // Encode this batch
+                await ffmpegInst.exec([
+                    '-framerate', fps.toString(),
+                    '-i', `${sessionId}_batch_%05d.jpg`,
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-pix_fmt', 'yuv420p',
+                    chunkName
+                ]);
+
+                chunkFiles.push(chunkName);
+
+                // Delete the batch frames from MEMFS immediately to free memory
+                const deletePromises = [];
+                for (let i = 0; i < framesInCurrentBatch; i++) {
+                    deletePromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_${String(i).padStart(5, '0')}.jpg`).catch(() => { }));
+                }
+                await Promise.all(deletePromises);
+
+                currentBatchIndex++;
+                framesInCurrentBatch = 0;
             }
         }
 
@@ -641,15 +785,29 @@ export const exportVideo = async ({
         if (signal?.aborted) throw new Error('cancelled');
         onProgress?.({ status: 'encoding', progress: 95 });
 
-        const videoFileName = hasAudio ? 'video_only.mp4' : 'output.mp4';
+        const videoFileName = hasAudio ? `${sessionId}_video_only.mp4` : `${sessionId}_output.mp4`;
+        
+        // Build a concat list for FFmpeg
+        let concatText = '';
+        for (const chunk of chunkFiles) {
+            concatText += `file '${chunk}'\n`;
+        }
+        await ffmpegInst.writeFile(`${sessionId}_concat.txt`, new TextEncoder().encode(concatText));
+
+        // Use the concat demuxer to instantly merge the chunks
         await ffmpegInst.exec([
-            '-framerate', fps.toString(),
-            '-i', 'frame_%05d.jpg',
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-pix_fmt', 'yuv420p',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', `${sessionId}_concat.txt`,
+            '-c', 'copy',
+            '-fflags', '+genpts',
             videoFileName
         ]);
+
+        // Clean up intermediate chunks + concat.txt (main video is saved)
+        const cleanupPromises = chunkFiles.map(chunk => ffmpegInst.deleteFile(chunk).catch(() => { }));
+        cleanupPromises.push(ffmpegInst.deleteFile(`${sessionId}_concat.txt`).catch(() => { }));
+        await Promise.all(cleanupPromises);
 
         if (signal?.aborted) throw new Error('cancelled');
 
@@ -663,7 +821,7 @@ export const exportVideo = async ({
         if (signal?.aborted) throw new Error('cancelled');
 
         onProgress?.({ status: 'encoding', progress: 100 });
-        const data = await ffmpegInst.readFile('output.mp4');
+        const data = await ffmpegInst.readFile(`${sessionId}_output.mp4`);
         return new Blob([data.buffer], { type: 'video/mp4' });
 
     } catch (error) {
@@ -673,7 +831,7 @@ export const exportVideo = async ({
     } finally {
         cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects);
         try {
-            await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length);
+            await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length, sessionId);
         } catch (e) {
             console.warn('Export: Temp file cleanup warning', e);
         }

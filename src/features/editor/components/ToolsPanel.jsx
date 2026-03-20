@@ -39,58 +39,53 @@ function ToolsPanel({ onClose }) {
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
 
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Tools</h2>
+      <div className="px-6 pt-6 pb-5 border-b border-white/5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[20px] font-semibold text-white tracking-tight">Tools</h2>
           {onClose && (
             <button
               onClick={onClose}
-              className="text-zinc-400 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-800"
+              className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
             >
-              <X className="h-4 w-4" strokeWidth={1.5} />
+              <X className="h-5 w-5" strokeWidth={2} />
             </button>
           )}
         </div>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={1.5} />
+          <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
           <input
             type="text"
-            placeholder="Search tools"
+            placeholder="Search AI tools..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-zinc-700 focus:ring-1 focus:ring-zinc-700"
+            className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-[12px] text-white text-[14px] placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all"
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-2">
+      <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+        <div className="space-y-3">
           {filteredTools.map((tool, index) => {
             const Icon = tool.icon
             return (
               <button
                 key={index}
-                title={tool.isComingSoon ? "This is currently under development coming soon" : ""}
-                className={`w-full text-left px-4 py-3 rounded-lg bg-zinc-900 transition-colors border border-zinc-800 ${tool.isComingSoon ? 'opacity-80 cursor-not-allowed' : 'hover:bg-zinc-800'}`}
+                title={tool.isComingSoon ? "This is currently under development" : ""}
+                className={`w-full text-left px-5 py-5 rounded-[16px] bg-white/5 transition-all duration-300 border border-white/5 flex-shrink-0 relative group shadow-sm ${tool.isComingSoon ? 'opacity-60 cursor-not-allowed grayscale-[0.5]' : 'hover:bg-white/10 hover:border-white/10 hover:shadow-medium active:scale-[0.98]'}`}
               >
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-purple-500/10 rounded-md flex-shrink-0 relative">
-                    <Icon className="h-5 w-5 text-purple-400" strokeWidth={1.5} />
-                    {tool.isComingSoon && (
-                      <div className="absolute -top-1 -right-1 bg-yellow-500 rounded-full p-0.5 border border-zinc-900 shadow-sm">
-                        <AlertTriangle className="h-2.5 w-2.5 text-zinc-900" fill="currentColor" strokeWidth={3} />
-                      </div>
-                    )}
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-[#7c4af0]/10 rounded-[12px] flex items-center justify-center flex-shrink-0 transition-colors group-hover:bg-[#7c4af0]/20">
+                    <Icon className="h-6 w-6 text-[#7c4af0]" strokeWidth={2} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-white">{tool.name}</p>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-[15px] font-semibold text-white tracking-tight">{tool.name}</p>
                       {tool.isComingSoon && (
-                        <span className="text-[10px] text-yellow-500/80 font-bold uppercase tracking-wider">Soon</span>
+                        <span className="text-[9px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded-full font-bold uppercase tracking-widest">Soon</span>
                       )}
                     </div>
-                    <p className="text-xs text-zinc-400 mt-0.5">{tool.description}</p>
+                    <p className="text-[13px] text-zinc-500 leading-snug group-hover:text-zinc-400 transition-colors">{tool.description}</p>
                   </div>
                 </div>
               </button>

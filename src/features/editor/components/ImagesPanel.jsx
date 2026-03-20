@@ -148,16 +148,29 @@ function ImagesPanel({ onClose, aspectRatio }) {
         >
             {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
-            <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
-                <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-semibold text-white">Media</h2>
+            <div className="px-6 pt-6 pb-5 border-b border-white/5">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-[20px] font-semibold text-white tracking-tight">Media</h2>
                     {onClose && (
-                        <button onClick={onClose} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800">
-                            <X className="h-4 w-4" />
+                        <button 
+                            onClick={onClose} 
+                            className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
+                        >
+                            <X className="h-5 w-5" strokeWidth={2} />
                         </button>
                     )}
                 </div>
 
+                <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
+                    <input
+                        type="text"
+                        placeholder="Search media..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-[12px] text-white text-[14px] placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all"
+                    />
+                </div>
             </div>
 
             {fetchError && (
@@ -167,31 +180,35 @@ function ImagesPanel({ onClose, aspectRatio }) {
                 </div>
             )}
 
-            <div className="flex border-b border-zinc-800/50 px-4">
+            <div className="flex border-b border-white/5 px-6">
                 {['All', 'Images', 'Videos'].map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-3 text-sm font-medium relative ${activeTab === tab ? 'text-purple-400' : 'text-zinc-400'}`}
+                        className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : 'text-zinc-500 hover:text-white'}`}
                     >
-                        {tab} ({tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount})
-                        {activeTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400" />}
+                        {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount}</span>
+                        {activeTab === tab && (
+                            <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
+                        )}
                     </button>
                 ))}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar scrollbar-hide">
                 {isFetching && !sharedAssets.length ? (
                     <SkeletonGrid />
                 ) : filteredImages.length === 0 ? (
-                    <div className="h-48 flex flex-col items-center justify-center text-center opacity-40">
-                        <ImageIcon className="h-8 w-8 mb-3 text-zinc-600" />
-                        <p className="text-sm text-zinc-500">
+                    <div className="h-64 flex flex-col items-center justify-center text-center">
+                        <div className="p-4 bg-white/5 rounded-full mb-4">
+                            <ImageIcon className="h-8 w-8 text-zinc-600" />
+                        </div>
+                        <p className="text-[14px] text-zinc-500 font-medium">
                             {searchQuery ? 'No matching media' : 'No assets available'}
                         </p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-4">
                         {filteredImages.map((image) => (
                             <AssetCard
                                 key={image._id || image.id}

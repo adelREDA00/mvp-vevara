@@ -117,7 +117,6 @@ export function useEditorPlayback(scenes) {
     }
 
     if (activeScene && activeScene.id !== currentSceneId) {
-      console.log(`🎬 [useEditorPlayback] Scene Sync: playhead=${playheadTime.toFixed(3)}s, currentId=${currentSceneId}, targetId=${activeScene.id} (${activeScene.name})`)
       dispatch(setCurrentScene(activeScene.id))
     }
   }, [playheadTime, timelineInfo, currentSceneId, dispatch])

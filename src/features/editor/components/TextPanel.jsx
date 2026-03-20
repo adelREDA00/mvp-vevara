@@ -153,46 +153,46 @@ function TextPanel({ onClose, aspectRatio }) {
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
 
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Text</h2>
+      <div className="px-6 pt-6 pb-5 border-b border-white/5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[20px] font-semibold text-white tracking-tight">Text</h2>
           {onClose && (
             <button
               onClick={onClose}
-              className="text-white/70 hover:text-white hover:bg-white/10 transition-all duration-200 p-1 rounded-md"
+              className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
             >
-              <X className="h-4 w-4" strokeWidth={2} />
+              <X className="h-5 w-5" strokeWidth={2} />
             </button>
           )}
         </div>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={1.5} />
+          <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
           <input
             type="text"
-            placeholder="Search text elements"
+            placeholder="Search text styles..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-zinc-900/50 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-zinc-700 focus:ring-1 focus:ring-zinc-700"
+            className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-[12px] text-white text-[14px] placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all"
           />
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-3">
+      <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+        <div className="space-y-4">
           {filteredTextElements.map((element) => (
             <button
               key={element.id}
               onClick={element.onClick}
-              className="w-full text-left px-4 py-4 rounded-lg hover:bg-zinc-800/50 transition-colors border border-zinc-800 hover:border-zinc-700"
+              className="w-full text-left px-5 py-6 rounded-[16px] hover:bg-white/5 transition-all duration-300 border border-white/5 hover:border-white/10 group shadow-sm active:scale-[0.98]"
             >
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-zinc-400 uppercase tracking-wide">{element.name}</span>
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] text-white/40 uppercase font-bold tracking-widest group-hover:text-white/60 transition-colors uppercase">{element.name}</span>
                 <span
                   className="text-white"
                   style={{
                     fontSize: element.id === 'title' ? '28px' : element.id === 'subtitle' ? '20px' : '16px',
-                    fontWeight: element.id === 'title' ? 'bold' : element.id === 'subtitle' ? '600' : 'normal',
+                    fontWeight: element.id === 'title' ? '700' : element.id === 'subtitle' ? '600' : '500',
                     lineHeight: '1.2',
                     fontFamily: 'Inter'
                   }}

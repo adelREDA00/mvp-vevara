@@ -21,18 +21,27 @@ export class RotateAction {
         const dangle = values.dangle ?? 0
         const targetAngle = startAngle + dangle
 
-        const fromVars = {
-            rotation: startAngle * (Math.PI / 180),
-            immediateRender: false
-        }
-
-        return gsap.fromTo(pixiObject, fromVars, {
-            rotation: targetAngle * (Math.PI / 180), // Convert degrees to radians
+        const toVars = {
             duration: animationDuration,
             ease: easing,
             immediateRender: false,
-            overwrite: 'auto',
+            overwrite: false,
             ...options.gsapOptions,
-        })
+        }
+
+        const fromVars = {
+            immediateRender: false
+        }
+
+        // [FIX] Only animate rotation if it's explicitly changing or provided
+        if (values.dangle !== undefined && values.dangle !== 0) {
+            fromVars.rotation = startAngle * (Math.PI / 180)
+            toVars.rotation = targetAngle * (Math.PI / 180)
+        } else {
+            // Return no-op to maintain duration if no rotation
+            return gsap.to({}, { duration: animationDuration })
+        }
+
+        return gsap.fromTo(pixiObject, fromVars, toVars)
     }
 }

@@ -7,18 +7,35 @@ export class FadeAction {
 
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
-        const opacity = values.opacity !== undefined ? values.opacity : 1
         const duration = values.duration || 2000
-        const easing = values.easing || 'linear'
+        const easing = values.easing || 'power4.out'
+
+        const startOpacity = options.startState?.opacity ?? pixiObject.alpha
+        const targetOpacity = values.opacity !== undefined ? values.opacity : 1
 
         const animationDuration = duration / 1000
 
-        return gsap.to(pixiObject, {
-            alpha: opacity, // PIXI uses alpha for opacity
+        const toVars = {
             duration: animationDuration,
             ease: easing,
             immediateRender: false,
-            ...options.gsapOptions,
-        })
+            overwrite: false,
+            ...options.gsapOptions
+        }
+
+        const fromVars = {
+            immediateRender: false
+        }
+
+        // [FIX] Only animate alpha if it's explicitly changing or provided
+        if (values.opacity !== undefined) {
+            fromVars.alpha = startOpacity
+            toVars.alpha = targetOpacity
+        } else {
+            // If No opacity change, return a no-op to maintain duration
+            return gsap.to({}, { duration: animationDuration })
+        }
+
+        return gsap.fromTo(pixiObject, fromVars, toVars)
     }
 }

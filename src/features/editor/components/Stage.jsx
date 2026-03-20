@@ -17,6 +17,7 @@ import {
   Unlink,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { createSelector } from '@reduxjs/toolkit'
@@ -34,7 +35,9 @@ import TextEditOverlay from './TextEditOverlay'
 import { isLayerCompletelyOutside } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
-import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo } from '../../../store/slices/projectSlice'
+import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect } from '../../../store/slices/projectSlice'
+import { attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer'
+import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 // =============================================================================
 // MEMOIZED SELECTORS
@@ -132,6 +135,8 @@ function Stage({
 
   // Component state
   const [contextMenu, setContextMenu] = useState(null)
+  const [subMenu, setSubMenu] = useState(null) // 'position' or null
+  const subMenuTimerRef = useRef(null)
   const [lockedTooltip, setLockedTooltip] = useState(null) // { x, y }
   const lockedTooltipTimeoutRef = useRef(null)
 
@@ -309,6 +314,7 @@ function Stage({
         scaleY: obj.scale?.y ?? 1,
         rotation: (obj.rotation * 180) / Math.PI, // Convert rad to deg for consistent logic
         alpha: obj.alpha,
+        blur: (obj.filters && obj._blurFilter && obj.filters.includes(obj._blurFilter)) ? obj._blurFilter.strength : 0,
         cropX: obj.cropX ?? obj._storedCropX ?? 0,
         cropY: obj.cropY ?? obj._storedCropY ?? 0,
         cropWidth: obj.cropWidth ?? obj._storedCropWidth ?? obj._originalWidth ?? obj.width ?? 100,
@@ -345,6 +351,83 @@ function Stage({
       lockedTooltipTimeoutRef.current = null
     }, 3000)
   }, [])
+
+  // Handle dropping an asset (image/video URL) onto a frame layer
+  const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight) => {
+    const frameLayer = layers[frameLayerId]
+    if (!frameLayer || frameLayer.type !== 'frame') return
+
+    // 1. Update Redux state
+    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200 }))
+
+    // 2. Update PIXI object immediately for visual feedback
+    const frameObj = layerObjects?.get(frameLayerId)
+    if (frameObj) {
+      loadTextureRobust(assetUrl).then(texture => {
+        if (!texture || frameObj.destroyed) return
+        const frameW = frameLayer.cropWidth ?? frameLayer.width
+        const frameH = frameLayer.cropHeight ?? frameLayer.height
+        attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+      }).catch(() => {})
+    }
+  }, [layers, layerObjects, dispatch])
+
+  // Native canvas drag-and-drop listeners (React synthetic events don't reach the canvas)
+  useEffect(() => {
+    const canvas = containerRef.current?.querySelector('canvas')
+    if (!canvas) return
+
+    const onDragOver = (e) => {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+
+    const onDrop = (e) => {
+      e.preventDefault()
+      let asset
+      try {
+        const raw = e.dataTransfer.getData('application/vevara-asset')
+        if (!raw) return
+        asset = JSON.parse(raw)
+        if (!asset.url) return
+      } catch { return }
+
+      let targetId = null
+
+      // Hit-test to find frame layer under cursor
+      if (pixiApp?.renderer?.events?.rootBoundary) {
+        const rect = canvas.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        const hitObject = pixiApp.renderer.events.rootBoundary.hitTest(x, y)
+        if (hitObject) {
+          const foundId = findLayerIdFromObject(hitObject, layerObjects, stageContainer, viewport)
+          if (layers[foundId]?.type === 'frame') {
+            targetId = foundId
+          }
+        }
+      }
+
+      // Fallback: if selected layer is a frame, drop onto it
+      if (!targetId && selectedLayerIds?.length === 1) {
+        const selId = selectedLayerIds[0]
+        if (layers[selId]?.type === 'frame') {
+          targetId = selId
+        }
+      }
+
+      if (targetId) {
+        handleDropAssetOnFrame(targetId, asset.url, asset.width || 300, asset.height || 200)
+      }
+    }
+
+    canvas.addEventListener('dragover', onDragOver)
+    canvas.addEventListener('drop', onDrop)
+    return () => {
+      canvas.removeEventListener('dragover', onDragOver)
+      canvas.removeEventListener('drop', onDrop)
+    }
+  }, [pixiApp, viewport, layerObjects, layers, selectedLayerIds, handleDropAssetOnFrame, stageContainer])
 
   // Close locked tooltip on any click outside
   useEffect(() => {
@@ -874,13 +957,19 @@ function Stage({
     contextMenu && createPortal(
       <>
         <div
-          className="fixed z-[10010] bg-[#0f1015]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] overflow-hidden transition-all duration-200 animate-in fade-in zoom-in-95"
+          className="fixed z-[10010] bg-[#0f1015]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95"
           style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseLeave={() => setContextMenu(null)}
+          onMouseLeave={() => {
+            if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
+            subMenuTimerRef.current = setTimeout(() => {
+              setSubMenu(null)
+            }, 300)
+          }}
         >
           {selectedLayerIds.length > 0 ? (
             <>
               <button
+                onMouseEnter={() => setSubMenu(null)}
                 onClick={() => {
                   if (selectedLayerIds[0]) {
                     dispatch(duplicateLayer(selectedLayerIds[0]))
@@ -894,6 +983,7 @@ function Stage({
               </button>
               {selectedLayer?.type === 'image' && (
                 <button
+                  onMouseEnter={() => setSubMenu(null)}
                   onClick={() => {
                     const imageUrl = selectedLayer?.data?.url || selectedLayer?.data?.src
                     if (selectedLayerIds[0] && imageUrl) {
@@ -916,56 +1006,162 @@ function Stage({
                   Set as Background
                 </button>
               )}
-              <button
-                onClick={() => {
-                  if (selectedLayerIds[0]) {
-                    dispatch(bringLayerToFront(selectedLayerIds[0]))
-                    setContextMenu(null)
-                  }
-                }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5 border-t border-white/5 mt-1 pt-2.5"
-              >
-                <Layers className="h-3.5 w-3.5 opacity-60" />
-                Bring to Front
-              </button>
-              <button
-                onClick={() => {
-                  if (selectedLayerIds[0]) {
-                    dispatch(bringLayerForward(selectedLayerIds[0]))
-                    setContextMenu(null)
-                  }
-                }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
-              >
-                <ChevronUp className="h-3.5 w-3.5 opacity-60" />
-                Bring Forward
-              </button>
-              <button
-                onClick={() => {
-                  if (selectedLayerIds[0]) {
-                    dispatch(sendLayerBackward(selectedLayerIds[0]))
-                    setContextMenu(null)
-                  }
-                }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
-              >
-                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                Send Backward
-              </button>
-              <button
-                onClick={() => {
-                  if (selectedLayerIds[0]) {
-                    dispatch(sendLayerToBack(selectedLayerIds[0]))
-                    setContextMenu(null)
-                  }
-                }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
-              >
-                <Layers3 className="h-3.5 w-3.5 opacity-60" />
-                Send to Back
-              </button>
+              {selectedLayer?.type === 'frame' && selectedLayer?.data?.assetUrl && (
+                <button
+                  onMouseEnter={() => setSubMenu(null)}
+                  onClick={() => {
+                    if (selectedLayerIds[0]) {
+                      const frameLayerId = selectedLayerIds[0]
+                      const frameLayer = layers[frameLayerId]
+                      const assetUrl = frameLayer?.data?.assetUrl
+                      const assetWidth = frameLayer?.data?.assetWidth || frameLayer?.width || 200
+                      const assetHeight = frameLayer?.data?.assetHeight || frameLayer?.height || 200
+
+                      // Create a standalone image layer from the detached asset
+                      if (assetUrl) {
+                        const maxSize = 400
+                        const ratio = Math.min(maxSize / assetWidth, maxSize / assetHeight, 1)
+                        const displayW = Math.round(assetWidth * ratio)
+                        const displayH = Math.round(assetHeight * ratio)
+                        dispatch(addLayerAndSelect({
+                          sceneId: currentSceneId,
+                          type: 'image',
+                          name: 'Detached Image',
+                          x: frameLayer.x ?? worldWidth / 2,
+                          y: frameLayer.y ?? worldHeight / 2,
+                          width: displayW,
+                          height: displayH,
+                          anchorX: 0.5,
+                          anchorY: 0.5,
+                          mediaWidth: assetWidth,
+                          mediaHeight: assetHeight,
+                          data: { url: assetUrl, src: assetUrl }
+                        }))
+                      }
+
+                      // Reset PIXI frame object immediately
+                      const frameObj = layerObjects?.get(frameLayerId)
+                      if (frameObj && frameObj._imageSprite) {
+                        frameObj._imageSprite.texture = PIXI.Texture.WHITE
+                        frameObj._imageSprite.alpha = 0
+                        frameObj._frameHasAsset = false
+                        if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = true
+                      }
+                      dispatch(detachAssetFromFrame({ layerId: frameLayerId }))
+                      setContextMenu(null)
+                    }
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                >
+                  <Unlink className="h-3.5 w-3.5 opacity-60" />
+                  Detach Asset
+                </button>
+              )}
+              {selectedLayer?.type === 'frame' && (
+                <button
+                  onMouseEnter={() => setSubMenu(null)}
+                  onClick={() => {
+                    if (selectedLayerIds[0]) {
+                      const currentLabel = selectedLayer?.data?.label || ''
+                      const newLabel = window.prompt('Enter frame label:', currentLabel)
+                      if (newLabel !== null) {
+                        dispatch(updateLayer({
+                          id: selectedLayerIds[0],
+                          data: { label: newLabel }
+                        }))
+                        setContextMenu(null)
+                      }
+                    }
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                >
+                  <ImageIcon className="h-3.5 w-3.5 opacity-60" />
+                  Set Label
+                </button>
+              )}
+              <div className="relative">
+                <button
+                  onMouseEnter={() => {
+                    if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
+                    subMenuTimerRef.current = setTimeout(() => setSubMenu('position'), 300)
+                  }}
+                  onClick={() => setSubMenu(subMenu === 'position' ? null : 'position')}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center justify-between gap-2.5 border-t border-white/5 mt-1 pt-2.5 ${
+                    subMenu === 'position' ? 'bg-white/10 text-white' : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Layers className="h-3.5 w-3.5 opacity-60" />
+                    Position
+                  </div>
+                  <ChevronRight className={`h-3.5 w-3.5 opacity-40 transition-transform duration-200 ${subMenu === 'position' ? 'rotate-90' : ''}`} />
+                </button>
+
+                {subMenu === 'position' && (
+                  <div 
+                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 bg-[#0f1015]/90 backdrop-blur-2xl rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200`}
+                    onMouseEnter={() => {
+                      if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        if (selectedLayerIds[0]) {
+                          dispatch(bringLayerToFront(selectedLayerIds[0]))
+                          setContextMenu(null)
+                          setSubMenu(null)
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                    >
+                      <Layers className="h-3.5 w-3.5 opacity-60" />
+                      Bring to Front
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (selectedLayerIds[0]) {
+                          dispatch(bringLayerForward(selectedLayerIds[0]))
+                          setContextMenu(null)
+                          setSubMenu(null)
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5 opacity-60" />
+                      Bring Forward
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (selectedLayerIds[0]) {
+                          dispatch(sendLayerBackward(selectedLayerIds[0]))
+                          setContextMenu(null)
+                          setSubMenu(null)
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                      Send Backward
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (selectedLayerIds[0]) {
+                          dispatch(sendLayerToBack(selectedLayerIds[0]))
+                          setContextMenu(null)
+                          setSubMenu(null)
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                    >
+                      <Layers3 className="h-3.5 w-3.5 opacity-60" />
+                      Send to Back
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="h-px bg-white/10 my-1.5 mx-3" />
               <button
+                onMouseEnter={() => setSubMenu(null)}
                 onClick={() => {
                   selectedLayerIds.forEach(id => dispatch(deleteLayer(id)))
                   dispatch(clearLayerSelection())
@@ -982,6 +1178,7 @@ function Stage({
               {currentSceneBackgroundLayer?.data?.imageUrl && (
                 <>
                   <button
+                    onMouseEnter={() => setSubMenu(null)}
                     onClick={() => {
                       dispatch(detachBackgroundImage({
                         sceneId: currentSceneId,
@@ -996,6 +1193,7 @@ function Stage({
                     Detach Background Image
                   </button>
                   <button
+                    onMouseEnter={() => setSubMenu(null)}
                     onClick={() => {
                       dispatch(removeBackgroundImage({ sceneId: currentSceneId }))
                       setContextMenu(null)
@@ -1018,12 +1216,12 @@ function Stage({
         </div>
         <div
           className="fixed inset-0 z-[10005]"
-          onClick={() => setContextMenu(null)}
+          onClick={() => { setContextMenu(null); setSubMenu(null); }}
         />
       </>,
       document.body
     )
-  ), [contextMenu, selectedLayerIds, dispatch, selectedLayer, currentSceneId, currentSceneBackgroundLayer])
+  ), [contextMenu, selectedLayerIds, dispatch, selectedLayer, currentSceneId, currentSceneBackgroundLayer, layerObjects, subMenu])
   // Camera controls for Canva-like behavior - optimized to reduce re-attachments
   useEffect(() => {
     if (!viewport || !isReady || !containerRef.current) return
@@ -1184,6 +1382,7 @@ function Stage({
       }
     }
 
+    setSubMenu(null)
     setContextMenu({ x: e.clientX, y: e.clientY })
     if (onRightClick) onRightClick(e)
   }, [pixiApp, viewport, layerObjects, stageContainer, selectedLayerIds, layers, currentSceneId, dispatch, onRightClick])

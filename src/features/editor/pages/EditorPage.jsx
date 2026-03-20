@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing } from '../../../store/slices/projectSlice'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -34,6 +34,7 @@ import { useEditorLayout } from '../hooks/useEditorLayout'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
 import { resetGlobalMotionEngine } from '../../engine/motion'
+import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
@@ -340,7 +341,7 @@ function EditorPage() {
   const [activeTool, setActiveTool] = useState('select')
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
-  const [sidebarWidth, setSidebarWidth] = useState('3.5rem')
+  const [sidebarWidth, setSidebarWidth] = useState('80px')
   const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
@@ -613,7 +614,7 @@ function EditorPage() {
 
     const stateString = JSON.stringify(projectState)
     if (!force && stateString === lastSavedStateRef.current) {
-      // console.log('[Save] Skipping save: No changes detected.')
+
       return
     }
 
@@ -702,6 +703,7 @@ function EditorPage() {
         resolution,
         fps: 30,
         onProgress: (update) => {
+          if (controller.signal.aborted) return
           setExportState(prev => ({
             ...prev,
             status: update.status,
@@ -784,6 +786,7 @@ function EditorPage() {
 
 
 
+
   // =============================================================================
   // SIDEBAR AND PLAYBACK CONTROLS
   // =============================================================================
@@ -793,6 +796,17 @@ function EditorPage() {
     handleSidebarItemClick,
     handleClosePanel,
   } = useEditorSidebar()
+
+  // Automatically switch colorPickerType to 'canvas' when canvas is selected
+  // and ensure it switches back to a valid layer mode when a layer is selected.
+  useEffect(() => {
+    if (selectedCanvas && activeSidebarItem === 'Color') {
+      setColorPickerType('canvas')
+    } else if (selectedLayerIds.length > 0 && colorPickerType === 'canvas' && activeSidebarItem === 'Color') {
+      // Revert to 'fill' default when moving from canvas back to layers
+      setColorPickerType('fill')
+    }
+  }, [selectedCanvas, selectedLayerIds, activeSidebarItem, colorPickerType])
 
   const {
     playheadTime,
@@ -1136,6 +1150,35 @@ function EditorPage() {
     return step?.id || null
   }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime])
 
+  // Virtual layer for UI controls during motion capture
+  // This combines the base Redux layer with live capture transforms to prevent slider snapping
+  // while keeping the Redux 'base' state pure for the MotionEngine's starting point.
+  const capturedLayer = useMemo(() => {
+    if (!isMotionCaptureActive || !selectedLayerIds[0]) return null
+    const layerId = selectedLayerIds[0]
+    const capture = motionCaptureRef.current
+    if (!capture) return null
+    const tracked = capture.trackedLayers?.get(layerId)
+    if (!tracked) return null
+    const base = layers[layerId]
+    if (!base) return null
+
+    return {
+      ...base,
+      x: tracked.currentPosition?.x ?? base.x,
+      y: tracked.currentPosition?.y ?? base.y,
+      scaleX: tracked.scaleX !== undefined ? tracked.scaleX : base.scaleX,
+      scaleY: tracked.scaleY !== undefined ? tracked.scaleY : base.scaleY,
+      rotation: tracked.rotation !== undefined ? tracked.rotation : base.rotation,
+      opacity: tracked.opacity !== undefined ? tracked.opacity : base.opacity,
+      cropX: tracked.cropX ?? base.cropX,
+      cropY: tracked.cropY ?? base.cropY,
+      cropWidth: tracked.cropWidth ?? base.cropWidth,
+      cropHeight: tracked.cropHeight ?? base.cropHeight,
+      blur: tracked.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, tracked.blur)) : (base.blur ?? 0)
+    }
+  }, [isMotionCaptureActive, selectedLayerIds, layers, currentSceneMotionFlow, motionCaptureMode])
+
   // Effect: Exit motion capture mode when switching scenes
   // We use a ref to track the previous scene ID to detect changes
   const prevSceneIdRef = useRef(currentSceneId)
@@ -1172,12 +1215,12 @@ function EditorPage() {
         // [CROP FIX] Reset all PIXI objects to their base Redux state when scene switches
         if (motionControls && motionControls.layerObjects && layers) {
           const layerObjects = motionControls.layerObjects
-          layerObjects.forEach((pixiObject, layerId) => {
-            const baseLayerData = layers[layerId]
-            if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-              applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
-            }
-          })
+            layerObjects.forEach((pixiObject, layerId) => {
+              const baseLayerData = layers[layerId]
+              if (baseLayerData && pixiObject && !pixiObject.destroyed) {
+                applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
+              }
+            })
         }
 
         // 2. Reset local state
@@ -1222,6 +1265,13 @@ function EditorPage() {
       stepId: newStepId
     }))
 
+    // [SYNC FIX] Inform Redux that we are starting to edit this specific step
+    // This allows projectSlice to prevent auto-deleting this step if it becomes empty during interaction.
+    dispatch(startMotionEditing({
+      sceneId: currentSceneId,
+      stepId: newStepId
+    }))
+
     // 4. Store the step ID for tracking
     setEditingStepId(newStepId)
     isNewStepRef.current = true // Mark as NEWLY created step
@@ -1243,6 +1293,12 @@ function EditorPage() {
       let currentScaleX = layer.scaleX !== undefined ? layer.scaleX : 1
       let currentScaleY = layer.scaleY !== undefined ? layer.scaleY : 1
       let currentRotation = layer.rotation || 0
+      let currentOpacity = layer.opacity !== undefined ? layer.opacity : 1
+      let currentBlur = layer.blur !== undefined ? layer.blur : 0
+      let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
+        : layer.type === 'text' ? (layer.data?.color || null)
+        : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
+        : null
       let currentCropX = layer.cropX || 0
       let currentCropY = layer.cropY || 0
       let currentCropWidth = layer.cropWidth || layer.width || 100
@@ -1259,15 +1315,19 @@ function EditorPage() {
         const scaleAction = actions.find(a => a.type === 'scale')
         const rotateAction = actions.find(a => a.type === 'rotate')
         const cropAction = actions.find(a => a.type === 'crop')
+        const fadeAction = actions.find(a => a.type === 'fade')
 
         if (moveAction) {
           // Add relative delta values
           currentX += moveAction.values?.dx || 0
           currentY += moveAction.values?.dy || 0
-        } else if (cropAction && cropAction.values?.dx !== undefined) {
-          // BUNDLED POSITION FALLBACK: If no move action exists, check if position was bundled in crop
-          currentX += cropAction.values.dx
-          currentY += cropAction.values.dy
+        }
+
+        // [FIX] CUMULATIVE CROP SHIFT: Always check for bundled displacement in crop actions
+        // regardless of whether a move action exists. This ensures initialTransform is 100% accurate.
+        if (cropAction) {
+          currentX += cropAction.values?.dx || 0
+          currentY += cropAction.values?.dy || 0
         }
 
         if (scaleAction) {
@@ -1290,6 +1350,22 @@ function EditorPage() {
           currentMediaWidth = cropAction.values?.mediaWidth !== undefined ? cropAction.values.mediaWidth : currentMediaWidth
           currentMediaHeight = cropAction.values?.mediaHeight !== undefined ? cropAction.values.mediaHeight : currentMediaHeight
         }
+
+        if (fadeAction) {
+          // Opacity is typically absolute per step
+          currentOpacity = fadeAction.values?.opacity !== undefined ? fadeAction.values.opacity : currentOpacity
+        }
+
+        const blurAction = prevStep.layerActions?.[layerId]?.find(a => a.type === 'blur')
+        if (blurAction) {
+          // Blur is relative or absolute? Usually absolute per step in this engine for simplicity
+          currentBlur = blurAction.values?.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, blurAction.values.blur)) : currentBlur
+        }
+
+        const colorAction = actions.find(a => a.type === 'colorChange')
+        if (colorAction && colorAction.values?.color) {
+          currentColor = colorAction.values.color
+        }
       }
 
       // Session start transform (end of previous steps)
@@ -1307,7 +1383,10 @@ function EditorPage() {
         cropWidth: currentCropWidth,
         cropHeight: currentCropHeight,
         mediaWidth: currentMediaWidth,
-        mediaHeight: currentMediaHeight
+        mediaHeight: currentMediaHeight,
+        opacity: currentOpacity,
+        blur: currentBlur,
+        color: currentColor
       }
 
       // Apply any existing crop action values from previous steps
@@ -1335,8 +1414,17 @@ function EditorPage() {
         cropHeight: currentCropHeight,
         mediaWidth: currentMediaWidth,
         mediaHeight: currentMediaHeight,
+        opacity: currentOpacity,
+        blur: currentBlur,
+        color: currentColor,
         interactionType: null,
-        didMove: false
+        didMove: false,
+        didBlur: false,
+        didScale: false,
+        didRotate: false,
+        didFade: false,
+        didCrop: false,
+        didColor: false
       })
     })
 
@@ -1363,10 +1451,7 @@ function EditorPage() {
           if (initialTrackedLayers.has(layerId)) {
             const entry = initialTrackedLayers.get(layerId)
 
-            // Log discrepancy for debugging
-            // const dx = transform.x - entry.initialTransform.x
-            // const dy = transform.y - entry.initialTransform.y
-            // if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) console.log(`Aligning layer ${layerId}: dx=${dx}, dy=${dy}`)
+
 
             // Update the entry with actual visual coordinates
             entry.initialTransform.x = transform.x
@@ -1374,12 +1459,21 @@ function EditorPage() {
             entry.initialTransform.rotation = transform.rotation
             entry.initialTransform.scaleX = transform.scaleX
             entry.initialTransform.scaleY = transform.scaleY
+            entry.initialTransform.opacity = transform.alpha !== undefined ? transform.alpha : entry.initialTransform.opacity
 
             entry.currentPosition.x = transform.x
             entry.currentPosition.y = transform.y
             entry.rotation = transform.rotation
             entry.scaleX = transform.scaleX
             entry.scaleY = transform.scaleY
+            entry.opacity = transform.alpha !== undefined ? transform.alpha : entry.opacity
+            entry.blur = transform.blur !== undefined ? transform.blur : (transform._blurFilter ? transform._blurFilter.strength : entry.blur)
+
+            // Sync color from PIXI object (post fast-preview)
+            if (transform.color !== undefined && transform.color !== null) {
+              entry.color = transform.color
+              entry.initialTransform.color = transform.color
+            }
 
             // [CROP FIX] DO NOT sync crop values from PIXI objects - use only calculated values from Redux
             // Crop values are already correctly calculated from Redux layers and previous steps above.
@@ -1494,6 +1588,144 @@ function EditorPage() {
               captureActionIdsRef.current.delete(key)
             }
           }
+
+          // [SYNC FIX] Crop: Dispatch crop changes immediately on mouse-up
+          // This keeps Move (center) and Crop (bounds) in sync in Redux, preventing jumps.
+          const initialCropX = init.cropX || 0
+          const initialCropY = init.cropY || 0
+          const initialCropW = init.cropWidth || 100
+          const initialCropH = init.cropHeight || 100
+
+          const hasCropChanged = (
+            (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
+            (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
+            (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
+            (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
+          )
+
+          if (hasCropChanged) {
+            const key = `${layerId}:crop`
+            const existingId = captureActionIdsRef.current.get(key)
+            const cropValues = {
+              cropX: tracked.cropX ?? initialCropX,
+              cropY: tracked.cropY ?? initialCropY,
+              cropWidth: tracked.cropWidth ?? initialCropW,
+              cropHeight: tracked.cropHeight ?? initialCropH,
+              mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
+              mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
+              easing: 'power4.out'
+            }
+
+            // Important: dx/dy are handled by the Move action if it exists.
+            // If No move action, the crop action itself carries the displacement.
+            if (!tracked.didMove && !tracked.controlPoints?.length) {
+              cropValues.dx = tracked.deltaX
+              cropValues.dy = tracked.deltaY
+            }
+
+            if (existingId) {
+              dispatch(updateSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId, values: cropValues }))
+            } else {
+              const actionId = `action-${Date.now()}-crop-${layerId}`
+              dispatch(addSceneMotionAction({ sceneId, stepId, layerId, actionId, type: 'crop', values: cropValues }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // [REVEAL BUG FIX] If crop returned to base, clean up the action
+            const key = `${layerId}:crop`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Fade (Opacity)
+          const initialOpacity = init.opacity !== undefined ? init.opacity : 1
+          const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
+
+          if (opacityChanged) {
+            const key = `${layerId}:fade`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { opacity: tracked.opacity }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-fade-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:fade`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Blur
+          const initialBlur = init.blur !== undefined ? init.blur : 0
+          const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
+          const shouldCreateBlurAction = blurChanged || tracked.didBlur
+
+          if (shouldCreateBlurAction) {
+            const key = `${layerId}:blur`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { blur: tracked.blur }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-blur-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:blur`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Color Change
+          const colorChanged = tracked.color !== undefined && tracked.color !== init.color
+          const shouldCreateColorAction = colorChanged || tracked.didColor
+          if (shouldCreateColorAction) {
+            const key = `${layerId}:colorChange`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { color: tracked.color }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-color-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:colorChange`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
         },
         onPositionUpdate: (data) => {
           // Update tracked layers
@@ -1519,15 +1751,47 @@ function EditorPage() {
             nextEntry.deltaY = y - initialTotalY
           }
 
-          if (scaleX !== undefined) nextEntry.scaleX = scaleX
-          if (scaleY !== undefined) nextEntry.scaleY = scaleY
-          if (rotation !== undefined) nextEntry.rotation = rotation
+          if (scaleX !== undefined) {
+            nextEntry.scaleX = scaleX
+            nextEntry.didScale = true
+          }
+          if (scaleY !== undefined) {
+            nextEntry.scaleY = scaleY
+            nextEntry.didScale = true
+          }
+          if (rotation !== undefined) {
+            nextEntry.rotation = rotation
+            nextEntry.didRotate = true
+          }
+          if (data.opacity !== undefined) {
+            nextEntry.opacity = data.opacity
+            nextEntry.didFade = true
+          }
+          if (data.blur !== undefined) {
+            nextEntry.blur = data.blur
+            nextEntry.didBlur = true
+          }
+          if (data.color !== undefined) {
+            nextEntry.color = data.color
+            nextEntry.didColor = true
+          }
+          if (data.cropX !== undefined) {
+            nextEntry.cropX = data.cropX
+            nextEntry.didCrop = true
+          }
+          if (data.cropY !== undefined) {
+            nextEntry.cropY = data.cropY
+            nextEntry.didCrop = true
+          }
+          if (data.cropWidth !== undefined) {
+            nextEntry.cropWidth = data.cropWidth
+            nextEntry.didCrop = true
+          }
+          if (data.cropHeight !== undefined) {
+            nextEntry.cropHeight = data.cropHeight
+            nextEntry.didCrop = true
+          }
 
-          // Create crop properties in capture data
-          if (data.cropX !== undefined) nextEntry.cropX = data.cropX
-          if (data.cropY !== undefined) nextEntry.cropY = data.cropY
-          if (data.cropWidth !== undefined) nextEntry.cropWidth = data.cropWidth
-          if (data.cropHeight !== undefined) nextEntry.cropHeight = data.cropHeight
           if (data.mediaWidth !== undefined) nextEntry.mediaWidth = data.mediaWidth
           if (data.mediaHeight !== undefined) nextEntry.mediaHeight = data.mediaHeight
 
@@ -1536,9 +1800,11 @@ function EditorPage() {
           // Control points are arrays, so we check for array type to distinguish from undefined
           if (data.controlPoints !== undefined && Array.isArray(data.controlPoints)) {
             nextEntry.controlPoints = data.controlPoints
+            nextEntry.didMove = true // Curve edit IS a move action
           } else if (data.controlPoints === null) {
             // Explicitly clear control points if null is passed
             nextEntry.controlPoints = []
+            nextEntry.didMove = true
           }
           // If controlPoints is undefined, preserve existing value (don't overwrite)
 
@@ -1601,28 +1867,41 @@ function EditorPage() {
    * Apply captured motion and exit capture mode
    */
   const handleApplyMotion = useCallback((options = {}) => {
-    // Check if we have captured motion data
-    if (!motionCaptureMode || !motionCaptureMode.trackedLayers || motionCaptureMode.trackedLayers.size === 0) {
-      // Nothing was captured — restore original step timings if this was a new step
-      if (editingStepId && currentSceneId && isNewStepRef.current && savedStepTimingsRef.current) {
+    // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
+    const hasAnyInteraction = motionCaptureMode.trackedLayers 
+      ? Array.from(motionCaptureMode.trackedLayers.values()).some(
+          l => l.didMove || l.didBlur || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor
+        )
+      : false
+
+    const stepId = editingStepId
+    const currentFlow = currentSceneMotionFlow || { steps: [] }
+    const currentStep = currentFlow.steps?.find(s => s.id === stepId)
+    const hasAnyActionsInRedux = currentStep && currentStep.layerActions && Object.keys(currentStep.layerActions).length > 0
+
+    const isMeaningfulSession = hasAnyInteraction || hasAnyActionsInRedux
+
+    if (!isMeaningfulSession) {
+      // Nothing was changed and no previous actions exist — restore original flow or delete new step
+      if (stepId && currentSceneId && isNewStepRef.current && savedStepTimingsRef.current) {
         dispatch(updateSceneMotionFlow({
           sceneId: currentSceneId,
           steps: savedStepTimingsRef.current
         }))
         savedStepTimingsRef.current = null
-      } else if (editingStepId && currentSceneId) {
+      } else if (stepId && currentSceneId) {
         dispatch(deleteSceneMotionStep({
           sceneId: currentSceneId,
-          stepId: editingStepId
+          stepId: stepId
         }))
       }
       setMotionCaptureMode(null)
       setEditingStepId(null)
       motionCaptureRef.current = null
+      dispatch(stopMotionEditing())
       return
     }
 
-    const stepId = editingStepId
     if (!stepId || !currentSceneId) {
       setMotionCaptureMode(null)
       setEditingStepId(null)
@@ -1634,72 +1913,17 @@ function EditorPage() {
     // This ensures the last interaction's snapshot is committed to history.
     dispatch({ type: 'history/flushPending' })
 
-    // [RACE CONDITION FIX] Get the current step to check for existing actions
     // Redux updates are synchronous, but React re-renders are async, so currentSceneMotionFlow
     // might be from a previous render. We'll build the preview optimistically anyway.
-    const currentFlow = currentSceneMotionFlow || { steps: [] }
     const step = currentFlow.steps?.find(s => s.id === stepId)
 
     // Move/scale/rotate actions are already dispatched to Redux by onInteractionEnd during capture.
     // Only dispatch crop actions here (not handled by onInteractionEnd).
-    motionCaptureMode.trackedLayers.forEach((layerData, layerId) => {
-      const { deltaX, initialTransform } = layerData
-
-      const existingLayerActions = step?.layerActions?.[layerId] || []
-      const cropAction = existingLayerActions.find(a => a.type === 'crop')
-
-      // Check if a move action exists (from onInteractionEnd or prior editing)
-      const hasMoveAction = captureActionIdsRef.current.has(`${layerId}:move`) ||
-        existingLayerActions.some(a => a.type === 'move')
-
-      // Sync Crop
-      const { cropX, cropY, cropWidth, cropHeight, mediaWidth, mediaHeight } = layerData
-
-      const initialCropX = initialTransform?.cropX || 0
-      const initialCropY = initialTransform?.cropY || 0
-      const initialCropW = initialTransform?.cropWidth || 100
-      const initialCropH = initialTransform?.cropHeight || 100
-
-      const hasCropChanged = (
-        (cropX !== undefined && Math.abs(cropX - initialCropX) > 0.1) ||
-        (cropY !== undefined && Math.abs(cropY - initialCropY) > 0.1) ||
-        (cropWidth !== undefined && Math.abs(cropWidth - initialCropW) > 0.1) ||
-        (cropHeight !== undefined && Math.abs(cropHeight - initialCropH) > 0.1)
-      )
-
-      if (hasCropChanged) {
-        const cropValues = {
-          cropX: cropX ?? initialCropX,
-          cropY: cropY ?? initialCropY,
-          cropWidth: cropWidth ?? initialCropW,
-          cropHeight: cropHeight ?? initialCropH,
-          mediaWidth: mediaWidth ?? initialTransform?.mediaWidth,
-          mediaHeight: mediaHeight ?? initialTransform?.mediaHeight,
-          // Only pass dx/dy directly to CropAction if MoveAction isn't managing it.
-          dx: hasMoveAction ? undefined : deltaX,
-          dy: hasMoveAction ? undefined : (layerData.deltaY || 0),
-          easing: 'power4.out'
-        }
-
-        if (cropAction) {
-          dispatch(updateSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: cropAction.id,
-            values: { ...cropAction.values, ...cropValues }
-          }))
-        } else {
-          dispatch(addSceneMotionAction({
-            sceneId: currentSceneId, stepId, layerId, actionId: `action-${Date.now()}-crop-${layerId}`,
-            type: 'crop', values: cropValues
-          }))
-        }
-      }
-    })
 
     // =======================================================================
     // FAST-PLAY PREVIEW: Trigger animated transition for visual feedback
     // =======================================================================
     if (motionControls && !options?.skipPreview) {
-      const currentFlow = currentSceneMotionFlow || { steps: [], pageDuration: 5000 }
       const motionFlow = currentFlow.steps || []
       const stepIndex = motionFlow.findIndex(s => s.id === stepId)
       const pageDuration = currentFlow.pageDuration || 5000
@@ -1750,8 +1974,10 @@ function EditorPage() {
           const initialCropY = initialTransform?.cropY || 0
           const initialCropW = initialTransform?.cropWidth || 100
           const initialCropH = initialTransform?.cropHeight || 100
+          // Determine if layer type supports cropping
+          const isCropSupported = !['text', 'shape', 'background'].includes(layerData.type)
 
-          const hasCropChanged = (
+          const hasCropChanged = isCropSupported && (
             (cropX !== undefined && Math.abs(cropX - initialCropX) > 0.1) ||
             (cropY !== undefined && Math.abs(cropY - initialCropY) > 0.1) ||
             (cropWidth !== undefined && Math.abs(cropWidth - initialCropW) > 0.1) ||
@@ -1762,18 +1988,26 @@ function EditorPage() {
           // Control points take priority - if they exist, we MUST include move action
           const hasControlPoints = preservedControlPoints.length > 0
           const hasSignificantMovement = Math.abs(deltaX || 0) > 0.1 || Math.abs(deltaY || 0) > 0.1
-          const shouldIncludeMoveAction = (didMove || hasControlPoints || !hasCropChanged) && (hasSignificantMovement || hasControlPoints)
+          const moveActionAlreadyExists = !!originalMoveAction
+          const shouldIncludeMoveAction = (didMove || hasControlPoints || moveActionAlreadyExists || !hasCropChanged) && (hasSignificantMovement || hasControlPoints || moveActionAlreadyExists)
 
           if (shouldIncludeMoveAction) {
             const moveIdx = actions.findIndex(a => a.type === 'move')
             const existingValues = existingMoveAction?.values || {}
 
+            // [FIX] ONLY update dx/dy from the live canvas if the user actually moved or cropped the object.
+            // If they just tweaked a blur/color slider, the canvas position might be mid-tween or jumping from a preview,
+            // so we MUST strictly preserve the existing perfectly-calculated dx/dy!
+            const isPositionalEdit = didMove || hasCropChanged || hasControlPoints
+            const finalDx = isPositionalEdit ? deltaX : (existingValues.dx ?? deltaX)
+            const finalDy = isPositionalEdit ? deltaY : (existingValues.dy ?? deltaY)
+
             const moveAction = {
               type: 'move',
               values: {
                 ...existingValues,
-                dx: deltaX,
-                dy: deltaY,
+                dx: finalDx,
+                dy: finalDy,
                 controlPoints: preservedControlPoints,
                 duration: effectiveDuration,
                 easing: 'power4.out'
@@ -1852,6 +2086,54 @@ function EditorPage() {
             }
           }
 
+          // Fade (Opacity) action
+          const opacity = layerData.opacity
+          const initialOpacity = initialTransform?.opacity !== undefined ? initialTransform.opacity : 1
+          if (opacity !== undefined && Math.abs(opacity - initialOpacity) > 0.001) {
+            const fadeIdx = actions.findIndex(a => a.type === 'fade')
+            const action = {
+              type: 'fade',
+              values: {
+                opacity: opacity,
+                duration: effectiveDuration,
+                easing: 'power4.out'
+              }
+            }
+            if (fadeIdx !== -1) actions[fadeIdx] = action; else actions.push(action)
+          }
+
+          // Blur action
+          const blur = layerData.blur
+          const initialBlur = initialTransform?.blur !== undefined ? initialTransform.blur : 0
+          if (blur !== undefined && Math.abs(blur - initialBlur) > 0.1) {
+            const blurIdx = actions.findIndex(a => a.type === 'blur')
+            const action = {
+              type: 'blur',
+              values: {
+                blur: blur,
+                duration: effectiveDuration,
+                easing: 'power4.out'
+              }
+            }
+            if (blurIdx !== -1) actions[blurIdx] = action; else actions.push(action)
+          }
+
+          // [COLOR FIX] Add colorChange action to optimistic flow
+          const color = layerData.color
+          const initialColor = initialTransform?.color
+          if (color !== undefined && color !== initialColor) {
+            const colorIdx = actions.findIndex(a => a.type === 'colorChange')
+            const action = {
+              type: 'colorChange',
+              values: {
+                color: color,
+                duration: effectiveDuration,
+                easing: 'power1.out'
+              }
+            }
+            if (colorIdx !== -1) actions[colorIdx] = action; else actions.push(action)
+          }
+
           targetStep.layerActions[layerId] = actions
         })
       }
@@ -1882,12 +2164,18 @@ function EditorPage() {
       setEditingStepId(null)
       motionCaptureRef.current = null
       savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
+
+      // [SYNC FIX] Inform Redux that we are done editing
+      dispatch(stopMotionEditing())
     } else {
       // No motionControls available, just clear capture mode
       setMotionCaptureMode(null)
       setEditingStepId(null)
       motionCaptureRef.current = null
       savedStepTimingsRef.current = null
+
+      // [SYNC FIX] Inform Redux that we are done editing
+      dispatch(stopMotionEditing())
     }
   }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo])
 
@@ -1925,7 +2213,7 @@ function EditorPage() {
       layerObjects.forEach((pixiObject, layerId) => {
         const baseLayerData = layers[layerId]
         if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-          applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
+          applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
         }
       })
     }
@@ -1935,7 +2223,10 @@ function EditorPage() {
     setEditingStepId(null)
     motionCaptureRef.current = null
     isNewStepRef.current = false
-  }, [editingStepId, currentSceneId, dispatch, motionControls, layers])
+
+    // [SYNC FIX] Inform Redux that we are done editing
+    dispatch(stopMotionEditing())
+  }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset])
 
   // =========================================================================
   // Sync trackedLayers from Redux after undo/redo during active capture mode.
@@ -2105,6 +2396,13 @@ function EditorPage() {
     // INSTANT FEEDBACK: Glow the block immediately regardless of state
     setEditingStepId(stepId)
 
+    // [SYNC FIX] Inform Redux that we are starting to edit this specific step
+    // This allows projectSlice to prevent auto-deleting this step if it becomes empty during interaction.
+    dispatch(startMotionEditing({
+      sceneId: currentSceneId,
+      stepId: stepId
+    }))
+
     // 3. BASE CASE: Snap playhead to scene start
     if (stepId === 'base') {
       // Seek UI and Engine together
@@ -2141,6 +2439,12 @@ function EditorPage() {
       let currentScaleX = layer.scaleX !== undefined ? layer.scaleX : 1
       let currentScaleY = layer.scaleY !== undefined ? layer.scaleY : 1
       let currentRotation = layer.rotation || 0
+      let currentOpacity = layer.opacity !== undefined ? layer.opacity : 1
+      let currentBlur = layer.blur !== undefined ? layer.blur : 0
+      let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
+        : layer.type === 'text' ? (layer.data?.color || null)
+        : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
+        : null
       let currentCropX = layer.cropX || 0
       let currentCropY = layer.cropY || 0
       let currentCropWidth = layer.cropWidth || layer.width || 100
@@ -2172,8 +2476,10 @@ function EditorPage() {
           currentRotation += (rotateAction.values?.dangle ?? 0)
         }
         if (cropAction) {
-          if (cropAction.values?.x !== undefined) currentX = cropAction.values.x
-          if (cropAction.values?.y !== undefined) currentY = cropAction.values.y
+          // [FIX] CUMULATIVE CROP SHIFT: Always check for bundled displacement in crop actions
+          // regardless of whether a move action exists. This ensures initialTransform is 100% accurate.
+          currentX += cropAction.values?.dx || 0
+          currentY += cropAction.values?.dy || 0
 
           currentCropX = cropAction.values?.cropX ?? currentCropX
           currentCropY = cropAction.values?.cropY ?? currentCropY
@@ -2181,6 +2487,21 @@ function EditorPage() {
           currentCropHeight = cropAction.values?.cropHeight ?? currentCropHeight
           currentMediaWidth = cropAction.values?.mediaWidth ?? currentMediaWidth
           currentMediaHeight = cropAction.values?.mediaHeight ?? currentMediaHeight
+        }
+
+        const fadeAction = actions.find(a => a.type === 'fade')
+        if (fadeAction) {
+          currentOpacity = fadeAction.values?.opacity !== undefined ? fadeAction.values.opacity : currentOpacity
+        }
+
+        const blurAction = actions.find(a => a.type === 'blur')
+        if (blurAction) {
+          currentBlur = blurAction.values?.blur !== undefined ? blurAction.values.blur : currentBlur
+        }
+
+        const colorAction = actions.find(a => a.type === 'colorChange')
+        if (colorAction && colorAction.values?.color) {
+          currentColor = colorAction.values.color
         }
       }
 
@@ -2198,6 +2519,9 @@ function EditorPage() {
         cropHeight: currentCropHeight,
         mediaWidth: currentMediaWidth,
         mediaHeight: currentMediaHeight,
+        opacity: currentOpacity,
+        blur: currentBlur,
+        color: currentColor,
       }
 
       const currentStepActions = step?.layerActions?.[layerId] || []
@@ -2205,9 +2529,12 @@ function EditorPage() {
       const currentScale = currentStepActions.find(a => a.type === 'scale')
       const currentRotate = currentStepActions.find(a => a.type === 'rotate')
       const currentCrop = currentStepActions.find(a => a.type === 'crop')
+      const currentFade = currentStepActions.find(a => a.type === 'fade')
+      const currentBlurAction = currentStepActions.find(a => a.type === 'blur')
+      const currentColorAction = currentStepActions.find(a => a.type === 'colorChange')
 
-      const currentTargetX = currentMove ? (sessionStartTransform.x + (currentMove.values.dx || 0)) : (currentCrop?.values?.x ?? sessionStartTransform.x)
-      const currentTargetY = currentMove ? (sessionStartTransform.y + (currentMove.values.dy || 0)) : (currentCrop?.values?.y ?? sessionStartTransform.y)
+      const currentTargetX = currentMove ? (sessionStartTransform.x + (currentMove.values.dx || 0)) : (sessionStartTransform.x + (currentCrop?.values?.dx || 0))
+      const currentTargetY = currentMove ? (sessionStartTransform.y + (currentMove.values.dy || 0)) : (sessionStartTransform.y + (currentCrop?.values?.dy || 0))
 
       const deltaX = currentTargetX - sessionStartTransform.x
       const deltaY = currentTargetY - sessionStartTransform.y
@@ -2228,8 +2555,12 @@ function EditorPage() {
         cropHeight: currentCrop?.values?.cropHeight ?? sessionStartTransform.cropHeight,
         mediaWidth: currentCrop?.values?.mediaWidth ?? sessionStartTransform.mediaWidth,
         mediaHeight: currentCrop?.values?.mediaHeight ?? sessionStartTransform.mediaHeight,
+        opacity: currentFade?.values?.opacity ?? sessionStartTransform.opacity,
+        blur: currentBlurAction?.values?.blur ?? sessionStartTransform.blur,
+        color: currentColorAction?.values?.color ?? sessionStartTransform.color,
         controlPoints: currentMove?.values?.controlPoints || [],
         didMove: false,
+        didColor: false,
         interactionType: null
       })
     })
@@ -2260,6 +2591,13 @@ function EditorPage() {
             }
             if (transform.mediaWidth !== undefined) entry.mediaWidth = transform.mediaWidth
             if (transform.mediaHeight !== undefined) entry.mediaHeight = transform.mediaHeight
+            if (transform.alpha !== undefined) entry.opacity = transform.alpha
+            if (transform.blur !== undefined) entry.blur = transform.blur
+            // Sync color from PIXI object (post fast-preview)
+            if (transform.color !== undefined && transform.color !== null) {
+              entry.color = transform.color
+              entry.initialTransform.color = transform.color
+            }
           }
         })
       }
@@ -2285,9 +2623,15 @@ function EditorPage() {
         // Dispatches motion actions to Redux so each interaction creates a history entry for undo.
         onInteractionEnd: (layerId) => {
           const capture = motionCaptureRef.current
-          if (!capture) return
+          if (!capture) {
+            console.warn('[Capture] No active capture found in ref');
+            return
+          }
           const tracked = capture.trackedLayers?.get(layerId)
-          if (!tracked) return
+          if (!tracked) {
+            console.warn(`[Capture] No tracked data found for layer=${layerId}`);
+            return
+          }
           const captureStepId = capture.stepId
           const sceneId = currentSceneId
           if (!captureStepId || !sceneId) return
@@ -2374,13 +2718,153 @@ function EditorPage() {
               captureActionIdsRef.current.delete(key)
             }
           }
+
+          // [SYNC FIX] Crop: Dispatch crop changes immediately on mouse-up
+          // This keeps Move (center) and Crop (bounds) in sync in Redux, preventing jumps.
+          const initialCropX = init.cropX || 0
+          const initialCropY = init.cropY || 0
+          const initialCropW = init.cropWidth || 100
+          const initialCropH = init.cropHeight || 100
+
+          const hasCropChanged = (
+            (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
+            (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
+            (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
+            (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
+          )
+
+          if (hasCropChanged) {
+            const key = `${layerId}:crop`
+            const existingId = captureActionIdsRef.current.get(key)
+            const cropValues = {
+              cropX: tracked.cropX ?? initialCropX,
+              cropY: tracked.cropY ?? initialCropY,
+              cropWidth: tracked.cropWidth ?? initialCropW,
+              cropHeight: tracked.cropHeight ?? initialCropH,
+              mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
+              mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
+              easing: 'power4.out'
+            }
+
+            // Important: dx/dy are handled by the Move action if it exists.
+            // If No move action, the crop action itself carries the displacement.
+            if (!tracked.didMove && !tracked.controlPoints?.length) {
+              cropValues.dx = tracked.deltaX
+              cropValues.dy = tracked.deltaY
+            }
+
+            if (existingId) {
+              dispatch(updateSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId, values: cropValues }))
+            } else {
+              const actionId = `action-${Date.now()}-crop-${layerId}`
+              dispatch(addSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId, type: 'crop', values: cropValues }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // [REVEAL BUG FIX] If crop returned to base, clean up the action
+            const key = `${layerId}:crop`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Fade (Opacity)
+          const initialOpacity = init.opacity !== undefined ? init.opacity : 1
+          const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
+          if (opacityChanged) {
+            const key = `${layerId}:fade`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { opacity: tracked.opacity }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-fade-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:fade`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Blur
+          const initialBlur = init.blur !== undefined ? init.blur : 0
+          const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
+          const shouldCreateBlurAction = blurChanged || tracked.didBlur
+
+          if (shouldCreateBlurAction) {
+            const key = `${layerId}:blur`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { blur: tracked.blur }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-blur-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:blur`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
+          // Color Change
+          const colorChanged = tracked.color !== undefined && tracked.color !== init.color
+          const shouldCreateColorAction = colorChanged || tracked.didColor
+          if (shouldCreateColorAction) {
+            const key = `${layerId}:colorChange`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { color: tracked.color }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-color-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:colorChange`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
         },
         onPositionUpdate: (data) => {
+
           const capture = motionCaptureRef.current
           if (!capture) return
           const entry = capture.trackedLayers.get(data.layerId)
           if (entry) {
-            if (data.interactionType === 'move') entry.didMove = true
+            if (Math.abs(data.x - entry.initialTransform.x) > 0.5 || Math.abs(data.y - entry.initialTransform.y) > 0.5) {
+              entry.didMove = true
+            }
             if (data.x !== undefined && data.y !== undefined) {
               entry.currentPosition = { x: data.x, y: data.y }
               entry.deltaX = data.x - entry.initialTransform.x
@@ -2395,6 +2879,12 @@ function EditorPage() {
             if (data.cropHeight !== undefined) entry.cropHeight = data.cropHeight
             if (data.mediaWidth !== undefined) entry.mediaWidth = data.mediaWidth
             if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
+            if (data.opacity !== undefined) entry.opacity = data.opacity
+            if (data.blur !== undefined) entry.blur = data.blur
+            if (data.color !== undefined) {
+              entry.color = data.color
+              entry.didColor = true
+            }
             if (data.controlPoints !== undefined && Array.isArray(data.controlPoints)) {
               entry.controlPoints = data.controlPoints
             } else if (data.controlPoints === null) {
@@ -2983,7 +3473,32 @@ function EditorPage() {
                         : '#ffffff'
                   }
                   onColorSelect={(color) => {
+                    // Motion capture interception for color changes
+                    // Do NOT dispatch updateLayer during capture — that would pollute the base layer state
+                    // and make start === target, resulting in no animation.
+                    if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
+                      // For canvas background color, find the background layer
+                      let captureLayerId = null
+                      if (colorPickerType === 'canvas') {
+                        captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
+                      } else if (selectedLayerIds?.length === 1) {
+                        captureLayerId = selectedLayerIds[0]
+                      }
+
+                      if (captureLayerId) {
+                        const capture = motionCaptureRef.current
+                        if (capture && capture.trackedLayers.has(captureLayerId)) {
+                          const colorValue = color === 'transparent' ? null : color
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                          effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                          return
+                        }
+                      }
+                    }
+
                     if (colorPickerType === 'canvas' && currentSceneId) {
+                      if (color === 'transparent') return // Canvas background cannot be transparent
+
                       // Convert hex string to number for canvas background
                       const bgColor = color.startsWith('#')
                         ? parseInt(color.slice(1), 16)
@@ -3014,6 +3529,8 @@ function EditorPage() {
 
                       // Handle background layer color changes
                       if (layer.type === 'background' && currentSceneId) {
+                        if (color === 'transparent') return // Background layer cannot be transparent
+
                         // Convert hex string to number for background layer
                         const bgColor = color.startsWith('#')
                           ? parseInt(color.slice(1), 16)
@@ -3143,6 +3660,25 @@ function EditorPage() {
                             : '#ffffff'
                       }
                       onColorSelect={(color) => {
+                        // Motion capture interception
+                        if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
+                          let captureLayerId = null
+                          if (colorPickerType === 'canvas') {
+                            captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
+                          } else if (selectedLayerIds?.length === 1) {
+                            captureLayerId = selectedLayerIds[0]
+                          }
+                          if (captureLayerId) {
+                            const capture = motionCaptureRef.current
+                            if (capture && capture.trackedLayers.has(captureLayerId)) {
+                              const colorValue = color === 'transparent' ? null : color
+                              effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                              effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                              return
+                            }
+                          }
+                        }
+
                         if (colorPickerType === 'canvas' && currentSceneId) {
                           const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
                           dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
@@ -3220,12 +3756,60 @@ function EditorPage() {
           <div ref={topControlsRef} className="absolute left-1/2 transform -translate-x-1/2 z-30 pointer-events-none" style={{ top: `${topToolbarHeight + 8}px` }}>
             <CanvasControls
               duration={`${totalTime.toFixed(1)}s`}
-              selectedLayer={selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null}
+              selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
               selectedCanvas={selectedCanvas}
               currentScene={currentSceneData}
               onLayerUpdate={(updates) => {
                 if (selectedLayerIds[0]) {
-                  dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
+                  const layerId = selectedLayerIds[0]
+
+                  // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
+                  // We do NOT dispatch updateLayer here because that pollutes the base layer state
+                  // which the MotionEngine uses as its starting point for Step 0.
+                  if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate) {
+                    if (updates.opacity !== undefined) {
+                      const capture = motionCaptureRef.current
+                      if (capture && capture.trackedLayers.has(layerId)) {
+                        capture.trackedLayers.get(layerId).didFade = true
+                      }
+                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, opacity: updates.opacity })
+                      // For slider adjustments, we trigger an immediate interaction end 
+                      // to generate/update the motion action in Redux.
+                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+                    // Handle other properties if Slider UI ever supports them (rotate, x, y etc)
+                    if (updates.rotation !== undefined) {
+                      const capture = motionCaptureRef.current
+                      if (capture && capture.trackedLayers.has(layerId)) {
+                        capture.trackedLayers.get(layerId).didRotate = true
+                      }
+                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, rotation: updates.rotation })
+                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+                    if (updates.blur !== undefined) {
+                      const clampedBlur = Math.max(0, Math.min(BLUR_MAX, updates.blur))
+                      const capture = motionCaptureRef.current
+                      if (capture && capture.trackedLayers.has(layerId)) {
+                        const tracked = capture.trackedLayers.get(layerId)
+                        tracked.didBlur = true
+                      }
+                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
+                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+                    if (updates.data?.fill !== undefined || updates.data?.color !== undefined) {
+                      const colorValue = updates.data?.fill || updates.data?.color
+                      const capture = motionCaptureRef.current
+                      if (capture && capture.trackedLayers.has(layerId)) {
+                        capture.trackedLayers.get(layerId).didColor = true
+                        capture.trackedLayers.get(layerId).color = colorValue
+                      }
+                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: colorValue })
+                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+                  } else {
+                    // Normal editor behavior: update base layer properties
+                    dispatch(updateLayer({ id: layerId, ...updates }))
+                  }
                 }
               }}
               onCanvasUpdate={(updates) => {
@@ -3254,6 +3838,7 @@ function EditorPage() {
               onStartMotionCapture={handleStartMotionCapture}
               onApplyMotion={handleApplyMotion}
               onCancelMotion={handleCancelMotion}
+              stepsCount={currentSceneMotionFlow?.steps?.length || 0}
             />
           </div>
 
@@ -3263,7 +3848,7 @@ function EditorPage() {
             data-tutorial="canvas-area"
             className="absolute flex-1 overflow-hidden select-none"
             style={{
-              top: topToolbarHeight,
+              top: 'var(--header-height)',
               bottom: initialBottomHeight || 0,
               left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
               right: 0,
@@ -3500,7 +4085,13 @@ function EditorPage() {
       {/* Export Progress Overlay */}
       <Modal
         isOpen={exportState.isActive}
-        onClose={() => setExportState(prev => ({ ...prev, isActive: false }))}
+        onClose={() => {
+          if (exportState.status !== 'completed' && exportState.status !== 'error') {
+            handleCancelExport()
+          } else {
+            setExportState(prev => ({ ...prev, isActive: false }))
+          }
+        }}
         showCloseButton={exportState.status === 'completed' || exportState.status === 'error'}
         maxWidth="max-w-md"
       >

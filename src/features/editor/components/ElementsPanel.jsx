@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { X, Square, Circle, Triangle, Hexagon, Minus, Star } from 'lucide-react'
+import { X, Square, Circle, Triangle, Hexagon, Minus, Star, Frame } from 'lucide-react'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
 
 function ElementsPanel({ onClose, aspectRatio }) {
@@ -213,11 +213,102 @@ function ElementsPanel({ onClose, aspectRatio }) {
     },
   ]
 
+  // Frame presets — 5 common frame aspect ratios
+  const framePresets = [
+    {
+      id: 'frame-square',
+      name: 'Square Frame',
+      width: 200,
+      height: 200,
+      label: '1:1',
+    },
+    {
+      id: 'frame-landscape',
+      name: 'Landscape Frame',
+      width: 280,
+      height: 180,
+      label: '16:9',
+    },
+    {
+      id: 'frame-portrait',
+      name: 'Portrait Frame',
+      width: 160,
+      height: 240,
+      label: '9:16',
+    },
+    {
+      id: 'frame-wide',
+      name: 'Wide Frame',
+      width: 300,
+      height: 140,
+      label: '21:9',
+    },
+    {
+      id: 'frame-classic',
+      name: 'Classic Frame',
+      width: 240,
+      height: 180,
+      label: '4:3',
+    },
+  ]
+
+  const handleAddFrame = (preset) => {
+    if (!currentSceneId) return
+    const centerX = worldWidth / 2
+    const centerY = worldHeight / 2
+
+    dispatch(addLayerAndSelect({
+      sceneId: currentSceneId,
+      type: 'frame',
+      name: preset.name,
+      x: centerX,
+      y: centerY,
+      width: preset.width,
+      height: preset.height,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      data: {},
+    }))
+  }
+
+  const frameItems = framePresets.map((preset) => ({
+    id: preset.id,
+    preset,
+    onClick: () => handleAddFrame(preset),
+  }))
+
   const elementItems = allElements.map((element) => ({
     id: element.id,
     element,
     onClick: element.onClick,
   }))
+
+  const renderFramePreview = (item) => {
+    const { preset } = item
+    // Normalize to fit within a 56x56 viewBox
+    const maxDim = Math.max(preset.width, preset.height)
+    const w = (preset.width / maxDim) * 40
+    const h = (preset.height / maxDim) * 40
+    const rx = (56 - w) / 2
+    const ry = (56 - h) / 2
+
+    return (
+      <button
+        onClick={item.onClick}
+        className="w-full aspect-square flex flex-col items-center justify-center hover:bg-white/5 rounded-[12px] transition-all duration-300 group relative gap-1.5 border border-transparent hover:border-white/10 shadow-sm"
+        title={preset.name}
+      >
+        <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+          <rect x={rx} y={ry} width={w} height={h} rx="3"
+            fill="none" stroke="#a1a1aa" strokeWidth="1.5" strokeDasharray="4 2" />
+          {/* Plus icon in center */}
+          <line x1="24" y1="28" x2="32" y2="28" stroke="#71717a" strokeWidth="1.5" />
+          <line x1="28" y1="24" x2="28" y2="32" stroke="#71717a" strokeWidth="1.5" />
+        </svg>
+        <span className="text-[10px] text-zinc-500 font-medium tracking-wide">{preset.label}</span>
+      </button>
+    )
+  }
 
   const renderElementPreview = (item) => {
     if (item.element) {
@@ -226,32 +317,32 @@ function ElementsPanel({ onClose, aspectRatio }) {
       return (
         <button
           onClick={item.onClick}
-          className="w-full aspect-square flex items-center justify-center hover:bg-zinc-800/20 rounded-lg transition-all duration-200 group relative"
+          className="w-full aspect-square flex items-center justify-center hover:bg-white/5 rounded-[12px] transition-all duration-300 group relative border border-transparent hover:border-white/10 shadow-sm"
           title={item.element.name}
         >
-          <svg viewBox="0 0 56 56" className="w-[56px] h-[56px] flex-shrink-0">
+          <svg viewBox="0 0 56 56" className="w-[52px] h-[52px] flex-shrink-0 transition-transform duration-300 group-hover:scale-110">
             {shapeId === 'circle' && (
-              <circle cx="28" cy="28" r="20" fill="#e5e5e5" />
+              <circle cx="28" cy="28" r="20" fill="#f4f4f5" />
             )}
             {shapeId === 'rectangle' && (
-              <rect x="8" y="8" width="40" height="40" rx="3" fill="#e5e5e5" />
+              <rect x="8" y="8" width="40" height="40" rx="4" fill="#f4f4f5" />
             )}
             {shapeId === 'square' && (
-              <rect x="12" y="12" width="32" height="32" rx="2" fill="#e5e5e5" />
+              <rect x="12" y="12" width="32" height="32" rx="3" fill="#f4f4f5" />
             )}
             {shapeId === 'triangle' && (
-              <path d="M28 10L45 40H11L28 10z" fill="#e5e5e5" />
+              <path d="M28 10L45 40H11L28 10z" fill="#f4f4f5" />
             )}
             {shapeId === 'hexagon' && (
-              <path d="M28 8l16.97 9.75v19.5L28 48l-16.97-9.75v-19.5L28 8z" fill="#e5e5e5" />
+              <path d="M28 8l16.97 9.75v19.5L28 48l-16.97-9.75v-19.5L28 8z" fill="#f4f4f5" />
             )}
             {shapeId === 'line' && (
-              <rect x="8" y="26" width="40" height="4" rx="2" fill="#e5e5e5" />
+              <rect x="8" y="26" width="40" height="4" rx="2" fill="#f4f4f5" />
             )}
             {shapeId === 'star' && (
               <path
                 d="M28 8l5.09 10.32 11.39 1.65-8.24 8.03 1.95 11.3L28 33.8l-10.19 5.5 1.95-11.3-8.24-8.03 11.39-1.65L28 8z"
-                fill="#e5e5e5"
+                fill="#f4f4f5"
               />
             )}
           </svg>
@@ -262,17 +353,18 @@ function ElementsPanel({ onClose, aspectRatio }) {
     return null
   }
 
-  const GridSection = ({ items, sectionName }) => {
+  const GridSection = ({ items, sectionName, renderItem }) => {
+    const renderer = renderItem || renderElementPreview
     return (
-      <div className="mb-6">
-        <div className="flex items-center justify-between px-4 mb-3">
-          <h3 className="text-sm font-medium text-white">{sectionName}</h3>
-          <span className="text-xs text-zinc-500">{items.length} items</span>
+      <div className="mb-8">
+        <div className="flex items-center justify-between px-6 mb-4">
+          <h3 className="text-[14px] font-semibold text-white/50 uppercase tracking-widest">{sectionName}</h3>
+          <span className="text-[12px] text-zinc-600 font-medium">{items.length} items</span>
         </div>
-        <div className="px-4">
-          <div className="grid grid-cols-3 gap-3">
+        <div className="px-6">
+          <div className="grid grid-cols-3 gap-4">
             {items.map((item) => (
-              <div key={item.id}>{renderElementPreview(item)}</div>
+              <div key={item.id}>{renderer(item)}</div>
             ))}
           </div>
         </div>
@@ -292,15 +384,15 @@ function ElementsPanel({ onClose, aspectRatio }) {
       }}
     >
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Graphics</h2>
+      <div className="px-6 pt-6 pb-4 border-b border-white/5">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-[20px] font-semibold text-white tracking-tight">Graphics</h2>
           {onClose && (
             <button
               onClick={onClose}
-              className="text-white/70 hover:text-white hover:bg-white/10 transition-all duration-200 p-1 rounded-md"
+              className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
             >
-              <X className="h-4 w-4" strokeWidth={2} />
+              <X className="h-5 w-5" strokeWidth={2} />
             </button>
           )}
         </div>
@@ -313,6 +405,13 @@ function ElementsPanel({ onClose, aspectRatio }) {
             items={elementItems}
             sectionName="Elements"
           />
+
+          <GridSection
+            items={frameItems}
+            sectionName="Frames"
+            renderItem={renderFramePreview}
+          />
+
         </div>
       </div>
     </div>

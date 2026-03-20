@@ -7,15 +7,19 @@ export { MoveAction } from './MoveAction.js'
 export { ScaleAction } from './ScaleAction.js'
 export { RotateAction } from './RotateAction.js'
 export { FadeAction } from './FadeAction.js'
+export { BlurAction } from './BlurAction.js'
 export { HoldAction } from './HoldAction.js'
 export { CropAction } from './CropAction.js'
+export { ColorChangeAction } from './ColorChangeAction.js'
 
 import { MoveAction } from './MoveAction.js'
 import { ScaleAction } from './ScaleAction.js'
 import { RotateAction } from './RotateAction.js'
 import { FadeAction } from './FadeAction.js'
+import { BlurAction } from './BlurAction.js'
 import { HoldAction } from './HoldAction.js'
 import { CropAction } from './CropAction.js'
+import { ColorChangeAction } from './ColorChangeAction.js'
 import { ACTION_TYPES } from '../types/actionTypes.js'
 
 /**
@@ -26,8 +30,10 @@ export const ACTION_HANDLERS = {
   [ACTION_TYPES.SCALE]: ScaleAction,
   [ACTION_TYPES.ROTATE]: RotateAction,
   [ACTION_TYPES.FADE]: FadeAction,
+  [ACTION_TYPES.BLUR]: BlurAction,
   [ACTION_TYPES.CROP]: CropAction,
   [ACTION_TYPES.HOLD]: HoldAction,
+  [ACTION_TYPES.COLOR_CHANGE]: ColorChangeAction,
 }
 
 /**

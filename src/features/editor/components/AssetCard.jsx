@@ -18,6 +18,17 @@ export function AssetCard({ image, isUploading, deletingId, onDelete, onAdd }) {
         : 'cursor-pointer hover:border-purple-500/50'
         }`}
       onClick={() => !isDisabled && onAdd(image)}
+      draggable={!isDisabled}
+      onDragStart={(e) => {
+        if (isDisabled) { e.preventDefault(); return }
+        e.dataTransfer.setData('application/vevara-asset', JSON.stringify({
+          url: assetUrl,
+          width: image.metadata?.width || 300,
+          height: image.metadata?.height || 200,
+          type: isVideo ? 'video' : 'image',
+        }))
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
     >
       {isVideo ? (
         <div className="w-full h-full relative">

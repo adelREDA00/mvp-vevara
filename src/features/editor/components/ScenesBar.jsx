@@ -1875,7 +1875,6 @@ const ScenesBar = React.memo(({
     if (timelineInfo && onSeek) {
       const sceneInfo = timelineInfo.find(s => s.id === sceneId)
       if (sceneInfo) {
-        console.log(`🎯 [ScenesBar] Manually switching to scene: ${sceneId}, startTime: ${sceneInfo.startTime}s. TimelineInfo length: ${timelineInfo.length}`)
         onSeek(sceneInfo.startTime)
       } else {
         console.error(`❌ [ScenesBar] FAILED to find sceneInfo for sceneId: ${sceneId}. Available IDs:`, timelineInfo.map(s => s.id))

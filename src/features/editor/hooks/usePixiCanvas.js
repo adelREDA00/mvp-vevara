@@ -51,6 +51,17 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         setIsReady(true)
       } catch (error) {
         if (!isMounted) return
+        
+        // Ensure any partially initialized app is cleaned up
+        if (pendingApp) {
+          try {
+            pendingApp.destroy({ removeView: true })
+          } catch (e) {
+            console.warn('Failed to cleanup pending app after init error', e)
+          }
+          pendingApp = null
+        }
+
         console.error('Failed to initialize Pixi.js application:', error)
         setError(error)
         setIsReady(false)
@@ -80,12 +91,33 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         if (containerRef.current && app.canvas && containerRef.current.contains(app.canvas)) {
           containerRef.current.removeChild(app.canvas)
         }
+        
+        // [FIX] Force GPU context loss before destroy to immediately free WebGL contexts limit instead of waiting for GC
+        if (app.canvas) {
+          try {
+            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+            if (gl) {
+              const loseCtx = gl.getExtension('WEBGL_lose_context');
+              if (loseCtx) loseCtx.loseContext();
+            }
+          } catch(e) {}
+        }
+
         if (app.renderer && !app.destroyed) {
           app.destroy({ removeView: true })
         }
         appRef.current = null
       } else if (pendingApp) {
         // [FIX] Safety check for pending app
+        if (pendingApp.canvas) {
+          try {
+            const gl = pendingApp.canvas.getContext('webgl2') || pendingApp.canvas.getContext('webgl');
+            if (gl) {
+              const loseCtx = gl.getExtension('WEBGL_lose_context');
+              if (loseCtx) loseCtx.loseContext();
+            }
+          } catch(e) {}
+        }
         if (pendingApp.renderer && !pendingApp.destroyed) {
           pendingApp.destroy({ removeView: true })
         }

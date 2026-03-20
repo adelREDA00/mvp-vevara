@@ -2,8 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* 8pt Spacing System */
+  --space-micro: 4px;
+  --space-tight: 8px;
+  --space-compact: 12px;
+  --space-default: 16px;
+  --space-section: 24px;
+  --space-large: 32px;
+  --space-major: 48px;
+
+  /* Typography (Apple Style) */
+  --font-size-caption: 12px;
+  --font-size-secondary: 14px;
+  --font-size-ui: 16px;
+  --font-size-title: 20px;
+  --font-size-header: 24px;
+  --font-size-header-large: 28px;
+
+  --font-weight-body: 400;
+  --font-weight-label: 500;
+  --font-weight-title: 600;
+
+  /* Corner Radius */
+  --radius-small: 8px;
+  --radius-default: 12px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
+
+  /* Shadows */
+  --shadow-small: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-medium: 0 4px 12px rgba(0,0,0,0.1);
+
+  /* Motion Timing */
+  --motion-fast: 150ms;
+  --motion-standard: 250ms;
+  --motion-complex: 300ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Layout */
+  --header-height: 48px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --header-height: 40px;
+  }
+}
+
 * {
-  font-family: 'Poppins', sans-serif;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 body {
@@ -237,4 +285,27 @@ body {
 
 .zoom-in-95 {
   animation-name: zoom-in;
+}
+
+/* Custom scrollbar for CanvasControls on mobile */
+@media (max-width: 1023px) {
+  .mobile-scrollbar {
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(255, 255, 255, 0.4) transparent !important;
+  }
+
+  .mobile-scrollbar::-webkit-scrollbar {
+    display: block !important;
+    height: 4px !important;
+  }
+
+  .mobile-scrollbar::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+
+  .mobile-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.4) !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
 }

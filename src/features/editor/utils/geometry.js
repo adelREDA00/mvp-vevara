@@ -100,7 +100,7 @@ export function getEffectiveLayerDimensions(layer, layerObject, motionCaptureMod
   if (!layer || !layerObject || layerObject.destroyed) return null
 
   const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layer.id)
-  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
 
   if (isMedia) {
     const w =
@@ -145,7 +145,7 @@ export function getLayerWorldBounds(layer, layerObject, motionCaptureMode = null
   const displayObject = getSafeDisplayObject(layerObject)
 
   const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layer.id)
-  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO
+  const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
 
   const dims = getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode)
   if (!dims) return null
@@ -154,9 +154,9 @@ export function getLayerWorldBounds(layer, layerObject, motionCaptureMode = null
 
   const { anchorX, anchorY } = resolveAnchors(layer, displayObject)
 
-  const scaleX = capturedLayer?.scaleX ?? (layer.scaleX !== undefined ? layer.scaleX : 1)
-  const scaleY = capturedLayer?.scaleY ?? (layer.scaleY !== undefined ? layer.scaleY : 1)
-  const rotation = capturedLayer?.rotation ?? (layer.rotation || 0)
+  const scaleX = capturedLayer?.scaleX ?? (displayObject?.scale?.x !== undefined ? displayObject.scale.x : (layer.scaleX !== undefined ? layer.scaleX : 1))
+  const scaleY = capturedLayer?.scaleY ?? (displayObject?.scale?.y !== undefined ? displayObject.scale.y : (layer.scaleY !== undefined ? layer.scaleY : 1))
+  const rotation = capturedLayer?.rotation ?? (displayObject?.angle !== undefined ? displayObject.angle : (layer.rotation || 0))
 
   // Calculate actual bounds (accounting for anchor)
   const scaledWidth = width * scaleX
@@ -165,8 +165,8 @@ export function getLayerWorldBounds(layer, layerObject, motionCaptureMode = null
   const anchorOffsetY = -scaledHeight * anchorY
 
   // Get layer position (center position)
-  const x = capturedLayer?.currentPosition?.x ?? layer.x ?? 0
-  const y = capturedLayer?.currentPosition?.y ?? layer.y ?? 0
+  const x = capturedLayer?.currentPosition?.x ?? (displayObject?.x !== undefined ? displayObject.x : (layer.x ?? 0))
+  const y = capturedLayer?.currentPosition?.y ?? (displayObject?.y !== undefined ? displayObject.y : (layer.y ?? 0))
 
   // Calculate local corners before rotation
   const localCorners = [

@@ -50,7 +50,7 @@ export class ScaleAction {
             duration: animationDuration,
             ease: gsapEasing,
             immediateRender: false,
-            overwrite: 'auto',
+            overwrite: false,
             ...options.gsapOptions
         }
 
@@ -59,7 +59,9 @@ export class ScaleAction {
             const textObj = pixiObject instanceof PIXI.Text ? pixiObject : pixiObject.children.find(c => c instanceof PIXI.Text)
 
             // ADAPTIVE RESOLUTION: Calculate target resolution based on maximum scale
-            const maxTargetScale = Math.max(targetX, targetY)
+            // [EXPORT FIX] Account for global exportScale (targetWidth/worldWidth)
+            const exportScale = options.exportScale || 1
+            const maxTargetScale = Math.max(targetX, targetY) * exportScale
 
             // Adaptive resolution: base (4.0) * scale factor, capped at 8.0 for performance
             // Only boost if scaling up significantly (> 1.5x)
@@ -75,18 +77,20 @@ export class ScaleAction {
         }
 
         const fromVars = {
-            x: startX,
-            y: startY,
             immediateRender: false
         }
 
-        const toVars = {
-            ...gsapVars,
-            x: targetX,
-            y: targetY
+        // [FIX] Only explicitly animate scale if it's changing (dsx/dsy != 1)
+        if (Math.abs(dsx - 1) > 0.001) {
+            fromVars.x = startX
+            gsapVars.x = targetX
+        }
+        if (Math.abs(dsy - 1) > 0.001) {
+            fromVars.y = startY
+            gsapVars.y = targetY
         }
 
-        return gsap.fromTo(pixiObject.scale, fromVars, toVars)
+        return gsap.fromTo(pixiObject.scale, fromVars, gsapVars)
     }
 
 

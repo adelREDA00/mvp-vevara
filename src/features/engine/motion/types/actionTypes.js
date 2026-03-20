@@ -8,8 +8,10 @@ export const ACTION_TYPES = {
   ROTATE: 'rotate',
   SCALE: 'scale',
   FADE: 'fade',
+  BLUR: 'blur',
   CROP: 'crop',
   HOLD: 'hold',
+  COLOR_CHANGE: 'colorChange',
 }
 
 /**

@@ -26,7 +26,8 @@ export async function createApp(config = {}) {
   // Set global text resolution
   PIXI.TextStyle.defaultTextStyle.resolution = defaultResolution
 
-  const app = new PIXI.Application()
+  let app = new PIXI.Application()
+  let initialized = false
 
   try {
     // Try primary initialization
@@ -42,8 +43,36 @@ export async function createApp(config = {}) {
       antialias: true,
       premultipliedAlpha: true,
     })
+    initialized = true
   } catch (error) {
-    console.warn('PixiJS primary init failed, trying fallback:', error)
+    console.warn('PixiJS primary init failed, trying fallback with fresh instance:', error)
+    
+    // Clean up the failed instance before trying again
+    try {
+      if (app) {
+        if (app.canvas) {
+          try {
+            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl')
+            if (gl) {
+              const loseCtx = gl.getExtension('WEBGL_lose_context')
+              if (loseCtx) loseCtx.loseContext()
+            }
+          } catch(e) {}
+        }
+        // Only call destroy if renderer exists to avoid TypeError
+        if (app.renderer) {
+          app.destroy({ removeView: true })
+        }
+      }
+    } catch (destroyError) {
+      console.warn('Failed to destroy app after primary init failure:', destroyError)
+    }
+
+    // CREATE A FRESH INSTANCE for fallback. 
+    // Re-initializing the same Application object after a failure often leads 
+    // to "CanvasRenderer is not yet implemented" error in PixiJS v8.
+    app = new PIXI.Application()
+    
     try {
       // Fallback: lower resolution and no antialias for weaker hardware
       await app.init({
@@ -55,10 +84,22 @@ export async function createApp(config = {}) {
         autoDensity: false,
         preference: 'webgl',
       })
+      initialized = true
     } catch (fallbackError) {
       console.error('PixiJS fallback init also failed:', fallbackError)
-      if (app.renderer) {
-        app.destroy({ removeView: true })
+      if (app) {
+        if (app.canvas) {
+          try {
+            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl')
+            if (gl) {
+              const loseCtx = gl.getExtension('WEBGL_lose_context')
+              if (loseCtx) loseCtx.loseContext()
+            }
+          } catch(e) {}
+        }
+        try { 
+          if (app.renderer) app.destroy({ removeView: true }) 
+        } catch (e) {}
       }
       throw new Error(`Failed to initialize PixiJS: ${fallbackError.message}`)
     }

@@ -40,6 +40,7 @@ export class MoveAction {
     const targetX = startX + dx
     const targetY = startY + dy
 
+
     const animationDuration = (duration) / 1000 // Convert ms to seconds
 
     // Resolve easing function
@@ -50,29 +51,36 @@ export class MoveAction {
       duration: animationDuration,
       ease: gsapEasing,
       immediateRender: false,
-      overwrite: 'auto',
+      overwrite: false,
       ...options.gsapOptions
     }
 
     const fromVars = {
-      x: startX,
-      y: startY,
       immediateRender: false
+    }
+
+    // [FIX] Only explicitly animate x and y if a delta shift is provided to prevent overwriting other Parallel actions
+    if (values.dx !== undefined && values.dx !== 0) {
+      fromVars.x = startX
+      gsapVars.x = targetX
+    }
+    if (values.dy !== undefined && values.dy !== 0) {
+      fromVars.y = startY
+      gsapVars.y = targetY
     }
 
     // Check for curved path
     if (values.controlPoints && Array.isArray(values.controlPoints) && values.controlPoints.length > 0) {
-      // [FIX] RELATIVE COORDINATES: controlPoints are now stored as relative offsets
-      // from the startState. We must map them back to world space for GSAP.
+      // RELATIVE COORDINATES: controlPoints are stored as relative offsets
+      // Map them back to world space for GSAP.
       const worldControlPoints = values.controlPoints.map(cp => ({
         x: startX + cp.x,
         y: startY + cp.y
       }))
 
-      // Create a full path including current position and target position
-      // This ensures smooth entry and exit from the curve handles
+      // Path strictly contains the control points and the final target.
+      // GSAP automatically curves from the start position (enforced by fromVars)
       const path = [
-        { x: startX, y: startY },
         ...worldControlPoints,
         { x: targetX, y: targetY }
       ]
@@ -82,10 +90,19 @@ export class MoveAction {
         autoRotate: false,
         useRadians: true
       }
-    } else {
-      gsapVars.x = targetX
-      gsapVars.y = targetY
+      
+      // CRITICAL: When using motionPath, we MUST NOT tween x/y directly in gsapVars
+      // The motionPath plugin takes full control over x and y.
+      delete gsapVars.x
+      delete gsapVars.y
+
+      // Ensure start position is in fromVars so motionPath builds the curve correctly
+      // from the deterministic start point regardless of current playhead position
+      fromVars.x = startX
+      fromVars.y = startY
     }
+    
+    // [DEBUG]
 
     return gsap.fromTo(pixiObject, fromVars, gsapVars)
   }

@@ -110,6 +110,7 @@ export const LAYER_TYPES = {
   GROUP: 'group',
   CAMERA: 'camera',
   BACKGROUND: 'background',
+  FRAME: 'frame',
 }
 
 /**

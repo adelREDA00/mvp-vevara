@@ -16,6 +16,12 @@ export class CropAction {
     }
 
     execute(pixiObject, actionData, options = {}) {
+        // [ROCK SOLID FIX] Never attempt to crop a Text or Graphics layer.
+        // Doing so overwrites their natural Pivot math and causes massive visual jumps.
+        if (!pixiObject || pixiObject instanceof PIXI.Text || pixiObject instanceof PIXI.Graphics) {
+            return null;
+        }
+
         const { values = {} } = actionData
         const duration = values.duration || 2000
 
@@ -30,46 +36,58 @@ export class CropAction {
 
         const animationDuration = duration / 1000
 
-        // Resolve start and target position using relative system
-        const startX = values.initialX ?? startState.x ?? pixiObject.x
-        const startY = values.initialY ?? startState.y ?? pixiObject.y
-
-        // STATE ISOLATION FIX: Use fromTo so each step starts from its own predicted state
-        const fromVars = {
-            cropX: values.initialCropX ?? startState.cropX ?? pixiObject.cropX,
-            cropY: values.initialCropY ?? startState.cropY ?? pixiObject.cropY,
-            cropWidth: values.initialCropWidth ?? startState.cropWidth ?? pixiObject.cropWidth,
-            cropHeight: values.initialCropHeight ?? startState.cropHeight ?? pixiObject.cropHeight,
-            mediaWidth: values.initialMediaWidth ?? startState.mediaWidth ?? pixiObject.mediaWidth,
-            mediaHeight: values.initialMediaHeight ?? startState.mediaHeight ?? pixiObject.mediaHeight,
-        }
+        // Resolve start position using strictly relative/tracker system
+        const startX = startState.x ?? pixiObject.x
+        const startY = startState.y ?? pixiObject.y
 
         const toVars = {
             duration: animationDuration,
             ease: easing,
-            cropX: values.cropX !== undefined ? values.cropX : fromVars.cropX,
-            cropY: values.cropY !== undefined ? values.cropY : fromVars.cropY,
-            cropWidth: values.cropWidth !== undefined ? values.cropWidth : fromVars.cropWidth,
-            cropHeight: values.cropHeight !== undefined ? values.cropHeight : fromVars.cropHeight,
-            mediaWidth: values.mediaWidth !== undefined ? values.mediaWidth : fromVars.mediaWidth,
-            mediaHeight: values.mediaHeight !== undefined ? values.mediaHeight : fromVars.mediaHeight,
             immediateRender: false,
-            overwrite: 'auto',
+            overwrite: false,
             ...options.gsapOptions
         }
 
-        // Only explicitly animate x/y if a delta shift is provided AND NOT EXPLICITLY undefined.
-        // If fromVars.x/y is included, even as `startX`, GSAP's overwrite: 'auto' will
-        // kill any overlapping x/y tweens from MoveAction (like MotionPathPlugin curves)!
-        if (values.dx !== undefined || values.dy !== undefined) {
-            const hasShift = (values.dx !== 0 && values.dx !== undefined) || (values.dy !== 0 && values.dy !== undefined)
-            if (hasShift) {
-                fromVars.x = startX
-                fromVars.y = startY
-                toVars.x = startX + (values.dx || 0)
-                toVars.y = startY + (values.dy || 0)
-            }
+        const fromVars = {
+            immediateRender: false
         }
+
+        // [FIX] Explicitly animate ONLY properties that are changing.
+        // This prevents overwriting other parallel actions in the same step.
+        let hasChanges = false
+
+        const cropProps = ['cropX', 'cropY', 'cropWidth', 'cropHeight', 'mediaWidth', 'mediaHeight']
+        cropProps.forEach(prop => {
+            if (values[prop] !== undefined) {
+                // [FIX] CRITICAL: NEVER use values.initial... they are stale snapshots.
+                // Always trust the startState from the MotionEngine tracker.
+                fromVars[prop] = startState[prop] ?? pixiObject[prop]
+                toVars[prop] = values[prop]
+                hasChanges = true
+            }
+        })
+
+        // Track x/y displacement
+        if (values.dx !== undefined && values.dx !== 0) {
+            fromVars.x = startX
+            toVars.x = startX + values.dx
+            hasChanges = true
+        }
+        if (values.dy !== undefined && values.dy !== 0) {
+            fromVars.y = startY
+            toVars.y = startY + values.dy
+            hasChanges = true
+        }
+
+        // If no changes provided, return a no-op to maintain step duration
+        if (!hasChanges) {
+            return gsap.to({}, { duration: animationDuration })
+        }
+        
+        // [DEBUG]
+        console.log(`[CropAction] Layer ${pixiObject.id || 'unknown'} -> start: (${startX.toFixed(1)}, ${startY.toFixed(1)}) delta: (${values.dx || 0}, ${values.dy || 0})`)
+        console.log(`   -> fromVars: `, fromVars)
+        console.log(`   -> toVars: `, toVars)
 
         return gsap.fromTo(pixiObject, fromVars, toVars)
     }
@@ -151,36 +169,34 @@ export class CropAction {
         const sprite = pixiObject._imageSprite || pixiObject._videoSprite
         const cropMask = pixiObject._cropMask
 
-        if (!sprite || !cropMask) return
+        const mediaW = pixiObject.mediaWidth || pixiObject._storedMediaWidth || 100
+        const mediaH = pixiObject.mediaHeight || pixiObject._storedMediaHeight || 100
+        const cropX = pixiObject.cropX || 0
+        const cropY = pixiObject.cropY || 0
+        const cropW = pixiObject.cropWidth || 100
+        const cropH = pixiObject.cropHeight || 100
 
-        const mediaW = pixiObject.mediaWidth
-        const mediaH = pixiObject.mediaHeight
-        const cropX = pixiObject.cropX
-        const cropY = pixiObject.cropY
-        const cropW = pixiObject.cropWidth
-        const cropH = pixiObject.cropHeight
-
-
-        // Update sprite geometry
-        if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
-        if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
-
-        // Offset sprite to align with top-left of container (0,0)
-        // The container's (0,0) is the top-left of the CROP window.
-        // So we shift the sprite so that the (cropX, cropY) point of the sprite is at (0,0).
-        if (Math.abs(sprite.x - (-cropX)) > 0.1) sprite.x = -cropX
-        if (Math.abs(sprite.y - (-cropY)) > 0.1) sprite.y = -cropY
-
-        // Redraw crop mask
-        // Optimizing: Only redraw if dimensions changed significantly
-        // But clear/rect is cheap enough for now
-        cropMask.clear()
-        cropMask.rect(0, 0, cropW, cropH)
-        cropMask.fill(0xffffff)
-
-        // Update pivot to maintain anchor-based positioning (e.g. rotation center)
-        const anchorX = pixiObject.anchorX ?? 0.5
-        const anchorY = pixiObject.anchorY ?? 0.5
+        // [FIX] ALWAYS update pivot to maintain anchor-based positioning, 
+        // EVEN IF the frame is currently empty (detaching an asset leaves 
+        // the frame with crop math, requiring pivot shifts to match x/y compensation).
+        const anchorX = pixiObject.anchorX !== undefined ? pixiObject.anchorX : 0.5
+        const anchorY = pixiObject.anchorY !== undefined ? pixiObject.anchorY : 0.5
         pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+
+        // If an image asset is currently attached, shift internal coordinate geometries
+        if (sprite && cropMask) {
+          // Update sprite geometry
+          if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
+          if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
+
+          // Offset sprite to align with top-left of container (0,0)
+          if (Math.abs(sprite.x - (-cropX)) > 0.1) sprite.x = -cropX
+          if (Math.abs(sprite.y - (-cropY)) > 0.1) sprite.y = -cropY
+
+          // Redraw crop mask
+          cropMask.clear()
+          cropMask.rect(0, 0, cropW, cropH)
+          cropMask.fill(0xffffff)
+        }
     }
 }

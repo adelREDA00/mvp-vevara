@@ -1,10 +1,12 @@
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Minus, ChevronDown,
   Settings, Activity, X, MoreVertical, Layers,
-  Volume2, VolumeX
+  Volume2, VolumeX, Ghost, Droplets
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
+import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 
 function CanvasControls({
@@ -21,9 +23,40 @@ function CanvasControls({
   isMotionCaptureActive = false,
   onStartMotionCapture,
   onApplyMotion,
-  onCancelMotion
+  onCancelMotion,
+  stepsCount = 0
 }) {
 
+  const [showOpacitySlider, setShowOpacitySlider] = useState(false)
+  const [showBlurSlider, setShowBlurSlider] = useState(false)
+  const [showAddStepHint, setShowAddStepHint] = useState(false)
+  const scrollContainerRef = useRef(null)
+  const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
+    try {
+      return localStorage.getItem('vevara_hint_add_step_shown') === 'true'
+    } catch (e) {
+      return false
+    }
+  })
+
+  // Auto-close slider when selection changes
+  useEffect(() => {
+    setShowOpacitySlider(false)
+    setShowBlurSlider(false)
+  }, [selectedLayer?.id, selectedCanvas])
+
+  // [MOBILE] Auto-scroll to the right on small screens to ensure "Add Step" is visible
+  useLayoutEffect(() => {
+    if (scrollContainerRef.current && typeof window !== 'undefined' && window.innerWidth < 1024) {
+      // Small delay to ensure children are rendered and measured
+      const timer = setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollLeft = scrollContainerRef.current.scrollWidth
+        }
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [selectedLayer?.id, selectedCanvas])
 
   const handleLayerUpdate = (updates) => {
     if (onLayerUpdate) {
@@ -135,11 +168,12 @@ function CanvasControls({
 
 
   return (
-    <div className="flex items-center justify-center py-1 px-3">
+    <div className="relative flex flex-col items-center justify-center py-2 px-3">
       <div
-        className="h-9 flex items-center gap-1.5 px-2 rounded-lg max-w-[calc(100vw-24px)] overflow-x-auto scrollbar-hide backdrop-blur-md"
+        ref={scrollContainerRef}
+        className="h-10 flex items-center gap-3 px-3 rounded-[12px] max-w-[calc(100vw-24px)] overflow-x-auto mobile-scrollbar backdrop-blur-md transition-all duration-300 shadow-medium"
         style={{
-          backgroundColor: 'rgba(15, 16, 21, 0.8)',
+          backgroundColor: 'rgba(15, 16, 21, 0.85)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
           border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -197,9 +231,9 @@ function CanvasControls({
           <>
             <DropdownMenu
               trigger={
-                <button className="h-7 px-2 rounded-md bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-1.5 transition-all outline-none min-w-[120px]">
-                  <span className="truncate flex-1 text-left">{getFontFamily()}</span>
-                  <ChevronDown className="h-3 w-3 opacity-60" />
+                <button className="h-8 px-3 rounded-[8px] bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-2 transition-all outline-none min-w-[120px]">
+                  <span className="truncate flex-1 text-left font-medium">{getFontFamily()}</span>
+                  <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
                 </button>
               }
             >
@@ -218,9 +252,9 @@ function CanvasControls({
             {/* Font Size Dropdown */}
             <DropdownMenu
               trigger={
-                <button className="h-7 px-2 rounded-md bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-1.5 transition-all outline-none min-w-[60px]">
-                  <span className="flex-1 text-left">{getFontSize()}</span>
-                  <ChevronDown className="h-3 w-3 opacity-60" />
+                <button className="h-8 px-2 rounded-[8px] bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-2 transition-all outline-none min-w-[60px]">
+                  <span className="flex-1 text-left font-medium">{getFontSize()}</span>
+                  <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
                 </button>
               }
             >
@@ -255,8 +289,6 @@ function CanvasControls({
                   newAlign = 'left'
                 }
 
-                // Standard editor behavior: alignment only changes internal text flow.
-                // The box (x, y) remains at the same top-left position.
                 handleLayerUpdate({
                   data: {
                     ...selectedLayer.data,
@@ -264,13 +296,13 @@ function CanvasControls({
                   }
                 })
               }}
-              className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center justify-center min-w-[32px] border border-transparent hover:border-white/10"
+              className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center min-w-[32px] border border-transparent hover:border-white/10"
               title={`Align: ${selectedLayer.data?.textAlign || 'left'}`}
             >
               <div className="flex flex-col gap-0.5 items-center">
-                <div className={`h-0.5 bg-current rounded-full ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
-                <div className={`h-0.5 bg-current rounded-full ${selectedLayer.data?.textAlign === 'right' ? 'w-2 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-2' : 'w-2 self-start')}`} />
-                <div className={`h-0.5 bg-current rounded-full ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
+                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
+                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-2 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-2' : 'w-2 self-start')}`} />
+                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
               </div>
             </button>
 
@@ -284,12 +316,12 @@ function CanvasControls({
             <DropdownMenu
               trigger={
                 <button
-                  className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+                  className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
                   title="Stroke Style"
                 >
-                  <Minus className="h-4 w-4 flex-shrink-0 opacity-60" />
-                  <span className="text-sm">Stroke</span>
-                  <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-60" />
+                  <Minus className="h-4 w-4 flex-shrink-0 opacity-60" strokeWidth={2} />
+                  <span className="text-xs font-medium">Stroke</span>
+                  <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-60" strokeWidth={2} />
                 </button>
               }
             >
@@ -375,14 +407,44 @@ function CanvasControls({
           </>
         )}
 
+        {/* Opacity Control */}
+        {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
+          <button
+            onClick={() => {
+              setShowOpacitySlider(!showOpacitySlider)
+              setShowBlurSlider(false)
+            }}
+            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showOpacitySlider ? 'bg-white/20 border-white/20' : ''}`}
+            title="Layer Transparency"
+          >
+            <Ghost className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+            {/* <span className="text-xs font-medium">Opacity</span> */}
+          </button>
+        )}
+
+        {/* Blur Control */}
+        {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
+          <button
+            onClick={() => {
+              setShowBlurSlider(!showBlurSlider)
+              setShowOpacitySlider(false)
+            }}
+            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showBlurSlider ? 'bg-white/20 border-white/20' : ''}`}
+            title="Layer Blur"
+          >
+            <Droplets className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+            {/* <span className="text-xs font-medium">Blur</span> */}
+          </button>
+        )}
+
         {/* Position panel opener */}
         <button
           onClick={() => onOpenPositionPanel?.()}
-          className="text-white hover:bg-white/10 active:bg-white/15 h-7 px-2 rounded-md transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+          className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
           title="Reorder layers"
         >
-          <Layers className="h-4 w-4 flex-shrink-0 opacity-70" />
-          <span className="text-sm">Position</span>
+          <Layers className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+          <span className="text-xs font-medium">Position</span>
         </button>
 
         {/* Video specific controls */}
@@ -411,24 +473,34 @@ function CanvasControls({
             onClick={() => {
               if (isMotionCaptureActive) {
                 onApplyMotion?.()
+                // Hide hint when applying motion
+                setShowAddStepHint(false)
               } else {
                 onStartMotionCapture?.()
+                // Show hint if it's the first time AND no steps exist yet
+                // Boolean check on hasShownAddStepHint for robustness
+                if (!hasShownAddStepHint && Number(stepsCount) === 0) {
+                  setShowAddStepHint(true)
+                }
               }
             }}
-            className={`h-7 px-2 rounded-md transition-all flex items-center gap-1 touch-manipulation whitespace-nowrap ${isMotionCaptureActive
-              ? 'bg-purple-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.8)] ring-1 ring-purple-400 animate-pulse-glow'
+            className={`h-8 px-3 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
+              ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow'
               : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10'
               }`}
             title={isMotionCaptureActive ? "Apply Animation" : "Start Animation Capture"}
           >
-            <Activity className="h-4 w-4 flex-shrink-0" />
-            <span className="text-sm">Add Step</span>
+            <Activity className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
+            <span>Add Step</span>
           </button>
 
           {/* Cancel Button - Only shown in capture mode */}
           {isMotionCaptureActive && (
             <button
-              onClick={() => onCancelMotion?.()}
+              onClick={() => {
+                onCancelMotion?.()
+                setShowAddStepHint(false)
+              }}
               className="text-white hover:bg-red-600/80 active:bg-red-700 h-7 w-7 rounded-md transition-colors flex items-center justify-center"
               title="Cancel Animation Capture"
             >
@@ -437,18 +509,148 @@ function CanvasControls({
           )}
 
           {/* Motion Panel Menu - 3 dots to access MotionPanel for managing steps */}
-          <button
+          {/* <button
             onClick={() => onToggleMotionPanel?.()}
             className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10"
             title="Animation Steps"
           >
             <MoreVertical className="h-4 w-4 opacity-70" />
-          </button>
+          </button> */}
         </div>
 
       </div>
 
+      {/* Transparency Sub-tab (Modal) */}
+      {showOpacitySlider && selectedLayer && (
+        <div
+          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          style={{
+            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            minWidth: '240px',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Opacity</span>
 
+          <Slider.Root
+            className="relative flex items-center select-none touch-none grow h-5"
+            value={[Math.round((selectedLayer.opacity ?? 1) * 100)]}
+            onValueChange={(value) => {
+              handleLayerUpdate({ opacity: value[0] / 100 })
+            }}
+            min={0}
+            max={100}
+            step={1}
+          >
+            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
+              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            </Slider.Track>
+            <Slider.Thumb
+              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              aria-label="Layer Opacity"
+            />
+          </Slider.Root>
+
+          <span className="text-white text-xs font-mono min-w-[32px] text-right">
+            {Math.round((selectedLayer.opacity ?? 1) * 100)}%
+          </span>
+        </div>
+      )}
+
+      {/* Blur Sub-tab (Modal) */}
+      {showBlurSlider && selectedLayer && (
+        <div
+          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          style={{
+            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            minWidth: '240px',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Blur</span>
+
+          <Slider.Root
+            className="relative flex items-center select-none touch-none grow h-5"
+            value={[Math.min(BLUR_MAX, selectedLayer.blur ?? 0)]}
+            onValueChange={(value) => {
+              const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0))
+              handleLayerUpdate({ blur: v })
+            }}
+            min={0}
+            max={BLUR_MAX}
+            step={0.5}
+          >
+            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
+              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            </Slider.Track>
+            <Slider.Thumb
+              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              aria-label="Layer Blur"
+            />
+          </Slider.Root>
+
+          <span className="text-white text-xs font-mono min-w-[32px] text-right">
+            {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
+          </span>
+        </div>
+      )}
+
+      {/* Add Step Hint Modal */}
+      {showAddStepHint && (
+        <div
+          className="absolute top-full mt-4 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-2 duration-300"
+          style={{ pointerEvents: 'auto' }}
+        >
+          {/* Arrow */}
+          <div
+            className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border-t border-l border-white/20"
+            style={{ backgroundColor: '#6940c9' }}
+          />
+
+          <div
+            className="bg-[#6940c9] text-white px-3 py-1.5 rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-white/20 flex flex-row items-center gap-3 sm:gap-4 max-w-[calc(100vw-32px)] sm:max-w-none w-max text-center animate-bounce-subtle"
+          >
+            <span className="text-[11px] sm:text-[12.5px] font-semibold leading-none whitespace-nowrap opacity-95">
+              Now change anything, move, scale, rotate, blur or edit, it will animate.
+            </span>
+
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setShowAddStepHint(false)
+                setHasShownAddStepHint(true)
+                try {
+                  localStorage.setItem('vevara_hint_add_step_shown', 'true')
+                } catch (e) {
+                  // Ignore localStorage errors
+                }
+              }}
+              className="text-[11px] font-bold opacity-80 hover:opacity-100 transition-opacity underline decoration-white/40 underline-offset-4 text-purple-200 whitespace-nowrap"
+            >
+              hide
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes bounce-subtle {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
+        }
+        .animate-bounce-subtle {
+          animation: bounce-subtle 2.5s infinite ease-in-out;
+        }
+      `}</style>
     </div>
   )
 }

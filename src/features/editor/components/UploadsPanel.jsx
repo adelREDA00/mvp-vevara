@@ -221,42 +221,45 @@ function UploadsPanel({ onClose, aspectRatio }) {
     >
       {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Uploads</h2>
+      <div className="px-6 pt-6 pb-5 border-b border-white/5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[20px] font-semibold text-white tracking-tight">Uploads</h2>
           {onClose && (
-            <button onClick={onClose} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800">
-              <X className="h-4 w-4" />
+            <button 
+                onClick={onClose} 
+                className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
+            >
+              <X className="h-5 w-5" strokeWidth={2} />
             </button>
           )}
         </div>
 
         {isAuthenticated ? (
           <>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" />
+            <div className="relative mb-4">
+              <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
               <input
                 type="text"
-                placeholder="Search uploads"
+                placeholder="Search your uploads..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-white text-sm"
+                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-[12px] text-white text-[14px] placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all"
               />
             </div>
 
             <button
               onClick={handleUploadClick}
               disabled={isUploading}
-              className="w-full mt-3 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2"
+              className="w-full h-10 px-4 bg-[#7c4af0] hover:bg-[#6940c9] disabled:opacity-50 text-white rounded-[12px] text-[14px] font-semibold flex items-center justify-center gap-2 transition-all shadow-medium active:scale-[0.98]"
             >
               {isUploading ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2.5} />
                   Uploading...
                 </>
               ) : (
                 <>
-                  <UploadIcon className="h-4 w-4" />
+                  <UploadIcon className="h-4 w-4" strokeWidth={2.5} />
                   Upload Files
                 </>
               )}
@@ -264,17 +267,17 @@ function UploadsPanel({ onClose, aspectRatio }) {
             <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" onChange={handleFileInputChange} className="hidden" />
           </>
         ) : (
-          <div className="py-8 px-4 text-center bg-gradient-to-b from-purple-500/10 to-transparent rounded-2xl border border-purple-500/20 mb-2">
-            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <UploadIcon className="h-6 w-6 text-purple-400" />
+          <div className="py-8 px-5 text-center bg-white/5 rounded-[20px] border border-white/5 mb-2 shadow-small">
+            <div className="w-14 h-14 bg-[#7c4af0]/10 rounded-full flex items-center justify-center mx-auto mb-5">
+              <UploadIcon className="h-7 w-7 text-[#7c4af0]" strokeWidth={2} />
             </div>
-            <h3 className="text-white font-semibold mb-2">Want to upload?</h3>
-            <p className="text-zinc-400 text-xs mb-4 leading-relaxed">
-              Open account to upload your own assets and use premium templates.
+            <h3 className="text-white text-[16px] font-semibold mb-2">Want to upload?</h3>
+            <p className="text-white/40 text-[13px] mb-5 leading-relaxed">
+              Create an account to upload your own assets and use premium templates.
             </p>
             <button
               onClick={() => window.location.href = '/login'}
-              className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-purple-500/25"
+              className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-[12px] text-[14px] font-semibold transition-all shadow-medium active:scale-[0.98]"
             >
               Sign up for free
             </button>
@@ -310,47 +313,49 @@ function UploadsPanel({ onClose, aspectRatio }) {
             </div>
           )}
 
-          <div className="flex border-b border-zinc-800/50 px-4">
+          <div className="flex border-b border-white/5 px-6">
             {['All', 'Images', 'Videos'].map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-4 py-3 text-sm font-medium relative ${activeTab === tab ? 'text-purple-400' : 'text-zinc-400'}`}
+                className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : 'text-zinc-500 hover:text-white'}`}
               >
-                {tab} ({tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount})
-                {activeTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400" />}
+                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount}</span>
+                {activeTab === tab && (
+                  <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
+                )}
               </button>
             ))}
           </div>
 
           <div
-            className={`flex-1 overflow-y-auto p-4 custom-scrollbar ${isDragOver ? 'bg-purple-500/10 border-2 border-dashed border-purple-400' : ''}`}
+            className={`flex-1 overflow-y-auto p-6 custom-scrollbar scrollbar-hide ${isDragOver ? 'bg-[#7c4af0]/5 border-2 border-dashed border-[#7c4af0]/30' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
             {isUploading && (
-              <div className="mb-4 p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-purple-400">
-                    {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : 'Processing media...'}
+              <div className="mb-6 p-4 rounded-[16px] bg-white/5 border border-white/10 shadow-medium">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[12px] font-semibold text-[#7c4af0] tracking-tight">
+                    {uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : 'Processing...'}
                   </span>
                   <button
                     onClick={() => dispatch(cancelUpload())}
-                    className="text-[10px] font-bold uppercase tracking-wider text-purple-400/50 hover:text-purple-400 transition-colors"
+                    className="text-[10px] font-bold uppercase tracking-widest text-white/30 hover:text-red-400 transition-colors"
                   >
                     Cancel
                   </button>
                 </div>
-                <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mb-2">
+                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mb-3">
                   <div
-                    className={`h-full bg-purple-500 transition-all duration-300 ${uploadProgress === 0 ? 'animate-[progress_2s_ease-in-out_infinite]' : ''}`}
+                    className={`h-full bg-[#7c4af0] transition-all duration-300 shadow-[0_0_8px_rgba(124,74,240,0.4)] ${uploadProgress === 0 ? 'animate-[progress_2s_ease-in-out_infinite]' : ''}`}
                     style={{ width: `${Math.max(uploadProgress, 10)}%` }}
                   />
                 </div>
                 {hasLargeUpload && uploadProgress < 100 && (
-                  <p className="text-[10px] text-zinc-400 leading-tight">
-                    This file is large and may take some time. Please don't leave the page.
+                  <p className="text-[11px] text-zinc-500 leading-normal">
+                    Large file detected. This might take a few moments.
                   </p>
                 )}
               </div>
@@ -360,14 +365,16 @@ function UploadsPanel({ onClose, aspectRatio }) {
             {isFetching && !uploadedImages.length ? (
               <SkeletonGrid />
             ) : filteredImages.length === 0 ? (
-              <div className="h-48 flex flex-col items-center justify-center text-center opacity-40">
-                <UploadIcon className="h-8 w-8 mb-3 text-zinc-600" />
-                <p className="text-sm text-zinc-500">
-                  {searchQuery ? 'No matching media' : 'Drop files here or click Upload'}
+              <div className="h-64 flex flex-col items-center justify-center text-center">
+                <div className="p-4 bg-white/5 rounded-full mb-4">
+                  <UploadIcon className="h-8 w-8 text-zinc-600" />
+                </div>
+                <p className="text-[14px] text-zinc-500 font-medium">
+                  {searchQuery ? 'No matching uploads' : 'Drop files here to start'}
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 {filteredImages.map((image) => (
                   <AssetCard
                     key={image.id}

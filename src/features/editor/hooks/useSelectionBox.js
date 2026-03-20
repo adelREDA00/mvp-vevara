@@ -24,7 +24,7 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import * as PIXI from 'pixi.js'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
-import { drawShapePath } from '../../engine/pixi/createLayer'
+import { drawShapePath, redrawFramePlaceholder } from '../../engine/pixi/createLayer'
 import { getRotatedCursor, calculateAdaptedScale } from '../utils/handleUtils'
 import {
   removeDimensionsBadge,
@@ -427,7 +427,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       return calculateTextDimensions(currentLayerObject, currentLayer)
     }
 
-    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO
+    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO || currentLayer.type === LAYER_TYPES.FRAME
     if (isMediaElement && currentLayerObject && !currentLayerObject.destroyed) {
       const mediaDims = getEffectiveLayerDimensions(currentLayer, currentLayerObject, motionCaptureMode)
       if (mediaDims) {
@@ -445,29 +445,33 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   const handleTransformCache = useRef({
     // Each handle type has a pre-computed transformation function
     e: (localDeltaX, localDeltaY, state, maintainAspectRatio, motionCaptureMode) => { // right edge
-      const isCaptureMode = motionCaptureMode?.isActive // Enable center-scale for all including media crop
-      const widthDelta = isCaptureMode ? (localDeltaX / state.scaleX) * 2 : localDeltaX / state.scaleX
+      const isCaptureMode = motionCaptureMode?.isActive
+      const isMediaFreeCrop = isCaptureMode && state.isMediaElement
+      const widthDelta = (isCaptureMode && !isMediaFreeCrop) ? (localDeltaX / state.scaleX) * 2 : localDeltaX / state.scaleX
       const newWidth = Math.max(10, state.startWidth + widthDelta)
       const localOffsetX = isCaptureMode ? 0 : (newWidth - state.startWidth) * state.scaleX * state.anchorX
       return { newWidth, newHeight: state.startHeight, widthDelta, heightDelta: 0, localOffsetX, localOffsetY: 0 }
     },
     w: (localDeltaX, localDeltaY, state, maintainAspectRatio, motionCaptureMode) => { // left edge
-      const isCaptureMode = motionCaptureMode?.isActive // Enable center-scale for all including media crop
-      const widthDelta = isCaptureMode ? (-localDeltaX / state.scaleX) * 2 : -localDeltaX / state.scaleX
+      const isCaptureMode = motionCaptureMode?.isActive
+      const isMediaFreeCrop = isCaptureMode && state.isMediaElement
+      const widthDelta = (isCaptureMode && !isMediaFreeCrop) ? (-localDeltaX / state.scaleX) * 2 : -localDeltaX / state.scaleX
       const newWidth = Math.max(10, state.startWidth + widthDelta)
       const localOffsetX = isCaptureMode ? 0 : -(newWidth - state.startWidth) * state.scaleX * (1 - state.anchorX)
       return { newWidth, newHeight: state.startHeight, widthDelta, heightDelta: 0, localOffsetX, localOffsetY: 0 }
     },
     n: (localDeltaX, localDeltaY, state, maintainAspectRatio, motionCaptureMode) => { // top edge
-      const isCaptureMode = motionCaptureMode?.isActive // Enable center-scale for all including media crop
-      const heightDelta = isCaptureMode ? (-localDeltaY / state.scaleY) * 2 : -localDeltaY / state.scaleY
+      const isCaptureMode = motionCaptureMode?.isActive
+      const isMediaFreeCrop = isCaptureMode && state.isMediaElement
+      const heightDelta = (isCaptureMode && !isMediaFreeCrop) ? (-localDeltaY / state.scaleY) * 2 : -localDeltaY / state.scaleY
       const newHeight = Math.max(10, state.startHeight + heightDelta)
       const localOffsetY = isCaptureMode ? 0 : -(newHeight - state.startHeight) * state.scaleY * (1 - state.anchorY)
       return { newWidth: state.startWidth, newHeight, widthDelta: 0, heightDelta, localOffsetX: 0, localOffsetY }
     },
     s: (localDeltaX, localDeltaY, state, maintainAspectRatio, motionCaptureMode) => { // bottom edge
-      const isCaptureMode = motionCaptureMode?.isActive // Enable center-scale for all including media crop
-      const heightDelta = isCaptureMode ? (localDeltaY / state.scaleY) * 2 : localDeltaY / state.scaleY
+      const isCaptureMode = motionCaptureMode?.isActive
+      const isMediaFreeCrop = isCaptureMode && state.isMediaElement
+      const heightDelta = (isCaptureMode && !isMediaFreeCrop) ? (localDeltaY / state.scaleY) * 2 : localDeltaY / state.scaleY
       const newHeight = Math.max(10, state.startHeight + heightDelta)
       const localOffsetY = isCaptureMode ? 0 : (newHeight - state.startHeight) * state.scaleY * state.anchorY
       return { newWidth: state.startWidth, newHeight, widthDelta: 0, heightDelta, localOffsetX: 0, localOffsetY }
@@ -1603,30 +1607,84 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             const minCropSize = 10
 
             if (isCaptureMode) {
-              if (state.handleType === 'e' || state.handleType === 'w') {
-                const rawCropWidth = state.startCropWidth + widthDelta
-                const shift = widthDelta / 2
-                const rawCropX = state.startCropX - shift
-                newCropWidth = Math.max(minCropSize, Math.min(state.startMediaWidth, rawCropWidth))
-                newCropX = Math.max(0, Math.min(state.startMediaWidth - newCropWidth, rawCropX))
-                const startCenter = state.startCropX + state.startCropWidth / 2
-                const currentCenter = newCropX + newCropWidth / 2
-                const centerShiftX = currentCenter - startCenter
-                newX = state.startX + centerShiftX * trig.cosPos
-                newY = state.startY + centerShiftX * trig.sinPos
-                newWidth = newCropWidth
-              } else if (state.handleType === 's' || state.handleType === 'n') {
-                const rawCropHeight = state.startCropHeight + heightDelta
-                const shift = heightDelta / 2
-                const rawCropY = state.startCropY - shift
-                newCropHeight = Math.max(minCropSize, Math.min(state.startMediaHeight, rawCropHeight))
-                newCropY = Math.max(0, Math.min(state.startMediaHeight - newCropHeight, rawCropY))
-                const startCenter = state.startCropY + state.startCropHeight / 2
-                const currentCenter = newCropY + newCropHeight / 2
-                const centerShiftY = currentCenter - startCenter
-                newX = state.startX - centerShiftY * trig.sinPos
-                newY = state.startY + centerShiftY * trig.cosPos
-                newHeight = newCropHeight
+              if (state.isMediaElement) {
+                // FREE CROP for media layers: only the dragged edge changes
+                if (state.handleType === 'e') {
+                  newCropWidth = Math.max(minCropSize, Math.min(state.startMediaWidth - state.startCropX, state.startCropWidth + widthDelta))
+                } else if (state.handleType === 'w') {
+                  const shift = -(newWidth - state.startWidth)
+                  newCropX = Math.max(0, Math.min(state.startMediaWidth - minCropSize, state.startCropX + shift))
+                  newCropWidth = Math.max(minCropSize, Math.min(state.startMediaWidth - newCropX, state.startCropWidth - shift))
+                } else if (state.handleType === 's') {
+                  newCropHeight = Math.max(minCropSize, Math.min(state.startMediaHeight - state.startCropY, state.startCropHeight + heightDelta))
+                } else if (state.handleType === 'n') {
+                  const shift = -(newHeight - state.startHeight)
+                  newCropY = Math.max(0, Math.min(state.startMediaHeight - minCropSize, state.startCropY + shift))
+                  newCropHeight = Math.max(minCropSize, Math.min(state.startMediaHeight - newCropY, state.startCropHeight - shift))
+                }
+
+                // Position adjustment: shift layer center to match new visible area center
+                // [FIX] SCALE-AWARE SHIFT: Multiply crop-space center shift by absolute scale
+                // to correctly compensate for world-space position. This prevents "jiggle" when cropping scaled layers.
+                const { scaleX, scaleY } = getCurrentLayerScale(currentLayer, currentLayerObject)
+                if (state.handleType === 'e' || state.handleType === 'w') {
+                  const startCenter = state.startCropX + state.startCropWidth / 2
+                  const currentCenter = newCropX + newCropWidth / 2
+                  const centerShiftX = currentCenter - startCenter
+                  newX = state.startX + (centerShiftX * scaleX) * trig.cosPos
+                  newY = state.startY + (centerShiftX * scaleX) * trig.sinPos
+                  newWidth = newCropWidth
+                } else {
+                  const startCenter = state.startCropY + state.startCropHeight / 2
+                  const currentCenter = newCropY + newCropHeight / 2
+                  const centerShiftY = currentCenter - startCenter
+                  newX = state.startX - (centerShiftY * scaleY) * trig.sinPos
+                  newY = state.startY + (centerShiftY * scaleY) * trig.cosPos
+                  newHeight = newCropHeight
+                }
+
+                currentMotionCaptureMode.onPositionUpdate({
+                  layerId: currentLayer.id,
+                  x: newX,
+                  y: newY,
+                  scaleX: scaleX,
+                  scaleY: scaleY,
+                  rotation: (currentLayerObject.rotation * 180) / Math.PI,
+                  cropX: newCropX,
+                  cropY: newCropY,
+                  cropWidth: newCropWidth,
+                  cropHeight: newCropHeight,
+                  mediaWidth: state.startMediaWidth,
+                  mediaHeight: state.startMediaHeight,
+                  interactionType: 'resize'
+                })
+              } else {
+                // NON-MEDIA layers: center-constrained crop (symmetric)
+                if (state.handleType === 'e' || state.handleType === 'w') {
+                  const rawCropWidth = state.startCropWidth + widthDelta
+                  const shift = widthDelta / 2
+                  const rawCropX = state.startCropX - shift
+                  newCropWidth = Math.max(minCropSize, Math.min(state.startMediaWidth, rawCropWidth))
+                  newCropX = Math.max(0, Math.min(state.startMediaWidth - newCropWidth, rawCropX))
+                  const startCenter = state.startCropX + state.startCropWidth / 2
+                  const currentCenter = newCropX + newCropWidth / 2
+                  const centerShiftX = currentCenter - startCenter
+                  newX = state.startX + centerShiftX * trig.cosPos
+                  newY = state.startY + centerShiftX * trig.sinPos
+                  newWidth = newCropWidth
+                } else if (state.handleType === 's' || state.handleType === 'n') {
+                  const rawCropHeight = state.startCropHeight + heightDelta
+                  const shift = heightDelta / 2
+                  const rawCropY = state.startCropY - shift
+                  newCropHeight = Math.max(minCropSize, Math.min(state.startMediaHeight, rawCropHeight))
+                  newCropY = Math.max(0, Math.min(state.startMediaHeight - newCropHeight, rawCropY))
+                  const startCenter = state.startCropY + state.startCropHeight / 2
+                  const currentCenter = newCropY + newCropHeight / 2
+                  const centerShiftY = currentCenter - startCenter
+                  newX = state.startX - centerShiftY * trig.sinPos
+                  newY = state.startY + centerShiftY * trig.cosPos
+                  newHeight = newCropHeight
+                }
               }
             } else {
               if (state.handleType === 'e') newCropWidth = Math.max(minCropSize, Math.min(state.startMediaWidth - newCropX, state.startCropWidth + widthDelta))
@@ -1689,6 +1747,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             updates.mediaWidth = state.startMediaWidth * scaleRatio; updates.mediaHeight = state.startMediaHeight * scaleRatio
             // CRITICAL: Force scale to 1 in Redux since resize uses width/height directly
             updates.scaleX = 1; updates.scaleY = 1;
+          }
+          // Redraw frame placeholder at new dimensions during resize
+          if (currentLayer.type === LAYER_TYPES.FRAME && currentLayerObject._framePlaceholder && !currentLayerObject._frameHasAsset) {
+            const phW = updates.cropWidth ?? newWidth
+            const phH = updates.cropHeight ?? newHeight
+            redrawFramePlaceholder(currentLayerObject, phW, phH)
           }
           currentLayerObject.x = newX
           currentLayerObject.y = newY
@@ -1773,14 +1837,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       updateThrottleRef.current = null
     }
     if (pendingUpdateRef.current && latestOnUpdateRef.current) {
-      const isMedia = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO
-      if (typeof console !== 'undefined' && console.log && isMedia && currentLayerObject) {
-        console.log('[useSelectionBox] handleResizeEnd flushing pending (media)', {
-          layerId: currentLayer?.id,
-          pendingUpdate: pendingUpdateRef.current,
-          pixiBefore: { x: currentLayerObject.x, y: currentLayerObject.y, pivotX: currentLayerObject.pivot?.x, pivotY: currentLayerObject.pivot?.y }
-        })
-      }
+      const isMedia = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO || currentLayer?.type === LAYER_TYPES.FRAME
+
       latestOnUpdateRef.current(pendingUpdateRef.current)
       pendingUpdateRef.current = null
     }
@@ -1793,7 +1851,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     if (currentLayerObject && !currentLayerObject.destroyed) {
       const isTextElement = currentLayerObject instanceof PIXI.Text
-      const isImageElement = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO
+      const isImageElement = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO || currentLayer?.type === LAYER_TYPES.FRAME
 
       if (isTextElement) {
         currentLayerObject.updateText?.(false)
@@ -1893,7 +1951,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const currentSessionScaleX = capturedLayer?.scaleX ?? (currentLayer.scaleX !== undefined ? currentLayer.scaleX : 1)
     const currentSessionScaleY = capturedLayer?.scaleY ?? (currentLayer.scaleY !== undefined ? currentLayer.scaleY : 1)
 
-    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO
+    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO || currentLayer.type === LAYER_TYPES.FRAME
     const currentSessionWidth = isMediaElement
       ? (capturedLayer?.cropWidth ?? currentLayer.cropWidth ?? currentLayer.width ?? 100)
       : (capturedLayer?.initialTransform?.width ?? (currentLayer.width ?? 100))
@@ -2129,7 +2187,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     dragStateAPI.setInteractionState(false, true, currentLayer.id)
 
-    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO
+    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO || currentLayer.type === LAYER_TYPES.FRAME
     const rotationDims = currentLayerObject instanceof PIXI.Text
       ? calculateTextDimensions(currentLayerObject, currentLayer)
       : {
@@ -2224,7 +2282,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const captured = isCapture && latestMotionCaptureModeRef.current.trackedLayers?.get(latestL.id)
 
       if (hoverBoxRef.current?.visible && latestObj && !latestObj.destroyed) {
-        const isMedia = latestL.type === LAYER_TYPES.IMAGE || latestL.type === LAYER_TYPES.VIDEO
+        const isMedia = latestL.type === LAYER_TYPES.IMAGE || latestL.type === LAYER_TYPES.VIDEO || latestL.type === LAYER_TYPES.FRAME
         const effectiveDims = isMedia
           ? getEffectiveLayerDimensions(latestL, latestObj, latestMotionCaptureModeRef.current)
           : null
@@ -2659,19 +2717,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         width = layer.cropWidth ?? layer.width ?? 100
         height = layer.cropHeight ?? layer.height ?? 100
       }
-      if (typeof console !== 'undefined' && console.log) {
-        const isVideo = layerObject._videoSprite != null
-        console.log('[useSelectionBox] sync media layer', {
-          layerId: layer?.id,
-          isVideo,
-          selectionBoxCenter: { x, y },
-          layerObjectPos: { x: layerObject.x, y: layerObject.y },
-          layerObjectPivot: layerObject.pivot ? { x: layerObject.pivot.x, y: layerObject.pivot.y } : null,
-          width,
-          height,
-          tracked: !!trackedLayer
-        })
-      }
+
     } else {
       // For shapes, use actual visual bounds from PIXI object
       let actualBounds
