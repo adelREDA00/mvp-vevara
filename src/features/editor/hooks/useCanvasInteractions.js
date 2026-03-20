@@ -4115,7 +4115,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             // Use the shared boundary checking logic
             const isOutside = isLayerCompletelyOutside(layer, layerObject, worldWidth, worldHeight)
 
-            if (isOutside) {
+            // [FIX] Skip deletion if motion capture mode is active.
+            // This allows layers to move outside the canvas during step recording without being removed.
+            const isMotionCaptureActive = latestMotionCaptureModeRef.current?.isActive
+
+            if (isOutside && !isMotionCaptureActive) {
               // Layer is completely outside canvas - delete it
               dispatch(deleteLayer(layerId))
               // Remove from selection if it was selected

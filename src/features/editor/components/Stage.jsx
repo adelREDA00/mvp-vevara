@@ -768,9 +768,12 @@ function Stage({
 
     // Check if layer is completely outside canvas after update
     if (isLayerCompletelyOutside(updatedLayer, layerObject, worldWidth, worldHeight)) {
-      // Layer is completely outside canvas - delete it
-      dispatch(deleteLayer(data.selectedLayerId))
-      dispatch(clearLayerSelection())
+      // [FIX] Skip deletion if motion capture mode is active.
+      if (!motionCaptureMode?.isActive) {
+        // Layer is completely outside canvas - delete it
+        dispatch(deleteLayer(data.selectedLayerId))
+        dispatch(clearLayerSelection())
+      }
     } else {
       // Layer is still inside or partially inside - update it
       // Simplified data merging: always preserve existing data and merge updates
