@@ -10,6 +10,80 @@ import { uid } from '../../../utils/ids'
 
 const TUTORIAL_VIDEO_URL = "/first.mp4"
 
+const TemplateThumbnail = ({ project }) => {
+    const videoRef = React.useRef(null)
+    const [isVisible, setIsVisible] = useState(false)
+    const [isLoaded, setIsLoaded] = useState(false)
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                setIsVisible(entry.isIntersecting)
+            },
+            { threshold: 0.1 }
+        )
+
+        if (videoRef.current) {
+            observer.observe(videoRef.current)
+        }
+
+        return () => observer.disconnect()
+    }, [])
+
+    useEffect(() => {
+        if (!videoRef.current) return
+
+        if (isVisible) {
+            videoRef.current.play().catch(e => {
+                // Autoplay might be blocked or file not found
+                console.log('Autoplay blocked or video missing:', e)
+            })
+        } else {
+            videoRef.current.pause()
+        }
+    }, [isVisible])
+
+    return (
+        <div className="aspect-video bg-[#f5f5f5] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
+            {project.videoUrl ? (
+                <video
+                    ref={videoRef}
+                    src={project.videoUrl}
+                    className={`w-full h-full object-contain transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    muted
+                    loop
+                    playsInline
+                    preload="auto"
+                    onLoadedData={() => setIsLoaded(true)}
+                    poster={project.thumbnail}
+                />
+            ) : null}
+
+            {/* Fallback Image / Static Thumbnail */}
+            {(!project.videoUrl || !isLoaded) && (
+                <div className={`absolute inset-0 transition-opacity duration-300 ${isLoaded ? 'opacity-0' : 'opacity-100'}`}>
+                    {project.thumbnail ? (
+                        <img
+                            src={project.thumbnail}
+                            alt={`${project.name} thumbnail`}
+                            className="w-full h-full object-contain"
+                        />
+                    ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
+                            <Layers size={32} strokeWidth={1.5} className="opacity-50" />
+                            <span className="text-[12px] font-semibold uppercase tracking-widest opacity-50">Preview</span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm duration-300">
+                <button className="h-9 px-5 bg-white text-black text-[12px] font-semibold rounded-[10px] shadow-sm transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">DUPLICATE & EDIT</button>
+            </div>
+        </div>
+    )
+}
+
 const DashboardPage = () => {
     const dispatch = useDispatch()
     const navigate = useNavigate()
@@ -115,6 +189,7 @@ const DashboardPage = () => {
         window.location.href = '/'
     }
 
+
     const handleCreateProject = async () => {
         try {
             const sceneId = uid()
@@ -198,79 +273,6 @@ const DashboardPage = () => {
         }
     }
 
-    const TemplateThumbnail = ({ project }) => {
-        const videoRef = React.useRef(null)
-        const [isVisible, setIsVisible] = useState(false)
-        const [isLoaded, setIsLoaded] = useState(false)
-
-        useEffect(() => {
-            const observer = new IntersectionObserver(
-                ([entry]) => {
-                    setIsVisible(entry.isIntersecting)
-                },
-                { threshold: 0.1 }
-            )
-
-            if (videoRef.current) {
-                observer.observe(videoRef.current)
-            }
-
-            return () => observer.disconnect()
-        }, [])
-
-        useEffect(() => {
-            if (!videoRef.current) return
-
-            if (isVisible) {
-                videoRef.current.play().catch(e => {
-                    // Autoplay might be blocked or file not found
-                    console.log('Autoplay blocked or video missing:', e)
-                })
-            } else {
-                videoRef.current.pause()
-            }
-        }, [isVisible])
-
-        return (
-            <div className="aspect-video bg-[#050505] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
-                {project.videoUrl ? (
-                    <video
-                        ref={videoRef}
-                        src={project.videoUrl}
-                        className={`w-full h-full object-contain transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-                        muted
-                        loop
-                        playsInline
-                        preload="metadata"
-                        onLoadedData={() => setIsLoaded(true)}
-                        poster={project.thumbnail}
-                    />
-                ) : null}
-
-                {/* Fallback Image / Static Thumbnail */}
-                {(!project.videoUrl || !isLoaded) && (
-                    <div className={`absolute inset-0 transition-opacity duration-300 ${isLoaded ? 'opacity-0' : 'opacity-100'}`}>
-                        {project.thumbnail ? (
-                            <img
-                                src={project.thumbnail}
-                                alt={`${project.name} thumbnail`}
-                                className="w-full h-full object-contain"
-                            />
-                        ) : (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
-                                <Layers size={32} strokeWidth={1.5} className="opacity-50" />
-                                <span className="text-[12px] font-semibold uppercase tracking-widest opacity-50">Preview</span>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm duration-300">
-                    <button className="h-9 px-5 bg-white text-black text-[12px] font-semibold rounded-[10px] shadow-sm transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">DUPLICATE & EDIT</button>
-                </div>
-            </div>
-        )
-    }
 
     return (
         <div className="min-h-[100dvh] bg-[#0f1015] text-white font-extralight selection:bg-[#6940c9]/30 overflow-x-hidden">
@@ -470,7 +472,7 @@ const DashboardPage = () => {
                                         className="group cursor-pointer"
                                         onClick={() => window.location.href = `/project/${project._id}`}
                                     >
-                                        <div className="aspect-video bg-[#050505] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
+                                        <div className="aspect-video bg-[#f5f5f5] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
                                             {project.thumbnail ? (
                                                 <img
                                                     src={project.thumbnail}
