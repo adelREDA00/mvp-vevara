@@ -155,14 +155,14 @@ export class ColorChangeAction {
 
         // Determine start color from state tracker or current object
         let startColorRaw = options.startState?.color
-        if (!startColorRaw) {
+        if (startColorRaw === undefined) {
             // Fallback: read from the PIXI object
             if (pixiObject instanceof PIXI.Text) {
-                startColorRaw = pixiObject.style?.fill || '#000000'
+                startColorRaw = pixiObject.style?.fill ?? '#000000'
             } else if (pixiObject._backgroundGraphics) {
-                startColorRaw = pixiObject._storedColor || 0xffffff
+                startColorRaw = pixiObject._storedColor ?? 0xffffff
             } else if (pixiObject instanceof PIXI.Graphics) {
-                startColorRaw = pixiObject._storedFill || '#000000'
+                startColorRaw = pixiObject._storedFill ?? '#000000'
             } else {
                 startColorRaw = '#000000'
             }

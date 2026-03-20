@@ -616,9 +616,9 @@ function CanvasControls({
           />
 
           <div
-            className="bg-[#6940c9] text-white px-3 py-1.5 rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-white/20 flex flex-row items-center gap-3 sm:gap-4 max-w-[calc(100vw-32px)] sm:max-w-none w-max text-center animate-bounce-subtle"
+            className="bg-[#6940c9] text-white px-4 py-2.5 rounded-2xl sm:rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-white/20 flex flex-row items-center gap-3 sm:gap-4 max-w-[calc(100vw-32px)] sm:max-w-none w-fit sm:w-max text-left sm:text-center animate-bounce-subtle"
           >
-            <span className="text-[11px] sm:text-[12.5px] font-semibold leading-none whitespace-nowrap opacity-95">
+            <span className="text-[11px] sm:text-[12.5px] font-semibold leading-normal opacity-95">
               Now change anything, move, scale, rotate, blur or edit, it will animate.
             </span>
 
@@ -634,7 +634,7 @@ function CanvasControls({
                   // Ignore localStorage errors
                 }
               }}
-              className="text-[11px] font-bold opacity-80 hover:opacity-100 transition-opacity underline decoration-white/40 underline-offset-4 text-purple-200 whitespace-nowrap"
+              className="text-[11px] font-bold opacity-80 hover:opacity-100 transition-opacity underline decoration-white/40 underline-offset-4 text-purple-200 whitespace-nowrap self-center"
             >
               hide
             </button>

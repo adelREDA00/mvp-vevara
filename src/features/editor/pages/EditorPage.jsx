@@ -1297,7 +1297,7 @@ function EditorPage() {
       let currentBlur = layer.blur !== undefined ? layer.blur : 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
-        : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
+        : layer.type === 'background' ? ('#' + (layer.data?.color ?? 0xffffff).toString(16).padStart(6, '0'))
         : null
       let currentCropX = layer.cropX || 0
       let currentCropY = layer.cropY || 0

@@ -363,7 +363,7 @@ const DashboardPage = () => {
                             )}
 
                             {/* Feedback Input Section */}
-                            <div className="bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-[20px] p-6 flex flex-col items-start gap-4 shadow-sm">
+                            <div className="bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-[20px] p-4 sm:p-6 flex flex-col items-start gap-4 shadow-sm">
                                 <div className="w-full flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <h3 className="text-[12px] font-semibold uppercase tracking-widest text-white/30">Share your thoughts</h3>
@@ -380,19 +380,19 @@ const DashboardPage = () => {
                                         <span className="text-[12px] text-emerald-500 font-medium">Feedback sent!</span>
                                     )}
                                 </div>
-                                <div className="w-full flex items-center gap-3">
+                                <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                                     <input
                                         type="text"
                                         value={feedbackText}
                                         onChange={(e) => setFeedbackText(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && handleSendFeedback()}
                                         placeholder="What's missing or broken?"
-                                        className="h-11 flex-1 bg-white/[0.03] border border-white/5 rounded-[12px] px-4 text-[14px] text-white placeholder:text-white/20 outline-none focus:border-[#6940c9]/40 transition-all duration-200 font-normal"
+                                        className="h-11 flex-1 bg-white/[0.03] border border-white/5 rounded-[12px] px-4 text-[14px] text-white placeholder:text-white/20 outline-none focus:border-[#6940c9]/40 transition-all duration-200 font-normal w-full"
                                     />
                                     <button
                                         onClick={handleSendFeedback}
                                         disabled={!feedbackText.trim() || feedbackStatus === 'sending'}
-                                        className="h-11 px-6 bg-[#6940c9] hover:bg-[#7b52da] disabled:opacity-50 disabled:cursor-not-allowed rounded-[12px] text-[14px] font-semibold transition-all duration-200 flex items-center gap-2 shadow-sm"
+                                        className="h-11 px-6 bg-[#6940c9] hover:bg-[#7b52da] disabled:opacity-50 disabled:cursor-not-allowed rounded-[12px] text-[14px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
                                     >
                                         {feedbackStatus === 'sending' ? <Loader2 size={16} strokeWidth={2} className="animate-spin" /> : 'Send'}
                                     </button>
