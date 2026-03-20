@@ -103,8 +103,9 @@ const DashboardPage = () => {
     const CATEGORIES = [
         'All',
         'Logo',
-        'Product',
+        'Ads',
         'Social',
+        "Website",
         'YouTube & Podcast Intros/Outros'
     ]
 
