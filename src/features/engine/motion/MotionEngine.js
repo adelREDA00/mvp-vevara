@@ -633,7 +633,12 @@ export class MotionEngine {
         this.masterTimeline.pause()
         this.isInternalPaused = true
       } else if (!needsBuffering && this.isInternalPaused) {
-        this.masterTimeline.play()
+        // [FIX] Only auto-resume if NOT in a fast preview (tweenTo) transition.
+        // Letting the timeline play during tweenTo causes it to keep moving 
+        // after the transition finishes.
+        if (!this._muteVideosForFastPreview) {
+          this.masterTimeline.play()
+        }
         this.isInternalPaused = false
       }
     } else {
