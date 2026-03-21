@@ -549,7 +549,7 @@ const DashboardPage = () => {
                                     <div className="w-6 h-6 border-[1.5px] border-[#6940c9]/20 border-t-[#6940c9] rounded-full animate-spin"></div>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-10">
                                     {templateProjects
                                         .filter(project => {
                                             if (selectedCategory === 'All') return true
@@ -565,8 +565,8 @@ const DashboardPage = () => {
                                                 <TemplateThumbnail project={project} />
                                                 <div className="flex items-start justify-between gap-4 px-1">
                                                     <div className="min-w-0">
-                                                        <h3 className="text-[14px] font-medium text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
-                                                        <p className="text-[12px] text-white/20 mt-1 uppercase tracking-tight">
+                                                        <h3 className="text-[16px] font-medium text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
+                                                        <p className="text-[13px] text-white/20 mt-1 uppercase tracking-tight">
                                                             {project.category && project.category !== 'none' ? project.category : 'Template'}
                                                         </p>
                                                     </div>
