@@ -465,7 +465,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                         scaleY: obj.scale.y,
                         alpha: obj.alpha,
                         blur: obj._blurFilter ? obj._blurFilter.strength : 0,
-                        color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? '#' + obj._storedColor.toString(16).padStart(6, '0') : null) ?? null,
+                        color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
                         // Visual crop properties (reactive)
                         cropX: obj.cropX,
                         cropY: obj.cropY,

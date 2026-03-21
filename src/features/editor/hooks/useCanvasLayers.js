@@ -303,15 +303,6 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     return
   }
 
-  // [FIX] BACKGROUND PROTECTION: Skip geometric transforms for background layers.
-  // Their dimensions and positioning are managed separately to ensure "cover" fit
-  // and non-interactivity.
-  if (layer.type === 'background') {
-    // Sync opacity only
-    if (layer.opacity !== undefined) displayObject.alpha = layer.opacity
-    return
-  }
-
   // Check for motion capture overrides
   const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layerId)
 
@@ -344,6 +335,34 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
   // Skip updates during playback unless forced (GSAP is in control)
   if (isActuallyPlaying && !force) {
+    return
+  }
+
+  // [FIX] BACKGROUND PROTECTION: Skip geometric transforms for background layers.
+  // Their dimensions and positioning are managed separately to ensure "cover" fit
+  // and non-interactivity.
+  if (layer.type === 'background' || layer.type === LAYER_TYPES.BACKGROUND) {
+    // Sync opacity only
+    if (layer.opacity !== undefined) displayObject.alpha = layer.opacity
+    
+    // Background color sync
+    if (force || capturedLayer || shouldApplyBaseState) {
+      const bgColor = capturedLayer?.color ?? layer.data?.color
+      if (bgColor !== undefined) {
+        const numericColor = parseColorCached(bgColor)
+        if (displayObject.fill) {
+          displayObject.clear()
+          displayObject.rect(0, 0, layer.width, layer.height)
+          displayObject.fill(numericColor)
+        }
+      }
+      // Clear GSAP color properties on force reset to prevent stale values
+      if (force) {
+        delete displayObject._color
+        delete displayObject._applyAnimatedColor
+        delete displayObject._lastAppliedColor
+      }
+    }
     return
   }
 
@@ -571,25 +590,6 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
           })
         }
         displayObject._storedFill = currentColor
-      }
-      // Clear GSAP color properties on force reset to prevent stale values
-      if (force) {
-        delete displayObject._color
-        delete displayObject._applyAnimatedColor
-        delete displayObject._lastAppliedColor
-      }
-    }
-  } else if (layer.type === LAYER_TYPES.BACKGROUND) {
-    // Background color sync
-    if (force || capturedLayer || shouldApplyBaseState) {
-      const bgColor = capturedLayer?.color ?? layer.data?.color
-      if (bgColor !== undefined) {
-        const numericColor = parseColorCached(bgColor)
-        if (displayObject.fill) {
-          displayObject.clear()
-          displayObject.rect(0, 0, layer.width, layer.height)
-          displayObject.fill(numericColor)
-        }
       }
       // Clear GSAP color properties on force reset to prevent stale values
       if (force) {
@@ -912,15 +912,16 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.BACKGROUND) {
         const container = new PIXI.Container()
         const graphics = new PIXI.Graphics()
-        const color = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+        const rawColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+        const numericColor = typeof rawColor === 'string' ? (parseColorCached(rawColor) ?? 0xffffff) : rawColor
         graphics.rect(0, 0, layer.width || worldWidth, layer.height || worldHeight)
-        graphics.fill(color)
+        graphics.fill(numericColor)
         graphics.eventMode = 'none'
         container.eventMode = 'none'
 
         container.addChild(graphics)
         container._backgroundGraphics = graphics
-        container._storedColor = color
+        container._storedColor = numericColor
         container._storedWidth = layer.width || worldWidth
         container._storedHeight = layer.height || worldHeight
         container._storedImageUrl = undefined // Set to undefined to force initial load in update block
@@ -1304,7 +1305,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
         else if (layer.type === LAYER_TYPES.BACKGROUND) {
           // During capture, use captured color; otherwise only sync base color at scene start
-          let currentColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+          const rawBaseColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+          let currentColor = typeof rawBaseColor === 'string' ? (parseColorCached(rawBaseColor) ?? 0xffffff) : rawBaseColor
           if (capturedLayerData?.color !== undefined) {
             const c = capturedLayerData.color
             currentColor = typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : (c ?? 0xffffff)

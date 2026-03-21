@@ -315,6 +315,7 @@ function Stage({
         rotation: (obj.rotation * 180) / Math.PI, // Convert rad to deg for consistent logic
         alpha: obj.alpha,
         blur: (obj.filters && obj._blurFilter && obj.filters.includes(obj._blurFilter)) ? obj._blurFilter.strength : 0,
+        color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
         cropX: obj.cropX ?? obj._storedCropX ?? 0,
         cropY: obj.cropY ?? obj._storedCropY ?? 0,
         cropWidth: obj.cropWidth ?? obj._storedCropWidth ?? obj._originalWidth ?? obj.width ?? 100,
