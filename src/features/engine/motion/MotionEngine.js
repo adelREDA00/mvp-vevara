@@ -336,7 +336,7 @@ export class MotionEngine {
               gsapTimeline.set(pixiObject, {
                 x: startState.x,
                 y: startState.y,
-                rotation: startState.rotation,
+                rotation: startState.rotation * (Math.PI / 180),
                 alpha: startState.opacity !== undefined ? startState.opacity : 1,
               }, startTimeOffset) // Anchor explicitly at the beginning of the scene
               
