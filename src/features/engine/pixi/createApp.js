@@ -50,9 +50,9 @@ export async function createApp(config = {}) {
     // Clean up the failed instance before trying again
     try {
       if (app) {
-        if (app.canvas) {
+        if (app.renderer && app.renderer.canvas) {
           try {
-            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl')
+            const gl = app.renderer.canvas.getContext('webgl2') || app.renderer.canvas.getContext('webgl')
             if (gl) {
               const loseCtx = gl.getExtension('WEBGL_lose_context')
               if (loseCtx) loseCtx.loseContext()
@@ -60,7 +60,7 @@ export async function createApp(config = {}) {
           } catch(e) {}
         }
         // Only call destroy if renderer exists to avoid TypeError
-        if (app.renderer) {
+        if (app.renderer && !app.destroyed) {
           app.destroy({ removeView: true })
         }
       }
@@ -88,9 +88,9 @@ export async function createApp(config = {}) {
     } catch (fallbackError) {
       console.error('PixiJS fallback init also failed:', fallbackError)
       if (app) {
-        if (app.canvas) {
+        if (app.renderer && app.renderer.canvas) {
           try {
-            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl')
+            const gl = app.renderer.canvas.getContext('webgl2') || app.renderer.canvas.getContext('webgl')
             if (gl) {
               const loseCtx = gl.getExtension('WEBGL_lose_context')
               if (loseCtx) loseCtx.loseContext()
@@ -98,7 +98,7 @@ export async function createApp(config = {}) {
           } catch(e) {}
         }
         try { 
-          if (app.renderer) app.destroy({ removeView: true }) 
+          if (app.renderer && !app.destroyed) app.destroy({ removeView: true }) 
         } catch (e) {}
       }
       throw new Error(`Failed to initialize PixiJS: ${fallbackError.message}`)
@@ -124,8 +124,8 @@ export async function createApp(config = {}) {
   // false-positive warning that appears on every page load without any user
   // interaction.  Real context losses caused by heavy GPU usage come much later
   // and are always caught once the two-frame window has passed.
-  if (app.canvas) {
-    const canvas = app.canvas
+  if (app.renderer && app.renderer.canvas) {
+    const canvas = app.renderer.canvas
     const attachContextListeners = () => {
       canvas.addEventListener('webglcontextlost', (event) => {
         // If the app is already destroyed or in the process of being destroyed, 

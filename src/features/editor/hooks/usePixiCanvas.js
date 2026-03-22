@@ -41,11 +41,14 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         pendingApp = app
 
         // Mount the canvas to the container
-        app.canvas.style.width = '100%'
-        app.canvas.style.height = '100%'
-        app.canvas.style.display = 'block'
-        app.canvas.style.touchAction = 'none' // Prevent browser scrolling on mobile
-        containerRef.current.appendChild(app.canvas)
+        if (app.renderer && app.renderer.canvas) {
+          const canvas = app.renderer.canvas
+          canvas.style.width = '100%'
+          canvas.style.height = '100%'
+          canvas.style.display = 'block'
+          canvas.style.touchAction = 'none' // Prevent browser scrolling on mobile
+          containerRef.current.appendChild(canvas)
+        }
 
         appRef.current = { app, viewport, stageContainer, layersContainer }
         setIsReady(true)
@@ -88,14 +91,14 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         // [FIX] Stop the ticker FIRST to prevent in-flight render calls from
         // drawing on a destroyed WebGL context (causes GL_INVALID_OPERATION)
         if (app.ticker) app.ticker.stop()
-        if (containerRef.current && app.canvas && containerRef.current.contains(app.canvas)) {
-          containerRef.current.removeChild(app.canvas)
+        if (containerRef.current && app.renderer && app.renderer.canvas && containerRef.current.contains(app.renderer.canvas)) {
+          containerRef.current.removeChild(app.renderer.canvas)
         }
         
         // [FIX] Force GPU context loss before destroy to immediately free WebGL contexts limit instead of waiting for GC
-        if (app.canvas) {
+        if (app.renderer && app.renderer.canvas) {
           try {
-            const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+            const gl = app.renderer.canvas.getContext('webgl2') || app.renderer.canvas.getContext('webgl');
             if (gl) {
               const loseCtx = gl.getExtension('WEBGL_lose_context');
               if (loseCtx) loseCtx.loseContext();
@@ -109,9 +112,9 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         appRef.current = null
       } else if (pendingApp) {
         // [FIX] Safety check for pending app
-        if (pendingApp.canvas) {
+        if (pendingApp.renderer && pendingApp.renderer.canvas) {
           try {
-            const gl = pendingApp.canvas.getContext('webgl2') || pendingApp.canvas.getContext('webgl');
+            const gl = pendingApp.renderer.canvas.getContext('webgl2') || pendingApp.renderer.canvas.getContext('webgl');
             if (gl) {
               const loseCtx = gl.getExtension('WEBGL_lose_context');
               if (loseCtx) loseCtx.loseContext();
