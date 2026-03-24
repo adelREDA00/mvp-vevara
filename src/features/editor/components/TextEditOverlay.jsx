@@ -73,11 +73,25 @@ function TextEditOverlay({
   const syncStyles = useCallback(() => {
     if (!layer || !viewport || !canvasContainer || !editableDivRef.current) return
 
+    // [FIX] Prioritize live PIXI object state for animated layers
+    const liveX = textObject?.x ?? (layer.x || 0)
+    const liveY = textObject?.y ?? (layer.y || 0)
+    const liveRotation = textObject ? (textObject.rotation * 180 / Math.PI) : (layer.rotation || 0)
+    const liveAlpha = textObject?.alpha ?? (layer.opacity !== undefined ? layer.opacity : 1)
+    
+    // [FIX] Synchronize width with intended layer boundaries (wordWrapWidth)
+    // IMPORTANT: Width is kept at its BASE value, and live scaling (animation) 
+    // is applied via CSS transform: scale() below. This ensures both width 
+    // and font-size are perfectly synchronized without double-scaling.
+    const liveScaleX = textObject?.scale?.x ?? 1
+    const liveScaleY = textObject?.scale?.y ?? 1
+    const baseWidth = layer.width || 200
+
     const zoomScale = viewport.scale.x
-    const screenPos = viewport.toScreen(layer.x || 0, layer.y || 0)
+    const screenPos = viewport.toScreen(liveX, liveY)
     const canvasRect = canvasContainer.getBoundingClientRect()
 
-    const scaledWidth = Math.floor((layer.width || 200) * zoomScale)
+    const scaledWidth = Math.floor(baseWidth * zoomScale)
 
     // [FIX] Mobile auto-zoom prevention: use 16px min font size and scale visually
     const targetFontSize = (layer.data?.fontSize || 24) * zoomScale
@@ -103,9 +117,10 @@ function TextEditOverlay({
     style.fontSize = `${fontSize}px`
     style.lineHeight = `${lineHeight}px`
 
-    const rotation = layer.rotation || 0
-    // Combined transform: translate to center, rotate, and apply visual scale for mobile zoom prevention
-    style.transform = `translate(-50%, -50%) rotate(${rotation}deg) scale(${visualScale})`
+    // Combined transform: translate to center, rotate, and apply visual scale
+    // [FIX] Multiply visualScale (for mobile) by the live animation scale (X and Y)
+    // to keep the font-size and width perfectly in sync with the animated PIXI object.
+    style.transform = `translate(-50%, -50%) rotate(${liveRotation}deg) scale(${visualScale * liveScaleX}, ${visualScale * liveScaleY})`
     style.transformOrigin = 'center center'
 
     style.fontFamily = layer.data?.fontFamily || 'Arial'
@@ -119,9 +134,9 @@ function TextEditOverlay({
     style.border = 'none'
     style.outline = 'none'
     style.boxSizing = 'content-box'
-    style.opacity = layer.opacity !== undefined ? layer.opacity : 1
+    style.opacity = liveAlpha
     style.webkitFontSmoothing = 'antialiased'
-  }, [layer, viewport, canvasContainer])
+  }, [layer, viewport, canvasContainer, textObject])
 
   useEffect(() => {
     syncStyles()
@@ -134,20 +149,49 @@ function TextEditOverlay({
     let lastViewportX = viewport.x
     let lastViewportY = viewport.y
     let lastViewportScale = viewport.scale.x
+    
+    // Track live PIXI object properties
+    let lastLayerX = textObject?.x
+    let lastLayerY = textObject?.y
+    let lastLayerRot = textObject?.rotation
+    let lastLayerAlpha = textObject?.alpha
+    let lastLayerScaleX = textObject?.scale?.x
+    let lastLayerScaleY = textObject?.scale?.y
 
-    const checkViewportChanges = () => {
-      if (viewport.x !== lastViewportX ||
+    const checkUpdates = () => {
+      const viewportChanged = viewport.x !== lastViewportX ||
         viewport.y !== lastViewportY ||
-        viewport.scale.x !== lastViewportScale) {
+        viewport.scale.x !== lastViewportScale
+      
+      const layerChanged = textObject && (
+        textObject.x !== lastLayerX ||
+        textObject.y !== lastLayerY ||
+        textObject.rotation !== lastLayerRot ||
+        textObject.alpha !== lastLayerAlpha ||
+        textObject.scale.x !== lastLayerScaleX ||
+        textObject.scale.y !== lastLayerScaleY
+      )
+
+      if (viewportChanged || layerChanged) {
         syncStyles()
+        
         lastViewportX = viewport.x
         lastViewportY = viewport.y
         lastViewportScale = viewport.scale.x
+        
+        if (textObject) {
+          lastLayerX = textObject.x
+          lastLayerY = textObject.y
+          lastLayerRot = textObject.rotation
+          lastLayerAlpha = textObject.alpha
+          lastLayerScaleX = textObject.scale.x
+          lastLayerScaleY = textObject.scale.y
+        }
       }
-      animationFrameId = requestAnimationFrame(checkViewportChanges)
+      animationFrameId = requestAnimationFrame(checkUpdates)
     }
 
-    animationFrameId = requestAnimationFrame(checkViewportChanges)
+    animationFrameId = requestAnimationFrame(checkUpdates)
     viewport.on('moved', syncStyles)
     viewport.on('zoomed', syncStyles)
 
@@ -156,7 +200,7 @@ function TextEditOverlay({
       viewport.off('moved', syncStyles)
       viewport.off('zoomed', syncStyles)
     }
-  }, [layer, viewport, canvasContainer, syncStyles])
+  }, [layer, viewport, canvasContainer, syncStyles, textObject])
 
   if (!layer) return null
 

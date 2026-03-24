@@ -2756,7 +2756,10 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         // [FIX] Block multi-drag if ANY selected layer is animated and we are past base step
         const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
-        if (anyLocked) {
+        const targetLayerId = findLayerIdFromObject(target, layerObjectsMap, stageContainer, viewport)
+        const isTextLayer = targetLayerId && latestLayersRef.current[targetLayerId]?.type === LAYER_TYPES.TEXT
+
+        if (anyLocked && !isTextLayer) {
           event.stopPropagation()
           event.stopImmediatePropagation?.()
           if (onLockedInteraction) onLockedInteraction(event)
@@ -2845,7 +2848,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
           // [FIX] Block single-layer drag if it's animated and we are past base step
           // Enforce lock even on initial selection (Bug 1 Fix)
-          if (isLayerLocked(selectedLayerId)) {
+          const isTextLayer = latestLayersRef.current[selectedLayerId]?.type === LAYER_TYPES.TEXT
+          if (isLayerLocked(selectedLayerId) && !isTextLayer) {
             event.stopPropagation()
             event.stopImmediatePropagation?.()
             if (onLockedInteraction) onLockedInteraction(event)
@@ -2971,7 +2975,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         if (clickedLayerInMultiSelect) {
           // [FIX] Block multi-drag from element click if ANY selected layer is locked
           const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
-          if (anyLocked) {
+          const isTextTarget = latestLayersRef.current[layerId]?.type === LAYER_TYPES.TEXT
+          if (anyLocked && !isTextTarget) {
             event.stopPropagation()
             event.stopImmediatePropagation?.()
             if (onLockedInteraction) onLockedInteraction(event)
@@ -3082,7 +3087,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (activeTool === 'select' || activeTool === 'move') {
         // [FIX] Block single-layer drag from element click if locked
         // Enforce lock even on initial selection (Bug 1 Fix)
-        if (!hasMultiSelect && isLayerLocked(layerId)) {
+        const isTextLayer = latestLayersRef.current[layerId]?.type === LAYER_TYPES.TEXT
+        if (!hasMultiSelect && isLayerLocked(layerId) && !isTextLayer) {
           event.stopPropagation()
           event.stopImmediatePropagation?.()
           if (onLockedInteraction) onLockedInteraction(event)
@@ -3228,7 +3234,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           return // Not enough movement yet, don't start dragging
         }
         // Start dragging!
-        dragStateAPI.setDragState(true, dragStartRef.current.layerId)
+        const dragLayerId = dragStartRef.current.layerId
+        if (isLayerLocked(dragLayerId)) {
+          if (onLockedInteraction) onLockedInteraction(event)
+          // Reset state to stop tracking movement
+          pointerIsDownRef.current = false
+          dragStartRef.current = null
+          return
+        }
+        dragStateAPI.setDragState(true, dragLayerId)
 
         // Show drag hover box when dragging starts
         const dragStartLayerId = dragStartRef.current.layerId
@@ -3374,6 +3388,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       if (isMultiSelectDrag) {
+        // [FIX] Block multi-drag move if ANY selected layer is locked
+        const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
+        if (anyLocked) {
+          if (onLockedInteraction) onLockedInteraction(event)
+          // Reset state to stop tracking movement
+          pointerIsDownRef.current = false
+          dragStartRef.current = null
+          dragStateAPI.setDragState(false)
+          return
+        }
         // Optimized multi-select drag: simplified snapping for better performance
         // Get the original bounding box center (stored at drag start)
         let originalBoundsCenter = multiSelectBoundsCenterRef.current
@@ -3991,7 +4015,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           const frameBounds = getLayerWorldBounds(frameLayer, frameObj)
           if (!frameBounds) continue
           if (newX >= frameBounds.left && newX <= frameBounds.right &&
-              newY >= frameBounds.top && newY <= frameBounds.bottom) {
+            newY >= frameBounds.top && newY <= frameBounds.bottom) {
             overlappingFrameId = frameId
             break
           }
@@ -4060,12 +4084,24 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             }))
             const frameObj = layerObjectsMap.get(frameId)
             if (frameObj) {
+              const frameW = frameLayer.cropWidth ?? frameLayer.width
+              const frameH = frameLayer.cropHeight ?? frameLayer.height
+
+              // [FIX] Clear the drop target flag so the sync loop is not blocked
+              unhighlightFrameDropTarget(frameObj, frameW, frameH)
+
               loadTextureRobust(assetUrl).then(texture => {
                 if (!texture || frameObj.destroyed) return
-                const frameW = frameLayer.cropWidth ?? frameLayer.width
-                const frameH = frameLayer.cropHeight ?? frameLayer.height
+
                 attachAssetToFramePixi(frameObj, texture, frameW, frameH)
-              }).catch(() => {})
+
+                // [FIX] Force MotionEngine refresh to ensure new asset is immediately
+                // visible and correctly positioned for the current timeline time.
+                const engine = getGlobalMotionEngine()
+                if (engine && engine.masterTimeline) {
+                  engine.masterTimeline.time(engine.masterTimeline.time())
+                }
+              }).catch(() => { })
             }
             dispatch(deleteLayer(draggedLayerId))
             dispatch(clearLayerSelection())

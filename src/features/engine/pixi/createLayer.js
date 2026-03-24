@@ -593,6 +593,7 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   sprite.x = -cropX
   sprite.y = -cropY
   sprite.alpha = 1
+  sprite.visible = true // [FIX] Ensure immediate visibility after texture load
 
   // Enable mipmapping
   if (!_isMobileDevice && texture.source) {

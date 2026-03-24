@@ -344,7 +344,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   if (layer.type === 'background' || layer.type === LAYER_TYPES.BACKGROUND) {
     // Sync opacity only
     if (layer.opacity !== undefined) displayObject.alpha = layer.opacity
-    
+
     // Background color sync
     if (force || capturedLayer || shouldApplyBaseState) {
       const bgColor = capturedLayer?.color ?? layer.data?.color
@@ -608,7 +608,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
  */
 function syncBlurFilter(displayObject, blurValue) {
   const clamped = Math.max(0, Math.min(Number(blurValue) || 0, BLUR_MAX))
-  
+
   // Set logical strength for the engine and applier
   displayObject._blurLogicalStrength = clamped
 
@@ -629,11 +629,11 @@ function syncBlurFilter(displayObject, blurValue) {
           const worldScale = Math.abs(displayObject.worldTransform.a);
           const rendererRes = displayObject.renderer?.resolution || window.devicePixelRatio || 1;
           const target = logical * worldScale * rendererRes;
-          
+
           if (Math.abs(displayObject._blurFilter.strength - target) > 0.05) {
             displayObject._blurFilter.strength = target;
           }
-          
+
           if (!displayObject.filters || !displayObject.filters.includes(displayObject._blurFilter)) {
             displayObject.filters = displayObject.filters ? [...displayObject.filters, displayObject._blurFilter] : [displayObject._blurFilter];
           }
@@ -1510,7 +1510,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const cropW = capturedLayerData?.cropWidth ?? capturedLayerData?.width ?? pixiObject._storedCropWidth ?? layer.cropWidth ?? layer.width ?? 100
             const cropH = capturedLayerData?.cropHeight ?? capturedLayerData?.height ?? pixiObject._storedCropHeight ?? layer.cropHeight ?? layer.height ?? 100
 
-            if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
+            // [FIX] Consistently sync internal media properties even if we aren't at scene start.
+            // This ensures that when an asset is dropped at T > 0, the sprite dimensions,
+            // crop mask, and pivot are correctly initialized for the new asset.
+            // We only skip the CONTAINER transforms (handled by GSAP) if not at start.
+            if (!isActuallyPlaying) {
+              // 1. Sprite visibility and texture sync
               if (pixiObject._frameHasAsset) {
                 if (sprite) {
                   sprite.visible = true
@@ -1523,26 +1528,19 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
                 sprite.visible = false
               }
 
+              // 2. Crop mask sync
               if (cropMask) {
                 cropMask.clear()
                 cropMask.rect(0, 0, cropW, cropH)
                 cropMask.fill(0xffffff)
               }
 
+              // 3. Pivot sync (CRITICAL: center rotation/scale depends on this)
               const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
               const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
               pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
 
-              if (pixiObject._framePlaceholder && !pixiObject._isDropTarget) {
-                pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
-                if (!pixiObject._frameHasAsset) {
-                  redrawFramePlaceholder(pixiObject, cropW, cropH, layer.data)
-                }
-              }
-            }
-            else if (!isActuallyPlaying && !pixiObject._isDropTarget) {
-              // Ensure visibility is correct even if we aren't at start or captured
-              if (sprite) sprite.visible = pixiObject._frameHasAsset
+              // 4. Placeholder sync
               if (pixiObject._framePlaceholder) {
                 pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
                 if (!pixiObject._frameHasAsset) {
