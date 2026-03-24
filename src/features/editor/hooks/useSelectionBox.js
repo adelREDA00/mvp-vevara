@@ -1720,6 +1720,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
               if (liveLayer) {
                 liveLayer.currentPosition = { x: newX, y: newY }
                 liveLayer.cropX = newCropX; liveLayer.cropY = newCropY; liveLayer.cropWidth = newCropWidth; liveLayer.cropHeight = newCropHeight
+                // [FIX] For frame layers, ensure width/height in trackedLayers are also updated
+                // so that sync logic using .width/.height sees the new crop dimensions.
+                if (currentLayer.type === LAYER_TYPES.FRAME) {
+                  liveLayer.width = newCropWidth
+                  liveLayer.height = newCropHeight
+                }
                 // [SCALE FIX] Preserve scale values instead of resetting to 1
                 // This ensures that if the user scaled the layer before cropping, the scale is maintained
                 liveLayer.scaleX = preservedScaleX

@@ -596,6 +596,13 @@ const projectSlice = createSlice({
           ? { sourceStartTime: 0, sourceEndTime: layerData.data?.duration || 0, ...layerData.data }
           : (layerData.data || {}),
 
+        // [FIX] Initialize Frame layers with explicit native dimensions
+        // This allows crops to change width/height while preserving placeholder identity
+        ...(type === 'frame' ? {
+          mediaWidth: layerData.width || 100,
+          mediaHeight: layerData.height || 100
+        } : {}),
+
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
@@ -1620,6 +1627,7 @@ const projectSlice = createSlice({
       const frameW = layer.cropWidth ?? layer.width
       const frameH = layer.cropHeight ?? layer.height
 
+
       // Store old media dimensions for remapping existing motion crop actions
       const oldMediaW = layer.mediaWidth ?? frameW
       const oldMediaH = layer.mediaHeight ?? frameH
@@ -1631,7 +1639,14 @@ const projectSlice = createSlice({
       const cropX = (mediaW - frameW) / 2
       const cropY = (mediaH - frameH) / 2
 
-      layer.data = { ...layer.data, assetUrl, assetWidth, assetHeight }
+      layer.data = {
+        ...layer.data,
+        assetUrl,
+        assetWidth,
+        assetHeight,
+        originalPlaceholderWidth: layer.mediaWidth || layer.width,
+        originalPlaceholderHeight: layer.mediaHeight || layer.height
+      }
       layer.mediaWidth = mediaW
       layer.mediaHeight = mediaH
       layer.cropX = cropX
@@ -1639,6 +1654,7 @@ const projectSlice = createSlice({
       layer.cropWidth = frameW
       layer.cropHeight = frameH
       layer.updatedAt = Date.now()
+
 
       // Remap existing motion crop actions to new media dimensions
       // This prevents incorrect positions when the user adds new motion steps after attachment
@@ -1653,10 +1669,20 @@ const projectSlice = createSlice({
           for (const action of actions) {
             if (action.type === 'crop' && action.values) {
               const v = action.values
-              if (v.cropX !== undefined) v.cropX = v.cropX * scaleX + cropX
-              if (v.cropY !== undefined) v.cropY = v.cropY * scaleY + cropY
-              if (v.cropWidth !== undefined) v.cropWidth = v.cropWidth * scaleX
-              if (v.cropHeight !== undefined) v.cropHeight = v.cropHeight * scaleY
+              
+              // [FIX] Remap based on the STEP'S OWN DIMENSIONS to maintain fit
+              // instead of using a static offset from the base state.
+              const stepCropW = v.cropWidth ?? frameW
+              const stepCropH = v.cropHeight ?? frameH
+
+              // If it was centered before (or empty), keep it centered
+              // For frames, we almost always want to force-center unless user manually panned
+              const newCropX = (mediaW - stepCropW) / 2
+              const newCropY = (mediaH - stepCropH) / 2
+
+              v.cropX = newCropX
+              v.cropY = newCropY
+              
               if (v.mediaWidth !== undefined) v.mediaWidth = mediaW
               if (v.mediaHeight !== undefined) v.mediaHeight = mediaH
             }
@@ -1665,40 +1691,47 @@ const projectSlice = createSlice({
       }
     },
 
-    // Detach the asset from a frame, leaving it empty again
     detachAssetFromFrame: (state, action) => {
       const { layerId } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
 
-      const frameW = layer.cropWidth ?? layer.width
-      const frameH = layer.cropHeight ?? layer.height
+      // Restore to empty frame state.
+      // We want to "stay" at the current visual crop size, but restore the underlying
+      // placeholder canvas dimensions so the user can "un-crop" later if needed.
+      const preservedWidth = layer.cropWidth ?? layer.width
+      const preservedHeight = layer.cropHeight ?? layer.height
 
-      // [FIX] Calculate current scale vs frame base BEFORE resetting
-      const currentMediaW = layer.mediaWidth ?? frameW
-      const currentMediaH = layer.mediaHeight ?? frameH
-      const currentCropX = layer.cropX ?? 0
-      const currentCropY = layer.cropY ?? 0
+      // Capture the asset's current media size for remapping
+      const currentMediaW = layer.mediaWidth || preservedWidth
+      const currentMediaH = layer.mediaHeight || preservedHeight
 
-      // Reset to empty frame state
+      const canvasWidth = layer.data.originalPlaceholderWidth || preservedWidth
+      const canvasHeight = layer.data.originalPlaceholderHeight || preservedHeight
+
       delete layer.data.assetUrl
       delete layer.data.assetWidth
       delete layer.data.assetHeight
-      layer.mediaWidth = frameW
-      layer.mediaHeight = frameH
+      delete layer.data.originalPlaceholderWidth
+      delete layer.data.originalPlaceholderHeight
+
+      layer.width = preservedWidth
+      layer.height = preservedHeight
+      layer.mediaWidth = canvasWidth
+      layer.mediaHeight = canvasHeight
+      layer.cropWidth = preservedWidth
+      layer.cropHeight = preservedHeight
       layer.cropX = 0
       layer.cropY = 0
-      layer.cropWidth = frameW
-      layer.cropHeight = frameH
       layer.updatedAt = Date.now()
 
-      // [FIX] Remap existing motion crop actions back to frame dimensions
-      // This reverses the mapping done in attachAssetToFrame and prevents visual jumps/corruption
+      // Remap existing motion crop actions back to the new placeholder canvas
       const sceneId = layer.sceneId
       const motionFlow = state.sceneMotionFlows[sceneId]
       if (motionFlow?.steps) {
-        const invScaleX = frameW / currentMediaW
-        const invScaleY = frameH / currentMediaH
+        // scale Factor relative to the asset's current media size
+        const scaleFactorX = canvasWidth / currentMediaW
+        const scaleFactorY = canvasHeight / currentMediaH
 
         for (const step of motionFlow.steps) {
           const actions = step.layerActions?.[layerId]
@@ -1706,12 +1739,17 @@ const projectSlice = createSlice({
           for (const action of actions) {
             if (action.type === 'crop' && action.values) {
               const v = action.values
-              if (v.cropX !== undefined) v.cropX = (v.cropX - currentCropX) * invScaleX
-              if (v.cropY !== undefined) v.cropY = (v.cropY - currentCropY) * invScaleY
-              if (v.cropWidth !== undefined) v.cropWidth = v.cropWidth * invScaleX
-              if (v.cropHeight !== undefined) v.cropHeight = v.cropHeight * invScaleY
-              v.mediaWidth = frameW
-              v.mediaHeight = frameH
+
+              const stepCropW = v.cropWidth ?? currentMediaW
+              const stepCropH = v.cropHeight ?? currentMediaH
+
+              v.cropWidth = stepCropW * scaleFactorX
+              v.cropHeight = stepCropH * scaleFactorY
+              v.cropX = 0
+              v.cropY = 0
+
+              if (v.mediaWidth !== undefined) v.mediaWidth = canvasWidth
+              if (v.mediaHeight !== undefined) v.mediaHeight = canvasHeight
             }
           }
         }

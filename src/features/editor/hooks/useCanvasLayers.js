@@ -474,6 +474,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         displayObject._storedMediaWidth = mediaW
         displayObject._storedMediaHeight = mediaH
 
+
         // Update sprite to match full media size
         if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
         if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
@@ -1263,13 +1264,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             if (pixiObject.updateText) pixiObject.updateText(true);
 
             // Force re-measure and re-pivot immediately
-            const align = layer.data?.textAlign || 'left'
-            const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
-            const currentWidth = layer.width || 200
-            const bounds = pixiObject.getLocalBounds()
+            const align = layer.data?.textAlign || 'left';
+            const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0);
+            const currentWidth = layer.width || 200;
+            const bounds = pixiObject.getLocalBounds();
 
-            pixiObject.anchor.set(anchorX, 0)
-            pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2)
+            pixiObject.anchor.set(anchorX, 0);
+            pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2);
 
             // Re-calculate the Redux height so selection boxes fit
             calculateTextHeight(
@@ -1462,16 +1463,16 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
 
             if (oldStart !== pixiObject._sourceStartTime) {
-              console.log(`[useCanvasLayers] Video time range updated: ${layerId}, sourceStartTime=${pixiObject._sourceStartTime}, sourceEndTime=${pixiObject._sourceEndTime}`)
+              // console.log(`[useCanvasLayers] Video time range updated: ${layerId}, sourceStartTime=${pixiObject._sourceStartTime}, sourceEndTime=${pixiObject._sourceEndTime}`)
             }
 
             if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
-              const mediaW = layer.mediaWidth ?? layer.width ?? 100
-              const mediaH = layer.mediaHeight ?? layer.height ?? 100
-              const cropX = layer.cropX ?? 0
-              const cropY = layer.cropY ?? 0
-              const cropW = layer.cropWidth ?? layer.width ?? 100
-              const cropH = layer.cropHeight ?? layer.height ?? 100
+              const mediaW = capturedLayerData?.mediaWidth ?? layer.mediaWidth ?? layer.width ?? 100
+              const mediaH = capturedLayerData?.mediaHeight ?? layer.mediaHeight ?? layer.height ?? 100
+              const cropX = capturedLayerData?.cropX ?? layer.cropX ?? 0
+              const cropY = capturedLayerData?.cropY ?? layer.cropY ?? 0
+              const cropW = capturedLayerData?.cropWidth ?? layer.cropWidth ?? layer.width ?? 100
+              const cropH = capturedLayerData?.cropHeight ?? layer.cropHeight ?? layer.height ?? 100
 
               if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
               if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
@@ -1499,25 +1500,27 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const sprite = pixiObject._imageSprite
             const cropMask = pixiObject._cropMask
 
+            // Resolve common crop dimensions for both branches to ensure consistency
+            const mediaW = capturedLayerData?.mediaWidth ?? pixiObject._storedMediaWidth ?? layer.mediaWidth ?? layer.width ?? 100
+            const mediaH = capturedLayerData?.mediaHeight ?? pixiObject._storedMediaHeight ?? layer.mediaHeight ?? layer.height ?? 100
+            const cropX = capturedLayerData?.cropX ?? pixiObject._storedCropX ?? layer.cropX ?? 0
+            const cropY = capturedLayerData?.cropY ?? pixiObject._storedCropY ?? layer.cropY ?? 0
+
+            // Frame width/height: use cropWidth if specifically set, falling back to base width
+            const cropW = capturedLayerData?.cropWidth ?? capturedLayerData?.width ?? pixiObject._storedCropWidth ?? layer.cropWidth ?? layer.width ?? 100
+            const cropH = capturedLayerData?.cropHeight ?? capturedLayerData?.height ?? pixiObject._storedCropHeight ?? layer.cropHeight ?? layer.height ?? 100
+
             if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
-              const mediaW = layer.mediaWidth ?? layer.width ?? 100
-              const mediaH = layer.mediaHeight ?? layer.height ?? 100
-              const cropX = layer.cropX ?? 0
-              const cropY = layer.cropY ?? 0
-              
-              const cropWidthBase = layer.cropWidth ?? layer.width ?? 100
-              const cropHeightBase = layer.cropHeight ?? layer.height ?? 100
-
-              // [FIX] If frame is empty, ignore animated crop dimensions and fit to frame base
-              // This prevents visual corruption/jumping when detaching assets with existing crop animations.
-              const cropW = pixiObject._frameHasAsset ? cropWidthBase : (layer.width || 100)
-              const cropH = pixiObject._frameHasAsset ? cropHeightBase : (layer.height || 100)
-
               if (pixiObject._frameHasAsset) {
-                if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-                if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-                if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-                if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
+                if (sprite) {
+                  sprite.visible = true
+                  if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
+                  if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
+                  if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
+                  if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
+                }
+              } else if (sprite) {
+                sprite.visible = false
               }
 
               if (cropMask) {
@@ -1530,29 +1533,21 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
               pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
 
-              // Sync placeholder visibility and redraw at current dimensions
-              // [UX FIX] Skip sync ONLY when frame is highlighted as a drop target (_isDropTarget)
-              // to prevent flickering when dragging over frames with existing assets.
               if (pixiObject._framePlaceholder && !pixiObject._isDropTarget) {
-                // [FIX] Update frame data so redraw reflects latest label etc.
-                pixiObject._frameData = layer.data
-
                 pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
                 if (!pixiObject._frameHasAsset) {
                   redrawFramePlaceholder(pixiObject, cropW, cropH, layer.data)
                 }
               }
             }
-            
-            // [FIX] Label Sync: Always sync label and placeholder data even if not at scene start.
-            // Labels are static metadata and should reflect Redux immediately, unlike geometric transforms.
-            else if (!isActuallyPlaying && !pixiObject._isDropTarget && pixiObject._framePlaceholder) {
-              const cropW = layer.width || 100
-              const cropH = layer.height || 100
-              pixiObject._frameData = layer.data
-              pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
-              if (!pixiObject._frameHasAsset) {
-                redrawFramePlaceholder(pixiObject, cropW, cropH, layer.data)
+            else if (!isActuallyPlaying && !pixiObject._isDropTarget) {
+              // Ensure visibility is correct even if we aren't at start or captured
+              if (sprite) sprite.visible = pixiObject._frameHasAsset
+              if (pixiObject._framePlaceholder) {
+                pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
+                if (!pixiObject._frameHasAsset) {
+                  redrawFramePlaceholder(pixiObject, cropW, cropH, layer.data)
+                }
               }
             }
           }

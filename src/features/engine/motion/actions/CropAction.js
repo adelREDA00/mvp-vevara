@@ -6,6 +6,7 @@
 import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { CustomEase } from "gsap/CustomEase";
+import { redrawFramePlaceholder } from '../../pixi/createLayer'
 
 // Register the plugin
 gsap.registerPlugin(CustomEase);
@@ -84,11 +85,6 @@ export class CropAction {
             return gsap.to({}, { duration: animationDuration })
         }
         
-        // [DEBUG]
-        console.log(`[CropAction] Layer ${pixiObject.id || 'unknown'} -> start: (${startX.toFixed(1)}, ${startY.toFixed(1)}) delta: (${values.dx || 0}, ${values.dy || 0})`)
-        console.log(`   -> fromVars: `, fromVars)
-        console.log(`   -> toVars: `, toVars)
-
         return gsap.fromTo(pixiObject, fromVars, toVars)
     }
 
@@ -158,6 +154,7 @@ export class CropAction {
 
         pixiObject._hasReactiveCropProperties = true
 
+
         // Immediate visual update to ensure state is reflected
         pixiObject._updateCropVisuals()
     }
@@ -181,6 +178,7 @@ export class CropAction {
         // the frame with crop math, requiring pivot shifts to match x/y compensation).
         const anchorX = pixiObject.anchorX !== undefined ? pixiObject.anchorX : 0.5
         const anchorY = pixiObject.anchorY !== undefined ? pixiObject.anchorY : 0.5
+
         pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
 
         // If an image asset is currently attached, shift internal coordinate geometries
@@ -197,6 +195,17 @@ export class CropAction {
           cropMask.clear()
           cropMask.rect(0, 0, cropW, cropH)
           cropMask.fill(0xffffff)
+        }
+
+        // [FIX] Update visibility and placeholders for frames during animation
+        if (pixiObject._isFrame) {
+            if (pixiObject._imageSprite) pixiObject._imageSprite.visible = !!pixiObject._frameHasAsset
+            if (pixiObject._framePlaceholder) {
+                pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
+                if (!pixiObject._frameHasAsset) {
+                    redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
+                }
+            }
         }
     }
 }

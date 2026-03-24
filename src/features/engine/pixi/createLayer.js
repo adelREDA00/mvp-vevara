@@ -532,6 +532,7 @@ export function createFrameLayer(config) {
   container._originalWidth = width
   container._originalHeight = height
 
+
   // Crop mask
   const cropMask = new PIXI.Graphics()
   cropMask.rect(0, 0, cropWidth, cropHeight)
@@ -603,6 +604,7 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   // Update container metadata
   container._mediaWidth = mediaW
   container._mediaHeight = mediaH
+
 
   // Update crop mask to frame dimensions
   const cropMask = container._cropMask
