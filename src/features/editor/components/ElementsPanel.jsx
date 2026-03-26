@@ -96,7 +96,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'rect',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -115,7 +115,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         data: {
           shapeType: 'circle',
           radius: 50,
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -133,7 +133,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'line',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -151,7 +151,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'triangle',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -169,7 +169,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'hexagon',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -187,7 +187,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'square',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
@@ -205,7 +205,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'star',
-          fill: '#6367ff',
+          fill: '#000000',
           stroke: '',
           strokeWidth: 0,
         }
