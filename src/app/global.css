@@ -228,23 +228,20 @@ body {
 /* Animations */
 @keyframes pulse-glow {
   0% {
-    box-shadow: 0 0 5px rgba(168, 85, 247, 0.4), 0 0 10px rgba(168, 85, 247, 0.2);
-    transform: scale(1);
+    box-shadow: 0 0 4px rgba(124, 74, 240, 0.2);
   }
 
   50% {
-    box-shadow: 0 0 20px rgba(168, 85, 247, 0.8), 0 0 30px rgba(168, 85, 247, 0.4);
-    transform: scale(1.02);
+    box-shadow: 0 0 12px rgba(124, 74, 240, 0.5);
   }
 
   100% {
-    box-shadow: 0 0 5px rgba(168, 85, 247, 0.4), 0 0 10px rgba(168, 85, 247, 0.2);
-    transform: scale(1);
+    box-shadow: 0 0 4px rgba(124, 74, 240, 0.2);
   }
 }
 
 .animate-pulse-glow {
-  animation: pulse-glow 2s infinite ease-in-out;
+  animation: pulse-glow 3s infinite ease-in-out;
 }
 
 /* Mobile bottom sheet slide-up */

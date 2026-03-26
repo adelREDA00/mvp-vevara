@@ -81,7 +81,8 @@ export class ScaleAction {
         }
 
         // [FIX] Only explicitly animate scale if it's changing (dsx/dsy != 1)
-        if (Math.abs(dsx - 1) > 0.001) {
+        // When a FlipAction co-exists in the same step, skip scale.x (flip owns it)
+        if (Math.abs(dsx - 1) > 0.001 && !options.skipScaleX) {
             fromVars.x = startX
             gsapVars.x = targetX
         }

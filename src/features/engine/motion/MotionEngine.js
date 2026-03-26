@@ -277,7 +277,9 @@ export class MotionEngine {
           trimStart: baseLayer?.data?.trimStart ?? (obj._storedTrimStart ?? 0),
           trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0),
           blur: baseLayer?.blur ?? (obj._blurFilter?.strength ?? 0),
-          color: baseLayer?.data?.fill || baseLayer?.data?.color || null
+          color: baseLayer?.data?.fill || baseLayer?.data?.color || null,
+          // Card frame flip state — defaults to true (front) if not explicitly set
+          showingFront: baseLayer?.data?.showingFront !== false
         })
       })
     }
@@ -363,6 +365,13 @@ export class MotionEngine {
         // to avoid double-counting if multiple actions has dx/dy/dsx/dsy
         const updatedDeltas = new Set()
 
+        // [FIX] Detect flip+scale co-occurrence to prevent both fighting over scale.x
+        const hasFlip = actions.some(a => a.type === 'flip')
+        const coScaleAction = hasFlip ? actions.find(a => a.type === 'scale') : null
+        const flipTargetScaleX = coScaleAction
+          ? startState.scaleX * (coScaleAction.values?.dsx ?? 1)
+          : undefined
+
         actions.forEach((action) => {
           const handler = getActionHandler(action.type)
           if (!handler) return
@@ -379,14 +388,23 @@ export class MotionEngine {
             return
           }
 
-          builder.timeline.add((gsapTimeline) => {
-            const tween = handler.execute(pixiObject, action, {
+          // When flip and scale co-exist: flip owns scale.x, scale skips it
+          const actionOptions = {
               ...options,
               duration: actionDuration,
               startTime: stepStartTime,
               sceneStartOffset: startTimeOffset,
-              startState // [FIX] Pass predicted state to handler
-            })
+              startState
+          }
+          if (hasFlip && action.type === 'flip' && flipTargetScaleX !== undefined) {
+            actionOptions.flipTargetScaleX = flipTargetScaleX
+          }
+          if (hasFlip && action.type === 'scale') {
+            actionOptions.skipScaleX = true
+          }
+
+          builder.timeline.add((gsapTimeline) => {
+            const tween = handler.execute(pixiObject, action, actionOptions)
             if (tween) {
               gsapTimeline.add(tween, stepStartTime)
             }
@@ -445,6 +463,18 @@ export class MotionEngine {
             if (action.values?.color !== undefined) {
               state.color = action.values.color
             }
+          } else if (action.type === 'flip') {
+            // Store flip metadata on the PIXI object for deterministic seek evaluation.
+            // GSAP nested timeline onUpdate callbacks don't reliably fire during
+            // masterTimeline.pause(time), so we need explicit post-seek evaluation.
+            if (!pixiObject._flipActions) pixiObject._flipActions = []
+            pixiObject._flipActions.push({
+              time: stepStartTime,
+              duration: actionDuration,
+              wasShowingFront: state.showingFront
+            })
+            // Toggle which side is showing for card frames
+            state.showingFront = !state.showingFront
           }
         })
       })
@@ -544,11 +574,18 @@ export class MotionEngine {
     // Logic to calculate intent for a given object/data
     const processObject = (obj, id) => {
       let videoElement = obj._videoElement
-      if (!videoElement && obj._videoSprite) {
-        const source = obj._videoSprite.texture?.source
-        if (source && source.resource instanceof HTMLVideoElement) {
-          videoElement = source.resource
-          obj._videoElement = videoElement
+      if (!videoElement) {
+        // [SYNC TARGET FIX] Search all possible sprite slots for an active video resource.
+        // Direct video layers use _videoSprite, but card frames with video assets 
+        // use _imageSprite (front) or _backSprite (back).
+        const targetSprites = [obj._videoSprite, obj._imageSprite, obj._backSprite].filter(Boolean)
+        for (const sprite of targetSprites) {
+          const source = sprite.texture?.source
+          if (source && source.resource instanceof HTMLVideoElement) {
+            videoElement = source.resource
+            obj._videoElement = videoElement
+            break
+          }
         }
       }
 
@@ -764,6 +801,10 @@ export class MotionEngine {
         videoElement._isPlayPending = false
       }
     })
+    // Clear flip metadata from registered objects before clearing timelines
+    this.registeredObjects.forEach((obj) => {
+      if (obj._flipActions) delete obj._flipActions
+    })
     this.masterTimeline.clear()
     this.activeTimelines.forEach(tl => tl.destroy())
     this.activeTimelines.clear()
@@ -841,22 +882,68 @@ export class MotionEngine {
     this.masterTimeline.pause(time)
     this.isPlaying = false
 
-    // Apply GSAP-controlled state (color, blur) to PIXI objects after seek.
-    // Some properties (like filters or redraw-heavy color) need an explicit visual 
-    // update call because onUpdate callbacks may not reliably fire during 
-    // masterTimeline.pause(time) in nested timeline configurations.
+    // Apply GSAP-controlled state (color, blur, flip) to PIXI objects after seek.
+    // Some properties need an explicit visual update call because onUpdate callbacks
+    // may not reliably fire during masterTimeline.pause(time) in nested timeline configurations.
     this.registeredObjects.forEach((obj) => {
-      // [FIX] Safety check: skip destroyed objects that may still be in the map 
+      // [FIX] Safety check: skip destroyed objects that may still be in the map
       // (e.g. if unregisterLayerObject was delayed or missed)
       if (obj.destroyed) return
-      
+
       if (obj._applyAnimatedColor) obj._applyAnimatedColor()
       if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
     })
 
+    // [FIX] Evaluate flip visibility deterministically based on time position.
+    // GSAP nested timeline onUpdate callbacks don't reliably fire during pause(time),
+    // so we explicitly resolve which side each card frame should show.
+    this._evaluateFlipStates(time)
+
     // Force immediate media sync during seek
     this.syncMedia(time, true)
     this._handleUpdate()
+  }
+
+  /**
+   * Evaluate flip visibility for all card frames at a given time.
+   * Called after seek/pause to ensure correct side is displayed,
+   * since GSAP nested timeline callbacks don't reliably fire during pause(time).
+   */
+  _evaluateFlipStates(time) {
+    this.registeredObjects.forEach((obj) => {
+      if (obj.destroyed || !obj._flipActions?.length) return
+      if (!obj._imageSprite || !obj._backSprite) return
+
+      // Walk through flip actions in chronological order to determine current side
+      let showingFront = obj._flipActions[0].wasShowingFront
+      for (const flip of obj._flipActions) {
+        const flipMidpoint = flip.time + (flip.duration / 2)
+        if (time >= flipMidpoint) {
+          // Past this flip's midpoint — the swap has happened
+          showingFront = !flip.wasShowingFront
+        } else {
+          // Before or during first half — still on the pre-flip side
+          showingFront = flip.wasShowingFront
+          break
+        }
+      }
+
+      obj._imageSprite.visible = showingFront && obj._frameHasAsset
+      obj._backSprite.visible = !showingFront && obj._frameHasBackAsset
+      if (obj._framePlaceholder) {
+        const activeHasAsset = showingFront
+          ? obj._frameHasAsset
+          : obj._frameHasBackAsset
+        obj._framePlaceholder.visible = !activeHasAsset
+        // Update placeholder label ("Front"/"Back") for empty card frames during seek/scrub
+        if (!activeHasAsset && obj._frameLabel) {
+          const customLabel = (obj._frameData?.label || '').trim()
+          if (!customLabel) {
+            obj._frameLabel.text = showingFront ? 'Front' : 'Back'
+          }
+        }
+      }
+    })
   }
 
   /**
@@ -900,12 +987,16 @@ export class MotionEngine {
       },
       onUpdate: () => {
         this._lastInteractionTime = Date.now()
+        // Evaluate flip visibility during fast preview
+        this._evaluateFlipStates(this.masterTimeline.time())
         // Internal tick for UI/React sync
         this._handleUpdate()
       },
       onComplete: () => {
         this._muteVideosForFastPreview = false
         this.isPlaying = false
+        // Final flip evaluation at target time
+        this._evaluateFlipStates(targetTime)
         if (onComplete) onComplete()
         this._handleAllComplete()
       }

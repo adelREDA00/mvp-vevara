@@ -36,7 +36,7 @@ import { isLayerCompletelyOutside } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect } from '../../../store/slices/projectSlice'
-import { attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer'
+import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 // =============================================================================
@@ -316,12 +316,8 @@ function Stage({
         alpha: obj.alpha,
         blur: (obj.filters && obj._blurFilter && obj.filters.includes(obj._blurFilter)) ? obj._blurFilter.strength : 0,
         color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
-        cropX: obj.cropX ?? obj._storedCropX ?? 0,
-        cropY: obj.cropY ?? obj._storedCropY ?? 0,
-        cropWidth: obj.cropWidth ?? obj._storedCropWidth ?? obj._originalWidth ?? obj.width ?? 100,
-        cropHeight: obj.cropHeight ?? obj._storedCropHeight ?? obj._originalHeight ?? obj.height ?? 100,
-        mediaWidth: obj.mediaWidth ?? obj._storedMediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,
-        mediaHeight: obj.mediaHeight ?? obj._storedMediaHeight ?? obj._mediaHeight ?? obj._originalHeight ?? obj.height ?? 100,
+        mediaWidth: obj.mediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,
+        mediaHeight: obj.mediaHeight ?? obj._mediaHeight ?? obj._originalWidth ?? obj.height ?? 100,
         visualRect: obj.getBounds ? (() => {
           const bounds = obj.getBounds();
           return {
@@ -358,8 +354,12 @@ function Stage({
     const frameLayer = layers[frameLayerId]
     if (!frameLayer || frameLayer.type !== 'frame') return
 
+    // Card frame: determine which side to attach to based on showingFront
+    const isCardFrame = frameLayer.data?.isCardFrame
+    const side = isCardFrame && frameLayer.data?.showingFront === false ? 'back' : 'front'
+
     // 1. Update Redux state
-    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200 }))
+    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side }))
 
     // 2. Update PIXI object immediately for visual feedback
     const frameObj = layerObjects?.get(frameLayerId)
@@ -368,7 +368,11 @@ function Stage({
         if (!texture || frameObj.destroyed) return
         const frameW = frameLayer.cropWidth ?? frameLayer.width
         const frameH = frameLayer.cropHeight ?? frameLayer.height
-        attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+        if (side === 'back') {
+          attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+        } else {
+          attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+        }
       }).catch(() => {})
     }
   }, [layers, layerObjects, dispatch])
@@ -542,7 +546,7 @@ function Stage({
 
   // Memoize effective selected layer - only recalculates when scene membership or layer changes
   const effectiveSelectedLayer = useMemo(() =>
-    belongsToCurrentScene && selectedLayerIds.length === 1 ? selectedLayer : null,
+    belongsToCurrentScene && selectedLayerIds?.length === 1 ? selectedLayer : null,
     [belongsToCurrentScene, selectedLayer, selectedLayerIds.length]
   )
 
@@ -677,7 +681,7 @@ function Stage({
 
   // Show multi-selection box only when multiple layers are selected
   const multiSelectionAPI = useMultiSelectionBox(
-    selectedLayerIds.length > 1 ? stageContainer : null,
+    selectedLayerIds?.length > 1 ? stageContainer : null,
     layersContainer,
     selectedLayerIds,
     layerObjects,
@@ -758,6 +762,12 @@ function Stage({
   }, [selectedLayerData])
 
   const handleLayerUpdate = useCallback((updates) => {
+    // [FIX] Strict Guard: Never update Redux "base state" during an active motion capture session.
+    // Instead, useSelectionBox and useCanvasInteractions should call motionCaptureMode.onPositionUpdate.
+    if (motionCaptureMode?.isActive) {
+      return
+    }
+
     const data = latestSelectedLayerDataRef.current
     if (!data.selectedLayerId) {
       return
@@ -970,7 +980,7 @@ function Stage({
             }, 300)
           }}
         >
-          {selectedLayerIds.length > 0 ? (
+          {selectedLayerIds?.length > 0 ? (
             <>
               <button
                 onMouseEnter={() => setSubMenu(null)}
@@ -1010,16 +1020,24 @@ function Stage({
                   Set as Background
                 </button>
               )}
-              {selectedLayer?.type === 'frame' && selectedLayer?.data?.assetUrl && (
+              {selectedLayer?.type === 'frame' && (selectedLayer?.data?.assetUrl || (selectedLayer?.data?.isCardFrame && selectedLayer?.data?.backAssetUrl)) && (
                 <button
                   onMouseEnter={() => setSubMenu(null)}
                   onClick={() => {
                     if (selectedLayerIds[0]) {
                       const frameLayerId = selectedLayerIds[0]
                       const frameLayer = layers[frameLayerId]
-                      const assetUrl = frameLayer?.data?.assetUrl
-                      const assetWidth = frameLayer?.data?.assetWidth || frameLayer?.width || 200
-                      const assetHeight = frameLayer?.data?.assetHeight || frameLayer?.height || 200
+                      const isCardFrame = frameLayer?.data?.isCardFrame
+                      const showingFront = frameLayer?.data?.showingFront !== false
+                      const detachBack = isCardFrame && !showingFront
+
+                      const assetUrl = detachBack ? frameLayer?.data?.backAssetUrl : frameLayer?.data?.assetUrl
+                      const assetWidth = detachBack
+                        ? (frameLayer?.data?.backAssetWidth || frameLayer?.width || 200)
+                        : (frameLayer?.data?.assetWidth || frameLayer?.width || 200)
+                      const assetHeight = detachBack
+                        ? (frameLayer?.data?.backAssetHeight || frameLayer?.height || 200)
+                        : (frameLayer?.data?.assetHeight || frameLayer?.height || 200)
 
                       // Create a standalone image layer from the detached asset
                       if (assetUrl) {
@@ -1045,13 +1063,25 @@ function Stage({
 
                       // Reset PIXI frame object immediately
                       const frameObj = layerObjects?.get(frameLayerId)
-                      if (frameObj && frameObj._imageSprite) {
-                        frameObj._imageSprite.texture = PIXI.Texture.WHITE
-                        frameObj._imageSprite.alpha = 0
-                        frameObj._frameHasAsset = false
-                        if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = true
+                      if (detachBack) {
+                        // Detach back side
+                        if (frameObj && frameObj._backSprite) {
+                          frameObj._backSprite.texture = PIXI.Texture.WHITE
+                          frameObj._backSprite.alpha = 0
+                          frameObj._frameHasBackAsset = false
+                          if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = true
+                        }
+                        dispatch(detachAssetFromFrame({ layerId: frameLayerId, side: 'back' }))
+                      } else {
+                        // Detach front side
+                        if (frameObj && frameObj._imageSprite) {
+                          frameObj._imageSprite.texture = PIXI.Texture.WHITE
+                          frameObj._imageSprite.alpha = 0
+                          frameObj._frameHasAsset = false
+                          if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = true
+                        }
+                        dispatch(detachAssetFromFrame({ layerId: frameLayerId }))
                       }
-                      dispatch(detachAssetFromFrame({ layerId: frameLayerId }))
                       setContextMenu(null)
                     }
                   }}

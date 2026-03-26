@@ -236,9 +236,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
   // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
   // Backgrounds are static elements and should not have interactive handles
-  if (layer?.type === 'background') {
-    return null
-  }
+  const isBackground = layer?.type === 'background'
 
   // Track previous drag state to detect drag end transitions
   const previousIsMovingRef = useRef(false)
@@ -263,6 +261,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
   // Update throttling and pending updates
   const pendingUpdateRef = useRef(null)
+  const lastUpdateTimestampRef = useRef(0)
 
   // Snapping guide references
   const vGuideRef = useRef(null)
@@ -1139,13 +1138,21 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     if (updateThrottleRef.current) return
 
-    updateThrottleRef.current = requestAnimationFrame(() => {
-      if (pendingUpdateRef.current && latestOnUpdateRef.current) {
-        latestOnUpdateRef.current(pendingUpdateRef.current)
-        pendingUpdateRef.current = null
-      }
-      updateThrottleRef.current = null
-    })
+    const now = performance.now()
+    const throttleInterval = 150 // [PERFORMANCE] Throttle Redux updates to ~6.6fps during active interaction
+    const timeSinceLastUpdate = now - lastUpdateTimestampRef.current
+    const shouldUpdateNow = timeSinceLastUpdate > throttleInterval
+
+    if (shouldUpdateNow) {
+      updateThrottleRef.current = requestAnimationFrame(() => {
+        if (pendingUpdateRef.current && latestOnUpdateRef.current) {
+          latestOnUpdateRef.current(pendingUpdateRef.current)
+          pendingUpdateRef.current = null
+          lastUpdateTimestampRef.current = performance.now()
+        }
+        updateThrottleRef.current = null
+      })
+    }
   }, [])
 
 
@@ -1747,6 +1754,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             sprite.y = -(state.startCropY * scaleRatio)
             if (cropMask) cropMask.clear().rect(0, 0, state.startCropWidth * scaleRatio, state.startCropHeight * scaleRatio).fill(0xffffff)
             currentLayerObject.pivot.set(state.startCropWidth * scaleRatio * state.anchorX, state.startCropHeight * scaleRatio * state.anchorY)
+            // Also scale back sprite for card frames (proportional cover-fit)
+            const backSprite = currentLayerObject._backSprite
+            if (backSprite && currentLayerObject._frameHasBackAsset && state.startBackMediaWidth != null) {
+              backSprite.width = state.startBackMediaWidth * scaleRatio
+              backSprite.height = state.startBackMediaHeight * scaleRatio
+              backSprite.x = -(state.startBackCropX * scaleRatio)
+              backSprite.y = -(state.startBackCropY * scaleRatio)
+              // Update stored dimensions so the sync loop stays in sync
+              currentLayerObject._backMediaWidth = state.startBackMediaWidth * scaleRatio
+              currentLayerObject._backMediaHeight = state.startBackMediaHeight * scaleRatio
+              currentLayerObject._backCropX = state.startBackCropX * scaleRatio
+              currentLayerObject._backCropY = state.startBackCropY * scaleRatio
+            }
             updates.width = state.startCropWidth * scaleRatio; updates.height = state.startCropHeight * scaleRatio
             updates.cropX = state.startCropX * scaleRatio; updates.cropY = state.startCropY * scaleRatio
             updates.cropWidth = state.startCropWidth * scaleRatio; updates.cropHeight = state.startCropHeight * scaleRatio
@@ -1843,9 +1863,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       updateThrottleRef.current = null
     }
     if (pendingUpdateRef.current && latestOnUpdateRef.current) {
-      const isMedia = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO || currentLayer?.type === LAYER_TYPES.FRAME
-
-      latestOnUpdateRef.current(pendingUpdateRef.current)
+      const isCaptureMode = latestMotionCaptureModeRef.current?.isActive
+      if (!isCaptureMode) {
+        latestOnUpdateRef.current(pendingUpdateRef.current)
+      }
       pendingUpdateRef.current = null
     }
 
@@ -1869,7 +1890,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           finalUpdates.width = currentWidth
         }
 
-        if (latestOnUpdateRef.current) latestOnUpdateRef.current(finalUpdates)
+        const isCapture = latestMotionCaptureModeRef.current?.isActive
+        if (latestOnUpdateRef.current && !isCapture) latestOnUpdateRef.current(finalUpdates)
         cachedTextHeightRef.current = finalDimensions.height
         lastTextWidthRef.current = currentWidth
 
@@ -1881,6 +1903,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       currentLayerObject._isResizing = false
+      // [SYNC FIX] Force one-shot sync from Redux to PIXI to ensure final state is correct
+      // This bridges the timing gap between clearing _isResizing and Redux state propagation
+      currentLayerObject._forceNextSync = true
+
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite._isResizing = false
       }
@@ -1891,6 +1917,14 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite.eventMode = restoredEventMode
       }
+
+      // Deferred safety sync to ensure Redux state has fully propagated
+      setTimeout(() => {
+        if (currentLayerObject && !currentLayerObject.destroyed) {
+          currentLayerObject._forceNextSync = true
+          setForceUpdate(prev => prev + 1)
+        }
+      }, 50)
     }
 
     // Commit capture state to Redux for undo history
@@ -1991,6 +2025,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       startCropHeight: capturedLayer?.cropHeight ?? currentLayer.cropHeight ?? currentSessionHeight,
       startMediaWidth: capturedLayer?.mediaWidth ?? currentLayer.mediaWidth ?? currentLayerObject._mediaWidth ?? currentLayerObject._originalWidth ?? currentSessionWidth,
       startMediaHeight: capturedLayer?.mediaHeight ?? currentLayer.mediaHeight ?? currentLayerObject._mediaHeight ?? currentLayerObject._originalHeight ?? currentSessionHeight,
+      // Card frame: capture initial back-asset cover-fit dimensions for proportional resize
+      startBackMediaWidth: currentLayerObject._backMediaWidth || null,
+      startBackMediaHeight: currentLayerObject._backMediaHeight || null,
+      startBackCropX: currentLayerObject._backCropX || null,
+      startBackCropY: currentLayerObject._backCropY || null,
       originalResolution: currentLayerObject.resolution
     }
 
@@ -2318,7 +2357,13 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const onRotateEnd = () => {
       if (!interactionStateRef.current.rotate) return
       if (updateThrottleRef.current) { cancelAnimationFrame(updateThrottleRef.current); updateThrottleRef.current = null }
-      if (pendingUpdateRef.current && latestOnUpdateRef.current) { latestOnUpdateRef.current(pendingUpdateRef.current); pendingUpdateRef.current = null }
+      if (pendingUpdateRef.current && latestOnUpdateRef.current) { 
+        const isCapture = latestMotionCaptureModeRef.current?.isActive
+        if (!isCapture) {
+          latestOnUpdateRef.current(pendingUpdateRef.current)
+        }
+        pendingUpdateRef.current = null 
+      }
 
       const v = latestViewportRef.current
       resumeViewportDragPlugin(v)
@@ -2397,7 +2442,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   // ===========================================================================
 
   useEffect(() => {
-    if (!layer || !layersContainer) return
+    if (isBackground || !layer || !layersContainer) return
 
     // [PERFORMANCE FIX] Use PIXI Ticker instead of manual requestAnimationFrame loop
     // This allows us to run at HIGH priority, matching the interaction ticker in useCanvasInteractions
@@ -2414,7 +2459,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       const rs = interactionStateRef.current.resize
       const rotateState = interactionStateRef.current.rotate
-      const isMoving = dragStateAPI && currentLayer?.id ? dragStateAPI.isLayerDragging(currentLayer.id) : false
+      const isLayerDragging = dragStateAPI && currentLayer?.id ? dragStateAPI.isLayerDragging(currentLayer.id) : false
+      const isFlipping = currentLayerObject?._isFlipping === true
+      const isMoving = isLayerDragging || isFlipping
 
       const engine = getGlobalMotionEngine()
       const currentTime = engine?.masterTimeline?.time() || 0
@@ -2435,6 +2482,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         currentLayer?.id,
         isAnimated
       )
+
+      // [FIX] Ensure hover box (purple outline) is also hidden during movement/flipping
+      // even if syncBoxVisuals() just showed it.
+      if (isMoving && hoverBoxRef.current) {
+        hoverBoxRef.current.visible = false
+      }
     }
 
     // Always keep active if layer is selected to ensure synchronization during timeline scrubbing
@@ -2480,6 +2533,13 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   // LAYER SWITCHING - Manages transitions when user selects different elements (layer change) Runs when switching layers, creates the entire selection box from scratch
   // ===========================================================================
   useEffect(() => {
+    if (isBackground) {
+      if (selectionBoxRef.current && layersContainer) {
+        selectionBoxRef.current.visible = false
+      }
+      return
+    }
+
     // If layer ID changed, clean up previous layer's handlers
     const currentLayerId = layer?.id
     if (currentLayerId !== previousLayerRef.current.id && previousLayerRef.current.id !== null) {

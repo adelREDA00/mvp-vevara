@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import {
   Plus,
@@ -6,503 +6,726 @@ import {
   RotateCw,
   Maximize2,
   Eye,
-  Pause,
   X,
-  GripVertical,
   Trash2,
-  Copy,
   Play,
-  ChevronUp,
-  ChevronDown,
   Crop,
   Zap,
+  FlipHorizontal2,
+  Check,
+  ChevronDown,
+  Droplets,
+  Palette,
+  Film,
 } from 'lucide-react'
 
-// Redux imports for scene-based motion system
+import { LAYER_TYPES } from '../../../store/models'
+
 import {
   selectSceneMotionFlow,
-  addSceneMotionStep,
   deleteSceneMotionStep,
-  addSceneMotionAction,
-  updateSceneMotionAction,
   deleteSceneMotionAction,
-  duplicateSceneMotionStep,
-  initializeSceneMotionFlow,
   selectCurrentSceneId,
   selectLayers,
-  selectProjectTimelineInfo,
 } from '../../../store/slices/projectSlice'
+import { setSelectedLayer } from '../../../store/slices/selectionSlice'
 
 // Stable default motion flow reference to prevent unnecessary rerenders
 const DEFAULT_MOTION_FLOW = { steps: [], pageDuration: 5000 }
 
+// Action type metadata for UI display
 const actionTypes = [
-  { id: 'move', label: 'Move', icon: Move, color: 'bg-blue-600' },
-  { id: 'rotate', label: 'Rotate', icon: RotateCw, color: 'bg-green-600' },
-  { id: 'scale', label: 'Scale', icon: Maximize2, color: 'bg-purple-600' },
-  { id: 'crop', label: 'Crop', icon: Crop, color: 'bg-indigo-600' },
-  { id: 'fade', label: 'Fade', icon: Eye, color: 'bg-yellow-600' },
-  { id: 'hold', label: 'Hold', icon: Pause, color: 'bg-gray-600' },
+  { id: 'move', label: 'Move', icon: Move, color: 'bg-blue-500/80' },
+  { id: 'rotate', label: 'Rotate', icon: RotateCw, color: 'bg-green-500/80' },
+  { id: 'scale', label: 'Scale', icon: Maximize2, color: 'bg-purple-500/80' },
+  { id: 'crop', label: 'Crop', icon: Crop, color: 'bg-indigo-500/80' },
+  { id: 'fade', label: 'Fade', icon: Eye, color: 'bg-yellow-500/80' },
+  { id: 'flip', label: 'Flip', icon: FlipHorizontal2, color: 'bg-teal-500/80' },
+  { id: 'colorChange', label: 'Color', icon: Palette, color: 'bg-pink-500/80' },
+  { id: 'blur', label: 'Blur', icon: Droplets, color: 'bg-cyan-500/80' },
 ]
 
+// Which actions are available per layer type (HOLD excluded entirely)
+const ACTION_AVAILABILITY = {
+  [LAYER_TYPES.SHAPE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange'],
+  [LAYER_TYPES.TEXT]:   ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange'],
+  [LAYER_TYPES.IMAGE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
+  [LAYER_TYPES.VIDEO]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
+  [LAYER_TYPES.GROUP]:  ['move', 'rotate', 'scale', 'fade', 'blur'],
+  frame_normal:         ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
+  frame_card:           ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip'],
+  [LAYER_TYPES.BACKGROUND]: ['colorChange'],
+}
 
-/**
- * MotionPanel Component - Core UI for Motion Flow Management
- *
- * This component provides the interface for creating and managing motion flows
- * for layers in the editor. It connects directly to the Redux store for state
- * management and provides full CRUD operations for motion steps and actions.
- *
- * Features:
- * - Visual step-based motion flow editor
- * - Action types: move, rotate, scale, fade, hold
- * - Real-time canvas editing state management
- * - Redux-integrated state persistence
- *
- * @param {Object} props - Component props
- * @param {boolean} props.isOpen - Whether the panel is visible
- * @param {function} props.onClose - Callback to close the panel
- * @param {number} props.topToolbarHeight - Height of top toolbar for positioning
- */
+function getLayerDisplayName(layer) {
+  if (!layer) return 'Unknown Element'
+  switch (layer.type) {
+    case LAYER_TYPES.IMAGE:      return 'Image Element'
+    case LAYER_TYPES.VIDEO:      return 'Video Element'
+    case LAYER_TYPES.SHAPE:      return 'Shape Element'
+    case LAYER_TYPES.TEXT:        return 'Text Element'
+    case LAYER_TYPES.GROUP:      return 'Group Element'
+    case LAYER_TYPES.BACKGROUND: return 'Canvas Background'
+    case LAYER_TYPES.FRAME:
+      return layer.data?.isCardFrame ? 'Card Frame Element' : 'Frame Element'
+    default: return layer.name || 'Element'
+  }
+}
+
+function getAvailableActions(layer, existingActions) {
+  if (!layer) return []
+  let layerKey = layer.type
+  if (layer.type === LAYER_TYPES.FRAME) {
+    layerKey = layer.data?.isCardFrame ? 'frame_card' : 'frame_normal'
+  }
+  const allowed = ACTION_AVAILABILITY[layerKey] || []
+  const usedTypes = (existingActions || []).map(a => a.type)
+  return allowed.filter(t => !usedTypes.includes(t))
+}
+
 function MotionPanel({
   isOpen = false,
   onClose,
   topToolbarHeight = 0,
-  onStepEdit, // Use centralized step editing handler
+  onStepEdit,
+  onApplyMotion,
+  onCancelMotion,
+  onStartMotionCapture,
+  onAddAnimation,
+  sceneLayers = [],
+  selectedLayerIds = [],
   motionControls = null,
   isMotionCaptureActive,
   editingStepId,
+  onDeleteCaptureAction,
 }) {
-  // ============================================================================
-  // REDUX STATE MANAGEMENT
-  // ============================================================================
-
   const dispatch = useDispatch()
 
-  // Get current scene ID from project store
   const currentSceneId = useSelector(selectCurrentSceneId)
-
-  // Get all layers in the project (for multi-layer tracking)
   const layers = useSelector(selectLayers)
 
-  // Get motion flow data for the current scene (not per-layer anymore)
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
   )
 
-  // Get project timeline info to find the current scene's start time offset
-  const timelineInfo = useSelector(selectProjectTimelineInfo)
-  const currentSceneTimelineInfo = useMemo(() => {
-    if (!timelineInfo || !currentSceneId) return null
-    return timelineInfo.find(s => s.id === currentSceneId)
-  }, [timelineInfo, currentSceneId])
-
-  const startTimeOffset = currentSceneTimelineInfo?.startTime || 0
-
-  // Extract steps array for easier access
   const motionFlow = motionFlowData.steps || []
 
-  // ============================================================================
-  // COMPONENT STATE MANAGEMENT
-  // ============================================================================
-
-  // Canvas editing state - now managed by EditorPage via props
-
-  // Panel width state for resizable functionality
   const [panelWidth, setPanelWidth] = useState(360)
+  const [isResizing, setIsResizing] = useState(false)
 
-  // Expanded steps state - tracks which steps are expanded to show details
+  // Context menu state
+  const [addAnimMenuLayerId, setAddAnimMenuLayerId] = useState(null)
+  const [menuDirection, setMenuDirection] = useState('down')
+  const menuRef = useRef(null)
+
+  // Collapsible steps (Set of expanded step IDs; default = all collapsed)
   const [expandedSteps, setExpandedSteps] = useState(new Set())
 
-  // [PERFORMANCE FIX] Use stable ref for high-frequency coordinate tracking
-  // Decouples coordinate updates from React render cycle
-  const motionCaptureRef = useRef(null)
+  // Collapsible layers (Map<layerId, boolean> for manual overrides)
+  const [manualLayerState, setManualLayerState] = useState(new Map())
 
-  // UI state for capture mode visibility and stats
-  // No internal motion capture state required anymore - handled by EditorPage
+  // Reset manual layer overrides when editing step changes
+  useEffect(() => { setManualLayerState(new Map()) }, [editingStepId])
 
-  // Early return if panel should not be shown
-  // Now only requires isOpen and a scene (not a selected layer)
+  // Close menu on outside click
+  useEffect(() => {
+    if (!addAnimMenuLayerId) return
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setAddAnimMenuLayerId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [addAnimMenuLayerId])
+
+  useEffect(() => {
+    if (!editingStepId || !selectedLayerIds?.length) return
+    const layerId = selectedLayerIds[0]
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-layer-id="${layerId}"]`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }, [selectedLayerIds, editingStepId])
+
   if (!isOpen || !currentSceneId) return null
 
   // ============================================================================
-  // MOTION FLOW CRUD OPERATIONS - Redux Integrated (Scene-Based)
+  // HANDLERS
   // ============================================================================
 
-  /**
-   * Initialize motion flow for the current scene if it doesn't exist
-   */
-  const ensureMotionFlowExists = () => {
+  const handleDeleteStep = (stepId) => {
     if (!currentSceneId) return
-
-    // Check if motion flow already exists, if not initialize it
-    if (!motionFlowData || motionFlow.length === 0) {
-      dispatch(initializeSceneMotionFlow({
-        sceneId: currentSceneId,
-      }))
+    if (editingStepId === stepId) {
+      // Active step: cancel capture mode first (resets editingStepId + isMotionCaptureActive)
+      onCancelMotion?.()
+      // Then ensure step is deleted (idempotent — filter on non-existent ID is a no-op)
+      dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
+    } else {
+      dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
     }
   }
 
-
-
-
-
-
-
-
-  /**
-   * Delete a motion step from the current scene's motion flow
-   * @param {string} stepId - ID of the step to delete
-   */
-  const handleDeleteStep = (stepId) => {
+  const handleDeleteAction = (stepId, layerId, actionId, actionType) => {
     if (!currentSceneId) return
-
-    dispatch(deleteSceneMotionStep({
-      sceneId: currentSceneId,
-      stepId
-    }))
-
-    // If the step being edited is deleted, the parent (EditorPage) 
-    // will naturally handle the state update as it manages editingStepId.
+    dispatch(deleteSceneMotionAction({ sceneId: currentSceneId, stepId, layerId, actionId }))
+    if (isMotionCaptureActive && onDeleteCaptureAction) {
+      onDeleteCaptureAction(stepId, layerId, actionType)
+    }
   }
 
-  /**
-   * Duplicate a motion step with all its layer actions
-   * @param {string} stepId - ID of the step to duplicate
-   */
-  const handleDuplicateStep = (stepId) => {
-    if (!currentSceneId) return
-
-    dispatch(duplicateSceneMotionStep({
-      sceneId: currentSceneId,
-      stepId
-    }))
-  }
-
-  /**
-   * Delete an action from a specific layer within a motion step
-   * @param {string} stepId - ID of the step containing the action
-   * @param {string} layerId - ID of the layer this action belongs to
-   * @param {string} actionId - ID of the action to delete
-   */
-  const handleDeleteAction = (stepId, layerId, actionId) => {
-    if (!currentSceneId) return
-
-    dispatch(deleteSceneMotionAction({
-      sceneId: currentSceneId,
-      stepId,
-      layerId,
-      actionId
-    }))
-  }
-
-  // ============================================================================
-  // CANVAS EDITING STATE MANAGEMENT
-  // ============================================================================
-
-  /**
-   * Set the currently editing step for canvas interaction
-   * This starts motion capture mode for the specified step (scene-based, multi-layer)
-   * @param {string} stepId - ID of the step being edited
-   */
-  /**
-   * Set the currently editing step for canvas interaction
-   * This starts motion capture mode for the specified step (scene-based, multi-layer)
-   * @param {string} stepId - ID of the step being edited
-   */
   const handleEditStep = (stepId) => {
     if (onStepEdit) onStepEdit(stepId)
   }
 
-  /**
-   * Toggle expanded state of a step
-   * @param {string} stepId - ID of the step to toggle
-   */
-  const handleToggleStepCollapse = (stepId) => {
+  const toggleStepExpand = (stepId) => {
     setExpandedSteps(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(stepId)) {
-        newSet.delete(stepId)
-      } else {
-        newSet.add(stepId)
-      }
-      return newSet
+      const next = new Set(prev)
+      if (next.has(stepId)) next.delete(stepId)
+      else next.add(stepId)
+      return next
     })
   }
 
+  const toggleLayerCollapse = (layerId, currentlyExpanded) => {
+    setManualLayerState(prev => {
+      const next = new Map(prev)
+      next.set(layerId, !currentlyExpanded)
+      return next
+    })
+  }
+
+  // ============================================================================
+  // RENDER HELPERS
+  // ============================================================================
+
+  const renderLayerPreview = (layer) => {
+    if (!layer) return null
+
+    if (layer.type === LAYER_TYPES.IMAGE) {
+      const src = layer.data?.url || layer.data?.src
+      return src
+        ? <img src={src} alt="" className="w-full h-full object-cover rounded-md" />
+        : <div className="w-full h-full rounded-md bg-gradient-to-br from-white/20 to-white/5" />
+    }
+
+    if (layer.type === LAYER_TYPES.VIDEO) {
+      const thumb = layer.data?.thumbnail
+      return (
+        <div className="w-full h-full relative rounded-md overflow-hidden bg-zinc-900">
+          {thumb
+            ? <img src={thumb} alt="" className="w-full h-full object-cover" />
+            : <div className="w-full h-full bg-zinc-900" />
+          }
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <Film className="h-3 w-3 text-white/70" />
+          </div>
+        </div>
+      )
+    }
+
+    if (layer.type === LAYER_TYPES.TEXT) {
+      const text = layer.data?.content || ''
+      const color = layer.data?.color || '#ffffff'
+      return (
+        <div className="w-full h-full rounded-md bg-white/5 border border-white/10 flex items-center justify-center px-1 overflow-hidden">
+          <span
+            style={{ fontSize: '10px', color, lineHeight: 1.1, wordBreak: 'break-all' }}
+            className="text-center font-bold"
+          >
+            {text.substring(0, 10) || 'Aa'}
+          </span>
+        </div>
+      )
+    }
+
+    if (layer.type === LAYER_TYPES.SHAPE) {
+      const fill = layer.data?.fill
+      const shapeType = layer.data?.shapeType || 'rect'
+      const fillColor = fill && fill !== 'transparent' ? fill : 'rgba(255,255,255,0.18)'
+
+      if (shapeType === 'circle') {
+        return (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-4 h-4 rounded-full border border-white/10" style={{ backgroundColor: fillColor }} />
+          </div>
+        )
+      }
+      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: fillColor }} />
+    }
+
+    if (layer.type === LAYER_TYPES.FRAME) {
+      return (
+        <div className="w-full h-full rounded-md bg-white/10 border border-white/10 flex items-center justify-center text-[8px] text-white/50">
+          {layer.data?.isCardFrame ? 'C' : 'F'}
+        </div>
+      )
+    }
+
+    if (layer.type === LAYER_TYPES.BACKGROUND) {
+      const color = typeof layer.data?.color === 'number'
+        ? '#' + layer.data.color.toString(16).padStart(6, '0')
+        : (layer.data?.color || '#ffffff')
+      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: color }} />
+    }
+
+    return (
+      <div className="w-full h-full rounded-md bg-white/10 border border-white/10 flex items-center justify-center text-[8px] text-white/50">
+        {(layer.type || 'L').charAt(0).toUpperCase()}
+      </div>
+    )
+  }
+
+  const getActionMeta = (actionType) => actionTypes.find(a => a.id === actionType)
 
   const renderActionIcon = (actionType) => {
-    const action = actionTypes.find(a => a.id === actionType)
-    if (!action) return null
-    const Icon = action.icon
-    return <Icon className="h-4 w-4" />
+    const meta = getActionMeta(actionType)
+    if (!meta) return null
+    const Icon = meta.icon
+    return <Icon className="h-3.5 w-3.5" />
   }
 
-  const renderActionLabel = (action) => {
-    switch (action.type) {
-      case 'move':
-        return `Move`
-      case 'rotate':
-        return `Rotate`
-      case 'scale':
-        return `Scale`
-      case 'fade':
-        return `Fade`
-      case 'hold':
-        return `Hold`
-      case 'crop':
-        return `Crop`
-      default:
-        return action.type
-    }
+  const renderActionLabel = (actionType) => {
+    const meta = getActionMeta(actionType)
+    return meta ? meta.label : actionType
+  }
+
+  const getStepSummary = (step) => {
+    if (!step.layerActions) return { layerCount: 0, actionCount: 0 }
+    const entries = Object.entries(step.layerActions)
+    const layerCount = entries.length
+    const actionCount = entries.reduce((sum, [, actions]) => sum + (actions?.length || 0), 0)
+    return { layerCount, actionCount }
   }
 
   // ============================================================================
-  // RENDER COMPONENT UI
+  // SHARED: Render action rows (used by both active and read-only views)
   // ============================================================================
-  return (
+
+  const renderActionRow = (action, stepId, layerId, readOnly) => (
     <div
-      className="fixed inset-y-0 right-0 lg:right-0 z-40 flex flex-col backdrop-blur-md transition-all duration-300 shadow-2xl"
-      style={{
-        top: `${topToolbarHeight}px`,
-        width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
-        backgroundColor: '#0f1015',
-        backdropFilter: 'blur(24px)',
-        WebkitBackdropFilter: 'blur(24px)',
-        borderLeft: '1px solid rgba(255, 255, 255, 0.05)',
-      }}
+      key={action.id}
+      className="flex items-center gap-2 p-1.5 bg-zinc-900/60 rounded-lg border border-zinc-800/20 text-[11px] group/action"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50 flex-shrink-0">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Zap className="h-5 w-5 text-yellow-400" />
-          Animation
-        </h2>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-            aria-label="Close panel"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+      <div className="text-zinc-400 opacity-60">
+        {renderActionIcon(action.type)}
       </div>
-      {/* Left resize handle */}
+      <span className="text-zinc-100 flex-1 font-medium">
+        {renderActionLabel(action.type)}
+      </span>
+      {!readOnly && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            handleDeleteAction(stepId, layerId, action.id, action.type)
+          }}
+          className="p-1 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover/action:opacity-100"
+          title="Remove action"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  )
+
+  // ============================================================================
+  // SHARED: Render a layer card
+  // ============================================================================
+
+  const renderLayerCard = (layer, step, readOnly) => {
+    if (!layer) return null
+    const layerId = layer.id
+    const layerActions = step.layerActions?.[layerId] || []
+    const available = readOnly ? [] : getAvailableActions(layer, layerActions)
+    const isSelected = selectedLayerIds?.includes(layerId)
+
+    // Collapsible logic (only for active step)
+    const hasAnimations = layerActions.length > 0
+    const manualOverride = manualLayerState.get(layerId)
+    let isLayerExpanded
+    if (readOnly) {
+      // Read-only: always show actions inline (they're compact enough)
+      isLayerExpanded = hasAnimations
+    } else {
+      isLayerExpanded = manualOverride !== undefined
+        ? manualOverride
+        : (!hasAnimations || isSelected)
+    }
+
+    return (
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 hover:bg-zinc-700/50 transition-colors"
-        style={{
-          borderLeft: '0.5px solid rgba(255, 255, 255, 0.15)',
-        }}
-        onMouseDown={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-
-          const dragStartX = e.clientX
-          const dragStartWidth = panelWidth
-
-          const handleMouseMove = (moveEvent) => {
-            const deltaX = moveEvent.clientX - dragStartX
-            // For left border drag: dragging left increases width, dragging right decreases width
-            // So we invert the deltaX by subtracting it instead of adding
-            const newWidth = Math.min(600, Math.max(280, dragStartWidth - deltaX))
-            setPanelWidth(newWidth)
-          }
-
-          const handleMouseUp = () => {
-            document.removeEventListener('mousemove', handleMouseMove)
-            document.removeEventListener('mouseup', handleMouseUp)
-            document.body.style.cursor = ''
-            document.body.style.userSelect = ''
-          }
-
-          document.addEventListener('mousemove', handleMouseMove)
-          document.addEventListener('mouseup', handleMouseUp)
-          document.body.style.cursor = 'ew-resize'
-          document.body.style.userSelect = 'none'
-        }}
-        title="Drag to resize panel width"
-      />
-      <div className="text-xs text-gray-400 px-4 pb-3 border-b border-zinc-800/50 flex-shrink-0">
-        <div className="text-xs text-gray-400">
-          {motionFlow.length === 0 ? 'No animation steps yet' : `${motionFlow.length} step${motionFlow.length > 1 ? 's' : ''} of animation`}
-          {isMotionCaptureActive && editingStepId && (
-            <span className="block text-purple-400 mt-1">
-              Animation Editing: Step {motionFlow.findIndex(s => s.id === editingStepId) + 1}
-              <span className="block text-yellow-400 mt-0.5">
-                Drag layers to capture animation...
-              </span>
+        key={layerId}
+        data-layer-id={layerId}
+        className={`bg-zinc-800/20 rounded-xl p-2.5 border transition-all ${
+          isSelected ? 'border-purple-500/40 bg-purple-500/[0.03]' : 'border-zinc-800/10 hover:border-zinc-800/30'
+        }`}
+      >
+        {/* Layer Header */}
+        <div
+          className={`flex items-center gap-2.5 min-w-0 ${!readOnly ? 'cursor-pointer' : ''}`}
+          onClick={!readOnly ? () => {
+            dispatch(setSelectedLayer(layerId))
+            toggleLayerCollapse(layerId, isLayerExpanded)
+          } : undefined}
+        >
+          {!readOnly && (
+            <ChevronDown className={`h-3 w-3 text-zinc-500 flex-shrink-0 transition-transform ${isLayerExpanded ? '' : '-rotate-90'}`} />
+          )}
+          <div className="w-7 h-7 flex-shrink-0 bg-black/20 rounded-lg overflow-hidden border border-white/5">
+            {renderLayerPreview(layer)}
+          </div>
+          <span className="text-[10px] text-white font-semibold truncate leading-tight flex-1">
+            {getLayerDisplayName(layer)}
+          </span>
+          {!isLayerExpanded && hasAnimations && (
+            <span className="text-[9px] text-zinc-500 flex-shrink-0">
+              {layerActions.length} action{layerActions.length > 1 ? 's' : ''}
             </span>
           )}
         </div>
+
+        {/* Expanded content */}
+        {isLayerExpanded && (
+          <>
+            {/* Actions */}
+            {layerActions.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {layerActions.map((action) => renderActionRow(action, step.id, layerId, readOnly))}
+              </div>
+            )}
+
+            {/* + Add Animation (active step only) */}
+            {!readOnly && available.length > 0 && (
+              <div className="mt-2 relative" ref={addAnimMenuLayerId === layerId ? menuRef : undefined}>
+                <button
+                  onClick={(e) => {
+                    if (addAnimMenuLayerId === layerId) {
+                      setAddAnimMenuLayerId(null)
+                    } else {
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const spaceBelow = window.innerHeight - rect.bottom
+                      setMenuDirection(spaceBelow < 200 ? 'up' : 'down')
+                      setAddAnimMenuLayerId(layerId)
+                    }
+                  }}
+                  className="flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-purple-400 transition-colors px-1.5 py-1 rounded-md hover:bg-white/[0.03]"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add Animation
+                </button>
+
+                {/* Context Menu */}
+                {addAnimMenuLayerId === layerId && (
+                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 min-w-[140px]`}>
+                    {available.map((actionType) => {
+                      const meta = getActionMeta(actionType)
+                      if (!meta) return null
+                      const Icon = meta.icon
+                      return (
+                        <button
+                          key={actionType}
+                          onClick={() => {
+                            setAddAnimMenuLayerId(null)
+                            onAddAnimation?.(layerId, actionType)
+                          }}
+                          className="flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+                        >
+                          <Icon className="h-3.5 w-3.5 text-zinc-500" />
+                          {meta.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // ============================================================================
+  // RENDER ACTIVE STEP (being edited)
+  // ============================================================================
+
+  const renderActiveStep = (step, stepIndex) => (
+    <div
+      key={step.id}
+      className="border rounded-xl p-3 transition-all duration-300 border-[#7c4af0]/40 bg-[#7c4af0]/5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]"
+    >
+      {/* Step Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-purple-500 text-white">
+            {stepIndex + 1}
+          </div>
+          <span className="text-xs font-semibold text-white">
+            Step {stepIndex + 1}
+          </span>
+          <span className="text-[9px] text-purple-300 font-medium px-1.5 py-0.5 rounded-full bg-purple-500/15">
+            Active
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onCancelMotion?.()}
+            className="px-2.5 py-1 text-[10px] font-semibold text-zinc-400 hover:text-white hover:bg-zinc-700/50 rounded-md transition-all flex items-center gap-1.5"
+            title="Cancel Step"
+          >
+            <X className="h-3 w-3" />
+            Cancel
+          </button>
+          <button
+            onClick={() => handleDeleteStep(step.id)}
+            className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all"
+            title="Delete step"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Add Step button removed - steps are now added via the Motion button in CanvasControls */}
+      {/* Helper hint */}
+      <div className="mt-3 px-2 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+        <p className="text-[10px] text-zinc-400 italic leading-relaxed">
+          Edit anything on the canvas. Animations will appear here.
+        </p>
+      </div>
 
-      {/* =======================================================================
-          STEPS LIST - Main scrollable area showing all motion steps
-          Each step contains multiple actions and can be edited individually
-          ======================================================================= */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {motionFlow.length === 0 ? (
-          <div className="text-center text-gray-500 py-12">
-            <Play className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p className="text-sm mb-2">Start building animation</p>
-            <p className="text-xs">Add your first step to begin</p>
-          </div>
+      {/* Layer Cards */}
+      <div className="mt-3 space-y-2">
+        {sceneLayers.length > 0 ? (
+          sceneLayers.map((layer) => renderLayerCard(layer, step, false))
         ) : (
-          motionFlow.map((step, stepIndex) => (
-            <div
-              key={step.id}
-              className={`bg-zinc-900/50 border rounded-lg p-3 transition-colors ${editingStepId === step.id
-                ? 'border-purple-500/50 bg-purple-900/10'
-                : 'border-zinc-800'
-                }`}
-            >
-              {/* ===============================================================
-                  STEP HEADER - Shows step number, drag handle, and action buttons
-                  =============================================================== */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <GripVertical className="h-4 w-4 text-gray-600 cursor-move" />
-                  <span className="text-sm font-medium text-white">Step {stepIndex + 1}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  {/* Collapse/Expand Button - toggles step content visibility */}
-                  <button
-                    onClick={() => handleToggleStepCollapse(step.id)}
-                    className="p-1 text-gray-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
-                    title={expandedSteps.has(step.id) ? "Collapse step" : "Expand step"}
-                  >
-                    {expandedSteps.has(step.id) ? (
-                      <ChevronUp className="h-3.5 w-3.5" />
-                    ) : (
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                  {/* Canvas Edit Button - allows editing step on canvas */}
-                  {isMotionCaptureActive && editingStepId === step.id ? (
-                    <div className="flex gap-1">
-                      <button
-                        onClick={handleApplyMotion}
-                        className="p-1 text-green-400 hover:text-green-300 hover:bg-green-900/50 rounded transition-colors"
-                        title="Apply captured animation"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={handleCancelMotion}
-                        className="p-1 text-red-400 hover:text-red-300 hover:bg-red-900/50 rounded transition-colors"
-                        title="Discard and snap back"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleEditStep(step.id)}
-                      className="p-1 text-gray-400 hover:text-purple-400 hover:bg-zinc-800 rounded transition-colors"
-                      title="Edit on canvas"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDuplicateStep(step.id)}
-                    className="p-1 text-gray-400 hover:text-white hover:bg-zinc-800 rounded transition-colors"
-                    title="Duplicate step"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteStep(step.id)}
-                    className="p-1 text-gray-400 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors"
-                    title="Delete step"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* ===============================================================
-                  LAYER ACTIONS LIST - Shows actions grouped by layer (only when expanded)
-                  Each layer can have multiple motion actions
-                  Keep automatically expanded if it's the current editing step
-                  =============================================================== */}
-              {(expandedSteps.has(step.id) || editingStepId === step.id) && (
-                <div className="space-y-2 mb-3">
-                  {step.layerActions && Object.keys(step.layerActions).length > 0 ? (
-                    Object.entries(step.layerActions).map(([layerId, layerActionsList]) => {
-                      const layer = layers[layerId]
-                      if (!layer) return null
-                      return (
-                        <div key={layerId} className="bg-zinc-800/30 rounded-lg p-2">
-                          {/* Layer name header */}
-                          <div className="text-xs text-gray-400 mb-1.5 flex items-center gap-1">
-                            <span className="font-medium text-gray-300">{layer.name || 'Unnamed Layer'}</span>
-                            <span className="text-gray-500">•</span>
-                            <span>{layerActionsList.length} action{layerActionsList.length > 1 ? 's' : ''}</span>
-                          </div>
-                          {/* Actions for this layer */}
-                          <div className="space-y-1">
-                            {layerActionsList.map((action) => (
-                              <div
-                                key={action.id}
-                                className="flex items-center gap-2 p-1.5 bg-zinc-800/50 rounded text-sm"
-                              >
-                                {renderActionIcon(action.type)}
-                                <span className="text-gray-300 flex-1">
-                                  {renderActionLabel(action)}
-                                </span>
-                                <button
-                                  onClick={() => handleDeleteAction(step.id, layerId, action.id)}
-                                  className="p-0.5 text-gray-400 hover:text-red-400 hover:bg-zinc-700 rounded transition-colors"
-                                  title="Remove action"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })
-                  ) : (
-                    <div className="text-center text-gray-500 py-4 text-xs">
-                      No layer actions in this step.
-                      <br />
-                      <span className="text-gray-600">Edit on canvas to capture animation.</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ===============================================================
-                  STEP INFO - Show hint about canvas editing (only when expanded)
-                  =============================================================== */}
-              {(expandedSteps.has(step.id) || editingStepId === step.id) && (
-                <div className="border-t border-zinc-800/50 pt-3">
-                  <div className="text-xs text-gray-500 text-center">
-                    Click the <Play className="inline h-3 w-3 text-purple-400" /> button to edit on canvas
-                  </div>
-                </div>
-              )}
-            </div>
-          ))
+          <div className="text-center py-4">
+            <p className="text-[10px] text-zinc-600 italic">No layers in this scene</p>
+          </div>
         )}
       </div>
 
-      {/* =======================================================================
-          FOOTER - Shows timing information and motion flow statistics
-          ======================================================================= */}
-      {motionFlow.length > 0 && (
-        <div className="flex-shrink-0 p-4 border-t border-zinc-800/50">
-          <div className="text-xs text-gray-400 text-center">
-            Page duration ({motionFlowData.pageDuration}ms) will be divided evenly across {motionFlow.length} step{motionFlow.length > 1 ? 's' : ''}
+      {/* Bottom Save Step */}
+      <div className="mt-3 pt-3 border-t border-white/[0.06]">
+        <button
+          onClick={() => onApplyMotion?.()}
+          className={`w-full py-2 text-[11px] font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-sm rounded-lg ${
+            getStepSummary(step).actionCount > 0
+              ? 'text-white bg-[#7c4af0] hover:bg-[#8b5cf6]'
+              : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80'
+          }`}
+        >
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+          Save Step
+        </button>
+      </div>
+    </div>
+  )
+
+  // ============================================================================
+  // RENDER INACTIVE STEP (collapsed or expanded read-only)
+  // ============================================================================
+
+  const renderInactiveStep = (step, stepIndex) => {
+    const { layerCount, actionCount } = getStepSummary(step)
+    const isExpanded = expandedSteps.has(step.id)
+
+    return (
+      <div
+        key={step.id}
+        className="border rounded-xl p-3 transition-all duration-300 border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div
+            className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
+            onClick={() => toggleStepExpand(step.id)}
+          >
+            <ChevronDown className={`h-3.5 w-3.5 text-zinc-500 flex-shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-zinc-800 text-zinc-400">
+              {stepIndex + 1}
+            </div>
+            <span className="text-xs font-semibold text-zinc-100">
+              Step {stepIndex + 1}
+            </span>
+            {layerCount > 0 && (
+              <span className="text-[9px] text-zinc-500">
+                {layerCount} layer{layerCount > 1 ? 's' : ''}, {actionCount} action{actionCount !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => handleEditStep(step.id)}
+              className="p-1.5 text-zinc-500 hover:text-purple-400 hover:bg-zinc-800 rounded-md transition-all"
+              title="Edit on canvas"
+            >
+              <Zap className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => handleDeleteStep(step.id)}
+              className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all"
+              title="Delete step"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
+
+        {/* Expanded read-only view */}
+        {isExpanded && step.layerActions && Object.keys(step.layerActions).length > 0 && (
+          <div className="mt-3 space-y-2 border-t border-zinc-800/50 pt-3">
+            {Object.entries(step.layerActions).map(([layerId]) => {
+              const layer = layers[layerId]
+              if (!layer) return null
+              return renderLayerCard(layer, step, true)
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ============================================================================
+  // MAIN RENDER
+  // ============================================================================
+  return (
+    <>
+      {/* Mobile Backdrop Overlay */}
+      {isOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
+          style={{ top: 0 }}
+          onClick={onClose}
+        />
       )}
-    </div>
+
+      <div
+        className={`fixed z-[61] flex flex-col shadow-2xl ${isResizing ? '' : 'transition-all duration-300'}
+          ${typeof window !== 'undefined' && window.innerWidth < 1024
+            ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t'
+            : 'inset-y-0 right-0 border-l'}`}
+        style={{
+          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : `${topToolbarHeight}px`,
+          height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '80vh' : 'auto',
+          width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
+          backgroundColor: 'rgba(8, 9, 12, 0.96)',
+          backdropFilter: 'blur(32px)',
+          WebkitBackdropFilter: 'blur(32px)',
+          borderColor: 'rgba(255, 255, 255, 0.15)',
+        }}
+      >
+        {/* Mobile Drag Handle */}
+        <div className="lg:hidden flex justify-center pt-2.5 pb-1 flex-shrink-0">
+          <div className="w-10 h-1 rounded-full bg-white/20" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0">
+          <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2.5">
+            <Zap className="h-4 w-4 text-[#7c4af0]" />
+            Animation
+          </h2>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onClose}
+              className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/5 rounded-md transition-all"
+              aria-label="Close panel"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Left resize handle */}
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 hover:bg-zinc-700/50 transition-colors"
+          style={{
+            borderLeft: '0.5px solid rgba(255, 255, 255, 0.15)',
+          }}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+
+            const dragStartX = e.clientX
+            const dragStartWidth = panelWidth
+
+            const handleMouseMove = (moveEvent) => {
+              const deltaX = moveEvent.clientX - dragStartX
+              const newWidth = Math.min(600, Math.max(280, dragStartWidth - deltaX))
+              setPanelWidth(newWidth)
+              if (!isResizing) setIsResizing(true)
+            }
+
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove)
+              document.removeEventListener('mouseup', handleMouseUp)
+              document.body.style.cursor = ''
+              document.body.style.userSelect = ''
+              setIsResizing(false)
+            }
+
+            document.addEventListener('mousemove', handleMouseMove)
+            document.addEventListener('mouseup', handleMouseUp)
+            document.body.style.cursor = 'ew-resize'
+            document.body.style.userSelect = 'none'
+          }}
+          title="Drag to resize panel width"
+        />
+
+        {/* Step count summary */}
+        <div className="px-5 pb-3 flex-shrink-0">
+          <div className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase">
+            {motionFlow.length === 0 ? 'No animation steps' : `${motionFlow.length} Step${motionFlow.length > 1 ? 's' : ''}`}
+          </div>
+        </div>
+
+        {/* Steps List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {motionFlow.length === 0 && !isMotionCaptureActive ? (
+            <div className="text-center text-gray-500 py-12">
+              <Play className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-sm mb-2">Start building animation</p>
+              <p className="text-xs mb-6">Add your first step to begin</p>
+              <button
+                onClick={() => onStartMotionCapture?.()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#7c4af0] hover:bg-[#8b5cf6] rounded-lg transition-all shadow-sm"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Step
+              </button>
+            </div>
+          ) : (
+            <>
+              {motionFlow.map((step, stepIndex) => (
+                editingStepId === step.id
+                  ? renderActiveStep(step, stepIndex)
+                  : renderInactiveStep(step, stepIndex)
+              ))}
+
+              {/* + Add Step button — only when not currently editing */}
+              {!isMotionCaptureActive && motionFlow.length > 0 && (
+                <button
+                  onClick={() => onStartMotionCapture?.()}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold text-zinc-400 hover:text-purple-400 border border-dashed border-zinc-800/60 hover:border-purple-500/30 rounded-xl transition-all hover:bg-white/[0.02]"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Step
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer — total duration */}
+        {motionFlow.length > 0 && (
+          <div className="flex-shrink-0 p-4 border-t border-white/10 bg-black/20">
+            <div className="text-xs text-white/60 text-center">
+              Total Animation Duration: <span className="text-white font-mono font-bold">{(motionFlowData.pageDuration / 1000).toFixed(1)}s</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 

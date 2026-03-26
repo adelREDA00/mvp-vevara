@@ -3,7 +3,9 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount } from '../../../store/slices/projectSlice'
+import { LAYER_TYPES } from '../../../store/models'
+import { gsap } from 'gsap'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
@@ -22,12 +24,14 @@ import DesignPanel from '../components/DesignPanel'
 import TextPanel from '../components/TextPanel'
 import UploadsPanel from '../components/UploadsPanel'
 import ImagesPanel from '../components/ImagesPanel'
-import ToolsPanel from '../components/ToolsPanel'
+// import ToolsPanel from '../components/ToolsPanel'
+import FramesPanel from '../components/FramesPanel'
 import ProjectsPanel from '../components/ProjectsPanel'
 import AppsPanel from '../components/AppsPanel'
 import ColorPickerPanel from '../components/ColorPickerPanel'
 import PositionPanel from '../components/PositionPanel'
 import TutorialOverlay from '../components/TutorialOverlay'
+import TutorialExportModal from '../components/TutorialExportModal'
 import { useEditorSidebar } from '../hooks/useEditorSidebar'
 import { useEditorPlayback } from '../hooks/useEditorPlayback'
 import { useEditorLayout } from '../hooks/useEditorLayout'
@@ -39,6 +43,7 @@ import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
+import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
 
 const GUEST_TEMPLATE = {
   "_id": {
@@ -317,7 +322,11 @@ function EditorPage() {
   const projectName = useSelector(selectProjectName)
   const projectId = useSelector(selectProjectId)
   const projectStatus = useSelector(state => state.project.status)
+  const isDirty = useSelector(selectIsDirty)
+  const projectVersion = useSelector(selectProjectVersion)
+  const isSavingRedux = useSelector(selectIsSavingRedux)
   const [isSaving, setIsSaving] = useState(false)
+  const editingStepActionCount = useSelector(selectEditingStepActionCount)
   const aspectRatio = useSelector(selectAspectRatio)
   const loadingMode = useSelector(selectLoadingMode)
   const [showGrid, setShowGrid] = useState(false)
@@ -342,7 +351,6 @@ function EditorPage() {
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
-  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
@@ -364,7 +372,9 @@ function EditorPage() {
 
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
+  const [pixiApp, setPixiApp] = useState(null)
   const [isStageReady, setIsStageReady] = useState(false) // Track PIXI object population
+
   // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
   const [minTimeElapsed, setMinTimeElapsed] = useState(false)
   const minTimeRef = useRef(null)
@@ -584,6 +594,10 @@ function EditorPage() {
     progress: 0,
     error: null
   })
+
+  // PERFORMANCE: Optimize rendering and animations based on tab visibility
+  usePerformanceOptimization(pixiApp, motionControls, exportState.isActive)
+
   const exportAbortControllerRef = useRef(null)
   const isExportActiveRef = useRef(false)
 
@@ -782,6 +796,21 @@ function EditorPage() {
       }
     }
   }, [selectedLayerIds, selectedCanvas, editingTextLayerId, handleFinishEditing])
+  // =============================================================================
+  // AUTO-SAVE LOGIC
+  // =============================================================================
+  useEffect(() => {
+    // Only auto-save if authenticated, project is dirty, and not currently saving
+    if (!isAuthenticated || !isDirty || isSaving || isSavingRedux || isExportActiveRef.current) return
+
+    // Debounce save for 5 seconds of inactivity
+    // This gives the user time to finish a "thought" of interactions
+    const timer = setTimeout(() => {
+      handleSave({ silent: true })
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [isDirty, projectVersion, isAuthenticated, isSaving, isSavingRedux, handleSave])
 
 
 
@@ -796,6 +825,9 @@ function EditorPage() {
     handleSidebarItemClick,
     handleClosePanel,
   } = useEditorSidebar()
+
+  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
+  const [requestOpenControl, setRequestOpenControl] = useState(null)
 
   // Automatically switch colorPickerType to 'canvas' when canvas is selected
   // and ensure it switches back to a valid layer mode when a layer is selected.
@@ -897,17 +929,25 @@ function EditorPage() {
     }
   }, [tutorialActive, tutorialStep, motionControls]);
 
-  // Handle playback stop for Step 1 -> 2
+  // Handle playback stop for Step 1 -> 2 and Step 6 -> 7
+  // Handle playback stop for Step 1 -> 2 and Step 6 -> 7
   const prevIsPlaying = useRef(isPlaying);
   const playStartTime = useRef(0);
+  const playStartStep = useRef(0);
+
   useEffect(() => {
     if (isPlaying && !prevIsPlaying.current) {
       playStartTime.current = Date.now();
+      playStartStep.current = tutorialStep;
     }
 
-    if (tutorialActive && tutorialStep === 1 && prevIsPlaying.current && !isPlaying) {
-      // Only advance if it played for at least 500ms to avoid flicker issues
-      if (Date.now() - playStartTime.current > 500) {
+    if (tutorialActive && (tutorialStep === 1 || tutorialStep === 6) && prevIsPlaying.current && !isPlaying) {
+      const duration = Date.now() - playStartTime.current;
+
+      // Only advance if:
+      // 1. It played for at least 500ms
+      // 2. The playback started during this specific step
+      if (duration > 500 && playStartStep.current === tutorialStep) {
         dispatch(nextStep());
       }
     }
@@ -969,7 +1009,7 @@ function EditorPage() {
   // Handle Step 5 -> Completion (Applying motion)
   useEffect(() => {
     if (tutorialActive && tutorialStep === 5 && !motionCaptureMode) {
-      dispatch(nextStep()); // Finish tutorial
+      dispatch(nextStep());
     }
   }, [motionCaptureMode, tutorialActive, tutorialStep, dispatch]);
 
@@ -1055,6 +1095,14 @@ function EditorPage() {
   const sceneLayersOrdered = useMemo(() => {
     if (!currentSceneData?.layers) return []
     return currentSceneData.layers.map(id => layers[id]).filter(Boolean)
+  }, [currentSceneData, layers])
+
+  // Scene layers for MotionPanel (excluding background/camera)
+  const sceneLayersForMotion = useMemo(() => {
+    if (!currentSceneData?.layers) return []
+    return currentSceneData.layers
+      .map(id => layers[id])
+      .filter(l => l && l.type !== LAYER_TYPES.CAMERA)
   }, [currentSceneData, layers])
 
   const handlePositionReorder = useCallback((fromIndex, toIndex) => {
@@ -1215,12 +1263,12 @@ function EditorPage() {
         // [CROP FIX] Reset all PIXI objects to their base Redux state when scene switches
         if (motionControls && motionControls.layerObjects && layers) {
           const layerObjects = motionControls.layerObjects
-            layerObjects.forEach((pixiObject, layerId) => {
-              const baseLayerData = layers[layerId]
-              if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-                applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
-              }
-            })
+          layerObjects.forEach((pixiObject, layerId) => {
+            const baseLayerData = layers[layerId]
+            if (baseLayerData && pixiObject && !pixiObject.destroyed) {
+              applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
+            }
+          })
         }
 
         // 2. Reset local state
@@ -1245,6 +1293,11 @@ function EditorPage() {
     // and isPlaying=true (from tweenTo) but motionCaptureMode.isActive is still false
     // (set in onComplete), so it calls pausePlayback() killing the tween.
     dispatch(clearLayerSelection())
+
+    // [NEW] Auto-open motion panel on desktop when adding a step
+    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      setIsMotionPanelOpen(true)
+    }
 
     // 1. Ensure motion flow exists
     dispatch(initializeSceneMotionFlow({ sceneId: currentSceneId }))
@@ -1297,8 +1350,10 @@ function EditorPage() {
       let currentBlur = layer.blur !== undefined ? layer.blur : 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
-        : layer.type === 'background' ? ('#' + (layer.data?.color ?? 0xffffff).toString(16).padStart(6, '0'))
-        : null
+          : layer.type === 'background' ? ('#' + (layer.data?.color ?? 0xffffff).toString(16).padStart(6, '0'))
+            : null
+      // Track cumulative flip state from previous steps (Redux showingFront is the base/time-0 state)
+      let currentShowingFront = layer.data?.showingFront !== false
       let currentCropX = layer.cropX || 0
       let currentCropY = layer.cropY || 0
       let currentCropWidth = layer.cropWidth || layer.width || 100
@@ -1366,6 +1421,12 @@ function EditorPage() {
         if (colorAction && colorAction.values?.color) {
           currentColor = colorAction.values.color
         }
+
+        // Flip: toggle showingFront for each flip action in previous steps
+        const flipAction = actions.find(a => a.type === 'flip')
+        if (flipAction) {
+          currentShowingFront = !currentShowingFront
+        }
       }
 
       // Session start transform (end of previous steps)
@@ -1417,6 +1478,8 @@ function EditorPage() {
         opacity: currentOpacity,
         blur: currentBlur,
         color: currentColor,
+        // Accumulated flip state from previous steps (accounts for all prior flip actions)
+        showingFront: currentShowingFront,
         interactionType: null,
         didMove: false,
         didBlur: false,
@@ -1424,7 +1487,8 @@ function EditorPage() {
         didRotate: false,
         didFade: false,
         didCrop: false,
-        didColor: false
+        didColor: false,
+        didFlip: false
       })
     })
 
@@ -1437,6 +1501,14 @@ function EditorPage() {
     // 7. Fast-play through all previous steps to animate to the start of the new step
     // 7. Fast-play through all previous steps to animate to the start of the new step
     const enableCaptureMode = () => {
+      // Clear _isFlipping on all layer objects — the tweenTo may have left it true
+      // if the FlipAction's onComplete didn't fire reliably during scrubbing
+      if (motionControls?.layerObjects) {
+        motionControls.layerObjects.forEach((obj) => {
+          if (obj && !obj.destroyed && obj._isFlipping) obj._isFlipping = false
+        })
+      }
+
       // Synchronize initialTrackedLayers with ACTUAL visual state from PIXI
       // This ensures that if the animation ended slightly off from the calculated position,
       // we snap the logical state to the visual state, preventing a visual jump.
@@ -1726,6 +1798,28 @@ function EditorPage() {
               captureActionIdsRef.current.delete(key)
             }
           }
+
+          // Flip (card frames)
+          if (tracked.didFlip) {
+            const key = `${layerId}:flip`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (!existingId) {
+              const actionId = `action-${Date.now()}-flip-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'flip', values: { duration: 600 }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // didFlip toggled back to false (user double-flipped) — remove the flip action
+            const key = `${layerId}:flip`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
         },
         onPositionUpdate: (data) => {
           // Update tracked layers
@@ -1774,6 +1868,9 @@ function EditorPage() {
           if (data.color !== undefined) {
             nextEntry.color = data.color
             nextEntry.didColor = true
+          }
+          if (data.didFlip) {
+            nextEntry.didFlip = true
           }
           if (data.cropX !== undefined) {
             nextEntry.cropX = data.cropX
@@ -1868,10 +1965,10 @@ function EditorPage() {
    */
   const handleApplyMotion = useCallback((options = {}) => {
     // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
-    const hasAnyInteraction = motionCaptureMode.trackedLayers 
+    const hasAnyInteraction = motionCaptureMode.trackedLayers
       ? Array.from(motionCaptureMode.trackedLayers.values()).some(
-          l => l.didMove || l.didBlur || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor
-        )
+        l => l.didMove || l.didBlur || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip
+      )
       : false
 
     const stepId = editingStepId
@@ -2154,19 +2251,21 @@ function EditorPage() {
           // (triggered by the React re-render when isPlaying changes to false) will
           // sync the engine with the latest Redux state without any visible jump.
           motionControls.seek(stepEndTimeSeconds)
+
+          // [FIX] Clear capture mode ONLY AFTER the preview is done.
+          // This ensures that the Tutorial Step 6 (which prompts the user to play)
+          // only appears once the engine is idle and isPlaying is false.
+          // This prevents the "two clicks to play" issue where the first click
+          // would accidentally pause the still-running fast preview.
+          setMotionCaptureMode(null)
+          setEditingStepId(null)
+          motionCaptureRef.current = null
+          savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
+
+          // [SYNC FIX] Inform Redux that we are done editing
+          dispatch(stopMotionEditing())
         }
       })
-
-      // [FIX] Clear capture mode AFTER triggering tweenTo to ensure 
-      // the engine has started its internal 'isPlaying' state before 
-      // React re-renders and potentially cancels the preview.
-      setMotionCaptureMode(null)
-      setEditingStepId(null)
-      motionCaptureRef.current = null
-      savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
-
-      // [SYNC FIX] Inform Redux that we are done editing
-      dispatch(stopMotionEditing())
     } else {
       // No motionControls available, just clear capture mode
       setMotionCaptureMode(null)
@@ -2443,8 +2542,10 @@ function EditorPage() {
       let currentBlur = layer.blur !== undefined ? layer.blur : 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
-        : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
-        : null
+          : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
+            : null
+      // Track cumulative flip state from previous steps
+      let currentShowingFront = layer.data?.showingFront !== false
       let currentCropX = layer.cropX || 0
       let currentCropY = layer.cropY || 0
       let currentCropWidth = layer.cropWidth || layer.width || 100
@@ -2503,6 +2604,12 @@ function EditorPage() {
         if (colorAction && colorAction.values?.color) {
           currentColor = colorAction.values.color
         }
+
+        // Flip: toggle showingFront for each flip action in previous steps
+        const flipAction = actions.find(a => a.type === 'flip')
+        if (flipAction) {
+          currentShowingFront = !currentShowingFront
+        }
       }
 
       const sessionStartTransform = {
@@ -2559,14 +2666,25 @@ function EditorPage() {
         blur: currentBlurAction?.values?.blur ?? sessionStartTransform.blur,
         color: currentColorAction?.values?.color ?? sessionStartTransform.color,
         controlPoints: currentMove?.values?.controlPoints || [],
+        // Accumulated flip state: base from previous steps, then apply current step's flip if re-editing
+        showingFront: currentStepActions.find(a => a.type === 'flip') ? !currentShowingFront : currentShowingFront,
         didMove: false,
         didColor: false,
+        // Pre-set didFlip if the step already has a flip action (re-editing)
+        didFlip: !!currentStepActions.find(a => a.type === 'flip'),
         interactionType: null
       })
     })
 
     // 2. Prepare capture session
     const enableEditCapture = () => {
+      // Clear _isFlipping on all layer objects — tweenTo may have left it true
+      if (motionControls?.layerObjects) {
+        motionControls.layerObjects.forEach((obj) => {
+          if (obj && !obj.destroyed && obj._isFlipping) obj._isFlipping = false
+        })
+      }
+
       if (motionControls && motionControls.getLayerCurrentTransforms) {
         const currentTransforms = motionControls.getLayerCurrentTransforms()
         currentTransforms.forEach((transform, layerId) => {
@@ -2855,6 +2973,28 @@ function EditorPage() {
               captureActionIdsRef.current.delete(key)
             }
           }
+
+          // Flip (card frames)
+          if (tracked.didFlip) {
+            const key = `${layerId}:flip`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (!existingId) {
+              const actionId = `action-${Date.now()}-flip-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'flip', values: { duration: 600 }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            // didFlip toggled back to false (user double-flipped) — remove the flip action
+            const key = `${layerId}:flip`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
         },
         onPositionUpdate: (data) => {
 
@@ -2884,6 +3024,9 @@ function EditorPage() {
             if (data.color !== undefined) {
               entry.color = data.color
               entry.didColor = true
+            }
+            if (data.didFlip) {
+              entry.didFlip = true
             }
             if (data.controlPoints !== undefined && Array.isArray(data.controlPoints)) {
               entry.controlPoints = data.controlPoints
@@ -3289,6 +3432,209 @@ function EditorPage() {
     return motionCaptureMode
   }, [motionCaptureMode, editingStepId, currentSceneMotionFlow])
 
+  /**
+   * Flip a card frame layer visually and record in motion capture if active.
+   * Extracted for reuse by both CanvasControls and handleAddAnimation.
+   */
+  const handleFlipForLayer = useCallback((layerId) => {
+    if (!layerId) return
+    const layer = layers[layerId]
+    if (!layer?.data?.isCardFrame) return
+
+    if (!isMotionCaptureActive) {
+      dispatch(flipCardFrame({ layerId }))
+    }
+
+    const tracked = isMotionCaptureActive ? motionCaptureRef.current?.trackedLayers?.get(layerId) : null
+    const showingFront = tracked?.showingFront !== undefined
+      ? tracked.showingFront
+      : (layer.data.showingFront !== false)
+
+    const pixiObj = motionControls?.layerObjects?.get?.(layerId)
+    if (pixiObj) {
+      pixiObj._isFlipping = true
+      gsap.to(pixiObj.scale, {
+        x: 0, duration: 0.15, ease: 'power2.in',
+        onComplete: () => {
+          const newShowingFront = !showingFront
+          if (pixiObj._imageSprite) pixiObj._imageSprite.visible = newShowingFront && pixiObj._frameHasAsset
+          if (pixiObj._backSprite) pixiObj._backSprite.visible = !newShowingFront && (pixiObj._frameHasBackAsset || false)
+          if (pixiObj._framePlaceholder) {
+            const activeHasAsset = newShowingFront ? pixiObj._frameHasAsset : (pixiObj._frameHasBackAsset || false)
+            pixiObj._framePlaceholder.visible = !activeHasAsset
+            if (!activeHasAsset && pixiObj._frameLabel) {
+              const customLabel = (layer.data?.label || '').trim()
+              if (!customLabel) {
+                pixiObj._frameLabel.text = newShowingFront ? 'Front' : 'Back'
+              }
+            }
+          }
+          gsap.to(pixiObj.scale, {
+            x: 1, duration: 0.15, ease: 'power2.out',
+            onComplete: () => { pixiObj._isFlipping = false }
+          })
+        }
+      })
+    }
+
+    if (tracked) {
+      tracked.showingFront = !showingFront
+      tracked.didFlip = !tracked.didFlip
+      if (effectiveMotionCaptureMode?.onInteractionEnd) {
+        effectiveMotionCaptureMode.onInteractionEnd(layerId)
+      }
+    }
+  }, [layers, isMotionCaptureActive, motionControls, dispatch, effectiveMotionCaptureMode])
+
+  /**
+   * Handle adding an animation from the MotionPanel's "+ Add Animation" menu.
+   * Auto-apply actions (move/rotate/scale/flip) nudge the PIXI object and dispatch.
+   * Panel-opening actions (color/fade/blur/crop) select the layer and open controls.
+   */
+  const handleAddAnimation = useCallback((layerId, actionType) => {
+    if (!isMotionCaptureActive || !editingStepId) return
+
+    dispatch(setSelectedLayer(layerId))
+
+    const pixiObj = motionControls?.layerObjects?.get?.(layerId)
+    const tracked = motionCaptureRef.current?.trackedLayers?.get(layerId)
+
+    switch (actionType) {
+      case 'move': {
+        if (!pixiObj || !tracked) break
+        const nudge = 255
+        pixiObj.x += nudge
+        tracked.deltaX = (tracked.deltaX || 0) + nudge
+        tracked.currentPosition = { x: pixiObj.x, y: pixiObj.y }
+        tracked.didMove = true
+        if (effectiveMotionCaptureMode?.onInteractionEnd) {
+          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+        }
+        break
+      }
+      case 'rotate': {
+        if (!pixiObj || !tracked) break
+        const angleDeg = 30
+        pixiObj.rotation += angleDeg * (Math.PI / 180)
+        tracked.rotation = (tracked.rotation ?? tracked.initialTransform?.rotation ?? 0) + angleDeg
+        tracked.didRotate = true
+        if (effectiveMotionCaptureMode?.onInteractionEnd) {
+          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+        }
+        break
+      }
+      case 'scale': {
+        if (!pixiObj || !tracked) break
+        const factor = 1.25
+        pixiObj.scale.x *= factor
+        pixiObj.scale.y *= factor
+        tracked.scaleX = pixiObj.scale.x
+        tracked.scaleY = pixiObj.scale.y
+        tracked.didScale = true
+        if (effectiveMotionCaptureMode?.onInteractionEnd) {
+          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+        }
+        break
+      }
+      case 'flip': {
+        handleFlipForLayer(layerId)
+        break
+      }
+      case 'colorChange': {
+        setColorPickerType('fill')
+        setActiveSidebarItem('Color')
+        break
+      }
+      case 'fade':
+        setRequestOpenControl('opacity')
+        setTimeout(() => setRequestOpenControl(null), 100)
+        break
+      case 'blur':
+        setRequestOpenControl('blur')
+        setTimeout(() => setRequestOpenControl(null), 100)
+        break
+      case 'crop': {
+        if (!pixiObj || !tracked) break
+        const layer = layers[layerId]
+        if (!layer) break
+        if (![LAYER_TYPES.IMAGE, LAYER_TYPES.VIDEO, LAYER_TYPES.FRAME].includes(layer.type)) break
+
+        const mw = tracked.mediaWidth || tracked.initialTransform.mediaWidth || layer.mediaWidth || layer.width || 100
+        const mh = tracked.mediaHeight || tracked.initialTransform.mediaHeight || layer.mediaHeight || layer.height || 100
+        const insetX = mw * 0.10
+        const insetY = mh * 0.10
+
+        tracked.cropX = (tracked.cropX ?? tracked.initialTransform.cropX ?? 0) + insetX
+        tracked.cropY = (tracked.cropY ?? tracked.initialTransform.cropY ?? 0) + insetY
+        tracked.cropWidth = (tracked.cropWidth ?? tracked.initialTransform.cropWidth ?? mw) - insetX * 2
+        tracked.cropHeight = (tracked.cropHeight ?? tracked.initialTransform.cropHeight ?? mh) - insetY * 2
+        tracked.mediaWidth = mw
+        tracked.mediaHeight = mh
+
+        if (tracked.cropWidth <= 0 || tracked.cropHeight <= 0) break
+        tracked.didCrop = true
+
+        if (effectiveMotionCaptureMode?.onInteractionEnd) {
+          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+        }
+        break
+      }
+      default:
+        break
+    }
+  }, [isMotionCaptureActive, editingStepId, motionControls, dispatch, effectiveMotionCaptureMode, handleFlipForLayer, setActiveSidebarItem])
+
+  const handleDeleteCaptureAction = useCallback((stepId, layerId, actionType) => {
+    if (!isMotionCaptureActive || editingStepId !== stepId) return
+    const tracked = motionCaptureRef.current?.trackedLayers?.get(layerId)
+    if (!tracked) return
+
+    // Remove from captureActionIdsRef
+    captureActionIdsRef.current.delete(`${layerId}:${actionType}`)
+
+    // Reset tracked flags and values to initial
+    const init = tracked.initialTransform
+    switch (actionType) {
+      case 'move':
+        tracked.didMove = false; tracked.deltaX = 0; tracked.deltaY = 0
+        tracked.controlPoints = []
+        tracked.currentPosition = { x: init.x, y: init.y }
+        break
+      case 'scale':
+        tracked.didScale = false; tracked.scaleX = init.scaleX; tracked.scaleY = init.scaleY
+        break
+      case 'rotate':
+        tracked.didRotate = false; tracked.rotation = init.rotation
+        break
+      case 'fade':
+        tracked.didFade = false; tracked.opacity = init.opacity
+        break
+      case 'blur':
+        tracked.didBlur = false; tracked.blur = init.blur ?? 0
+        break
+      case 'crop':
+        tracked.didCrop = false
+        tracked.cropX = init.cropX; tracked.cropY = init.cropY
+        tracked.cropWidth = init.cropWidth; tracked.cropHeight = init.cropHeight
+        break
+      case 'colorChange':
+        tracked.didColor = false; tracked.color = init.color
+        break
+      case 'flip':
+        tracked.didFlip = false; tracked.showingFront = !tracked.showingFront
+        break
+    }
+
+    // Reset PIXI object for visual types
+    const pixiObj = motionControls?.layerObjects?.get?.(layerId)
+    if (pixiObj && !pixiObj.destroyed) {
+      if (actionType === 'move') { pixiObj.x = init.x; pixiObj.y = init.y }
+      if (actionType === 'scale') { pixiObj.scale.x = init.scaleX; pixiObj.scale.y = init.scaleY }
+      if (actionType === 'rotate') { pixiObj.rotation = init.rotation * (Math.PI / 180) }
+      if (actionType === 'fade') { pixiObj.alpha = init.opacity ?? 1 }
+    }
+  }, [isMotionCaptureActive, editingStepId, motionControls])
+
   const handleSplitScene = useCallback(() => {
     if (!currentSceneId) return
     const sceneInfo = timelineInfo.find(s => s.id === currentSceneId)
@@ -3376,10 +3722,12 @@ function EditorPage() {
           projectName={projectName}
           onSave={handleSave}
           onNavigate={handleNavigate}
-          isSaving={isSaving}
+          isSaving={isSaving || isSavingRedux}
+          isDirty={isDirty}
           lastSaved={lastSaved}
           onProjectNameChange={(newName) => dispatch(setProjectName(newName))}
           onExport={handleExport}
+          hideExport={tutorialActive && tutorialStep === 7}
           onCanvasSizeChange={handleCanvasSizeChange}
           onToggleSidebar={() => handleSidebarItemClick('Elements')}
           onUndo={() => {
@@ -3403,7 +3751,14 @@ function EditorPage() {
       >
         <LeftSidebar
           activeItem={activeSidebarItem}
-          onItemClick={handleSidebarItemClick}
+          isMotionOpen={isMotionPanelOpen}
+          onItemClick={(item) => {
+            if (item === 'Motion') {
+              setIsMotionPanelOpen(prev => !prev)
+            } else {
+              handleSidebarItemClick(item)
+            }
+          }}
         />
       </div>
 
@@ -3425,6 +3780,9 @@ function EditorPage() {
               {activeSidebarItem === 'Elements' && (
                 <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
+              {activeSidebarItem === 'Frames' && (
+                <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+              )}
               {activeSidebarItem === 'Text' && (
                 <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
@@ -3434,9 +3792,9 @@ function EditorPage() {
               {activeSidebarItem === 'Media' && (
                 <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
               )}
-              {activeSidebarItem === 'Tools' && (
+              {/* {activeSidebarItem === 'Tools' && (
                 <ToolsPanel onClose={handleClosePanel} />
-              )}
+              )} */}
               {activeSidebarItem === 'Position' && (
                 <PositionPanel
                   onClose={handleClosePanel}
@@ -3612,6 +3970,9 @@ function EditorPage() {
                   {activeSidebarItem === 'Elements' && (
                     <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
+                  {activeSidebarItem === 'Frames' && (
+                    <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                  )}
                   {activeSidebarItem === 'Text' && (
                     <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
@@ -3621,9 +3982,9 @@ function EditorPage() {
                   {activeSidebarItem === 'Media' && (
                     <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                   )}
-                  {activeSidebarItem === 'Tools' && (
+                  {/* {activeSidebarItem === 'Tools' && (
                     <ToolsPanel onClose={handleClosePanel} />
-                  )}
+                  )} */}
                   {activeSidebarItem === 'Position' && (
                     <PositionPanel
                       onClose={handleClosePanel}
@@ -3759,6 +4120,7 @@ function EditorPage() {
               selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
               selectedCanvas={selectedCanvas}
               currentScene={currentSceneData}
+              editingStepActionCount={editingStepActionCount}
               onLayerUpdate={(updates) => {
                 if (selectedLayerIds[0]) {
                   const layerId = selectedLayerIds[0]
@@ -3832,12 +4194,14 @@ function EditorPage() {
                 setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
               }}
               onToggleMotionPanel={() => {
-                setIsMotionPanelOpen(!isMotionPanelOpen)
+                setIsMotionPanelOpen(prev => !prev)
               }}
               isMotionCaptureActive={isMotionCaptureActive}
               onStartMotionCapture={handleStartMotionCapture}
               onApplyMotion={handleApplyMotion}
               onCancelMotion={handleCancelMotion}
+              onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
+              requestOpenControl={requestOpenControl}
               stepsCount={currentSceneMotionFlow?.steps?.length || 0}
             />
           </div>
@@ -3874,7 +4238,11 @@ function EditorPage() {
               onViewportChange={handleViewportChange}
               topToolbarHeight={topToolbarHeight}
               isResizingBottom={isResizingBottom}
-              onReady={() => setIsPixiReady(true)}
+              onReady={() => {
+                setIsPixiReady(true)
+                const app = stageRef.current?.getApp?.()
+                if (app) setPixiApp(app)
+              }}
               setStageReady={setIsStageReady} // Pass the setter
               //motion capture mode & playback controls
               motionCaptureMode={effectiveMotionCaptureMode}
@@ -4073,11 +4441,18 @@ function EditorPage() {
 
       {/* Motion Panel - Right side overlay */}
       <MotionPanel
-        isOpen={activeSidebarItem === 'Motion'}
-        onClose={() => setActiveSidebarItem(null)}
+        isOpen={isMotionPanelOpen}
+        onClose={() => setIsMotionPanelOpen(false)}
         topToolbarHeight={topToolbarHeight}
         motionControls={motionControls}
         onStepEdit={handleEditStep}
+        onApplyMotion={handleApplyMotion}
+        onCancelMotion={handleCancelMotion}
+        onStartMotionCapture={handleStartMotionCapture}
+        onAddAnimation={handleAddAnimation}
+        onDeleteCaptureAction={handleDeleteCaptureAction}
+        sceneLayers={sceneLayersForMotion}
+        selectedLayerIds={selectedLayerIds}
         isMotionCaptureActive={isMotionCaptureActive}
         editingStepId={editingStepId}
       />
@@ -4223,6 +4598,14 @@ function EditorPage() {
         isPlaying={isPlaying}
         manualTargetRect={manualTutorialRect}
         onNext={() => dispatch(nextStep())}
+      />
+      <TutorialExportModal
+        isOpen={tutorialActive && tutorialStep === 7}
+        onClose={() => dispatch(endTutorial())}
+        onExport={(res) => {
+          handleExport(res);
+          dispatch(nextStep()); // Finish tutorial
+        }}
       />
     </div>
   )

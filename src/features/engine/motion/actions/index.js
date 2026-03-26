@@ -11,6 +11,7 @@ export { BlurAction } from './BlurAction.js'
 export { HoldAction } from './HoldAction.js'
 export { CropAction } from './CropAction.js'
 export { ColorChangeAction } from './ColorChangeAction.js'
+export { FlipAction } from './FlipAction.js'
 
 import { MoveAction } from './MoveAction.js'
 import { ScaleAction } from './ScaleAction.js'
@@ -20,6 +21,7 @@ import { BlurAction } from './BlurAction.js'
 import { HoldAction } from './HoldAction.js'
 import { CropAction } from './CropAction.js'
 import { ColorChangeAction } from './ColorChangeAction.js'
+import { FlipAction } from './FlipAction.js'
 import { ACTION_TYPES } from '../types/actionTypes.js'
 
 /**
@@ -34,6 +36,7 @@ export const ACTION_HANDLERS = {
   [ACTION_TYPES.CROP]: CropAction,
   [ACTION_TYPES.HOLD]: HoldAction,
   [ACTION_TYPES.COLOR_CHANGE]: ColorChangeAction,
+  [ACTION_TYPES.FLIP]: FlipAction,
 }
 
 /**

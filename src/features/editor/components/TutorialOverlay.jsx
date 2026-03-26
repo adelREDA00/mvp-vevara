@@ -26,7 +26,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     }
 
     let buttonSelector = '';
-    if (step === 1) buttonSelector = '[data-tutorial="play-button"]';
+    if (step === 1 || step === 6) buttonSelector = '[data-tutorial="play-button"]';
     else if (step === 2) buttonSelector = '[data-tutorial="steps-area"]';
     else if (step === 3 || step === 5) buttonSelector = '[data-tutorial="add-step-button"]';
 
@@ -53,7 +53,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
       // Positioning logic
       let isBottom = (step === 3 || step === 5);
       let offset = 80;
-      if (step === 1) offset = 100;
+      if (step === 1 || step === 6) offset = 100;
       if (step === 2) offset = 160;
 
       let top = isBottom ? (rect.bottom + 20) : (rect.top - offset);
@@ -99,7 +99,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
   }, [step, manualTargetRect]);
 
   useEffect(() => {
-    if (active && step > 0 && step < 6) {
+    if (active && step > 0 && step < 8) {
       updatePosition();
       requestRef.current = requestAnimationFrame(function loop() {
         updatePosition();
@@ -119,10 +119,10 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     const pts = ['0px 0px', '100% 0px', '100% 100%', '0px 100%', '0px 0px'];
 
     // Step 5 has no overlay (hint only)
-    if (step === 5) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
+    if (step === 5 || step === 7) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
 
-    // 2. Canvas Hole (Counter-Clockwise) - Only in Step 1
-    if (step === 1 && canvasRect) {
+    // 2. Canvas Hole (Counter-Clockwise) - Only in Step 1 and 6
+    if ((step === 1 || step === 6) && canvasRect) {
       const { x, y, width: w, height: h } = canvasRect;
       pts.push(`${x}px ${y}px`); // Bridge
       pts.push(`${x}px ${y + h}px`, `${x + w}px ${y + h}px`, `${x + w}px ${y}px`, `${x}px ${y}px`);
@@ -140,16 +140,18 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     return `polygon(${pts.join(', ')})`;
   }, [targetRect, canvasRect, step]);
 
-  // Hide overlay while playing in Step 1
-  if (!active || step <= 0 || step > 6 || (!targetRect && step !== 5) || (step === 1 && isPlaying)) return null;
+  // Hide overlay while playing in Step 1 or 6
+  // Also hide completely on Step 7 (Export Modal) to prevent overlap
+  if (!active || step <= 0 || step >= 7 || (!targetRect && step !== 5) || ((step === 1 || step === 5 || step === 6) && isPlaying)) return null;
 
   const getHintText = () => {
     switch (step) {
       case 1: return "Press Play to see the animation.";
       case 2: return "This scene has 2 Steps. Each Step is a moment in your animation.";
-      case 3: return "It's your turn! Click 'Add Step' to create Step 3.";
-      case 4: return "Move the Blue iPhone to the bottom and scale it.";
-      case 5: return "When you're done, click 'Add Step' again to save Step 3.";
+      case 3: return "It's your turn! Click 'Animate' to create Step 3.";
+      case 4: return "Move the Blue iPhone to the middle and rotate & scale it do  whatever you want.";
+      case 5: return "When you're done, click 'save step' again to save Step 3.";
+      case 6: return "Nice! You added a new step. Click Play to see your full animation.";
       default: return "";
     }
   }

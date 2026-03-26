@@ -2,7 +2,7 @@ import { createSlice } from '@reduxjs/toolkit';
 
 const initialState = {
   active: false,
-  step: 0, // 0: off, 1: Play Animation, 2: Explain Steps, 3: Add Step 3, 4: Edit Shape, 5: Save Step 3, 6: Finished
+  step: 0, // 0: off, 1: Play Animation, 2: Explain Steps, 3: Add Step 3, 4: Edit Shape, 5: Save Step 3, 6: Play Full Animation, 7: Export Project, 8: Finished
   isGuest: false,
   hasRunSession: false, // Track if it ran in this session
 };
@@ -18,11 +18,11 @@ const tutorialSlice = createSlice({
       }
     },
     nextStep: (state) => {
-      if (state.step < 6) {
-        state.step += 1;
+      if (state.step < 8) {
+        state.step += 1
       }
-      if (state.step === 6) {
-        state.active = false;
+      if (state.step === 8) {
+        state.active = false
         state.hasRunSession = true;
       }
     },

@@ -42,8 +42,17 @@ export async function createApp(config = {}) {
       powerPreference: isMobile ? 'low-power' : 'default',
       antialias: true,
       premultipliedAlpha: true,
+      hello: false, // Reduce console noise
     })
     initialized = true
+
+    // [STABILITY] Configure Texture Garbage Collection (Standard PixiGC)
+    // This ensures textures that aren't used for a while are automatically freed from GPU.
+    // Default is usually 1 hour (3600000ms), let's make it 30 seconds for the editor.
+    if (app.renderer.textureGC) {
+      app.renderer.textureGC.maxIdle = 30000 
+      app.renderer.textureGC.checkCountMax = 100 // Check every 100 renders
+    }
   } catch (error) {
     console.warn('PixiJS primary init failed, trying fallback with fresh instance:', error)
     
@@ -83,8 +92,15 @@ export async function createApp(config = {}) {
         resolution: 1,
         autoDensity: false,
         preference: 'webgl',
+        hello: false
       })
       initialized = true
+
+      // Fallback also gets the aggressive GC
+      if (app.renderer.textureGC) {
+        app.renderer.textureGC.maxIdle = 30000 
+        app.renderer.textureGC.checkCountMax = 100
+      }
     } catch (fallbackError) {
       console.error('PixiJS fallback init also failed:', fallbackError)
       if (app) {

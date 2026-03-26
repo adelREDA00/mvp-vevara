@@ -7,6 +7,7 @@ import { Plus, Folder, Layout, LogOut, Settings, User as UserIcon, ExternalLink,
 import { DropdownMenu, DropdownMenuItem } from '../../editor/components/DropdownMenu'
 import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
+import ProjectStarterModal from '../components/ProjectStarterModal'
 
 const TUTORIAL_VIDEO_URL = "/first.mp4"
 
@@ -99,9 +100,11 @@ const DashboardPage = () => {
         return localStorage.getItem('vevara_hide_beta_message') !== 'true'
     })
     const [selectedCategory, setSelectedCategory] = useState('All')
+    const [isProjectStarterModalOpen, setIsProjectStarterModalOpen] = useState(false)
 
     const CATEGORIES = [
         'All',
+        'Featured',
         'Logo',
         'Ads',
         'Social',
@@ -190,6 +193,10 @@ const DashboardPage = () => {
         window.location.href = '/'
     }
 
+
+    const handleOpenStarterModal = () => {
+        setIsProjectStarterModalOpen(true)
+    }
 
     const handleCreateProject = async () => {
         try {
@@ -331,9 +338,9 @@ const DashboardPage = () => {
             <main className="w-full min-h-screen">
                 {/* Hero Section */}
                 <section className="pt-32 pb-16 px-6 md:px-8 bg-gradient-to-b from-[#6940c9]/5 to-transparent">
-                    <div className="max-w-[1200px] mx-auto text-center">
-                        <h1 className="text-3xl md:text-5xl font-medium tracking-tight leading-tight mb-16">
-                            control <span className="text-[#6940c9] italic font-semibold"> motion</span> step by step.
+                    <div className="max-w-[1000px] mx-auto text-center">
+                        <h1 className="text-2xl md:text-4xl font-medium tracking-tight leading-tight mb-16">
+                            Change anything<span className="text-[#6940c9] italic font-semibold"> Vevara</span> animates the difference.
                         </h1>
 
                         <div className="max-w-xl mx-auto space-y-8">
@@ -411,7 +418,7 @@ const DashboardPage = () => {
                         <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-6">
                             <h2 className="text-2xl font-semibold tracking-tight">Your <span className="font-normal italic">Projects</span></h2>
                             <button
-                                onClick={handleCreateProject}
+                                onClick={handleOpenStarterModal}
                                 className="h-10 px-6 bg-[#6940c9] text-white rounded-[12px] text-[14px] font-semibold hover:bg-[#7c4af0] transition-all duration-200 flex items-center gap-2 shadow-sm"
                             >
                                 <Plus size={18} strokeWidth={2.5} />
@@ -509,7 +516,7 @@ const DashboardPage = () => {
                                     </div>
                                 ))}
                                 <button
-                                    onClick={handleCreateProject}
+                                    onClick={handleOpenStarterModal}
                                     className="aspect-video bg-[#0f1015] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 group hover:border-[#6940c9]/30 transition-all duration-300"
                                 >
                                     <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
@@ -738,6 +745,20 @@ const DashboardPage = () => {
                     </div>
                 </div>
             </Modal>
+
+            <ProjectStarterModal
+                isOpen={isProjectStarterModalOpen}
+                onClose={() => setIsProjectStarterModalOpen(false)}
+                onSelectBlank={() => {
+                    setIsProjectStarterModalOpen(false)
+                    handleCreateProject()
+                }}
+                onSelectTemplate={(templateId) => {
+                    setIsProjectStarterModalOpen(false)
+                    handleDuplicateTemplate(templateId)
+                }}
+                featuredTemplates={templateProjects.filter(p => (p.category || '').toLowerCase() === 'featured')}
+            />
         </div>
     )
 }

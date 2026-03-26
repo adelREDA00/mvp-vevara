@@ -107,12 +107,12 @@ export function getEffectiveLayerDimensions(layer, layerObject, motionCaptureMod
       capturedLayer?.cropWidth ??
       (layerObject._hasReactiveCropProperties
         ? layerObject.cropWidth
-        : (layerObject._storedCropWidth ?? layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
+        : (layerObject._cropWidth ?? layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
     const h =
       capturedLayer?.cropHeight ??
       (layerObject._hasReactiveCropProperties
         ? layerObject.cropHeight
-        : (layerObject._storedCropHeight ?? layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
+        : (layerObject._cropHeight ?? layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
     return { width: w, height: h }
   }
 

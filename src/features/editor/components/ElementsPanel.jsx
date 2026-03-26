@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { X, Square, Circle, Triangle, Hexagon, Minus, Star, Frame } from 'lucide-react'
+import { X, Square, Circle, Triangle, Hexagon, Minus, Star } from 'lucide-react'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
 
 function ElementsPanel({ onClose, aspectRatio }) {
@@ -96,7 +96,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'rect',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -115,7 +115,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         data: {
           shapeType: 'circle',
           radius: 50,
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -133,7 +133,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'line',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -151,7 +151,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'triangle',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -169,7 +169,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'hexagon',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -187,7 +187,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'square',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -205,7 +205,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
         anchorY: 0.5,
         data: {
           shapeType: 'star',
-          fill: '#e5e5e5',
+          fill: '#6367ff',
           stroke: '',
           strokeWidth: 0,
         }
@@ -213,102 +213,11 @@ function ElementsPanel({ onClose, aspectRatio }) {
     },
   ]
 
-  // Frame presets — 5 common frame aspect ratios
-  const framePresets = [
-    {
-      id: 'frame-square',
-      name: 'Square Frame',
-      width: 200,
-      height: 200,
-      label: '1:1',
-    },
-    {
-      id: 'frame-landscape',
-      name: 'Landscape Frame',
-      width: 280,
-      height: 180,
-      label: '16:9',
-    },
-    {
-      id: 'frame-portrait',
-      name: 'Portrait Frame',
-      width: 160,
-      height: 240,
-      label: '9:16',
-    },
-    {
-      id: 'frame-wide',
-      name: 'Wide Frame',
-      width: 300,
-      height: 140,
-      label: '21:9',
-    },
-    {
-      id: 'frame-classic',
-      name: 'Classic Frame',
-      width: 240,
-      height: 180,
-      label: '4:3',
-    },
-  ]
-
-  const handleAddFrame = (preset) => {
-    if (!currentSceneId) return
-    const centerX = worldWidth / 2
-    const centerY = worldHeight / 2
-
-    dispatch(addLayerAndSelect({
-      sceneId: currentSceneId,
-      type: 'frame',
-      name: preset.name,
-      x: centerX,
-      y: centerY,
-      width: preset.width,
-      height: preset.height,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      data: {},
-    }))
-  }
-
-  const frameItems = framePresets.map((preset) => ({
-    id: preset.id,
-    preset,
-    onClick: () => handleAddFrame(preset),
-  }))
-
   const elementItems = allElements.map((element) => ({
     id: element.id,
     element,
     onClick: element.onClick,
   }))
-
-  const renderFramePreview = (item) => {
-    const { preset } = item
-    // Normalize to fit within a 56x56 viewBox
-    const maxDim = Math.max(preset.width, preset.height)
-    const w = (preset.width / maxDim) * 40
-    const h = (preset.height / maxDim) * 40
-    const rx = (56 - w) / 2
-    const ry = (56 - h) / 2
-
-    return (
-      <button
-        onClick={item.onClick}
-        className="w-full aspect-square flex flex-col items-center justify-center hover:bg-white/5 rounded-[12px] transition-all duration-300 group relative gap-1.5 border border-transparent hover:border-white/10 shadow-sm"
-        title={preset.name}
-      >
-        <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-          <rect x={rx} y={ry} width={w} height={h} rx="3"
-            fill="none" stroke="#a1a1aa" strokeWidth="1.5" strokeDasharray="4 2" />
-          {/* Plus icon in center */}
-          <line x1="24" y1="28" x2="32" y2="28" stroke="#71717a" strokeWidth="1.5" />
-          <line x1="28" y1="24" x2="28" y2="32" stroke="#71717a" strokeWidth="1.5" />
-        </svg>
-        <span className="text-[10px] text-zinc-500 font-medium tracking-wide">{preset.label}</span>
-      </button>
-    )
-  }
 
   const renderElementPreview = (item) => {
     if (item.element) {
@@ -404,12 +313,6 @@ function ElementsPanel({ onClose, aspectRatio }) {
           <GridSection
             items={elementItems}
             sectionName="Elements"
-          />
-
-          <GridSection
-            items={frameItems}
-            sectionName="Frames"
-            renderItem={renderFramePreview}
           />
 
         </div>

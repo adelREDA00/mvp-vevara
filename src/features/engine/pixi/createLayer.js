@@ -562,6 +562,24 @@ export function createFrameLayer(config) {
   container._frameHasAsset = hasAsset
   container._frameData = data
 
+  // Card frame: add a second sprite for the back side
+  if (data.isCardFrame) {
+    const hasBackAsset = !!data.backAssetUrl
+    const backSprite = new PIXI.Sprite(PIXI.Texture.WHITE)
+    backSprite.width = width
+    backSprite.height = height
+    backSprite.anchor.set(0, 0)
+    backSprite.x = 0
+    backSprite.y = 0
+    backSprite.alpha = hasBackAsset ? 1 : 0
+    backSprite.visible = false // back side hidden initially
+    // Insert before placeholder so highlight renders on top
+    container.addChildAt(backSprite, container.getChildIndex(placeholderGroup))
+    container._backSprite = backSprite
+    container._isCardFrame = true
+    container._frameHasBackAsset = hasBackAsset
+  }
+
   return container
 }
 
@@ -625,6 +643,55 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
 }
 
 /**
+ * Attach a loaded texture to the back side of a card frame container.
+ * Uses the same cover-fit logic as the front side.
+ */
+export function attachBackAssetToFrame(container, texture, frameWidth, frameHeight) {
+  if (!container || !texture) return null
+
+  const sprite = container._backSprite
+  if (!sprite) return null
+
+  // Compute cover-fit: scale asset so it fully covers the frame
+  const texW = texture.width
+  const texH = texture.height
+  const scale = Math.max(frameWidth / texW, frameHeight / texH)
+  const mediaW = texW * scale
+  const mediaH = texH * scale
+
+  // Center the asset within the frame (crop offsets)
+  const cropX = (mediaW - frameWidth) / 2
+  const cropY = (mediaH - frameHeight) / 2
+
+  sprite.texture = texture
+  sprite.width = mediaW
+  sprite.height = mediaH
+  sprite.anchor.set(0, 0)
+  sprite.x = -cropX
+  sprite.y = -cropY
+  sprite.alpha = 1
+
+  // Enable mipmapping
+  if (!_isMobileDevice && texture.source) {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.mipMap = 'on'
+    texture.source.scaleMode = 'linear'
+  }
+
+  container._frameHasBackAsset = true
+
+  // Store back-specific cover-fit dimensions on the container
+  // so the sync loop can size the back sprite independently of the front
+  container._backMediaWidth = mediaW
+  container._backMediaHeight = mediaH
+  container._backCropX = cropX
+  container._backCropY = cropY
+
+  // Back sprite visibility depends on showingFront state — managed by sync loop
+  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX, cropY, cropWidth: frameWidth, cropHeight: frameHeight }
+}
+
+/**
  * Redraw the frame placeholder graphic at new dimensions.
  * Called during resize/sync so the placeholder scales with the frame.
  */
@@ -637,6 +704,11 @@ export function redrawFramePlaceholder(container, width, height, data = null) {
   const frameData = data || container._frameData
   const labelText = (frameData?.label || '').trim()
 
+  // For card frames, show side indicator when no label is set
+  const isCardFrame = frameData?.isCardFrame || container._isCardFrame
+  const showingFront = frameData?.showingFront !== false
+  const sideLabel = isCardFrame ? (showingFront ? 'Front' : 'Back') : ''
+
   ph.clear()
   ph.rect(0, 0, width, height)
   ph.fill({ color: 0x2a2a30, alpha: 0.6 })
@@ -644,8 +716,8 @@ export function redrawFramePlaceholder(container, width, height, data = null) {
   const cx = width / 2, cy = height / 2
 
   if (labelObj) {
-    if (labelText) {
-      labelObj.text = labelText
+    if (labelText || sideLabel) {
+      labelObj.text = labelText || sideLabel
       labelObj.style.fill = 0xdddddd // More visible light gray
       labelObj.style.fontSize = 60
       labelObj.style.fontWeight = 'bold'
@@ -716,7 +788,11 @@ export function unhighlightFrameDropTarget(container, width, height) {
   redrawFramePlaceholder(container, width, height)
 
   // [UX FIX] If frame has an asset, hide the placeholder again (it was shown for the highlight)
-  if (container._frameHasAsset && container._framePlaceholder) {
+  // For card frames, check the active side's asset status
+  const activeHasAsset = container._isCardFrame
+    ? (container._frameData?.showingFront !== false ? container._frameHasAsset : container._frameHasBackAsset)
+    : container._frameHasAsset
+  if (activeHasAsset && container._framePlaceholder) {
     container._framePlaceholder.visible = false
   }
 }

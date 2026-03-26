@@ -6,21 +6,24 @@ import {
   Upload,
   Wand2,
   FolderOpen,
-  Grid2x2,
   User,
   Image,
+  Zap,
+  Frame,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 export const SIDEBAR_ITEMS = [
   { icon: Grid3x3, label: 'Elements' },
+  { icon: Frame, label: 'Frames' },
   { icon: Image, label: 'Media' },
   { icon: Type, label: 'Text' },
   { icon: Upload, label: 'Uploads' },
-  { icon: Wand2, label: 'Tools' },
+  // { icon: Wand2, label: 'Tools' },
+  // { icon: Zap, label: 'Motion' },
 ]
 
-function LeftSidebar({ activeItem, onItemClick }) {
+function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
   return (
     <div
       className="w-[72px] lg:w-[80px] h-full flex flex-col items-center flex-shrink-0 overflow-y-auto transition-all duration-300"
@@ -35,7 +38,7 @@ function LeftSidebar({ activeItem, onItemClick }) {
       <div className="flex flex-col items-center gap-3 py-6 flex-shrink-0 w-full px-2">
         {SIDEBAR_ITEMS.map((item) => {
           const Icon = item.icon
-          const isActive = activeItem === item.label
+          const isActive = item.label === 'Motion' ? isMotionOpen : activeItem === item.label
           return (
             <button
               key={item.label}

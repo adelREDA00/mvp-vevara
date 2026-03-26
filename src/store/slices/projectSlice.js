@@ -71,6 +71,8 @@ const initialState = {
   error: null,
   isSaving: false,
   saveError: null,
+  isDirty: false,
+  version: 0,
   // [NEW] Asset loading management
   loadingMode: 'global', // 'global' (full screen preloader) or 'local' (card spinners)
   preparingLayers: {}, // Map of layerId -> true for layers being initialized in PIXI
@@ -238,6 +240,8 @@ const projectSlice = createSlice({
     },
     setAspectRatio: (state, action) => {
       state.aspectRatio = action.payload
+      state.isDirty = true
+      state.version++
     },
     // Scene actions
     addScene: (state, action) => {
@@ -306,6 +310,8 @@ const projectSlice = createSlice({
         state.currentSceneId = newScene.id
       }
       state.status = 'succeeded'
+      state.isDirty = true
+      state.version++
     },
 
     updateScene: (state, action) => {
@@ -381,6 +387,8 @@ const projectSlice = createSlice({
 
           syncSceneMotionDuration(state, id)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -402,6 +410,8 @@ const projectSlice = createSlice({
       if (state.currentSceneId === sceneId && state.scenes.length > 0) {
         state.currentSceneId = state.scenes[0].id
       }
+      state.isDirty = true
+      state.version++
     },
 
     setCurrentScene: (state, action) => {
@@ -420,6 +430,8 @@ const projectSlice = createSlice({
         fromIndex < state.scenes.length && toIndex < state.scenes.length) {
         const [moved] = state.scenes.splice(fromIndex, 1)
         state.scenes.splice(toIndex, 0, moved)
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -565,6 +577,8 @@ const projectSlice = createSlice({
       syncSceneMotionDuration(state, newSceneId)
 
       state.currentSceneId = newSceneId
+      state.isDirty = true
+      state.version++
     },
 
     // Layer actions
@@ -618,6 +632,8 @@ const projectSlice = createSlice({
           syncSceneVideoDuration(state, newLayer.sceneId)
         }
       }
+      state.isDirty = true
+      state.version++
     },
 
     updateLayer: (state, action) => {
@@ -643,6 +659,8 @@ const projectSlice = createSlice({
           layer.data.sourceEndTime = updates.data.duration
           syncSceneVideoDuration(state, layer.sceneId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -680,6 +698,8 @@ const projectSlice = createSlice({
         if (deletedLayerType === 'video') {
           syncSceneVideoDuration(state, sceneId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -729,6 +749,8 @@ const projectSlice = createSlice({
             })
           }
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -738,6 +760,8 @@ const projectSlice = createSlice({
       if (scene) {
         const [moved] = scene.layers.splice(fromIndex, 1)
         scene.layers.splice(toIndex, 0, moved)
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -753,6 +777,8 @@ const projectSlice = createSlice({
           scene.layers.splice(currentIndex, 1)
           scene.layers.push(layerId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -769,6 +795,8 @@ const projectSlice = createSlice({
           scene.layers.splice(currentIndex, 1)
           scene.layers.splice(1, 0, layerId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
     bringLayerForward: (state, action) => {
@@ -784,6 +812,8 @@ const projectSlice = createSlice({
           scene.layers.splice(currentIndex, 1)
           scene.layers.splice(nextIndex, 0, layerId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
     sendLayerBackward: (state, action) => {
@@ -800,6 +830,8 @@ const projectSlice = createSlice({
           scene.layers.splice(currentIndex, 1)
           scene.layers.splice(nextIndex, 0, layerId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -850,6 +882,8 @@ const projectSlice = createSlice({
 
       // resolveStepLayout recalculates: auto steps get default, manual preserved, overflow trimmed
       syncSceneMotionDuration(state, sceneId)
+      state.isDirty = true
+      state.version++
     },
 
     // Update an existing motion step
@@ -862,6 +896,8 @@ const projectSlice = createSlice({
           Object.assign(step, updates)
           syncSceneMotionDuration(state, sceneId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -873,6 +909,8 @@ const projectSlice = createSlice({
         motionFlow.steps = motionFlow.steps.filter(s => s.id !== stepId)
         syncSceneMotionDuration(state, sceneId)
       }
+      state.isDirty = true
+      state.version++
     },
 
     // Reorder motion steps — clears manual flags and redistributes equally
@@ -894,6 +932,8 @@ const projectSlice = createSlice({
           syncSceneMotionDuration(state, sceneId)
         }
       }
+      state.isDirty = true
+      state.version++
     },
 
     // Update step timing manually (move, resize left, resize right)
@@ -948,6 +988,8 @@ const projectSlice = createSlice({
           })
         })
       }
+      state.isDirty = true
+      state.version++
     },
 
     // Add action to a layer within a motion step
@@ -974,6 +1016,8 @@ const projectSlice = createSlice({
           }
           step.layerActions[layerId].push(newAction)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -1001,6 +1045,8 @@ const projectSlice = createSlice({
             Object.assign(motionAction, updates)
           }
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -1028,6 +1074,8 @@ const projectSlice = createSlice({
             }
           }
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -1058,6 +1106,8 @@ const projectSlice = createSlice({
           motionFlow.steps.push(duplicatedStep)
           syncSceneMotionDuration(state, sceneId)
         }
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -1066,6 +1116,8 @@ const projectSlice = createSlice({
       const { sceneId } = action.payload
       if (state.sceneMotionFlows[sceneId]) {
         delete state.sceneMotionFlows[sceneId]
+        state.isDirty = true
+        state.version++
       }
     },
 
@@ -1113,6 +1165,8 @@ const projectSlice = createSlice({
     // Project metadata
     setProjectName: (state, action) => {
       state.projectName = action.payload
+      state.isDirty = true
+      state.version++
     },
 
     // Initialize project (load from saved data)
@@ -1120,10 +1174,12 @@ const projectSlice = createSlice({
       const project = action.payload
       state.scenes = project.scenes || []
       state.layers = project.layers || {}
-      state.sceneMotionFlows = project.sceneMotionFlows || {} // Initialize scene motion flows from saved project
+      state.sceneMotionFlows = project.sceneMotionFlows || {}
       state.projectName = project.name || 'Untitled Project'
       state.currentSceneId = project.currentSceneId || project.currentProjectId || (state.scenes[0]?.id || null)
       state.status = 'succeeded'
+      state.isDirty = false
+      state.version = 0
     },
 
     // Restore project state from history (for undo/redo)
@@ -1397,6 +1453,8 @@ const projectSlice = createSlice({
       if (hasVideo) {
         syncSceneVideoDuration(state, sceneId)
       }
+      state.isDirty = true
+      state.version++
     },
 
     // Copy scene to clipboard (stores in localStorage for cross-project support)
@@ -1503,6 +1561,8 @@ const projectSlice = createSlice({
       if (hasVideo) {
         syncSceneVideoDuration(state, newScene.id)
       }
+      state.isDirty = true
+      state.version++
     },
 
     setBackgroundImage: (state, action) => {
@@ -1527,6 +1587,8 @@ const projectSlice = createSlice({
             }
             backgroundLayer.updatedAt = Date.now()
           }
+          state.isDirty = true
+          state.version++
         }
       }
     },
@@ -1547,6 +1609,8 @@ const projectSlice = createSlice({
             backgroundLayer.data = remainingData
             backgroundLayer.updatedAt = Date.now()
           }
+          state.isDirty = true
+          state.version++
         }
       }
     },
@@ -1614,15 +1678,30 @@ const projectSlice = createSlice({
             delete backgroundLayer.data.originalScaleY
             backgroundLayer.updatedAt = Date.now()
           }
+          state.isDirty = true
+          state.version++
         }
       }
     },
 
     // Attach an image/video asset to a frame layer (cover-fit crop)
+    // For card frames, `side` param ('front'|'back') determines which side receives the asset
     attachAssetToFrame: (state, action) => {
-      const { layerId, assetUrl, assetWidth, assetHeight } = action.payload
+      const { layerId, assetUrl, assetWidth, assetHeight, side } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
+
+      // Card frame back-side attachment: store separately, no crop changes
+      if (layer.data?.isCardFrame && side === 'back') {
+        layer.data = {
+          ...layer.data,
+          backAssetUrl: assetUrl,
+          backAssetWidth: assetWidth,
+          backAssetHeight: assetHeight,
+        }
+        layer.updatedAt = Date.now()
+        return
+      }
 
       const frameW = layer.cropWidth ?? layer.width
       const frameH = layer.cropHeight ?? layer.height
@@ -1669,7 +1748,7 @@ const projectSlice = createSlice({
           for (const action of actions) {
             if (action.type === 'crop' && action.values) {
               const v = action.values
-              
+
               // [FIX] Remap based on the STEP'S OWN DIMENSIONS to maintain fit
               // instead of using a static offset from the base state.
               const stepCropW = v.cropWidth ?? frameW
@@ -1682,19 +1761,41 @@ const projectSlice = createSlice({
 
               v.cropX = newCropX
               v.cropY = newCropY
-              
+
               if (v.mediaWidth !== undefined) v.mediaWidth = mediaW
               if (v.mediaHeight !== undefined) v.mediaHeight = mediaH
             }
           }
         }
       }
+      state.isDirty = true
+      state.version++
+    },
+
+    // Flip the active side of a card frame (front/back toggle)
+    flipCardFrame: (state, action) => {
+      const { layerId } = action.payload
+      const layer = state.layers[layerId]
+      if (!layer || !layer.data?.isCardFrame) return
+      layer.data.showingFront = !layer.data.showingFront
+      layer.updatedAt = Date.now()
+      state.isDirty = true
+      state.version++
     },
 
     detachAssetFromFrame: (state, action) => {
-      const { layerId } = action.payload
+      const { layerId, side } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
+
+      // Card frame back-side detachment: only clear back asset fields
+      if (layer.data?.isCardFrame && side === 'back') {
+        delete layer.data.backAssetUrl
+        delete layer.data.backAssetWidth
+        delete layer.data.backAssetHeight
+        layer.updatedAt = Date.now()
+        return
+      }
 
       // Restore to empty frame state.
       // We want to "stay" at the current visual crop size, but restore the underlying
@@ -1754,6 +1855,8 @@ const projectSlice = createSlice({
           }
         }
       }
+      state.isDirty = true
+      state.version++
     },
   },
   extraReducers: (builder) => {
@@ -1772,6 +1875,8 @@ const projectSlice = createSlice({
         state.aspectRatio = data.aspectRatio || '16:9' // Restore aspect ratio
         state.currentSceneId = state.scenes.length > 0 ? state.scenes[0].id : null
         state.status = 'succeeded'
+        state.isDirty = false
+        state.version = 0
       })
       .addCase(fetchProjectById.rejected, (state, action) => {
         state.status = 'failed'
@@ -1786,6 +1891,7 @@ const projectSlice = createSlice({
         state.projectId = action.payload._id
         state.isSaving = false
         state.saveError = null
+        state.isDirty = false
       })
       .addCase(saveProject.rejected, (state, action) => {
         state.isSaving = false
@@ -1844,6 +1950,7 @@ export const {
   // Frame layer actions
   attachAssetToFrame,
   detachAssetFromFrame,
+  flipCardFrame,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders
@@ -1979,6 +2086,23 @@ export const selectMotionEditingStepId = (state) => state.project.motionEditingM
 // Returns the initial transforms of all layers captured at edit start
 export const selectMotionEditingInitialTransforms = (state) => state.project.motionEditingMode.initialTransforms
 
+// [NEW] Selector to get the action count of the step currently being edited
+export const selectEditingStepActionCount = createSelector(
+  [
+    selectSceneMotionFlows,
+    selectCurrentSceneId,
+    selectMotionEditingStepId
+  ],
+  (flows, sceneId, stepId) => {
+    if (!flows || !sceneId || !stepId) return 0
+    const flow = flows[sceneId]
+    if (!flow || !flow.steps) return 0
+    const step = flow.steps.find(s => s.id === stepId)
+    if (!step || !step.layerActions) return 0
+    return Object.values(step.layerActions).reduce((sum, actions) => sum + (actions?.length || 0), 0)
+  }
+)
+
 // Asset loading selectors
 export const selectLoadingMode = (state) => state.project.loadingMode
 export const selectPreparingLayers = (state) => state.project.preparingLayers
@@ -2009,5 +2133,7 @@ export const selectIsSaving = (state) => state.project.isSaving
 export const selectSaveError = (state) => state.project.saveError
 export const selectProjectStatus = (state) => state.project.status
 export const selectProjectError = (state) => state.project.error
+export const selectIsDirty = (state) => state.project.isDirty
+export const selectProjectVersion = (state) => state.project.version
 
 export default projectSlice.reducer

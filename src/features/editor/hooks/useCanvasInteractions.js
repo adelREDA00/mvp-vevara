@@ -48,7 +48,7 @@ import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/view
 import { getScaledBadgeDimensions } from '../utils/badgeUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
-import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer'
+import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 
@@ -146,6 +146,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     frameCounter: 0, // Frame counter for throttling
     framesPerSnap: 2 // Run snapping every 2 frames (~30fps) instead of every frame
   }) // Throttle snapping calculations to improve performance
+  const lastStateUpdateRef = useRef(0) // Timestamp for throttling Redux updates
   const cacheInvalidationTimeoutRef = useRef(null) // Debounce cache invalidation
   const multiSelectBoundsCacheRef = useRef({ bounds: null, selectedIds: null, timestamp: 0 }) // Cache multi-select bounds calculations
   const dragMultiSelectBoundsCacheRef = useRef({ bounds: null, selectedIds: null }) // Persistent cache for multi-select bounds during drag operations
@@ -3991,13 +3992,21 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         // Normal mode
         updateMotionArrowVisibility(selectedLayerId, true)
         pendingDragUpdatesRef.current.set(selectedLayerId, { x: newX, y: newY })
-        if (!dragUpdateFrameRef.current) {
+
+        // [PERFORMANCE] Throttle Redux updates during drag to ~6-7 dispatches per second (150ms)
+        // This significantly reduces re-render overhead on low-end PCs while 
+        // immediate visual feedback is still provided via direct PIXI object manipulation.
+        const throttleInterval = 150
+        const shouldUpdateNow = currentTime - lastStateUpdateRef.current > throttleInterval
+
+        if (shouldUpdateNow && !dragUpdateFrameRef.current) {
           dragUpdateFrameRef.current = requestAnimationFrame(() => {
             pendingDragUpdatesRef.current.forEach((updates, layerId) => {
               dispatch(updateLayer({ id: layerId, x: updates.x, y: updates.y }))
             })
             pendingDragUpdatesRef.current.clear()
             dragUpdateFrameRef.current = null
+            lastStateUpdateRef.current = performance.now()
           })
         }
       }
@@ -4076,11 +4085,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         if (draggedLayer && frameLayer) {
           const assetUrl = draggedLayer.data?.url || draggedLayer.data?.src
           if (assetUrl) {
+            // Card frame: determine which side to attach to based on showingFront
+            const isCardFrame = frameLayer.data?.isCardFrame
+            const side = isCardFrame && frameLayer.data?.showingFront === false ? 'back' : 'front'
+
             dispatch(attachAssetToFrame({
               layerId: frameId,
               assetUrl,
               assetWidth: draggedLayer.mediaWidth || draggedLayer.width,
-              assetHeight: draggedLayer.mediaHeight || draggedLayer.height
+              assetHeight: draggedLayer.mediaHeight || draggedLayer.height,
+              side
             }))
             const frameObj = layerObjectsMap.get(frameId)
             if (frameObj) {
@@ -4093,7 +4107,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               loadTextureRobust(assetUrl).then(texture => {
                 if (!texture || frameObj.destroyed) return
 
-                attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+                if (side === 'back') {
+                  attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+                } else {
+                  attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+                }
 
                 // [FIX] Force MotionEngine refresh to ensure new asset is immediately
                 // visible and correctly positioned for the current timeline time.

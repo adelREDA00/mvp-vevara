@@ -102,7 +102,7 @@ export class CropAction {
         const properties = ['cropX', 'cropY', 'cropWidth', 'cropHeight', 'mediaWidth', 'mediaHeight']
 
         properties.forEach(prop => {
-            const privateProp = `_stored${prop.charAt(0).toUpperCase() + prop.slice(1)}` // e.g., _storedCropX
+            const privateProp = `_${prop}` // e.g., _cropX (standardized across PIXI objects)
 
             // value initialization:
             // 1. Try existing private prop (persistence)
@@ -179,17 +179,36 @@ export class CropAction {
         const anchorX = pixiObject.anchorX !== undefined ? pixiObject.anchorX : 0.5
         const anchorY = pixiObject.anchorY !== undefined ? pixiObject.anchorY : 0.5
 
-        pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+        // Guard pivot update to avoid micro-jitter from floating-point rounding during GSAP interpolation
+        const newPivotX = cropW * anchorX
+        const newPivotY = cropH * anchorY
+        if (Math.abs(pixiObject.pivot.x - newPivotX) > 0.1 || Math.abs(pixiObject.pivot.y - newPivotY) > 0.1) {
+            pixiObject.pivot.set(newPivotX, newPivotY)
+        }
 
         // If an image asset is currently attached, shift internal coordinate geometries
         if (sprite && cropMask) {
-          // Update sprite geometry
+          // Update front sprite geometry
           if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
           if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
 
           // Offset sprite to align with top-left of container (0,0)
           if (Math.abs(sprite.x - (-cropX)) > 0.1) sprite.x = -cropX
           if (Math.abs(sprite.y - (-cropY)) > 0.1) sprite.y = -cropY
+
+          // Also update back sprite for card frames (keeps crop in sync on both sides)
+          // Use back-specific cover-fit dimensions when available (different aspect ratio)
+          const backSprite = pixiObject._backSprite
+          if (backSprite) {
+              const bMediaW = pixiObject._backMediaWidth ?? mediaW
+              const bMediaH = pixiObject._backMediaHeight ?? mediaH
+              const bCropX = pixiObject._backCropX ?? cropX
+              const bCropY = pixiObject._backCropY ?? cropY
+              if (Math.abs(backSprite.width - bMediaW) > 0.1) backSprite.width = bMediaW
+              if (Math.abs(backSprite.height - bMediaH) > 0.1) backSprite.height = bMediaH
+              if (Math.abs(backSprite.x - (-bCropX)) > 0.1) backSprite.x = -bCropX
+              if (Math.abs(backSprite.y - (-bCropY)) > 0.1) backSprite.y = -bCropY
+          }
 
           // Redraw crop mask
           cropMask.clear()
@@ -199,11 +218,28 @@ export class CropAction {
 
         // [FIX] Update visibility and placeholders for frames during animation
         if (pixiObject._isFrame) {
-            if (pixiObject._imageSprite) pixiObject._imageSprite.visible = !!pixiObject._frameHasAsset
-            if (pixiObject._framePlaceholder) {
-                pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
-                if (!pixiObject._frameHasAsset) {
-                    redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
+            if (pixiObject._isCardFrame) {
+                // Card frame: during flip, FlipAction's onUpdate controls visibility
+                if (!pixiObject._isFlipping) {
+                    const showingFront = pixiObject._frameData?.showingFront !== false
+                    if (pixiObject._imageSprite) pixiObject._imageSprite.visible = showingFront && !!pixiObject._frameHasAsset
+                    if (pixiObject._backSprite) pixiObject._backSprite.visible = !showingFront && !!pixiObject._frameHasBackAsset
+                    if (pixiObject._framePlaceholder) {
+                        const activeHasAsset = showingFront ? pixiObject._frameHasAsset : pixiObject._frameHasBackAsset
+                        pixiObject._framePlaceholder.visible = !activeHasAsset
+                        if (!activeHasAsset) {
+                            redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
+                        }
+                    }
+                }
+            } else {
+                // Normal frame
+                if (pixiObject._imageSprite) pixiObject._imageSprite.visible = !!pixiObject._frameHasAsset
+                if (pixiObject._framePlaceholder) {
+                    pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
+                    if (!pixiObject._frameHasAsset) {
+                        redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
+                    }
                 }
             }
         }

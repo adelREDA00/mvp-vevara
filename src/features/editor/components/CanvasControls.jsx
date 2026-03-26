@@ -1,8 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Minus, ChevronDown,
-  Settings, Activity, X, MoreVertical, Layers,
-  Volume2, VolumeX, Ghost, Droplets
+  Settings, Zap, X, MoreVertical, Layers,
+  Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
+  Plus, Check
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -24,7 +25,10 @@ function CanvasControls({
   onStartMotionCapture,
   onApplyMotion,
   onCancelMotion,
-  stepsCount = 0
+  onFlipCardFrame,
+  requestOpenControl = null,
+  stepsCount = 0,
+  editingStepActionCount = 0
 }) {
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
@@ -44,6 +48,17 @@ function CanvasControls({
     setShowOpacitySlider(false)
     setShowBlurSlider(false)
   }, [selectedLayer?.id, selectedCanvas])
+
+  // Open opacity/blur slider when requested by parent (e.g. from MotionPanel)
+  useEffect(() => {
+    if (requestOpenControl === 'opacity') {
+      setShowOpacitySlider(true)
+      setShowBlurSlider(false)
+    } else if (requestOpenControl === 'blur') {
+      setShowBlurSlider(true)
+      setShowOpacitySlider(false)
+    }
+  }, [requestOpenControl])
 
   // [MOBILE] Auto-scroll to the right on small screens to ensure "Add Step" is visible
   useLayoutEffect(() => {
@@ -437,6 +452,18 @@ function CanvasControls({
           </button>
         )}
 
+        {/* Card Frame flip button */}
+        {selectedLayer?.data?.isCardFrame && (
+          <button
+            onClick={() => onFlipCardFrame?.()}
+            className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2.5 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+            title={`Showing ${selectedLayer.data.showingFront !== false ? 'Front' : 'Back'} - Click to flip`}
+          >
+            <FlipHorizontal2 className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+            <span className="text-xs font-medium">{selectedLayer.data.showingFront !== false ? 'Front' : 'Back'}</span>
+          </button>
+        )}
+
         {/* Position panel opener */}
         <button
           onClick={() => onOpenPositionPanel?.()}
@@ -484,14 +511,20 @@ function CanvasControls({
                 }
               }
             }}
-            className={`h-8 px-3 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
-              ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow'
+            className={`h-8 px-3 rounded-[10px] transition-all duration-300 flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
+              ? (editingStepActionCount > 0
+                ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
+                : 'bg-zinc-800/80 text-zinc-500 border border-white/5 cursor-default hover:bg-zinc-800')
               : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10'
               }`}
-            title={isMotionCaptureActive ? "Apply Animation" : "Start Animation Capture"}
+            title={isMotionCaptureActive ? "Save Step" : "Animate"}
           >
-            <Activity className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
-            <span>Add Step</span>
+            {isMotionCaptureActive ? (
+              <Check className="h-4 w-4 flex-shrink-0" strokeWidth={3} />
+            ) : (
+              <Zap className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
+            )}
+            <span>{isMotionCaptureActive ? 'Save Step' : 'Animate'}</span>
           </button>
 
           {/* Cancel Button - Only shown in capture mode */}
@@ -509,13 +542,13 @@ function CanvasControls({
           )}
 
           {/* Motion Panel Menu - 3 dots to access MotionPanel for managing steps */}
-          {/* <button
+          <button
             onClick={() => onToggleMotionPanel?.()}
             className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10"
             title="Animation Steps"
           >
             <MoreVertical className="h-4 w-4 opacity-70" />
-          </button> */}
+          </button>
         </div>
 
       </div>

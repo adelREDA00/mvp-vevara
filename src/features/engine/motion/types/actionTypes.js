@@ -12,6 +12,7 @@ export const ACTION_TYPES = {
   CROP: 'crop',
   HOLD: 'hold',
   COLOR_CHANGE: 'colorChange',
+  FLIP: 'flip',
 }
 
 /**

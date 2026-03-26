@@ -28,12 +28,14 @@ function TopToolbar({
   onProjectNameChange,
   onSave,
   isSaving,
+  isDirty = false,
   lastSaved = null,
   onCanvasSizeChange,
   onToggleSidebar,
   onNavigate,
   onUndo,
   onRedo,
+  hideExport = false,
 }) {
   const { isAuthenticated, user } = useSelector((state) => state.auth)
   const canUndo = useSelector(selectCanUndo)
@@ -120,9 +122,16 @@ function TopToolbar({
               onClick={onSave}
               disabled={isSaving}
               className="text-white hover:bg-white/10 active:bg-white/20 h-9 px-3.5 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap text-[13px] font-medium border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
-              title="Save Project"
+              title={isDirty ? "Unsaved Changes" : "Project Saved"}
             >
-              <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+              <div className="relative flex items-center justify-center">
+                <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isSaving && (
+                  <div 
+                    className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-[#7c4af0] shadow-sm transition-colors duration-300 ${isDirty ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`} 
+                  />
+                )}
+              </div>
               <span className="xs:inline">{isSaving ? 'Saving...' : 'Save'}</span>
             </button>
 
@@ -186,9 +195,19 @@ function TopToolbar({
               }
             >
               <DropdownMenuItem onClick={onSave}>
-                <div className="flex items-center gap-2">
-                  <FileText className="h-3.5 w-3.5" />
-                  <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                <div className="flex items-center gap-2 w-full">
+                  <div className="relative">
+                    <FileText className="h-3.5 w-3.5" />
+                    {!isSaving && (
+                      <div className={`absolute -top-1 -right-0.5 w-1.5 h-1.5 rounded-full border border-zinc-800 ${isDirty ? 'bg-red-500' : 'bg-green-500'}`} />
+                    )}
+                  </div>
+                  <span className="flex-1">{isSaving ? 'Saving...' : 'Save'}</span>
+                  {!isSaving && (
+                    <span className={`text-[9px] font-bold uppercase ${isDirty ? 'text-red-400' : 'text-green-400'}`}>
+                      {isDirty ? 'Unsaved' : 'Saved'}
+                    </span>
+                  )}
                 </div>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setIsResizeModalOpen(true)}>
@@ -197,46 +216,50 @@ function TopToolbar({
                   <span>Resize</span>
                 </div>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsExportModalOpen(true)}>
-                <div className="flex items-center gap-2">
-                  <Download className="h-3.5 w-3.5" />
-                  <span>Export</span>
-                </div>
-              </DropdownMenuItem>
+              {!hideExport && (
+                <DropdownMenuItem onClick={() => setIsExportModalOpen(true)}>
+                  <div className="flex items-center gap-2">
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Export</span>
+                  </div>
+                </DropdownMenuItem>
+              )}
             </DropdownMenu>
           </div>
 
           {/* Desktop Only: Export Button */}
-          <div className="hidden md:block">
-            <DropdownMenu
-              trigger={
-                <button
-                  className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-9 px-3.5 text-[13px] rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
-                  title="Export"
-                >
-                  <Download className="h-3.5 w-3.5" strokeWidth={2} />
-                  <span className="hidden sm:inline">Export</span>
-                  <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" strokeWidth={2} />
-                </button>
-              }
-            >
-              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1">
-                Select Resolution
-              </div>
-              <DropdownMenuItem onClick={() => onExport && onExport('720p')}>
-                720p (HD) (fast)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onExport && onExport('1080p')}>
-                1080p (Full HD) (fast)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onExport && onExport('1440p')}>
-                2K (QHD) (medium)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
-                4K (Ultra HD) (slightly slow)
-              </DropdownMenuItem>
-            </DropdownMenu>
-          </div>
+          {!hideExport && (
+            <div className="hidden md:block">
+              <DropdownMenu
+                trigger={
+                  <button
+                    className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-9 px-3.5 text-[13px] rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
+                    title="Export"
+                  >
+                    <Download className="h-3.5 w-3.5" strokeWidth={2} />
+                    <span className="hidden sm:inline">Export</span>
+                    <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" strokeWidth={2} />
+                  </button>
+                }
+              >
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1">
+                  Select Resolution
+                </div>
+                <DropdownMenuItem onClick={() => onExport && onExport('720p')}>
+                  720p (HD) (fast)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onExport && onExport('1080p')}>
+                  1080p (Full HD) (fast)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onExport && onExport('1440p')}>
+                  2K (QHD) (medium)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
+                  4K (Ultra HD) (slightly slow)
+                </DropdownMenuItem>
+              </DropdownMenu>
+            </div>
+          )}
 
           <button
             onClick={() => onNavigate && onNavigate(isAuthenticated ? "/dashboard" : "/login")}

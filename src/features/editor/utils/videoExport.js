@@ -2,7 +2,14 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL } from '@ffmpeg/util';
 import * as PIXI from 'pixi.js';
 import { MotionEngine } from '../../engine/motion/MotionEngine.js';
-import { createTextLayer, createShapeLayer, createImageLayer, createFrameLayer, attachAssetToFrame as attachAssetToFramePixi } from '../../engine/pixi/createLayer.js';
+import { 
+    createTextLayer, 
+    createShapeLayer, 
+    createImageLayer, 
+    createFrameLayer, 
+    attachAssetToFrame as attachAssetToFramePixi,
+    attachBackAssetToFrame
+} from '../../engine/pixi/createLayer.js';
 
 let ffmpeg = null;
 
@@ -571,17 +578,21 @@ export const exportVideo = async ({
                         }
                     } else if (layer.type === 'frame') {
                         pixiObject = createFrameLayer(layer);
-                        // If the frame has an attached asset, load its texture and apply cover-fit
-                        const frameAssetUrl = layer.data?.assetUrl;
-                        if (frameAssetUrl) {
+                        
+                        // Helper to load and attach an asset to a frame side
+                        const setupFrameSide = async (url, side) => {
+                            if (!url) return;
                             try {
                                 const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
-                                const frameTexture = await loadTextureRobust(frameAssetUrl);
-                                if (frameTexture) {
-                                    const fw = layer.cropWidth ?? layer.width;
-                                    const fh = layer.cropHeight ?? layer.height;
-                                    attachAssetToFramePixi(pixiObject, frameTexture, fw, fh);
-                                    // Apply stored crop state from Redux (motion actions may have modified it)
+                                const texture = await loadTextureRobust(url);
+                                if (!texture) return;
+                                
+                                const fw = layer.cropWidth ?? layer.width;
+                                const fh = layer.cropHeight ?? layer.height;
+                                
+                                if (side === 'front') {
+                                    attachAssetToFramePixi(pixiObject, texture, fw, fh);
+                                    // Apply stored crop state from Redux for the front side
                                     const sprite = pixiObject._imageSprite;
                                     if (sprite) {
                                         sprite.width = layer.mediaWidth ?? fw;
@@ -589,17 +600,39 @@ export const exportVideo = async ({
                                         sprite.x = -(layer.cropX ?? 0);
                                         sprite.y = -(layer.cropY ?? 0);
                                     }
-                                    const cropMask = pixiObject._cropMask;
-                                    if (cropMask) {
-                                        cropMask.clear();
-                                        cropMask.rect(0, 0, layer.cropWidth ?? fw, layer.cropHeight ?? fh);
-                                        cropMask.fill(0xffffff);
+                                } else {
+                                    attachBackAssetToFrame(pixiObject, texture, fw, fh);
+                                    // Back side currently uses default cover-fit from attachBackAssetToFrame.
+                                    // If we ever store back-specific crops in Redux, we'd apply them here.
+                                }
+                                
+                                if (pixiObject._cropMask) {
+                                    const mask = pixiObject._cropMask;
+                                    mask.clear();
+                                    mask.rect(0, 0, fw, fh);
+                                    mask.fill(0xffffff);
+                                }
+
+                                // If it's a video, track it for seeking
+                                const source = texture.source;
+                                if (source && source.resource instanceof HTMLVideoElement) {
+                                    const video = source.resource;
+                                    if (!exportVideoElements.includes(video)) {
+                                        exportVideoElements.push(video);
                                     }
+                                    
+                                    // Store metadata for the manual seek loop
+                                    video._layerSourceStartTime = layer.data?.sourceStartTime || 0;
+                                    video._layerSourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0);
+                                    video._parentLayer = pixiObject;
                                 }
                             } catch (e) {
-                                console.warn('Export: Failed to load frame asset', e);
+                                console.warn(`Export: Failed to load frame ${side} asset`, e);
                             }
-                        }
+                        };
+                        
+                        await setupFrameSide(layer.data?.assetUrl, 'front');
+                        await setupFrameSide(layer.data?.backAssetUrl, 'back');
                     } else if (layer.type === 'background') {
                         const graphics = new PIXI.Graphics();
                         graphics.rect(0, 0, worldWidth, worldHeight);
@@ -641,6 +674,14 @@ export const exportVideo = async ({
                     }
 
                     if (pixiObject) {
+                        // [EXPORT FIX] Apply base transform properties (rotation, scale) from the layer config.
+                        // Most creation functions in createLayer.js only handle (x, y, alpha), 
+                        // so we must explicitly apply rotation and scale here to ensure Frame 0 is correct.
+                        pixiObject.rotation = (layer.rotation || 0) * (Math.PI / 180);
+                        if (pixiObject.scale) {
+                            pixiObject.scale.set(layer.scaleX ?? 1, layer.scaleY ?? 1);
+                        }
+
                         stageContainer.addChild(pixiObject);
                         layerObjects.set(layerId, pixiObject);
                         exportEngine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId });
@@ -714,22 +755,31 @@ export const exportVideo = async ({
 
             for (const video of exportVideoElements) {
                 if (!video) continue;
-                const obj = [...layerObjects.values()].find(o => o._videoElement === video);
+                
+                // Find parent layer and its scene info
+                const obj = video._parentLayer || [...layerObjects.values()].find(o => o._videoElement === video);
                 if (!obj || obj.destroyed || !obj.visible) continue;
 
-                const range = exportEngine?.sceneRanges?.get(obj._sceneId);
+                const sceneId = obj._sceneId;
+                const range = exportEngine?.sceneRanges?.get(sceneId);
                 if (!range) continue;
 
-                const srcStart = obj._sourceStartTime || 0;
-                const srcEnd = obj._sourceEndTime;
+                const srcStart = video._layerSourceStartTime !== undefined ? video._layerSourceStartTime : (obj._sourceStartTime || 0);
+                const srcEnd = video._layerSourceEndTime !== undefined ? video._layerSourceEndTime : obj._sourceEndTime;
+                
                 const localTime = time - range.startTime;
                 let targetVideoTime = Math.max(0, localTime + srcStart);
                 if (srcEnd !== undefined) targetVideoTime = Math.min(targetVideoTime, srcEnd);
 
                 await seekVideoToTime(video, targetVideoTime);
 
-                if (obj._videoSprite?.texture?.source) {
-                    try { obj._videoSprite.texture.source.update(); } catch (e) { /* texture may be destroyed */ }
+                // Update texture if needed
+                // Find which sprite this video belongs to
+                const sprites = [obj._videoSprite, obj._imageSprite, obj._backSprite].filter(Boolean);
+                for (const s of sprites) {
+                    if (s.texture?.source?.resource === video) {
+                        try { s.texture.source.update(); } catch (e) { /* texture/source may be destroyed */ }
+                    }
                 }
             }
 
