@@ -2323,6 +2323,11 @@ function EditorPage() {
     motionCaptureRef.current = null
     isNewStepRef.current = false
 
+    // [FIX] Snap timeline marker back to base state when canceling
+    if (motionControls) {
+      motionControls.seek(startTimeOffset)
+    }
+
     // [SYNC FIX] Inform Redux that we are done editing
     dispatch(stopMotionEditing())
   }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset])

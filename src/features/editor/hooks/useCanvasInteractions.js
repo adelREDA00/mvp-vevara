@@ -4094,7 +4094,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               assetUrl,
               assetWidth: draggedLayer.mediaWidth || draggedLayer.width,
               assetHeight: draggedLayer.mediaHeight || draggedLayer.height,
-              side
+              side,
+              // [VIDEO-IN-FRAME FIX] Forward video metadata so the frame layer
+              // carries muted state, duration, and source timing for splitScene & syncMedia.
+              assetIsVideo: draggedLayer.type === 'video',
+              muted: draggedLayer.data?.muted,
+              duration: draggedLayer.data?.duration,
+              sourceStartTime: draggedLayer.data?.sourceStartTime,
+              sourceEndTime: draggedLayer.data?.sourceEndTime,
             }))
             const frameObj = layerObjectsMap.get(frameId)
             if (frameObj) {

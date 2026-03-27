@@ -474,8 +474,8 @@ function CanvasControls({
           <span className="text-xs font-medium">Position</span>
         </button>
 
-        {/* Video specific controls */}
-        {selectedLayer?.type === LAYER_TYPES.VIDEO && (
+        {/* Video specific controls — also show for frame layers containing a video asset */}
+        {(selectedLayer?.type === LAYER_TYPES.VIDEO || (selectedLayer?.type === LAYER_TYPES.FRAME && selectedLayer?.data?.assetIsVideo)) && (
           <button
             onClick={() => {
               const isMuted = selectedLayer.data?.muted !== false // default true

@@ -79,7 +79,75 @@ export class MotionEngine {
 
     // [FIX] Immediate Sync: Sync media state immediately when a new layer is added.
     const currentTime = this.masterTimeline.time()
+    
+    // [GSAP FIX] Ensure the object has all reactive properties defined so GSAP can safely set/animate them.
+    this._ensureGSAPProperties(pixiObject)
+    
     this.syncMedia(currentTime, false)
+  }
+
+  /**
+   * Defines reactive properties (getters/setters) on a PIXI object for GSAP tracking.
+   * This prevents "Invalid property" errors during scene initialization and ensures
+   * that visual updates (like cropping or card flips) trigger immediately when 
+   * GSAP modifies these values.
+   */
+  _ensureGSAPProperties(pixiObject) {
+    if (!pixiObject || pixiObject.destroyed || pixiObject._hasGSAPProperties) return
+
+    // List of custom properties we want to track/animate via GSAP
+    const properties = [
+      'cropX', 'cropY', 'cropWidth', 'cropHeight', 
+      'mediaWidth', 'mediaHeight', 'showingFront'
+    ]
+
+    properties.forEach(prop => {
+      const privateProp = `_${prop}`
+      
+      // Initialize private storage if not already there (prefixed with _)
+      if (pixiObject[privateProp] === undefined) {
+        let defaultValue = 0
+        if (prop === 'cropWidth') defaultValue = pixiObject.width || 100
+        if (prop === 'cropHeight') defaultValue = pixiObject.height || 100
+        if (prop === 'mediaWidth') defaultValue = pixiObject._originalWidth || pixiObject.width || 100
+        if (prop === 'mediaHeight') defaultValue = pixiObject._originalHeight || pixiObject.height || 100
+        if (prop === 'showingFront') defaultValue = true // Default to showing front
+        
+        pixiObject[privateProp] = defaultValue
+      }
+
+      // Define public getter/setter so GSAP can "see" and "set" the property
+      if (Object.getOwnPropertyDescriptor(pixiObject, prop)?.configurable !== false) {
+        Object.defineProperty(pixiObject, prop, {
+          get() { return this[privateProp] },
+          set(val) {
+            if (this[privateProp] !== val) {
+              this[privateProp] = val
+              // Trigger visual update if the object supports it (e.g. from CropAction)
+              if (this._updateCropVisuals) {
+                this._updateCropVisuals()
+              }
+              
+              // Special case for card frames - toggle visibility when showingFront changes
+              if (prop === 'showingFront' && this._isCardFrame && !this._isFlipping) {
+                const isShowing = val !== false
+                if (this._imageSprite) this._imageSprite.visible = isShowing && !!this._frameHasAsset
+                if (this._backSprite) this._backSprite.visible = !isShowing && !!this._frameHasBackAsset
+                
+                // Update placeholder if no asset
+                const activeHasAsset = isShowing ? this._frameHasAsset : this._frameHasBackAsset
+                if (this._framePlaceholder) {
+                    this._framePlaceholder.visible = !activeHasAsset
+                }
+              }
+            }
+          },
+          configurable: true
+        })
+      }
+    })
+
+    pixiObject._hasGSAPProperties = true
   }
 
   /**
@@ -239,7 +307,7 @@ export class MotionEngine {
     // If sharedContext is provided, we use those maps to accumulate across scenes
     const layerTimelineBuilders = sharedContext?.builders || new Map() // layerId -> { timeline, currentTimeOffset }
 
-        // [FIX] STATE TRACKER: Tracks predicted state of each layer as we build steps.
+    // [FIX] STATE TRACKER: Tracks predicted state of each layer as we build steps.
     const layerStateTracker = sharedContext?.stateTracker || new Map() // layerId -> { x, y, scaleX, scaleY, rotation }
 
     // [DEBUG]
@@ -259,7 +327,7 @@ export class MotionEngine {
         if (!obj || obj.destroyed) return
 
         const baseLayer = allLayers?.[id]
-        
+
         layerStateTracker.set(id, {
           x: baseLayer?.x ?? obj.x ?? 0,
           y: baseLayer?.y ?? obj.y ?? 0,
@@ -302,13 +370,13 @@ export class MotionEngine {
         const hasMove = originalActions.some(a => a.type === 'move')
         const actions = originalActions.map(a => {
           if (a.type === 'crop') {
-             // [DEBUG] Ensure we understand the state of this crop action
-             if (hasMove) {
-                const safeValues = { ...a.values }
-                delete safeValues.dx
-                delete safeValues.dy
-                return { ...a, values: safeValues }
-             }
+            // [DEBUG] Ensure we understand the state of this crop action
+            if (hasMove) {
+              const safeValues = { ...a.values }
+              delete safeValues.dx
+              delete safeValues.dy
+              return { ...a, values: safeValues }
+            }
           }
           return a
         })
@@ -340,8 +408,18 @@ export class MotionEngine {
                 y: startState.y,
                 rotation: startState.rotation * (Math.PI / 180),
                 alpha: startState.opacity !== undefined ? startState.opacity : 1,
+                // [SYNC FIX] Force baseline for crop and side properties at scene start.
+                // This ensures GSAP forcibly resets these properties during backward seeks,
+                // preventing "sticky" visual states from previous motion steps.
+                cropX: startState.cropX !== undefined ? startState.cropX : 0,
+                cropY: startState.cropY !== undefined ? startState.cropY : 0,
+                cropWidth: startState.cropWidth,
+                cropHeight: startState.cropHeight,
+                mediaWidth: startState.mediaWidth,
+                mediaHeight: startState.mediaHeight,
+                showingFront: startState.showingFront !== false
               }, startTimeOffset) // Anchor explicitly at the beginning of the scene
-              
+
               // Scale must be set on the inner .scale object natively
               if (pixiObject.scale) {
                 gsapTimeline.set(pixiObject.scale, {
@@ -390,11 +468,11 @@ export class MotionEngine {
 
           // When flip and scale co-exist: flip owns scale.x, scale skips it
           const actionOptions = {
-              ...options,
-              duration: actionDuration,
-              startTime: stepStartTime,
-              sceneStartOffset: startTimeOffset,
-              startState
+            ...options,
+            duration: actionDuration,
+            startTime: stepStartTime,
+            sceneStartOffset: startTimeOffset,
+            startState
           }
           if (hasFlip && action.type === 'flip' && flipTargetScaleX !== undefined) {
             actionOptions.flipTargetScaleX = flipTargetScaleX
@@ -591,12 +669,13 @@ export class MotionEngine {
 
       if (!videoElement) return
 
+
       const sceneId = obj._sceneId
       const range = this.sceneRanges.get(sceneId)
 
       if (range) {
         if (!mediaIntents.has(videoElement)) {
-          mediaIntents.set(videoElement, { shouldPlay: false, targetTime: -1, inAnyRange: false, layerId: id })
+          mediaIntents.set(videoElement, { shouldPlay: false, targetTime: -1, inAnyRange: false, layerId: id, layerMuted: true })
         }
 
         const intent = mediaIntents.get(videoElement)
@@ -625,6 +704,10 @@ export class MotionEngine {
           intent.targetTime = finalTime
           intent.inAnyRange = true
           intent.layerId = id
+          // [VIDEO-IN-FRAME FIX] Carry the in-range layer's muted preference.
+          // This ensures that after a scene split, the muted state comes from
+          // the segment that is actually playing, not from a stale reference.
+          intent.layerMuted = obj._layerMuted !== undefined ? obj._layerMuted : true
         } else {
           // Pass 2: Pre-seek lookahead
           const timeUntilStart = startTime - currentTime
@@ -704,6 +787,7 @@ export class MotionEngine {
       const targetMovedSignificantly = Math.abs(intent.targetTime - lastTarget) > 0.2
 
       if (intent.targetTime !== -1 && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
+
         videoElement.currentTime = intent.targetTime
         videoElement._lastMotionTargetTime = intent.targetTime // Track last request
       }
@@ -711,6 +795,14 @@ export class MotionEngine {
       // [FAST PREVIEW] Mute all videos during tweenTo so preview is silent
       if (this._muteVideosForFastPreview) {
         videoElement.muted = true
+      } else if (intent.inAnyRange) {
+        // [VIDEO-IN-FRAME FIX] Apply per-layer muted state for the in-range segment.
+        // This is critical after scene splits where two segments share one HTMLVideoElement
+        // but need independent mute/unmute control.
+        const shouldMute = intent.layerMuted !== false
+        if (videoElement.muted !== shouldMute) {
+          videoElement.muted = shouldMute
+        }
       }
 
       // [Bug 2 Fix] Play/Pause with isPlaying guard:

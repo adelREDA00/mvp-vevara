@@ -350,7 +350,7 @@ function Stage({
   }, [])
 
   // Handle dropping an asset (image/video URL) onto a frame layer
-  const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight) => {
+  const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight, assetIsVideo = false) => {
     const frameLayer = layers[frameLayerId]
     if (!frameLayer || frameLayer.type !== 'frame') return
 
@@ -359,7 +359,7 @@ function Stage({
     const side = isCardFrame && frameLayer.data?.showingFront === false ? 'back' : 'front'
 
     // 1. Update Redux state
-    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side }))
+    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side, assetIsVideo }))
 
     // 2. Update PIXI object immediately for visual feedback
     const frameObj = layerObjects?.get(frameLayerId)
@@ -422,7 +422,7 @@ function Stage({
       }
 
       if (targetId) {
-        handleDropAssetOnFrame(targetId, asset.url, asset.width || 300, asset.height || 200)
+        handleDropAssetOnFrame(targetId, asset.url, asset.width || 300, asset.height || 200, asset.type === 'video')
       }
     }
 
@@ -1039,25 +1039,36 @@ function Stage({
                         ? (frameLayer?.data?.backAssetHeight || frameLayer?.height || 200)
                         : (frameLayer?.data?.assetHeight || frameLayer?.height || 200)
 
-                      // Create a standalone image layer from the detached asset
+                      // Create a standalone layer from the detached asset
                       if (assetUrl) {
+                        const isVideo = !!(frameLayer?.data?.assetIsVideo)
                         const maxSize = 400
                         const ratio = Math.min(maxSize / assetWidth, maxSize / assetHeight, 1)
                         const displayW = Math.round(assetWidth * ratio)
                         const displayH = Math.round(assetHeight * ratio)
+
                         dispatch(addLayerAndSelect({
                           sceneId: currentSceneId,
-                          type: 'image',
-                          name: 'Detached Image',
-                          x: frameLayer.x ?? worldWidth / 2,
-                          y: frameLayer.y ?? worldHeight / 2,
+                          type: isVideo ? 'video' : 'image',
+                          name: isVideo ? 'Detached Video' : 'Detached Image',
+                          x: frameLayer.x ?? (worldWidth / 2),
+                          y: frameLayer.y ?? (worldHeight / 2),
                           width: displayW,
                           height: displayH,
                           anchorX: 0.5,
                           anchorY: 0.5,
                           mediaWidth: assetWidth,
                           mediaHeight: assetHeight,
-                          data: { url: assetUrl, src: assetUrl }
+                          data: { 
+                            url: assetUrl, 
+                            src: assetUrl,
+                            // Preserving video metadata is critical for continuity
+                            assetIsVideo: isVideo,
+                            muted: frameLayer.data?.muted,
+                            sourceStartTime: frameLayer.data?.sourceStartTime,
+                            sourceEndTime: frameLayer.data?.sourceEndTime,
+                            duration: frameLayer.data?.duration
+                          }
                         }))
                       }
 

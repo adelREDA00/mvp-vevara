@@ -23,8 +23,10 @@ const destroyImageSprite = (sprite, layer) => {
 
   const imageUrl = layer?.data?.url || layer?.data?.src
 
-  // Handle Video-specific cleanup (critical for preventing resource errors)
-  if (layer?.type === LAYER_TYPES.VIDEO) {
+  // Handle Video resource cleanup (critical for preventing frozen elements/memory leaks)
+  const isVideo = layer?.type === LAYER_TYPES.VIDEO || (layer?.type === LAYER_TYPES.FRAME && layer?.data?.assetIsVideo)
+  
+  if (isVideo) {
     // Release from the global cache and kill the element
     if (layer.id) {
       releaseVideoElement(layer.id)
@@ -456,8 +458,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       // Muting is always safe, but unmuting requires prior user interaction
       // (browser autoplay policy). Only unmute when the engine is actively
       // playing, which guarantees the user clicked "play" first.
+      // [VIDEO-IN-FRAME FIX] Store _layerMuted on the PIXI object so MotionEngine.syncMedia
+      // can apply the correct per-layer muted state, even when two segments share one HTMLVideoElement.
+      const isMuted = layer.data?.muted !== false;
+      displayObject._layerMuted = isMuted;
       if (displayObject._videoElement) {
-        const isMuted = layer.data?.muted !== false;
         if (displayObject._videoElement.muted !== isMuted) {
           displayObject._videoElement.muted = isMuted;
         }
@@ -508,6 +513,13 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         displayObject.anchorY = targetAnchorY
 
         displayObject.pivot.set(cropW * targetAnchorX, cropH * targetAnchorY)
+
+        // SYNC Sprite visibility for Frames (consistent with Card side logic)
+        if (displayObject._isFrame) {
+           const showing = capturedLayer?.showingFront !== false && layer.data?.showingFront !== false
+           if (sprite) sprite.visible = showing && displayObject._frameHasAsset
+           if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
+        }
       }
     } else if (!(displayObject instanceof PIXI.Graphics) && !(displayObject instanceof PIXI.Sprite)) {
       if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
@@ -762,10 +774,46 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   const previousLayerValuesRef = useRef(new Map())
   const previousSelectedLayerIdsRef = useRef(new Set())
 
-  // Get all project scenes to build the global layer order
   const scenes = useSelector(selectScenes)
   const timelineInfo = useSelector(selectProjectTimelineInfo)
   const projectStatus = useSelector(state => state?.project?.status || 'idle')
+
+  // [SYNC OPTIMIZATION] Monitor engine playback state to trigger visual syncs.
+  // We use a React state to track time and playing status, which ensures that 
+  // useCanvasLayers re-renders immediately during seeking/scrubbing.
+  const [playbackState, setPlaybackState] = useState({ time: 0, isPlaying: false })
+
+  useEffect(() => {
+    const engine = getGlobalMotionEngine()
+    let lastUpdateTime = 0
+    
+    const handleUpdate = () => {
+      if (!engine.masterTimeline) return
+      const currentTime = engine.masterTimeline.time()
+      const isPlaying = engine.getIsPlaying()
+      
+      // PERFORMANCE: Throttle React updates during active playback (10fps is enough for UI sync).
+      // During seeking/scrubbing (isPlaying=false), we use a high-frequency update (~60fps)
+      // to ensure the "snap-back" to base state feels instantaneous.
+      const now = Date.now()
+      const throttleMs = isPlaying ? 100 : 16
+      
+      if (now - lastUpdateTime >= throttleMs) {
+        setPlaybackState({ time: currentTime, isPlaying })
+        lastUpdateTime = now
+      }
+    }
+
+    engine.onUpdate(handleUpdate)
+    engine.onPlay(handleUpdate)
+    engine.onPause(handleUpdate)
+
+    return () => {
+      engine.onUpdateCallbacks = engine.onUpdateCallbacks.filter(cb => cb !== handleUpdate)
+      engine.onPlayCallbacks = engine.onPlayCallbacks.filter(cb => cb !== handleUpdate)
+      engine.onPauseCallbacks = engine.onPauseCallbacks.filter(cb => cb !== handleUpdate)
+    }
+  }, [])
 
   // Build a project-wide layer order (concatenating all scenes)
   const layerOrder = useMemo(() => {
@@ -835,8 +883,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const layerObjects = layerObjectsRef.current
     const createdLayers = createdLayersRef.current
     const engine = getGlobalMotionEngine()
-    const isActuallyPlaying = engine.getIsPlaying()
-    const currentTime = engine.masterTimeline?.time() || 0
+    const isActuallyPlaying = playbackState.isPlaying
+    const currentTime = playbackState.time
 
     // [FIX] checkReadiness uses ONLY refs (always current) to avoid stale closure issues.
     // The counter tracks in-flight async loads. On mobile, also check the queue length.
@@ -1071,7 +1119,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               loadTextureRobust(backAssetUrl).then(backTexture => {
                 if (!backTexture || pixiObject.destroyed) return
                 attachBackAssetToFrame(pixiObject, backTexture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
-              }).catch(() => {})
+              }).catch(() => { })
             }
 
             setLayerObjectsVersion(v => v + 1)
@@ -1443,19 +1491,27 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             // [FIX] Protected Sync: Only apply Redux dimensions/crops if not playing/scrubbing
             // (unless specifically at a scene start or in capture mode)
             // [SYNC FIX] Skip sync if the object is currently being resized to avoid "jiggle"
-            if (!isActuallyPlaying && !pixiObject._isResizing && (isLayerCaptured || isAtSceneStart)) {
-              // CROP SYSTEM: Sync media size, crop offset, mask, and pivot
-              const mediaW = layer.mediaWidth ?? layer.width ?? 100
-              const mediaH = layer.mediaHeight ?? layer.height ?? 100
-              const cropX = layer.cropX ?? 0
-              const cropY = layer.cropY ?? 0
-              const cropW = layer.cropWidth ?? layer.width ?? 100
-              const cropH = layer.cropHeight ?? layer.height ?? 100
+            // [FIX] Priority Snapping: When at the very start of a scene, always prioritize
+            // Redux base state properties over "captured" data to ensure hard-snapping during seek.
+            // [POST-CLIP FIX] Only allow _forceNextSync to trigger Redux sync if the layer is 
+            // NOT animated, or if we are at the very start of the scene. This prevents the
+            // "selection snap" to base state when selecting a layer at t > 0 after a save.
+            const hasMotion = engine.activeTimelines?.has(layerId)
+            const canSyncReduxBase = isAtSceneStart || (pixiObject._forceNextSync && (!hasMotion || isAtSceneStart))
 
-              if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-              if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-              if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-              if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
+            if (!isActuallyPlaying && !pixiObject._isResizing && (isLayerCaptured || canSyncReduxBase)) {
+              const useCaptured = isLayerCaptured && !isAtSceneStart
+              const mediaW = (useCaptured ? capturedLayerData?.mediaWidth : null) ?? layer.mediaWidth ?? layer.width ?? 100
+              const mediaH = (useCaptured ? capturedLayerData?.mediaHeight : null) ?? layer.mediaHeight ?? layer.height ?? 100
+              const cropX = (useCaptured ? capturedLayerData?.cropX : null) ?? layer.cropX ?? 0
+              const cropY = (useCaptured ? capturedLayerData?.cropY : null) ?? layer.cropY ?? 0
+              const cropW = (useCaptured ? capturedLayerData?.cropWidth : null) ?? layer.cropWidth ?? layer.width ?? 100
+              const cropH = (useCaptured ? capturedLayerData?.cropHeight : null) ?? layer.cropHeight ?? layer.height ?? 100
+
+              if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
+              if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
+              if (Math.abs(sprite.x - (-cropX)) > 0.1) sprite.x = -cropX
+              if (Math.abs(sprite.y - (-cropY)) > 0.1) sprite.y = -cropY
 
               if (cropMask) {
                 cropMask.clear()
@@ -1466,6 +1522,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
               const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
               pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
+              pixiObject._forceNextSync = false
             }
           }
         }
@@ -1483,6 +1540,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const oldStart = pixiObject._sourceStartTime
             pixiObject._sourceStartTime = layer.data?.sourceStartTime ?? 0
             pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
+
+            // [VIDEO-IN-FRAME FIX] Store per-layer muted preference for syncMedia
+            pixiObject._layerMuted = layer.data?.muted !== false
 
             if (oldStart !== pixiObject._sourceStartTime) {
               // console.log(`[useCanvasLayers] Video time range updated: ${layerId}, sourceStartTime=${pixiObject._sourceStartTime}, sourceEndTime=${pixiObject._sourceEndTime}`)
@@ -1533,126 +1593,164 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           pixiObject._sourceStartTime = layer.data?.sourceStartTime ?? 0
           pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
 
+          // [VIDEO-IN-FRAME FIX] Sync muted state for frame layers containing video assets.
+          // _videoElement is set lazily by MotionEngine.syncMedia when it discovers a
+          // video texture inside _imageSprite or _backSprite.
+          if (layer.data?.assetIsVideo) {
+            const isMuted = layer.data?.muted !== false
+            pixiObject._layerMuted = isMuted
+            if (pixiObject._videoElement && pixiObject._videoElement.muted !== isMuted) {
+              pixiObject._videoElement.muted = isMuted
+            }
+          }
+
+          // [DETACH FIX] If the PIXI object still thinks it has an asset but Redux
+          // says it doesn't (detach happened), clean up the video/image texture.
+          // This prevents the "frozen frame" bug where the video keeps playing
+          // at the detach moment on repeat.
+          const reduxHasAsset = !!(layer.data?.assetUrl || layer.data?.url || layer.data?.src)
+          const reduxHasBackAsset = !!layer.data?.backAssetUrl
+
+          if (layerId.includes('1774619177814')) {
+            console.log(`[useCanvasLayers] 🧐 Layer: ${layerId}, Type: ${layer.type}, hasReduxAsset: ${reduxHasAsset}, pixiHasAsset: ${pixiObject._frameHasAsset}`);
+          }
+
+          // Case A: Front asset detached
+          if (pixiObject._frameHasAsset && !reduxHasAsset) {
+            console.log(`[useCanvasLayers] ⚡ Detach detected (Front) for layer: ${layerId}`);
+            const sprite = pixiObject._imageSprite
+            if (sprite) {
+              sprite.texture = PIXI.Texture.WHITE
+              sprite.alpha = 0 // Hide the white sprite (placeholder shows instead)
+            }
+            // Clear video element reference and pause it
+            if (pixiObject._videoElement) {
+              console.log(`[useCanvasLayers] ⚡ Pausing and clearing video element for layer: ${layerId}`);
+              pixiObject._videoElement.pause()
+              pixiObject._videoElement = null
+              // [RESOURCE CLEANUP] Release from global cache to prevent looping/memory leaks
+              releaseVideoElement(layerId)
+            }
+            pixiObject._frameHasAsset = false
+            pixiObject._layerMuted = true
+            // Show the placeholder again
+            if (pixiObject._framePlaceholder) {
+              pixiObject._framePlaceholder.visible = true
+              redrawFramePlaceholder(pixiObject, layer.cropWidth ?? layer.width ?? 100, layer.cropHeight ?? layer.height ?? 100, layer.data)
+            }
+          }
+
+          // Case B: Back asset detached (for Card Frames)
+          if (pixiObject._frameHasBackAsset && !reduxHasBackAsset) {
+            console.log(`[useCanvasLayers] ⚡ Detach detected (Back) for layer: ${layerId}`);
+            const backSprite = pixiObject._backSprite
+            if (backSprite) {
+              backSprite.texture = PIXI.Texture.WHITE
+              backSprite.alpha = 0
+            }
+            // Clear video element if it matches this side
+            if (pixiObject._videoElement) {
+              pixiObject._videoElement.pause()
+              pixiObject._videoElement = null
+              // [RESOURCE CLEANUP] Release from global cache
+              releaseVideoElement(layerId)
+            }
+            pixiObject._frameHasBackAsset = false
+          }
+
           if (pixiObject._imageSprite) {
             const sprite = pixiObject._imageSprite
-            const cropMask = pixiObject._cropMask
 
-            // Resolve common crop dimensions for both branches to ensure consistency
-            // Prioritize Redux state over local properties to ensure "unmasking" works
-            const mediaW = capturedLayerData?.mediaWidth ?? layer.mediaWidth ?? pixiObject._mediaWidth ?? layer.width ?? 100
-            const mediaH = capturedLayerData?.mediaHeight ?? layer.mediaHeight ?? pixiObject._mediaHeight ?? layer.height ?? 100
-            const cropX = capturedLayerData?.cropX ?? layer.cropX ?? pixiObject._cropX ?? 0
-            const cropY = capturedLayerData?.cropY ?? layer.cropY ?? pixiObject._cropY ?? 0
-            const cropW = capturedLayerData?.cropWidth ?? capturedLayerData?.width ?? layer.cropWidth ?? pixiObject._cropWidth ?? layer.width ?? 100
-            const cropH = capturedLayerData?.cropHeight ?? capturedLayerData?.height ?? layer.cropHeight ?? pixiObject._cropHeight ?? layer.height ?? 100
+            // [FIX] Consistently sync all properties when at scene start or captured.
+            // Matching Image Layer gate for visual consistency.
+            const hasMotion = engine.activeTimelines?.has(layerId)
+            const canSyncReduxBase = isAtSceneStart || (pixiObject._forceNextSync && (!hasMotion || isAtSceneStart))
 
-            // Update persistent internal properties for sync stability and selection box
-            pixiObject._mediaWidth = mediaW
-            pixiObject._mediaHeight = mediaH
-            pixiObject._cropX = cropX
-            pixiObject._cropY = cropY
-            pixiObject._cropWidth = cropW
-            pixiObject._cropHeight = cropH
+            if (!isActuallyPlaying && !pixiObject._isResizing && (isLayerCaptured || canSyncReduxBase)) {
+              const useCaptured = isLayerCaptured && !isAtSceneStart
+            
+              const mediaW = (useCaptured ? capturedLayerData?.mediaWidth : null) ?? layer.mediaWidth ?? layer.width ?? 100
+              const mediaH = (useCaptured ? capturedLayerData?.mediaHeight : null) ?? layer.mediaHeight ?? layer.height ?? 100
+              const cropX = (useCaptured ? capturedLayerData?.cropX : null) ?? layer.cropX ?? 0
+              const cropY = (useCaptured ? capturedLayerData?.cropY : null) ?? layer.cropY ?? 0
+              const cropW = (useCaptured ? capturedLayerData?.cropWidth : null) ?? layer.cropWidth ?? layer.width ?? 100
+              const cropH = (useCaptured ? capturedLayerData?.cropHeight : null) ?? layer.cropHeight ?? layer.height ?? 100
 
-            // 5. Consistently sync internal media properties if specifically requested
-            // or if we are at the scene start/captured.
-            // This ensures that when an asset is dropped at T > 0, the sprite dimensions,
-            // crop mask, and pivot are correctly initialized for the new asset.
-            // We only skip the CONTAINER transforms (handled by GSAP) if not at start.
-            // [SYNC FIX] Skip sync if the object is currently being resized to avoid "jiggle"
-            if (!isActuallyPlaying && !pixiObject._isResizing && (isLayerCaptured || isAtSceneStart || pixiObject._forceNextSync)) {
-              pixiObject._forceNextSync = false // Reset after one-shot sync
-              const isCardFrame = pixiObject._isCardFrame
-              // During capture, use the accumulated showingFront from tracked data
-              // (accounts for all previous steps' flips + current step's didFlip).
-              // Outside capture, use Redux base state.
-              let showingFront = capturedLayerData?.showingFront !== undefined
-                ? capturedLayerData.showingFront
-                : (layer.data?.showingFront !== false)
+              // 1. Sync internal properties and common media visuals (mirrors Image Layer)
+              pixiObject._mediaWidth = mediaW
+              pixiObject._mediaHeight = mediaH
+              pixiObject._cropX = cropX
+              pixiObject._cropY = cropY
+              pixiObject._cropWidth = cropW
+              pixiObject._cropHeight = cropH
 
-              // 1. Sprite visibility and texture sync
-              if (isCardFrame) {
-                // Card frame visibility: ONLY sync from Redux at scene start or when captured.
-                // At other timeline positions, FlipAction's onUpdate controls visibility
-                // to ensure seeking/scrubbing/fast-preview show the correct side.
-                if (isLayerCaptured || isAtSceneStart) {
-                  if (sprite) sprite.visible = showingFront && pixiObject._frameHasAsset
-                  const backSpriteVis = pixiObject._backSprite
-                  if (backSpriteVis) backSpriteVis.visible = !showingFront && pixiObject._frameHasBackAsset
-                }
+              if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
+              if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH
+              if (Math.abs(sprite.x - (-cropX)) > 0.1) sprite.x = -cropX
+              if (Math.abs(sprite.y - (-cropY)) > 0.1) sprite.y = -cropY
 
-                // Dimensional sync: ALWAYS keep both sprites sized correctly
-                // so when FlipAction reveals the other side, it's properly positioned
-                if (sprite && pixiObject._frameHasAsset) {
-                  if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-                  if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-                  if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-                  if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
-                }
-                const backSprite = pixiObject._backSprite
-                if (backSprite && pixiObject._frameHasBackAsset) {
-                  // Use back-specific cover-fit dimensions (different aspect ratio than front)
-                  const bMediaW = pixiObject._backMediaWidth ?? mediaW
-                  const bMediaH = pixiObject._backMediaHeight ?? mediaH
-                  const bCropX = pixiObject._backCropX ?? cropX
-                  const bCropY = pixiObject._backCropY ?? cropY
-                  if (Math.abs(backSprite.width - bMediaW) > 0.5) backSprite.width = bMediaW
-                  if (Math.abs(backSprite.height - bMediaH) > 0.5) backSprite.height = bMediaH
-                  if (Math.abs(backSprite.x - (-bCropX)) > 0.5) backSprite.x = -bCropX
-                  if (Math.abs(backSprite.y - (-bCropY)) > 0.5) backSprite.y = -bCropY
-                }
-              } else {
-                // Normal frame
-                if (pixiObject._frameHasAsset) {
-                  if (sprite) {
-                    sprite.visible = true
-                    if (Math.abs(sprite.width - mediaW) > 0.5) sprite.width = mediaW
-                    if (Math.abs(sprite.height - mediaH) > 0.5) sprite.height = mediaH
-                    if (Math.abs(sprite.x - (-cropX)) > 0.5) sprite.x = -cropX
-                    if (Math.abs(sprite.y - (-cropY)) > 0.5) sprite.y = -cropY
-                  }
-                } else if (sprite) {
-                  sprite.visible = false
-                }
-              }
-
-              // 2. Crop mask sync
+              const cropMask = pixiObject._cropMask
               if (cropMask) {
                 cropMask.clear()
                 cropMask.rect(0, 0, cropW, cropH)
                 cropMask.fill(0xffffff)
               }
 
-              // 3. Pivot sync (CRITICAL: center rotation/scale depends on this)
               const anchorX = layer.anchorX !== undefined ? layer.anchorX : 0.5
               const anchorY = layer.anchorY !== undefined ? layer.anchorY : 0.5
               pixiObject.pivot.set(cropW * anchorX, cropH * anchorY)
 
-              // 4. Placeholder sync
-              if (pixiObject._framePlaceholder) {
-                if (isCardFrame && !isAtSceneStart && !isLayerCaptured) {
-                  // At non-start positions, FlipAction controls placeholder visibility
-                } else {
-                  const activeHasAsset = isCardFrame
-                    ? (showingFront ? pixiObject._frameHasAsset : pixiObject._frameHasBackAsset)
-                    : pixiObject._frameHasAsset
-                  // [FIX] Do not override placeholder visibility if it's currently a drop target highlight
-                  if (!pixiObject._isDropTarget) {
-                    pixiObject._framePlaceholder.visible = !activeHasAsset
-                  }
-                  if (!activeHasAsset) {
-                    // During capture, pass the accumulated showingFront so the label
-                    // reads "Front"/"Back" correctly (Redux base state is stale)
-                    const placeholderData = isCardFrame && capturedLayerData?.showingFront !== undefined
-                      ? { ...layer.data, showingFront }
-                      : layer.data
-                    redrawFramePlaceholder(pixiObject, cropW, cropH, placeholderData)
+              // 2. Sync Frame-specific logic (Card sides, Placeholders)
+              const isCardFrame = pixiObject._isCardFrame
+              let showingFront = capturedLayerData?.showingFront !== undefined
+                ? capturedLayerData.showingFront
+                : (layer.data?.showingFront !== false)
+
+              if (isCardFrame) {
+                // Card frame side visibility
+                if (sprite) sprite.visible = showingFront && pixiObject._frameHasAsset
+                const backSprite = pixiObject._backSprite
+                if (backSprite) {
+                  backSprite.visible = !showingFront && pixiObject._frameHasBackAsset
+                  // Dimensional sync for back-side
+                  if (pixiObject._frameHasBackAsset) {
+                    const bMediaW = (useCaptured ? capturedLayerData?.backMediaWidth : null) ?? pixiObject._backMediaWidth ?? mediaW
+                    const bMediaH = (useCaptured ? capturedLayerData?.backMediaHeight : null) ?? pixiObject._backMediaHeight ?? mediaH
+                    const bCropX = (useCaptured ? capturedLayerData?.backAssetCropX : null) ?? pixiObject._backCropX ?? cropX
+                    const bCropY = (useCaptured ? capturedLayerData?.backAssetCropY : null) ?? pixiObject._backCropY ?? cropY
+                    if (Math.abs(backSprite.width - bMediaW) > 0.1) backSprite.width = bMediaW
+                    if (Math.abs(backSprite.height - bMediaH) > 0.1) backSprite.height = bMediaH
+                    if (Math.abs(backSprite.x - (-bCropX)) > 0.1) backSprite.x = -bCropX
+                    if (Math.abs(backSprite.y - (-bCropY)) > 0.1) backSprite.y = -bCropY
                   }
                 }
+              } else {
+                // Normal frame visibility
+                if (sprite) sprite.visible = !!pixiObject._frameHasAsset
               }
+
+              // Placeholder sync
+              if (pixiObject._framePlaceholder) {
+                const activeHasAsset = isCardFrame
+                  ? (showingFront ? pixiObject._frameHasAsset : pixiObject._frameHasBackAsset)
+                  : pixiObject._frameHasAsset
+                
+                if (!pixiObject._isDropTarget) {
+                  pixiObject._framePlaceholder.visible = !activeHasAsset
+                }
+                
+                if (!activeHasAsset) {
+                  const placeholderData = isCardFrame && capturedLayerData?.showingFront !== undefined
+                    ? { ...layer.data, showingFront }
+                    : layer.data
+                  redrawFramePlaceholder(pixiObject, cropW, cropH, placeholderData)
+                }
+              }
+              pixiObject._forceNextSync = false
             }
           }
         }
+
 
         // -------------------------------------------------------------------
         // TRANSFORM & ALPHA
@@ -1708,7 +1806,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp, playbackState])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it

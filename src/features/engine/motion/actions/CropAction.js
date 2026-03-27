@@ -97,65 +97,54 @@ export class CropAction {
      * @param {Object} initialState - Optional initial state to populate defaults
      */
     _ensureReactiveCropProperties(pixiObject, initialState = {}) {
+        // [GSAP FIX] MotionEngine.registerLayerObject now initializes these properties.
+        // We only need to ensure the _updateCropVisuals method is attached so the 
+        // centralized setters in MotionEngine can trigger it.
+        
+        if (!pixiObject._updateCropVisuals) {
+            pixiObject._updateCropVisuals = function () {
+                CropAction.updateVisuals(this)
+            }
+        }
+
         if (pixiObject._hasReactiveCropProperties) return
 
         const properties = ['cropX', 'cropY', 'cropWidth', 'cropHeight', 'mediaWidth', 'mediaHeight']
 
         properties.forEach(prop => {
-            const privateProp = `_${prop}` // e.g., _cropX (standardized across PIXI objects)
+            const privateProp = `_${prop}`
 
-            // value initialization:
-            // 1. Try existing private prop (persistence)
-            // 2. Try initialState (prediction/context)
-            // 3. Try object's current dimensions (smart default)
-            // 4. Fallback to 0 or 100 (safe default)
-
-            if (pixiObject[privateProp] === undefined) {
-                // Determine sensible default based on current object state
+            // If MotionEngine already initialized it, we don't need to do much here
+            // but we ensure the initial value is correct if provided.
+            if (initialState[prop] !== undefined) {
+                pixiObject[privateProp] = initialState[prop]
+            } else if (pixiObject[privateProp] === undefined) {
+                // Fallback initialization if for some reason MotionEngine didn't do it
                 let smartDefault = 0
-                if (prop === 'cropWidth') smartDefault = pixiObject.cropWidth ?? pixiObject.width ?? 100
-                if (prop === 'cropHeight') smartDefault = pixiObject.cropHeight ?? pixiObject.height ?? 100
+                if (prop === 'cropWidth') smartDefault = pixiObject.width ?? 100
+                if (prop === 'cropHeight') smartDefault = pixiObject.height ?? 100
                 if (prop === 'mediaWidth') smartDefault = pixiObject._mediaWidth ?? pixiObject._originalWidth ?? pixiObject.width ?? 100
                 if (prop === 'mediaHeight') smartDefault = pixiObject._mediaHeight ?? pixiObject._originalHeight ?? pixiObject.height ?? 100
-
-                // Allow initialState to override smart default
-                const initialValue = initialState[prop]
-
-                if (pixiObject[privateProp] === undefined) {
-                    pixiObject[privateProp] = initialValue ?? smartDefault
-                }
+                
+                pixiObject[privateProp] = smartDefault
             }
 
-            Object.defineProperty(pixiObject, prop, {
-                get() {
-                    return this[privateProp]
-                },
-                set(value) {
-                    if (this[privateProp] !== value) {
-                        this[privateProp] = value
-                        // Call the update function directly on the object scope
-                        // We attach the update function to the object so it can be called internally
-                        if (this._updateCropVisuals) {
+            // If the public property doesn't exist yet, define it (though MotionEngine should have)
+            if (pixiObject[prop] === undefined || Object.getOwnPropertyDescriptor(pixiObject, prop)?.configurable) {
+                Object.defineProperty(pixiObject, prop, {
+                    get() { return this[privateProp] },
+                    set(value) {
+                        if (this[privateProp] !== value) {
+                            this[privateProp] = value
                             this._updateCropVisuals()
-                        } else {
-                            // Fallback if method not attached (shouldn't happen if we attach it below)
-                            CropAction.updateVisuals(this)
                         }
-                    }
-                },
-                configurable: true // Allow re-definition if hot-reloading
-            })
+                    },
+                    configurable: true
+                })
+            }
         })
 
-        // Attach the visual update function to the object
-        pixiObject._updateCropVisuals = function () {
-            CropAction.updateVisuals(this)
-        }
-
         pixiObject._hasReactiveCropProperties = true
-
-
-        // Immediate visual update to ensure state is reflected
         pixiObject._updateCropVisuals()
     }
 

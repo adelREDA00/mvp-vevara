@@ -1727,12 +1727,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
               if (liveLayer) {
                 liveLayer.currentPosition = { x: newX, y: newY }
                 liveLayer.cropX = newCropX; liveLayer.cropY = newCropY; liveLayer.cropWidth = newCropWidth; liveLayer.cropHeight = newCropHeight
-                // [FIX] For frame layers, ensure width/height in trackedLayers are also updated
-                // so that sync logic using .width/.height sees the new crop dimensions.
-                if (currentLayer.type === LAYER_TYPES.FRAME) {
-                  liveLayer.width = newCropWidth
-                  liveLayer.height = newCropHeight
-                }
                 // [SCALE FIX] Preserve scale values instead of resetting to 1
                 // This ensures that if the user scaled the layer before cropping, the scale is maintained
                 liveLayer.scaleX = preservedScaleX
@@ -1766,6 +1760,14 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
               currentLayerObject._backMediaHeight = state.startBackMediaHeight * scaleRatio
               currentLayerObject._backCropX = state.startBackCropX * scaleRatio
               currentLayerObject._backCropY = state.startBackCropY * scaleRatio
+
+              // [CARD SYNC] Ensure back-side dimensions are also committed to Redux data
+              // so that visual state persists accurately after the interaction ends.
+              if (!updates.data) updates.data = { ...currentLayer.data }
+              updates.data.backAssetWidth = currentLayerObject._backMediaWidth
+              updates.data.backAssetHeight = currentLayerObject._backMediaHeight
+              updates.data.backAssetCropX = currentLayerObject._backCropX
+              updates.data.backAssetCropY = currentLayerObject._backCropY
             }
             updates.width = state.startCropWidth * scaleRatio; updates.height = state.startCropHeight * scaleRatio
             updates.cropX = state.startCropX * scaleRatio; updates.cropY = state.startCropY * scaleRatio
@@ -1773,6 +1775,27 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             updates.mediaWidth = state.startMediaWidth * scaleRatio; updates.mediaHeight = state.startMediaHeight * scaleRatio
             // CRITICAL: Force scale to 1 in Redux since resize uses width/height directly
             updates.scaleX = 1; updates.scaleY = 1;
+
+            if (isCaptureMode) {
+              const liveLayer = latestMotionCaptureModeRef.current?.trackedLayers?.get(currentLayer.id)
+              if (liveLayer) {
+                liveLayer.currentPosition = { x: newX, y: newY }
+                liveLayer.width = updates.width; liveLayer.height = updates.height
+                liveLayer.cropX = updates.cropX; liveLayer.cropY = updates.cropY
+                liveLayer.cropWidth = updates.cropWidth; liveLayer.cropHeight = updates.cropHeight
+                liveLayer.mediaWidth = updates.mediaWidth; liveLayer.mediaHeight = updates.mediaHeight
+                liveLayer.scaleX = 1; liveLayer.scaleY = 1
+              }
+
+              currentMotionCaptureMode.onPositionUpdate({
+                layerId: currentLayer.id, x: newX, y: newY, scaleX: 1, scaleY: 1,
+                rotation: (currentLayerObject.rotation * 180) / Math.PI,
+                cropX: updates.cropX, cropY: updates.cropY,
+                cropWidth: updates.cropWidth, cropHeight: updates.cropHeight,
+                mediaWidth: updates.mediaWidth, mediaHeight: updates.mediaHeight,
+                interactionType: 'resize'
+              })
+            }
           }
           // Redraw frame placeholder at new dimensions during resize
           if (currentLayer.type === LAYER_TYPES.FRAME && currentLayerObject._framePlaceholder && !currentLayerObject._frameHasAsset) {
@@ -1904,8 +1927,13 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       currentLayerObject._isResizing = false
       // [SYNC FIX] Force one-shot sync from Redux to PIXI to ensure final state is correct
-      // This bridges the timing gap between clearing _isResizing and Redux state propagation
-      currentLayerObject._forceNextSync = true
+      // This bridges the timing gap between clearing _isResizing and Redux state propagation.
+      // [POST-CLIP FIX] Only force sync if NOT in motion capture mode to prevent 
+      // snapping back to base state after saving.
+      const isCapture = latestMotionCaptureModeRef.current?.isActive
+      if (!isCapture) {
+        currentLayerObject._forceNextSync = true
+      }
 
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite._isResizing = false
@@ -1921,8 +1949,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       // Deferred safety sync to ensure Redux state has fully propagated
       setTimeout(() => {
         if (currentLayerObject && !currentLayerObject.destroyed) {
-          currentLayerObject._forceNextSync = true
-          setForceUpdate(prev => prev + 1)
+          const stillCapture = latestMotionCaptureModeRef.current?.isActive
+          if (!stillCapture) {
+            currentLayerObject._forceNextSync = true
+            setForceUpdate(prev => prev + 1)
+          }
         }
       }, 50)
     }

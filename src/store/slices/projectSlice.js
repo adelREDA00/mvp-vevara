@@ -489,8 +489,8 @@ const projectSlice = createSlice({
         // preventing the "freeze" or "flicker" caused by layer reconstruction.
         newLayer.sourceId = layer.sourceId || layer.id
 
-        // Split logic for video layers
-        if (layer.type === 'video' && layer.data) {
+        // Split logic for video layers AND frame layers containing a video asset
+        if ((layer.type === 'video' || (layer.type === 'frame' && layer.data?.assetIsVideo)) && layer.data) {
           const originalSourceStart = layer.data.sourceStartTime || 0
 
           // Original layer (left segment): ends at split point
@@ -1687,7 +1687,7 @@ const projectSlice = createSlice({
     // Attach an image/video asset to a frame layer (cover-fit crop)
     // For card frames, `side` param ('front'|'back') determines which side receives the asset
     attachAssetToFrame: (state, action) => {
-      const { layerId, assetUrl, assetWidth, assetHeight, side } = action.payload
+      const { layerId, assetUrl, assetWidth, assetHeight, side, assetIsVideo, muted, duration, sourceStartTime, sourceEndTime } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
 
@@ -1724,7 +1724,16 @@ const projectSlice = createSlice({
         assetWidth,
         assetHeight,
         originalPlaceholderWidth: layer.mediaWidth || layer.width,
-        originalPlaceholderHeight: layer.mediaHeight || layer.height
+        originalPlaceholderHeight: layer.mediaHeight || layer.height,
+        // [VIDEO-IN-FRAME FIX] Preserve video metadata so splitScene, mute/unmute,
+        // and timeline sync treat this frame layer as a video carrier.
+        ...(assetIsVideo ? {
+          assetIsVideo: true,
+          muted: muted ?? true,
+          duration: duration ?? 0,
+          sourceStartTime: sourceStartTime ?? 0,
+          sourceEndTime: sourceEndTime ?? (duration ?? 0),
+        } : {})
       }
       layer.mediaWidth = mediaW
       layer.mediaHeight = mediaH
@@ -1811,10 +1820,18 @@ const projectSlice = createSlice({
       const canvasHeight = layer.data.originalPlaceholderHeight || preservedHeight
 
       delete layer.data.assetUrl
+      delete layer.data.url
+      delete layer.data.src
       delete layer.data.assetWidth
       delete layer.data.assetHeight
       delete layer.data.originalPlaceholderWidth
       delete layer.data.originalPlaceholderHeight
+      // [VIDEO-IN-FRAME FIX] Clean up video-specific metadata
+      delete layer.data.assetIsVideo
+      delete layer.data.muted
+      delete layer.data.sourceStartTime
+      delete layer.data.sourceEndTime
+      delete layer.data.duration
 
       layer.width = preservedWidth
       layer.height = preservedHeight
