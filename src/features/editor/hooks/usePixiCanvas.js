@@ -24,6 +24,20 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
     let pendingApp = null
 
     const init = async () => {
+      // [STABILITY FIX] Clean up any existing app before re-initializing.
+      // This helps release WebGL contexts if a retry is triggered quickly.
+      if (appRef.current?.app) {
+        try {
+          const oldApp = appRef.current.app
+          if (oldApp.renderer?.canvas) {
+            const gl = oldApp.renderer.canvas.getContext('webgl2') || oldApp.renderer.canvas.getContext('webgl')
+            if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext()
+          }
+          oldApp.destroy({ removeView: true })
+        } catch (e) {}
+        appRef.current = null
+      }
+
       try {
         const result = await createApp({
           width: width || 800,

@@ -37,7 +37,13 @@ export async function createApp(config = {}) {
       backgroundColor: 0x0f1015,
       resolution: defaultResolution,
       autoDensity,
+      // [STABILITY FIX] Explicitly prefer 'webgl' and disable WebGPU probing.
+      // Many Windows machines have buggy WebGPU drivers that cause crashes 
+      // even if detection succeeds. webgl is more stable across browsers.
       preference: 'webgl',
+      // [STABILITY FIX] Allow WebGL even if the browser reports a performance caveat.
+      // Better to be slow than to crash with "CanvasRenderer not implemented".
+      failIfMajorPerformanceCaveat: false,
       // [MOBILE FIX] Use 'low-power' on mobile to avoid thermal throttling and OOM.
       powerPreference: isMobile ? 'low-power' : 'default',
       antialias: true,
@@ -92,6 +98,7 @@ export async function createApp(config = {}) {
         resolution: 1,
         autoDensity: false,
         preference: 'webgl',
+        failIfMajorPerformanceCaveat: false,
         hello: false
       })
       initialized = true
