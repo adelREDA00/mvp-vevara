@@ -652,19 +652,9 @@ const DashboardPage = () => {
                                     desc: "Create animated school presentations with premium fluid transitions."
                                 },
                                 {
-                                    icon: <Wand2 />,
-                                    title: "Blur & Alpha Animation",
-                                    desc: "Cinematic depth with standard blur transitions and transparency controls."
-                                },
-                                {
                                     icon: <Music />,
                                     title: "Music Support",
                                     desc: "Integrated audio tracks with waveform-perfect syncing."
-                                },
-                                {
-                                    icon: <Box />,
-                                    title: "Reusable Smart Templates",
-                                    desc: "High-quality animation content with pre-built logic-driven layouts."
                                 },
                                 {
                                     icon: <Layers />,

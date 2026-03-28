@@ -112,6 +112,32 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     return
   }
 
+  // During interaction (resizing or rotating) — check this BEFORE isPastBaseStep
+  if (isResizing || isRotating) {
+    // Keep container visible so badges works
+    selectionBox.visible = true
+
+    // Iterate children: Show badges, hide handles/border
+    for (let i = 0; i < selectionBox.children.length; i++) {
+      const child = selectionBox.children[i]
+      // Check if it's a badge
+      const isBadge = child.label && (child.label.includes('badge') || child.label.includes('guide'))
+
+      if (isBadge) {
+        child.visible = true
+      } else {
+        // Show handles only in MotionCaptureMode
+        child.visible = false
+      }
+    }
+
+    // Ensure it's in the layersContainer
+    if (!selectionBox.parent && layersContainer) {
+      layersContainer.addChild(selectionBox)
+    }
+    return
+  }
+
   const isLocked = isPastBaseStep && isAnimated
 
   if (isLocked) {
@@ -151,49 +177,24 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     return
   }
 
-  // During interaction (resizing or rotating)
-  if (isResizing || isRotating) {
-    // Keep container visible so badges works
+  // NORMAL STATE: Show handles and border
+  if (!selectionBox.visible) {
     selectionBox.visible = true
+  }
 
-    // Iterate children: Show badges, hide handles/border
-    for (let i = 0; i < selectionBox.children.length; i++) {
-      const child = selectionBox.children[i]
-      // Check if it's a badge
-      const isBadge = child.label && (child.label.includes('badge') || child.label.includes('guide'))
+  // Show all handles/border
+  for (let i = 0; i < selectionBox.children.length; i++) {
+    const child = selectionBox.children[i]
+    // Show everything by default
+    child.visible = true
+    child.alpha = 1.0 // Reset alpha to full opacity in normal state
+  }
 
-      if (isBadge) {
-        child.visible = true
-      } else {
-        // Show handles only in MotionCaptureMode
-        child.visible = false
-      }
-    }
-
-    // Ensure it's in the layersContainer
-    if (!selectionBox.parent && layersContainer) {
-      layersContainer.addChild(selectionBox)
-    }
-  } else {
-    // NORMAL STATE: Show handles and border
-    if (!selectionBox.visible) {
-      selectionBox.visible = true
-    }
-
-    // Show all handles/border
-    for (let i = 0; i < selectionBox.children.length; i++) {
-      const child = selectionBox.children[i]
-      // Show everything by default
-      child.visible = true
-      child.alpha = 1.0 // Reset alpha to full opacity in normal state
-    }
-
-    // Ensure selection box is properly attached and positioned
-    if (!selectionBox.parent && layersContainer) {
-      layersContainer.addChild(selectionBox)
-      const topIndex = layersContainer.children.length - 1
-      layersContainer.setChildIndex(selectionBox, topIndex)
-    }
+  // Ensure selection box is properly attached and positioned
+  if (!selectionBox.parent && layersContainer) {
+    layersContainer.addChild(selectionBox)
+    const topIndex = layersContainer.children.length - 1
+    layersContainer.setChildIndex(selectionBox, topIndex)
   }
 }
 
@@ -1905,18 +1906,31 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       if (isTextElement) {
         currentLayerObject.updateText?.(false)
-        const finalDimensions = calculateTextDimensions(currentLayerObject, currentLayer)
-        const finalUpdates = { height: finalDimensions.height }
-        const currentWidth = currentLayer.width || 100
+        const resizeState = interactionStateRef.current.resize
+        // [FIX] Use the dynamic interaction width/pos, NOT the stale Redux layer data
+        const finalWidth = resizeState?._lastWidth ?? currentLayer.width ?? 100
+        const finalX = resizeState?._lastX ?? (currentLayer.x || 0)
+        const finalY = resizeState?._lastY ?? (currentLayer.y || 0)
+
+        const finalDimensions = calculateTextDimensions(currentLayerObject, currentLayer, finalWidth)
+        const finalUpdates = { 
+          width: finalWidth,
+          height: finalDimensions.height,
+          x: finalX,
+          y: finalY
+        }
+
         if (currentLayerObject.style) {
-          currentLayerObject.style.wordWrapWidth = currentWidth
-          finalUpdates.width = currentWidth
+          currentLayerObject.style.wordWrapWidth = finalWidth
+          // Force text refresh one last time to match final Redux state exactly
+          currentLayerObject.updateText?.(true)
         }
 
         const isCapture = latestMotionCaptureModeRef.current?.isActive
         if (latestOnUpdateRef.current && !isCapture) latestOnUpdateRef.current(finalUpdates)
+        
         cachedTextHeightRef.current = finalDimensions.height
-        lastTextWidthRef.current = currentWidth
+        lastTextWidthRef.current = finalWidth
 
         // Removed visual reversion to N-1 to prevent flicker before Redux update N arrives
       } else if (isImageElement) {

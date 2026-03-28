@@ -182,9 +182,11 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.rect(centerX - rx, centerY - ry, width, height)
       break
 
-    default:
+    default: {
       // rect / square and any unknown type
-      graphics.roundRect(centerX - rx, centerY - ry, width, height, cornerRadius || 0)
+      const clampedRadius = Math.min(cornerRadius || 0, Math.min(width, height) / 2)
+      graphics.roundRect(centerX - rx, centerY - ry, width, height, clampedRadius)
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
+import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 
 function CanvasControls({
@@ -33,6 +34,7 @@ function CanvasControls({
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)
+  const [showCornerRadiusSlider, setShowCornerRadiusSlider] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
   const scrollContainerRef = useRef(null)
   const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
@@ -47,6 +49,7 @@ function CanvasControls({
   useEffect(() => {
     setShowOpacitySlider(false)
     setShowBlurSlider(false)
+    setShowCornerRadiusSlider(false)
   }, [selectedLayer?.id, selectedCanvas])
 
   // Open opacity/blur slider when requested by parent (e.g. from MotionPanel)
@@ -54,9 +57,15 @@ function CanvasControls({
     if (requestOpenControl === 'opacity') {
       setShowOpacitySlider(true)
       setShowBlurSlider(false)
+      setShowCornerRadiusSlider(false)
     } else if (requestOpenControl === 'blur') {
       setShowBlurSlider(true)
       setShowOpacitySlider(false)
+      setShowCornerRadiusSlider(false)
+    } else if (requestOpenControl === 'cornerRadius') {
+      setShowCornerRadiusSlider(true)
+      setShowOpacitySlider(false)
+      setShowBlurSlider(false)
     }
   }, [requestOpenControl])
 
@@ -77,6 +86,13 @@ function CanvasControls({
     if (onLayerUpdate) {
       onLayerUpdate(updates)
     }
+  }
+
+  // Check if shape supports corner radius (rect/square only)
+  const hasCorners = () => {
+    if (!selectedLayer || selectedLayer.type !== LAYER_TYPES.SHAPE) return false
+    const st = selectedLayer.data?.shapeType || 'rect'
+    return st === 'rect' || st === 'square'
   }
 
   // Check if fill is transparent
@@ -428,6 +444,7 @@ function CanvasControls({
             onClick={() => {
               setShowOpacitySlider(!showOpacitySlider)
               setShowBlurSlider(false)
+              setShowCornerRadiusSlider(false)
             }}
             className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showOpacitySlider ? 'bg-white/20 border-white/20' : ''}`}
             title="Layer Transparency"
@@ -443,12 +460,30 @@ function CanvasControls({
             onClick={() => {
               setShowBlurSlider(!showBlurSlider)
               setShowOpacitySlider(false)
+              setShowCornerRadiusSlider(false)
             }}
             className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showBlurSlider ? 'bg-white/20 border-white/20' : ''}`}
             title="Layer Blur"
           >
             <Droplets className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
             {/* <span className="text-xs font-medium">Blur</span> */}
+          </button>
+        )}
+
+        {/* Corner Radius Control - Only for rect/square shapes */}
+        {selectedLayer?.type === LAYER_TYPES.SHAPE && hasCorners() && (
+          <button
+            onClick={() => {
+              setShowCornerRadiusSlider(!showCornerRadiusSlider)
+              setShowOpacitySlider(false)
+              setShowBlurSlider(false)
+            }}
+            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showCornerRadiusSlider ? 'bg-white/20 border-white/20' : ''}`}
+            title="Corner Radius"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 flex-shrink-0 opacity-70">
+              <path d="M21 4H11C7.13401 4 4 7.13401 4 11V21" />
+            </svg>
           </button>
         )}
 
@@ -632,6 +667,48 @@ function CanvasControls({
 
           <span className="text-white text-xs font-mono min-w-[32px] text-right">
             {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
+          </span>
+        </div>
+      )}
+
+      {/* Corner Radius Sub-tab (Modal) */}
+      {showCornerRadiusSlider && selectedLayer && hasCorners() && (
+        <div
+          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          style={{
+            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            minWidth: '240px',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Radius</span>
+          {console.log('[DEBUG] CanvasControls cornerRadius render:', selectedLayer.data?.cornerRadius)}
+          <Slider.Root
+            className="relative flex items-center select-none touch-none grow h-5"
+            value={[selectedLayer.data?.cornerRadius ?? 0]}
+            onValueChange={(value) => {
+              const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0)))
+              handleLayerUpdate({ data: { ...selectedLayer.data, cornerRadius: v } })
+            }}
+            min={0}
+            max={Math.min(CORNER_RADIUS_MAX, Math.min(selectedLayer.width || 100, selectedLayer.height || 100) / 2)}
+            step={1}
+          >
+            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
+              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            </Slider.Track>
+            <Slider.Thumb
+              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              aria-label="Corner Radius"
+            />
+          </Slider.Root>
+
+          <span className="text-white text-xs font-mono min-w-[36px] text-right">
+            {Math.round(selectedLayer.data?.cornerRadius ?? 0)}px
           </span>
         </div>
       )}

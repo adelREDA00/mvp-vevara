@@ -117,6 +117,7 @@ function Stage({
   setStageReady, // Callback to signal when stage initially populates with layers
   //motion capture mode & playback controls
   motionCaptureMode = null,
+  captureVersion = 0,
   onMotionStateChange,
   editingStepId = null,
   // text editing
@@ -287,7 +288,7 @@ function Stage({
 
 
   // Sync layers from Redux store to canvas
-  const { layerObjects, layerObjectsVersion, isStageReady } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId)
+  const { layerObjects, layerObjectsVersion, isStageReady } = useCanvasLayers(stageContainer, isReady, pixiApp, worldWidth, worldHeight, dragStateAPI, motionCaptureMode, editingTextLayerId, zoom, editingStepId, captureVersion)
 
   useEffect(() => {
     if (isStageReady && setStageReady) {

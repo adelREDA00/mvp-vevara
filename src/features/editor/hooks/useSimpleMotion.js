@@ -472,7 +472,8 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                         cropWidth: obj.cropWidth,
                         cropHeight: obj.cropHeight,
                         mediaWidth: obj._mediaWidth ?? obj.mediaWidth,
-                        mediaHeight: obj._mediaHeight ?? obj.mediaHeight
+                        mediaHeight: obj._mediaHeight ?? obj.mediaHeight,
+                        cornerRadius: obj._storedShapeData?.cornerRadius ?? (obj._animatedCornerRadius ?? 0)
                     })
                 }
             })

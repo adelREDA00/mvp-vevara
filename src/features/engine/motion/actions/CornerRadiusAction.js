@@ -1,0 +1,171 @@
+import { gsap } from 'gsap'
+import * as PIXI from 'pixi.js'
+import { drawShapePath } from '../../pixi/createLayer'
+import { drawDashedRect } from '../../pixi/dashUtils'
+import { CORNER_RADIUS_MAX } from '../cornerRadiusConstants.js'
+
+function clampRadius(value) {
+    return Math.max(0, Math.min(CORNER_RADIUS_MAX, Number(value) || 0))
+}
+
+function parseColor(hexColor) {
+    if (hexColor === null || hexColor === undefined || hexColor === 'transparent') return null
+    if (typeof hexColor === 'number') return hexColor
+    if (typeof hexColor !== 'string') return null
+    const hex = hexColor.replace('#', '')
+    if (hex && /^[0-9A-Fa-f]{6}$/.test(hex)) {
+        return parseInt(hex, 16)
+    }
+    return null
+}
+
+/**
+ * Redraw a PIXI.Graphics shape with the given corner radius.
+ * Reads fill, stroke, and dimensions from stored metadata on the object.
+ */
+function redrawShapeWithCornerRadius(pixiObject, cornerRadius) {
+    const shapeData = pixiObject._storedShapeData
+    if (!shapeData) return
+
+    const shapeType = shapeData.shapeType || 'rect'
+    // Only rect/square support corner radius
+    if (shapeType !== 'rect' && shapeType !== 'square') return
+
+    const w = pixiObject._storedWidth || 100
+    const h = pixiObject._storedHeight || 100
+    const anchorX = pixiObject._storedAnchorX ?? 0.5
+    const anchorY = pixiObject._storedAnchorY ?? 0.5
+    const halfWidth = w / 2
+    const halfHeight = h / 2
+    const shapeCenterX = halfWidth * (1 - 2 * anchorX)
+    const shapeCenterY = halfHeight * (1 - 2 * anchorY)
+
+    // Use animated fill color if a color animation is active, otherwise stored fill
+    const fillRaw = pixiObject._animatedFillColor !== undefined
+        ? pixiObject._animatedFillColor
+        : pixiObject._storedFill
+    const fill = typeof fillRaw === 'number' ? fillRaw : parseColor(fillRaw)
+
+    const strokeRaw = pixiObject._storedStroke
+    const stroke = strokeRaw ? parseColor(strokeRaw) : null
+    const strokeWidth = pixiObject._storedStrokeWidth || 0
+    const strokeStyle = pixiObject._storedStrokeStyle || 'solid'
+    const isDashed = strokeStyle === 'dashed' && stroke !== null && strokeWidth > 0
+    const isDotted = strokeStyle === 'dotted' && stroke !== null && strokeWidth > 0
+
+    // Update stored shape data so concurrent animations (color) see the new radius
+    shapeData.cornerRadius = cornerRadius
+    shapeData.shapeCenterX = shapeCenterX
+    shapeData.shapeCenterY = shapeCenterY
+
+    pixiObject.clear()
+
+    drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, cornerRadius)
+
+    if (fill !== null) {
+        pixiObject.fill(fill)
+    } else {
+        pixiObject.fill({ color: 0x000000, alpha: 0 })
+    }
+
+    if (stroke !== null && strokeWidth > 0) {
+        if (isDashed || isDotted) {
+            const dashLen = isDotted ? 0 : strokeWidth * 4
+            const gapLen = strokeWidth * 2
+            drawDashedRect(pixiObject, shapeCenterX - halfWidth, shapeCenterY - halfHeight, w, h, cornerRadius, stroke, strokeWidth, dashLen, gapLen)
+        } else {
+            drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, cornerRadius)
+            pixiObject.stroke({ color: stroke, width: strokeWidth, alignment: 0.5 })
+        }
+    }
+
+    if (fill === null) {
+        pixiObject.hitArea = new PIXI.Rectangle(shapeCenterX - halfWidth, shapeCenterY - halfHeight, w, h)
+    }
+
+    // Keep _storedFill in sync as hex string (same convention as ColorChangeAction)
+    if (typeof fillRaw === 'number') {
+        pixiObject._storedFill = '#' + fillRaw.toString(16).padStart(6, '0')
+    }
+}
+
+export class CornerRadiusAction {
+    constructor() {
+        this.type = 'cornerRadius'
+    }
+
+    execute(pixiObject, actionData, options = {}) {
+        const { values = {} } = actionData
+        const duration = (values.duration || 2000) / 1000
+        const easing = values.easing || 'power4.out'
+
+        // Resolve start radius
+        const startRadius = clampRadius(
+            options.startState?.cornerRadius ?? (pixiObject.cornerRadius ?? 0)
+        )
+        const targetRadius = clampRadius(
+            values.cornerRadius !== undefined ? values.cornerRadius : 0
+        )
+
+        // Ensure reactive properties and visual applier are attached
+        this._ensureReactiveRadiusProperties(pixiObject)
+
+        // No-op if values are the same
+        if (Math.abs(startRadius - targetRadius) < 0.1) {
+            return gsap.to({}, { duration })
+        }
+
+        const toVars = {
+            cornerRadius: targetRadius,
+            duration,
+            ease: easing,
+            immediateRender: false,
+            overwrite: false,
+        }
+
+        return gsap.fromTo(
+            pixiObject,
+            { cornerRadius: startRadius },
+            toVars
+        )
+    }
+
+    /**
+     * Define getters/setters for corner radius on the PIXI object.
+     * This ensures that any change (GSAP, manual, or during seek) 
+     * immediately triggers a visual redraw.
+     */
+    _ensureReactiveRadiusProperties(pixiObject) {
+        if (!pixiObject._updateShapeRadiusVisuals) {
+            pixiObject._updateShapeRadiusVisuals = function () {
+                const radius = this.cornerRadius ?? 0
+                redrawShapeWithCornerRadius(this, radius)
+            }
+        }
+
+        if (pixiObject._hasReactiveRadiusProperties) return
+
+        // If MotionEngine already initialized it, we ensure it's reactive
+        if (pixiObject.cornerRadius === undefined || Object.getOwnPropertyDescriptor(pixiObject, 'cornerRadius')?.configurable) {
+            const privateProp = '_cornerRadius'
+            
+            // Initial value from stored data if available
+            if (pixiObject[privateProp] === undefined) {
+                pixiObject[privateProp] = pixiObject._storedShapeData?.cornerRadius ?? 0
+            }
+
+            Object.defineProperty(pixiObject, 'cornerRadius', {
+                get() { return this[privateProp] },
+                set(value) {
+                    if (this[privateProp] !== value) {
+                        this[privateProp] = value
+                        this._updateShapeRadiusVisuals()
+                    }
+                },
+                configurable: true
+            })
+        }
+
+        pixiObject._hasReactiveRadiusProperties = true
+    }
+}

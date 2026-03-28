@@ -98,7 +98,8 @@ export class MotionEngine {
     // List of custom properties we want to track/animate via GSAP
     const properties = [
       'cropX', 'cropY', 'cropWidth', 'cropHeight', 
-      'mediaWidth', 'mediaHeight', 'showingFront'
+      'mediaWidth', 'mediaHeight', 'showingFront', 
+      'cornerRadius'
     ]
 
     properties.forEach(prop => {
@@ -126,6 +127,10 @@ export class MotionEngine {
               // Trigger visual update if the object supports it (e.g. from CropAction)
               if (this._updateCropVisuals) {
                 this._updateCropVisuals()
+              }
+              
+              if (this._updateShapeRadiusVisuals) {
+                this._updateShapeRadiusVisuals()
               }
               
               // Special case for card frames - toggle visibility when showingFront changes
@@ -345,6 +350,7 @@ export class MotionEngine {
           trimStart: baseLayer?.data?.trimStart ?? (obj._storedTrimStart ?? 0),
           trimEnd: baseLayer?.data?.trimEnd ?? (obj._storedTrimEnd ?? 0),
           blur: baseLayer?.blur ?? (obj._blurFilter?.strength ?? 0),
+          cornerRadius: baseLayer?.data?.cornerRadius ?? (obj._storedShapeData?.cornerRadius ?? 0),
           color: baseLayer?.data?.fill || baseLayer?.data?.color || null,
           // Card frame flip state — defaults to true (front) if not explicitly set
           showingFront: baseLayer?.data?.showingFront !== false
@@ -536,6 +542,10 @@ export class MotionEngine {
           } else if (action.type === 'blur') {
             if (action.values?.blur !== undefined) {
               state.blur = action.values.blur
+            }
+          } else if (action.type === 'cornerRadius') {
+            if (action.values?.cornerRadius !== undefined) {
+              state.cornerRadius = action.values.cornerRadius
             }
           } else if (action.type === 'colorChange') {
             if (action.values?.color !== undefined) {
@@ -984,6 +994,7 @@ export class MotionEngine {
 
       if (obj._applyAnimatedColor) obj._applyAnimatedColor()
       if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
+      if (obj._applyAnimatedCornerRadius) obj._applyAnimatedCornerRadius()
     })
 
     // [FIX] Evaluate flip visibility deterministically based on time position.

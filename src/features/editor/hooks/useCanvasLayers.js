@@ -318,7 +318,12 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
   // CRITICAL: Lockout - Do not apply any transforms if the layer is currently being interactively modified
   // OR during a visual flip animation (managed by GSAP scaling on the object itself)
-  const isInteracting = displayObject._isResizing === true || displayObject._isRotating === true || displayObject._isFlipping === true
+  const isInteracting = displayObject._isResizing === true || 
+                        displayObject._isRotating === true || 
+                        displayObject._isFlipping === true ||
+                        (dragStateAPI && dragStateAPI.isResizing()) || 
+                        (dragStateAPI && dragStateAPI.isRotating())
+
   if (isInteracting) {
     return
   }
@@ -562,6 +567,37 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     }
   }
 
+  // 7b. Corner Radius Synchronization (shapes only)
+  if (displayObject instanceof PIXI.Graphics && displayObject._storedShapeData) {
+    if (!isActuallyPlaying) {
+      const targetRadius = capturedLayer?.cornerRadius ?? (shouldApplyBaseState ? (layer.data?.cornerRadius ?? 0) : null)
+      if (targetRadius !== null && displayObject._storedShapeData.cornerRadius !== targetRadius) {
+        console.log('[DEBUG] applyTransformInline cornerRadius redraw:', { layerId, old: displayObject._storedShapeData.cornerRadius, new: targetRadius })
+        displayObject._storedShapeData.cornerRadius = targetRadius
+        
+        // [VISUAL FIX] Immediately redraw the shape to reflect the new radius.
+        // We use redrawShapeWithColors to ensure all offsets and styles match Redux/Capture.
+        const width = capturedLayer?.width ?? layer.width ?? 100
+        const height = capturedLayer?.height ?? layer.height ?? 100
+        const currentColor = capturedLayer?.color ?? layer.data?.fill ?? layer.data?.color ?? null
+        
+        redrawShapeWithColors(
+          displayObject, 
+          { ...layer.data, cornerRadius: targetRadius, fill: currentColor }, 
+          width, 
+          height, 
+          layer.anchorX ?? 0.5, 
+          layer.anchorY ?? 0.5
+        )
+      }
+    }
+    // Clear animated corner radius on force reset
+    if (force) {
+      delete displayObject._animatedCornerRadius
+      delete displayObject._applyAnimatedCornerRadius
+    }
+  }
+
   // 8. Color Synchronization
   if (displayObject instanceof PIXI.Text) {
     if (force || capturedLayer || shouldApplyBaseState) {
@@ -680,7 +716,7 @@ function syncBlurFilter(displayObject, blurValue) {
   }
 }
 
-export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null) {
+export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null, captureVersion = 0) {
   const dispatch = useDispatch()
   const loadingMode = useSelector(selectLoadingMode)
 
@@ -1221,7 +1257,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
       // [FIX] Anti-Jitter: Skip Redux updates if the layer is being actively transformed by the user
       // This prevents the "tug-of-war" between immediate mouse updates and delayed Redux state
-      const isInteracting = pixiObject._isResizing || pixiObject._isRotating || pixiObject._isDragging
+      const isInteracting = pixiObject._isResizing || 
+                            pixiObject._isRotating || 
+                            pixiObject._isDragging || 
+                            (dragStateAPI && dragStateAPI.isResizing()) || 
+                            (dragStateAPI && dragStateAPI.isRotating())
 
       // -----------------------------------------------------------------------
       // VISIBILITY & INTERACTION SYNC (from old useLayoutEffect)
@@ -1470,11 +1510,21 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const currentStrokeWidth = layer.data?.strokeWidth || 0
             const currentStrokeStyle = layer.data?.strokeStyle || 'solid'
 
+            // Corner radius: use captured value during capture, otherwise base state
+            let currentCornerRadius = layer.data?.cornerRadius || 0
+            if (capturedLayerData?.cornerRadius !== undefined) {
+              currentCornerRadius = capturedLayerData.cornerRadius
+            } else if (!isAtSceneStart) {
+              currentCornerRadius = pixiObject._storedShapeData?.cornerRadius ?? currentCornerRadius
+            }
+
             if (pixiObject._storedWidth !== currentWidth || pixiObject._storedHeight !== currentHeight ||
               pixiObject._storedFill !== currentFill || pixiObject._storedStroke !== currentStroke ||
-              pixiObject._storedStrokeWidth !== currentStrokeWidth || pixiObject._storedStrokeStyle !== currentStrokeStyle) {
+              pixiObject._storedStrokeWidth !== currentStrokeWidth || pixiObject._storedStrokeStyle !== currentStrokeStyle ||
+              (pixiObject._storedShapeData?.cornerRadius ?? 0) !== currentCornerRadius) {
 
-              const drawData = { ...layer.data, fill: currentFill }
+              console.log('[DEBUG] useCanvasLayers sync loop redraw:', { layerId, currentCornerRadius, stored: pixiObject._storedShapeData?.cornerRadius })
+              const drawData = { ...layer.data, fill: currentFill, cornerRadius: currentCornerRadius }
               redrawShapeWithColors(pixiObject, drawData, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
             }
           }
@@ -1806,7 +1856,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp, playbackState])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp, playbackState, captureVersion])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it

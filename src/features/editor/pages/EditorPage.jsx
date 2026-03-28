@@ -39,6 +39,7 @@ import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
 import { resetGlobalMotionEngine } from '../../engine/motion'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
+import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
@@ -1164,6 +1165,7 @@ function EditorPage() {
   const motionControlsRef = useRef(null) // Ref to hold motion playback controls from Stage
   const captureUndoSyncRef = useRef(false) // Signals that trackedLayers needs syncing from Redux after undo/redo
   const captureActionIdsRef = useRef(new Map()) // Tracks dispatched action IDs during capture: "layerId:type" -> actionId
+  const [captureVersion, setCaptureVersion] = useState(0) // Internal state to force re-renders on Ref updates
 
   // Get motion flow for current scene
   const currentSceneMotionFlow = useSelector((state) =>
@@ -1223,9 +1225,20 @@ function EditorPage() {
       cropY: tracked.cropY ?? base.cropY,
       cropWidth: tracked.cropWidth ?? base.cropWidth,
       cropHeight: tracked.cropHeight ?? base.cropHeight,
-      blur: tracked.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, tracked.blur)) : (base.blur ?? 0)
+      blur: tracked.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, tracked.blur)) : (base.blur ?? 0),
+      data: {
+        ...(base.data || {}),
+        cornerRadius: tracked.cornerRadius !== undefined ? Math.max(0, Math.min(CORNER_RADIUS_MAX, tracked.cornerRadius)) : (base.data?.cornerRadius ?? 0)
+      }
     }
-  }, [isMotionCaptureActive, selectedLayerIds, layers, currentSceneMotionFlow, motionCaptureMode])
+    console.log('[DEBUG] capturedLayer update:', {
+      layerId,
+      trackedRadius: tracked.cornerRadius,
+      baseRadius: base.data?.cornerRadius,
+      finalRadius: result.data.cornerRadius
+    })
+    return result
+  }, [isMotionCaptureActive, selectedLayerIds, layers, currentSceneMotionFlow, motionCaptureMode, captureVersion])
 
   // Effect: Exit motion capture mode when switching scenes
   // We use a ref to track the previous scene ID to detect changes
@@ -1348,6 +1361,7 @@ function EditorPage() {
       let currentRotation = layer.rotation || 0
       let currentOpacity = layer.opacity !== undefined ? layer.opacity : 1
       let currentBlur = layer.blur !== undefined ? layer.blur : 0
+      let currentCornerRadius = layer.data?.cornerRadius || 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
           : layer.type === 'background' ? ('#' + (layer.data?.color ?? 0xffffff).toString(16).padStart(6, '0'))
@@ -1417,6 +1431,11 @@ function EditorPage() {
           currentBlur = blurAction.values?.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, blurAction.values.blur)) : currentBlur
         }
 
+        const radiusAction = prevStep.layerActions?.[layerId]?.find(a => a.type === 'cornerRadius')
+        if (radiusAction) {
+          currentCornerRadius = radiusAction.values?.cornerRadius !== undefined ? Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusAction.values.cornerRadius)) : currentCornerRadius
+        }
+
         const colorAction = actions.find(a => a.type === 'colorChange')
         if (colorAction && colorAction.values?.color) {
           currentColor = colorAction.values.color
@@ -1447,6 +1466,7 @@ function EditorPage() {
         mediaHeight: currentMediaHeight,
         opacity: currentOpacity,
         blur: currentBlur,
+        cornerRadius: currentCornerRadius,
         color: currentColor
       }
 
@@ -1477,12 +1497,14 @@ function EditorPage() {
         mediaHeight: currentMediaHeight,
         opacity: currentOpacity,
         blur: currentBlur,
+        cornerRadius: currentCornerRadius,
         color: currentColor,
         // Accumulated flip state from previous steps (accounts for all prior flip actions)
         showingFront: currentShowingFront,
         interactionType: null,
         didMove: false,
         didBlur: false,
+        didCornerRadius: false,
         didScale: false,
         didRotate: false,
         didFade: false,
@@ -1771,6 +1793,36 @@ function EditorPage() {
             }
           }
 
+          // Corner Radius
+          const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
+          const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
+          const shouldCreateRadiusAction = radiusChanged || tracked.didCornerRadius
+
+          if (shouldCreateRadiusAction) {
+            const key = `${layerId}:cornerRadius`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: { cornerRadius: tracked.cornerRadius }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-radius-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:cornerRadius`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
           // Color Change
           const colorChanged = tracked.color !== undefined && tracked.color !== init.color
           const shouldCreateColorAction = colorChanged || tracked.didColor
@@ -1865,6 +1917,11 @@ function EditorPage() {
             nextEntry.blur = data.blur
             nextEntry.didBlur = true
           }
+          if (data.cornerRadius !== undefined) {
+            console.log('[DEBUG] onPositionUpdate cornerRadius mutation:', { layerId, radius: data.cornerRadius })
+            nextEntry.cornerRadius = data.cornerRadius
+            nextEntry.didCornerRadius = true
+          }
           if (data.color !== undefined) {
             nextEntry.color = data.color
             nextEntry.didColor = true
@@ -1906,6 +1963,8 @@ function EditorPage() {
           // If controlPoints is undefined, preserve existing value (don't overwrite)
 
           trackedLayers.set(layerId, nextEntry)
+          console.log('[DEBUG] Incrementing captureVersion for re-render:', { layerId, newRadius: nextEntry.cornerRadius })
+          setCaptureVersion(v => v + 1)
         },
         trackedLayers: initialTrackedLayers, // Pass the synchronized map
         layerActions: {}
@@ -1967,7 +2026,7 @@ function EditorPage() {
     // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
     const hasAnyInteraction = motionCaptureMode.trackedLayers
       ? Array.from(motionCaptureMode.trackedLayers.values()).some(
-        l => l.didMove || l.didBlur || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip
+        l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip
       )
       : false
 
@@ -2213,6 +2272,22 @@ function EditorPage() {
               }
             }
             if (blurIdx !== -1) actions[blurIdx] = action; else actions.push(action)
+          }
+
+          // Corner Radius action
+          const cornerRadius = layerData.cornerRadius
+          const initialCornerRadius = initialTransform?.cornerRadius !== undefined ? initialTransform.cornerRadius : 0
+          if (cornerRadius !== undefined && Math.abs(cornerRadius - initialCornerRadius) > 0.1) {
+            const radiusIdx = actions.findIndex(a => a.type === 'cornerRadius')
+            const action = {
+              type: 'cornerRadius',
+              values: {
+                cornerRadius: cornerRadius,
+                duration: effectiveDuration,
+                easing: 'power4.out'
+              }
+            }
+            if (radiusIdx !== -1) actions[radiusIdx] = action; else actions.push(action)
           }
 
           // [COLOR FIX] Add colorChange action to optimistic flow
@@ -2555,6 +2630,7 @@ function EditorPage() {
       let currentCropY = layer.cropY || 0
       let currentCropWidth = layer.cropWidth || layer.width || 100
       let currentCropHeight = layer.cropHeight || layer.height || 100
+      let currentCornerRadius = layer.data?.cornerRadius || 0
       const layerObject = motionControls?.layerObjects?.get?.(layerId)
       let currentMediaWidth = layer.mediaWidth || layerObject?._mediaWidth || layerObject?._originalWidth || layer.width || 100
       let currentMediaHeight = layer.mediaHeight || layerObject?._mediaHeight || layerObject?._originalHeight || layer.height || 100
@@ -2605,6 +2681,11 @@ function EditorPage() {
           currentBlur = blurAction.values?.blur !== undefined ? blurAction.values.blur : currentBlur
         }
 
+        const radiusAction = actions.find(a => a.type === 'cornerRadius')
+        if (radiusAction) {
+          currentCornerRadius = radiusAction.values?.cornerRadius !== undefined ? radiusAction.values.cornerRadius : currentCornerRadius
+        }
+
         const colorAction = actions.find(a => a.type === 'colorChange')
         if (colorAction && colorAction.values?.color) {
           currentColor = colorAction.values.color
@@ -2633,6 +2714,7 @@ function EditorPage() {
         mediaHeight: currentMediaHeight,
         opacity: currentOpacity,
         blur: currentBlur,
+        cornerRadius: currentCornerRadius,
         color: currentColor,
       }
 
@@ -2669,12 +2751,14 @@ function EditorPage() {
         mediaHeight: currentCrop?.values?.mediaHeight ?? sessionStartTransform.mediaHeight,
         opacity: currentFade?.values?.opacity ?? sessionStartTransform.opacity,
         blur: currentBlurAction?.values?.blur ?? sessionStartTransform.blur,
+        cornerRadius: currentStepActions.find(a => a.type === 'cornerRadius')?.values?.cornerRadius ?? sessionStartTransform.cornerRadius,
         color: currentColorAction?.values?.color ?? sessionStartTransform.color,
         controlPoints: currentMove?.values?.controlPoints || [],
         // Accumulated flip state: base from previous steps, then apply current step's flip if re-editing
         showingFront: currentStepActions.find(a => a.type === 'flip') ? !currentShowingFront : currentShowingFront,
         didMove: false,
-        didColor: false,
+        didColor: !!currentColorAction,
+        didCornerRadius: !!currentStepActions.find(a => a.type === 'cornerRadius'),
         // Pre-set didFlip if the step already has a flip action (re-editing)
         didFlip: !!currentStepActions.find(a => a.type === 'flip'),
         interactionType: null
@@ -2951,6 +3035,36 @@ function EditorPage() {
             }
           }
 
+          // Corner Radius
+          const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
+          const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
+          const shouldCreateRadiusAction = radiusChanged || tracked.didCornerRadius
+
+          if (shouldCreateRadiusAction) {
+            const key = `${layerId}:cornerRadius`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: { cornerRadius: tracked.cornerRadius }
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-radius-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:cornerRadius`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
           // Color Change
           const colorChanged = tracked.color !== undefined && tracked.color !== init.color
           const shouldCreateColorAction = colorChanged || tracked.didColor
@@ -3026,6 +3140,11 @@ function EditorPage() {
             if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
             if (data.opacity !== undefined) entry.opacity = data.opacity
             if (data.blur !== undefined) entry.blur = data.blur
+            if (data.cornerRadius !== undefined) {
+              console.log('[DEBUG] onPositionUpdate cornerRadius mutation (StartMotion path):', { layerId: data.layerId, radius: data.cornerRadius })
+              entry.cornerRadius = data.cornerRadius
+              entry.didCornerRadius = true
+            }
             if (data.color !== undefined) {
               entry.color = data.color
               entry.didColor = true
@@ -3038,6 +3157,9 @@ function EditorPage() {
             } else if (data.controlPoints === null) {
               entry.controlPoints = []
             }
+            
+            console.log('[DEBUG] Incrementing captureVersion (StartMotion path):', { layerId: data.layerId, newRadius: entry.cornerRadius })
+            setCaptureVersion(v => v + 1)
           }
         },
         trackedLayers: initialTrackedLayers,
@@ -3558,6 +3680,10 @@ function EditorPage() {
         setRequestOpenControl('blur')
         setTimeout(() => setRequestOpenControl(null), 100)
         break
+      case 'cornerRadius':
+        setRequestOpenControl('cornerRadius')
+        setTimeout(() => setRequestOpenControl(null), 100)
+        break
       case 'crop': {
         if (!pixiObj || !tracked) break
         const layer = layers[layerId]
@@ -3617,6 +3743,9 @@ function EditorPage() {
       case 'blur':
         tracked.didBlur = false; tracked.blur = init.blur ?? 0
         break
+      case 'cornerRadius':
+        tracked.didCornerRadius = false; tracked.cornerRadius = init.cornerRadius ?? 0
+        break
       case 'crop':
         tracked.didCrop = false
         tracked.cropX = init.cropX; tracked.cropY = init.cropY
@@ -3637,6 +3766,11 @@ function EditorPage() {
       if (actionType === 'scale') { pixiObj.scale.x = init.scaleX; pixiObj.scale.y = init.scaleY }
       if (actionType === 'rotate') { pixiObj.rotation = init.rotation * (Math.PI / 180) }
       if (actionType === 'fade') { pixiObj.alpha = init.opacity ?? 1 }
+      if (actionType === 'cornerRadius') { 
+        const radius = init.cornerRadius ?? 0
+        pixiObj._storedShapeData = { ...pixiObj._storedShapeData, cornerRadius: radius }
+        if (pixiObj._updateShapeRadiusVisuals) pixiObj._updateShapeRadiusVisuals(radius)
+      }
     }
   }, [isMotionCaptureActive, editingStepId, motionControls])
 
@@ -4163,15 +4297,29 @@ function EditorPage() {
                       effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
                       effectiveMotionCaptureMode.onInteractionEnd(layerId)
                     }
-                    if (updates.data?.fill !== undefined || updates.data?.color !== undefined) {
-                      const colorValue = updates.data?.fill || updates.data?.color
-                      const capture = motionCaptureRef.current
-                      if (capture && capture.trackedLayers.has(layerId)) {
-                        capture.trackedLayers.get(layerId).didColor = true
-                        capture.trackedLayers.get(layerId).color = colorValue
-                      }
-                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: colorValue })
+                    
+                    // [BUG FIX] Corner radius update from slider (nested in data)
+                    const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
+                    if (radiusUpdate !== undefined) {
+                      console.log('[DEBUG] onLayerUpdate cornerRadius interceptor:', { layerId, radiusUpdate })
+                      const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusUpdate))
+                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
                       effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+                    
+                    
+                    // [BUG FIX] Only trigger color change if the value actually changed
+                    // (prevents ghost actions when sliders spread entire data object)
+                    const newColor = updates.data?.fill || updates.data?.color
+                    if (newColor !== undefined) {
+                      const capture = motionCaptureRef.current
+                      const tracked = capture?.trackedLayers.get(layerId)
+                      if (tracked && tracked.color !== newColor) {
+                        tracked.didColor = true
+                        tracked.color = newColor
+                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: newColor })
+                        effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                      }
                     }
                   } else {
                     // Normal editor behavior: update base layer properties
@@ -4249,8 +4397,8 @@ function EditorPage() {
                 if (app) setPixiApp(app)
               }}
               setStageReady={setIsStageReady} // Pass the setter
-              //motion capture mode & playback controls
               motionCaptureMode={effectiveMotionCaptureMode}
+              captureVersion={captureVersion}
               onMotionStateChange={setMotionControls}
               editingStepId={editingStepId}
               //text editing

@@ -12,6 +12,7 @@ export { HoldAction } from './HoldAction.js'
 export { CropAction } from './CropAction.js'
 export { ColorChangeAction } from './ColorChangeAction.js'
 export { FlipAction } from './FlipAction.js'
+export { CornerRadiusAction } from './CornerRadiusAction.js'
 
 import { MoveAction } from './MoveAction.js'
 import { ScaleAction } from './ScaleAction.js'
@@ -22,6 +23,7 @@ import { HoldAction } from './HoldAction.js'
 import { CropAction } from './CropAction.js'
 import { ColorChangeAction } from './ColorChangeAction.js'
 import { FlipAction } from './FlipAction.js'
+import { CornerRadiusAction } from './CornerRadiusAction.js'
 import { ACTION_TYPES } from '../types/actionTypes.js'
 
 /**
@@ -37,6 +39,7 @@ export const ACTION_HANDLERS = {
   [ACTION_TYPES.HOLD]: HoldAction,
   [ACTION_TYPES.COLOR_CHANGE]: ColorChangeAction,
   [ACTION_TYPES.FLIP]: FlipAction,
+  [ACTION_TYPES.CORNER_RADIUS]: CornerRadiusAction,
 }
 
 /**

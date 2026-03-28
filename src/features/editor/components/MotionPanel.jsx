@@ -19,6 +19,13 @@ import {
   Film,
 } from 'lucide-react'
 
+// Custom Corner Radius Icon representing a rounded corner path
+const CornerRadiusIcon = (props) => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M21 4H11C7.13401 4 4 7.13401 4 11V21" />
+  </svg>
+)
+
 import { LAYER_TYPES } from '../../../store/models'
 
 import {
@@ -43,11 +50,12 @@ const actionTypes = [
   { id: 'flip', label: 'Flip', icon: FlipHorizontal2, color: 'bg-teal-500/80' },
   { id: 'colorChange', label: 'Color', icon: Palette, color: 'bg-pink-500/80' },
   { id: 'blur', label: 'Blur', icon: Droplets, color: 'bg-cyan-500/80' },
+  { id: 'cornerRadius', label: 'Radius', icon: CornerRadiusIcon, color: 'bg-orange-500/80' },
 ]
 
 // Which actions are available per layer type (HOLD excluded entirely)
 const ACTION_AVAILABILITY = {
-  [LAYER_TYPES.SHAPE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange'],
+  [LAYER_TYPES.SHAPE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius'],
   [LAYER_TYPES.TEXT]:   ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange'],
   [LAYER_TYPES.IMAGE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
   [LAYER_TYPES.VIDEO]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
@@ -78,7 +86,14 @@ function getAvailableActions(layer, existingActions) {
   if (layer.type === LAYER_TYPES.FRAME) {
     layerKey = layer.data?.isCardFrame ? 'frame_card' : 'frame_normal'
   }
-  const allowed = ACTION_AVAILABILITY[layerKey] || []
+  let allowed = ACTION_AVAILABILITY[layerKey] || []
+
+  // Filter out cornerRadius for non-rect/square shapes
+  const shapeType = layer.data?.shapeType || 'rect'
+  if (shapeType !== 'rect' && shapeType !== 'square') {
+    allowed = allowed.filter(t => t !== 'cornerRadius')
+  }
+
   const usedTypes = (existingActions || []).map(a => a.type)
   return allowed.filter(t => !usedTypes.includes(t))
 }
