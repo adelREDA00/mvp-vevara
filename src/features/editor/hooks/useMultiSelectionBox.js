@@ -658,6 +658,15 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
             dispatch(updateLayer({ id: layerId, ...updates }))
           })
         }
+        
+        // [FIX] CAPTURE MODE: Call onInteractionEnd for each layer to persist changes
+        // This is necessary even if resize was temporarily disabled at start in some versions,
+        // because once enabled, it would suffer from the same persistence bug as rotation.
+        if (motionCaptureMode?.isActive && motionCaptureMode.onInteractionEnd && state.pendingUpdates) {
+          state.pendingUpdates.forEach(({ layerId }) => {
+            motionCaptureMode.onInteractionEnd(layerId)
+          })
+        }
 
         // Clean up any pending animation frame
         if (state && state.dispatchFrameId) {
@@ -1423,6 +1432,12 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
                 rotation
               }))
             }
+          })
+        } else if (motionCaptureMode?.onInteractionEnd) {
+          // [FIX] CAPTURE MODE: Call onInteractionEnd for each layer to persist changes
+          // The initialLayerStates Map contains all layers that were part of the rotation
+          state.initialLayerStates.forEach((initial, id) => {
+            motionCaptureMode.onInteractionEnd(id)
           })
         }
 
