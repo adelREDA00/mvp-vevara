@@ -191,8 +191,14 @@ function TextPanel({ onClose, aspectRatio }) {
                 <span
                   className="text-white"
                   style={{
-                    fontSize: element.id === 'title' ? '28px' : element.id === 'subtitle' ? '20px' : '16px',
-                    fontWeight: element.id === 'title' ? '700' : element.id === 'subtitle' ? '600' : '500',
+                    fontSize: element.id === 'title' ? '28px' : 
+                             element.id === 'cartoon' ? '32px' :
+                             element.id === 'premium' ? '24px' :
+                             element.id === 'poster' ? '28px' :
+                             element.id === 'retro' ? '14px' :
+                             element.id === 'subtitle' ? '20px' : '16px',
+                    fontWeight: element.id === 'title' ? '700' : 
+                               element.id === 'subtitle' ? '600' : '500',
                     lineHeight: '1.2',
                     fontFamily: 'Inter'
                   }}
