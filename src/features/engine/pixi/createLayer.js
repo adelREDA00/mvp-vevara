@@ -689,7 +689,6 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
   container._backCropX = cropX
   container._backCropY = cropY
 
-  // Back sprite visibility depends on showingFront state — managed by sync loop
   return { mediaWidth: mediaW, mediaHeight: mediaH, cropX, cropY, cropWidth: frameWidth, cropHeight: frameHeight }
 }
 
@@ -790,9 +789,12 @@ export function unhighlightFrameDropTarget(container, width, height) {
   redrawFramePlaceholder(container, width, height)
 
   // [UX FIX] If frame has an asset, hide the placeholder again (it was shown for the highlight)
-  // For card frames, check the active side's asset status
+  // For card frames, check the active side's asset status using current visual state
+  const showingFront = container._showingFront !== undefined
+    ? container._showingFront !== false
+    : container._frameData?.showingFront !== false
   const activeHasAsset = container._isCardFrame
-    ? (container._frameData?.showingFront !== false ? container._frameHasAsset : container._frameHasBackAsset)
+    ? (showingFront ? container._frameHasAsset : container._frameHasBackAsset)
     : container._frameHasAsset
   if (activeHasAsset && container._framePlaceholder) {
     container._framePlaceholder.visible = false

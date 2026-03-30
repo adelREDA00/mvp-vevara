@@ -36,7 +36,8 @@ import { isLayerCompletelyOutside } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect } from '../../../store/slices/projectSlice'
-import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
+import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget } from '../../engine/pixi/createLayer'
+import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
 // =============================================================================
@@ -357,23 +358,39 @@ function Stage({
 
     // Card frame: determine which side to attach to based on showingFront
     const isCardFrame = frameLayer.data?.isCardFrame
-    const side = isCardFrame && frameLayer.data?.showingFront === false ? 'back' : 'front'
+    // Use PIXI visual state when timeline flip actions exist (scrubbing scenario),
+    // otherwise use Redux base state (manual flip scenario).
+    const frameObj = layerObjects?.get(frameLayerId)
+    const currentShowingFront = frameObj?._flipActions?.length
+      ? (frameObj._showingFront ?? true)
+      : (frameLayer.data?.showingFront ?? true)
+    const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
     // 1. Update Redux state
     dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side, assetIsVideo }))
 
     // 2. Update PIXI object immediately for visual feedback
-    const frameObj = layerObjects?.get(frameLayerId)
     if (frameObj) {
+      const frameW = frameLayer.cropWidth ?? frameLayer.width
+      const frameH = frameLayer.cropHeight ?? frameLayer.height
+
+      // Clear drop target highlight so the sync loop is not blocked
+      unhighlightFrameDropTarget(frameObj, frameW, frameH)
+
       loadTextureRobust(assetUrl).then(texture => {
         if (!texture || frameObj.destroyed) return
-        const frameW = frameLayer.cropWidth ?? frameLayer.width
-        const frameH = frameLayer.cropHeight ?? frameLayer.height
         if (side === 'back') {
           attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+          // Immediately show back sprite since we know the back side is facing the user
+          if (frameObj._backSprite) frameObj._backSprite.visible = true
+          if (frameObj._imageSprite) frameObj._imageSprite.visible = false
         } else {
           attachAssetToFramePixi(frameObj, texture, frameW, frameH)
         }
+        if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = false
+
+        // Force sync loop to pick up the new asset visibility (critical for scenes 2+)
+        frameObj._forceNextSync = true
       }).catch(() => {})
     }
   }, [layers, layerObjects, dispatch])

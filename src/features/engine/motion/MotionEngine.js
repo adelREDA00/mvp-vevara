@@ -1031,9 +1031,13 @@ export class MotionEngine {
         }
       }
 
+      // Sync the backing field so external consumers (drop handlers, etc.)
+      // can read the current visual flip state without re-evaluating flip actions.
+      obj._showingFront = showingFront
+
       obj._imageSprite.visible = showingFront && obj._frameHasAsset
       obj._backSprite.visible = !showingFront && obj._frameHasBackAsset
-      if (obj._framePlaceholder) {
+      if (obj._framePlaceholder && !obj._isDropTarget) {
         const activeHasAsset = showingFront
           ? obj._frameHasAsset
           : obj._frameHasBackAsset

@@ -4085,9 +4085,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         if (draggedLayer && frameLayer) {
           const assetUrl = draggedLayer.data?.url || draggedLayer.data?.src
           if (assetUrl) {
-            // Card frame: determine which side to attach to based on showingFront
+            // Card frame: determine which side to attach to based on current visual state
             const isCardFrame = frameLayer.data?.isCardFrame
-            const side = isCardFrame && frameLayer.data?.showingFront === false ? 'back' : 'front'
+            // Use PIXI visual state when timeline flip actions exist (scrubbing scenario),
+            // otherwise use Redux base state (manual flip scenario).
+            const frameObj = layerObjectsMap.get(frameId)
+            const currentShowingFront = frameObj?._flipActions?.length
+              ? (frameObj._showingFront ?? true)
+              : (frameLayer.data?.showingFront ?? true)
+            const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
             dispatch(attachAssetToFrame({
               layerId: frameId,
@@ -4103,7 +4109,6 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               sourceStartTime: draggedLayer.data?.sourceStartTime,
               sourceEndTime: draggedLayer.data?.sourceEndTime,
             }))
-            const frameObj = layerObjectsMap.get(frameId)
             if (frameObj) {
               const frameW = frameLayer.cropWidth ?? frameLayer.width
               const frameH = frameLayer.cropHeight ?? frameLayer.height
@@ -4116,16 +4121,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
                 if (side === 'back') {
                   attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+                  // Immediately show back sprite since we know the back side is facing the user
+                  if (frameObj._backSprite) frameObj._backSprite.visible = true
+                  if (frameObj._imageSprite) frameObj._imageSprite.visible = false
                 } else {
                   attachAssetToFramePixi(frameObj, texture, frameW, frameH)
                 }
+                if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = false
 
-                // [FIX] Force MotionEngine refresh to ensure new asset is immediately
-                // visible and correctly positioned for the current timeline time.
-                const engine = getGlobalMotionEngine()
-                if (engine && engine.masterTimeline) {
-                  engine.masterTimeline.time(engine.masterTimeline.time())
-                }
+                // Force sync loop to pick up the new asset visibility (critical for scenes 2+)
+                frameObj._forceNextSync = true
               }).catch(() => { })
             }
             dispatch(deleteLayer(draggedLayerId))
