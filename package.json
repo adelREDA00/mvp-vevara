@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@chenglou/pretext": "^0.0.3",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@radix-ui/react-dialog": "^1.1.15",
