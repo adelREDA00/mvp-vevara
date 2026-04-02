@@ -3584,6 +3584,7 @@ function EditorPage() {
         x: 0, duration: 0.15, ease: 'power2.in',
         onComplete: () => {
           const newShowingFront = !showingFront
+          pixiObj._showingFront = newShowingFront
           if (pixiObj._imageSprite) pixiObj._imageSprite.visible = newShowingFront && pixiObj._frameHasAsset
           if (pixiObj._backSprite) pixiObj._backSprite.visible = !newShowingFront && (pixiObj._frameHasBackAsset || false)
           if (pixiObj._framePlaceholder) {

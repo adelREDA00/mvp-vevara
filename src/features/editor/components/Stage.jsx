@@ -361,8 +361,8 @@ function Stage({
     // Use PIXI visual state when timeline flip actions exist (scrubbing scenario),
     // otherwise use Redux base state (manual flip scenario).
     const frameObj = layerObjects?.get(frameLayerId)
-    const currentShowingFront = frameObj?._flipActions?.length
-      ? (frameObj._showingFront ?? true)
+    const currentShowingFront = frameObj?._showingFront !== undefined
+      ? frameObj._showingFront
       : (frameLayer.data?.showingFront ?? true)
     const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 

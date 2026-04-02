@@ -1786,7 +1786,8 @@ const projectSlice = createSlice({
       const { layerId } = action.payload
       const layer = state.layers[layerId]
       if (!layer || !layer.data?.isCardFrame) return
-      layer.data.showingFront = !layer.data.showingFront
+      const current = layer.data.showingFront !== false
+      layer.data.showingFront = !current
       layer.updatedAt = Date.now()
       state.isDirty = true
       state.version++

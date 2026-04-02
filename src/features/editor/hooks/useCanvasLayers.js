@@ -521,9 +521,10 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
         // SYNC Sprite visibility for Frames (consistent with Card side logic)
         if (displayObject._isFrame) {
-           const showing = capturedLayer?.showingFront !== undefined
-             ? capturedLayer.showingFront
-             : (layer.data?.showingFront !== false)
+            const showing = capturedLayer?.showingFront !== undefined
+              ? capturedLayer.showingFront
+              : (layer.data?.showingFront !== false)
+            displayObject._showingFront = showing
            if (sprite) sprite.visible = showing && displayObject._frameHasAsset
            if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
         }
@@ -1757,6 +1758,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               let showingFront = capturedLayerData?.showingFront !== undefined
                 ? capturedLayerData.showingFront
                 : (layer.data?.showingFront !== false)
+              pixiObject._showingFront = showingFront
 
               if (isCardFrame) {
                 // Card frame side visibility
