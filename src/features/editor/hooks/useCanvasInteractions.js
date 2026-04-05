@@ -896,28 +896,31 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         width: width,
         height: height
       }
+    } else if (pixiObject?.isFlowText) {
+      // FlowTextContainer: pivot is already at center, use managed height directly
+      const flowHeight = pixiObject._actualHeight || layerHeight
+      localBounds = {
+        x: -layerWidth * 0.5,
+        y: -flowHeight * 0.5,
+        width: layerWidth,
+        height: Math.max(1, flowHeight)
+      }
     } else {
-      // For text layers, use layer.width for width but get actual text height
-      // Only fall back to layer data if it fails
+      // For standard PIXI.Text, use layer.width for width but get actual text height
       try {
-        // Ensure text is up to date before measuring
         pixiObject.updateText?.(true)
         const textBounds = pixiObject.getLocalBounds()
 
-        // Use layer.width for width but the content's logical (unscaled) height.
-        // We use Math.max to avoid issues with empty text or tiny bounds.
         localBounds = {
           x: -layerWidth * anchorX,
           y: -textBounds.height * anchorY,
           width: layerWidth,
           height: Math.max(1, textBounds.height)
         }
-        // Ensure we have valid bounds
         if (!localBounds || typeof localBounds.width !== 'number' || typeof localBounds.height !== 'number') {
           throw new Error('Invalid bounds from getLocalBounds')
         }
       } catch (e) {
-        // Fallback to efficient layer data calculation
         localBounds = {
           x: -layerWidth * anchorX,
           y: -layerHeight * anchorY,
@@ -1074,6 +1077,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     if (layerObject instanceof PIXI.Text) {
       layerObject.updateText?.(true)
       height = layerObject.getLocalBounds().height
+    } else if (layerObject?._actualHeight !== undefined) {
+      // [DYNAMIC SYNC] Use the engine's layout height for FlowTextContainers
+      height = layerObject._actualHeight
     }
 
     // Prioritize captured state during motion capture
@@ -1083,6 +1089,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     const x = (xOverride !== undefined ? xOverride : (layer.x || 0)) + (0.5 - anchorX) * width * scaleX
     const y = (yOverride !== undefined ? yOverride : (layer.y || 0)) + (0.5 - anchorY) * height * scaleY
+
     return { x, y }
   }, [motionCaptureMode])
 
@@ -2956,8 +2963,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         } else {
           // Double-click detected - start text editing
           // CRITICAL: Prevent editing during motion capture mode
+          // [FLOW TEXT FIX] Also prevent editing if "Water Wrap" (enableFlow) is enabled,
+          // because the HTML overlay does not yet support Pretext's obstacle-aware layout.
+          // User should use the sidebar panel to edit flow-enabled text.
           if (onStartTextEditing && !latestMotionCaptureModeRef.current?.isActive) {
-            onStartTextEditing(layerId)
+            if (layer.data?.enableFlow) {
+              console.warn('[FLOW] Double-click editing is disabled for Water Wrap text. Use Properties panel.')
+            } else {
+              onStartTextEditing(layerId)
+            }
           }
           // Don't proceed with normal selection logic for double-clicks
           return
@@ -3601,6 +3615,13 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
             targetObject.x = newX
             targetObject.y = newY
+
+            // [BIDIRECTIONAL FIX] Trigger real-time wrap refresh during drag.
+            // Even if Redux hasn't updated yet, we want the PIXI object to re-layout 
+            // as it moves through world-space obstacles.
+            if (layerObject.isFlowText) {
+              layerObject.refresh(layerObject._lastObstacles || [])
+            }
           }
 
           // Handle motion capture mode vs normal drag mode
@@ -3937,13 +3958,28 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         // Position elements
         targetObject.x = newX
         targetObject.y = newY
+
+        // [BIDIRECTIONAL FIX] Trigger real-time wrap refresh during drag.
+        // FlowTextContainer._getObstaclesHash now includes its own world position, 
+        // so moving it will invalidate the cache and trigger a re-layout.
+        if (layerObject.isFlowText) {
+          layerObject.refresh(layerObject._lastObstacles || [])
+        }
       }
 
       // Update drag hover box with snapped position during drag move (use stored dimensions)
       const dragHoverBoxDims = dragHoverBoxDimensionsRef.current
       if (dragHoverBoxDims) {
         const { dragScale } = getViewportScale()
-        updateDragHoverBox(newX, newY, dragHoverBoxDims.width, dragHoverBoxDims.height, dragHoverBoxDims.rotationRadians, dragHoverBoxDims.anchorX, dragHoverBoxDims.anchorY, dragHoverBoxDims.scaleX, dragHoverBoxDims.scaleY, dragScale)
+
+        // [SYNC FIX] For FlowText, fetch the LIVE recalculated height from the engine.
+        // This handles cases where moving past an obstacle causes a re-wrap during the drag.
+        let liveHeight = dragHoverBoxDims.height
+        if (layerObject?.isFlowText && layerObject._actualHeight !== undefined) {
+          liveHeight = layerObject._actualHeight
+        }
+
+        updateDragHoverBox(newX, newY, dragHoverBoxDims.width, liveHeight, dragHoverBoxDims.rotationRadians, dragHoverBoxDims.anchorX, dragHoverBoxDims.anchorY, dragHoverBoxDims.scaleX, dragHoverBoxDims.scaleY, dragScale)
       }
 
       // Handle motion capture mode vs normal drag mode
@@ -4170,32 +4206,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       // Re-enable viewport drag
       resumeViewportDragPlugin(viewport)
 
-      // ADD BOUNDARY CHECKING HERE
-      // Check if any dragged layers went outside canvas bounds
-      if (wasDragging && currentSelectedLayerIds) {
-        currentSelectedLayerIds.forEach(layerId => {
-          const layer = latestLayersRef.current[layerId]
-          const layerObject = layerObjectsMap.get(layerId)
-
-          if (layer && layerObject) {
-            // Use the shared boundary checking logic
-            const isOutside = isLayerCompletelyOutside(layer, layerObject, worldWidth, worldHeight)
-
-            // [FIX] Skip deletion if motion capture mode is active.
-            // This allows layers to move outside the canvas during step recording without being removed.
-            const isMotionCaptureActive = latestMotionCaptureModeRef.current?.isActive
-
-            if (isOutside && !isMotionCaptureActive) {
-              // Layer is completely outside canvas - delete it
-              dispatch(deleteLayer(layerId))
-              // Remove from selection if it was selected
-              if (currentSelectedLayerIds.includes(layerId)) {
-                dispatch(clearLayerSelection())
-              }
-            }
-          }
-        })
-      }
+      // [UX CHANGE] Layers are NO LONGER deleted when moved outside the canvas.
+      // We removed the boundary check and deleteLayer logic here to allow 
+      // a "pasteboard" workflow where layers can exist off-stage.
 
       // Commit capture state to Redux for undo history (one dispatch per drag interaction)
       if (wasDragging && latestMotionCaptureModeRef.current?.isActive && latestMotionCaptureModeRef.current.onInteractionEnd) {
@@ -4425,6 +4438,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
     })
 
+
+
     // Cleanup
     return () => {
       viewport.off('pointerdown', handlePointerDown)
@@ -4526,7 +4541,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
 
     const updateTextSelectionPrevention = () => {
-      const shouldPrevent = dragStateAPI.isDragging() || dragStateAPI.isResizing() || dragStateAPI.isRotating()
+      const isInteracting = dragStateAPI.isDragging() || dragStateAPI.isResizing() || dragStateAPI.isRotating()
+      const shouldPrevent = isInteracting
+
+      // [LIQUID FLOW] Sync wrapping in real-time while dragging/interacting
+      // This ensures text 'dodges' the mouse even if the animation timeline is paused
+      if (isInteracting) {
+        getGlobalMotionEngine().refreshFlows()
+      }
 
       if (shouldPrevent && !textSelectionPrevented) {
         // Enable text selection prevention
@@ -4547,14 +4569,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
     }
 
-    // Set up a polling mechanism to check drag state
-    const checkInterval = setInterval(updateTextSelectionPrevention, 16) // ~60fps
+    // Set up a polling mechanism using PIXI's internal ticker synced to requestAnimationFrame
+    PIXI.Ticker.shared.add(updateTextSelectionPrevention)
 
     // Initial check
     updateTextSelectionPrevention()
 
     return () => {
-      clearInterval(checkInterval)
+      PIXI.Ticker.shared.remove(updateTextSelectionPrevention)
       if (textSelectionPrevented) {
         document.body.style.userSelect = ''
         document.body.style.WebkitUserSelect = ''

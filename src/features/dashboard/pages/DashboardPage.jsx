@@ -283,11 +283,11 @@ const DashboardPage = () => {
 
 
     return (
-        <div className="min-h-[100dvh] bg-[#0f1015] text-white font-extralight selection:bg-[#6940c9]/30 overflow-x-hidden">
+        <div className="min-h-[100dvh] bg-[#090a0d] text-white font-extralight selection:bg-[#6940c9]/30 overflow-x-hidden">
             {/* Top Navigation Bar (Reactive) */}
             <header
                 className={`fixed top-0 left-0 right-0 h-[var(--header-height)] flex items-center justify-between px-6 md:px-8 z-50 transition-all duration-200 ease-in-out ${scrolled
-                    ? 'bg-[#0f1015]/80 backdrop-blur-2xl border-b border-white/5 shadow-sm'
+                    ? 'bg-[#090a0d]/80 backdrop-blur-2xl border-b border-white/5 shadow-sm'
                     : 'bg-transparent'
                     }`}
             >
@@ -445,7 +445,7 @@ const DashboardPage = () => {
                                                 alt="Tutorial Preview"
                                                 className="h-[120%] w-auto object-contain scale-[0.7] rotate-[8deg] group-hover:rotate-[4deg] group-hover:scale-[0.75] transition-all duration-1000 drop-shadow-2xl"
                                             />
-                                            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1015]/60 via-transparent to-transparent"></div>
+                                            <div className="absolute inset-0 bg-gradient-to-t from-[#090a0d]/60 via-transparent to-transparent"></div>
                                         </div>
 
                                         <div className="absolute inset-0 opacity-10 group-hover:opacity-20 transition-opacity bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
@@ -458,7 +458,7 @@ const DashboardPage = () => {
                                             <p className="text-[10px] text-white/40 font-semibold uppercase tracking-[0.2em] leading-tight">create your first iphone ad</p>
                                         </div>
 
-                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#0f1015]/60 backdrop-blur-[4px] z-20">
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#090a0d]/60 backdrop-blur-[4px] z-20">
                                             <div className="h-9 px-5 bg-white text-black text-[12px] font-bold rounded-full flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-all duration-300 shadow-sm">
                                                 START GUIDE <Sparkles size={14} className="text-[#6940c9]" />
                                             </div>
@@ -517,7 +517,7 @@ const DashboardPage = () => {
                                 ))}
                                 <button
                                     onClick={handleOpenStarterModal}
-                                    className="aspect-video bg-[#0f1015] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 group hover:border-[#6940c9]/30 transition-all duration-300"
+                                    className="aspect-video bg-[#090a0d] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 group hover:border-[#6940c9]/30 transition-all duration-300"
                                 >
                                     <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
                                         <Plus size={24} strokeWidth={2} className="text-white/30" />

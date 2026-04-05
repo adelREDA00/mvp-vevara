@@ -97,7 +97,7 @@ const ProjectStarterModal = ({
                         className="group cursor-pointer"
                         onClick={onSelectBlank}
                     >
-                        <div className="aspect-video bg-[#0f1015] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 hover:border-[#6940c9]/40 transition-all duration-300 hover:bg-[#6940c9]/5">
+                        <div className="aspect-video bg-[#090a0d] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 hover:border-[#6940c9]/40 transition-all duration-300 hover:bg-[#6940c9]/5">
                             <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300 group-hover:bg-[#6940c9]/20">
                                 <Plus size={24} strokeWidth={2} className="text-white/30 group-hover:text-[#6940c9]" />
                             </div>

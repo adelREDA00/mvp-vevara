@@ -18,7 +18,7 @@ function AppsPanel({ onClose }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: '#0f1015',
+        backgroundColor: '#090a0d',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         borderRight: '1px solid rgba(255, 255, 255, 0.05)',

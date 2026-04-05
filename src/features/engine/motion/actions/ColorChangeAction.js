@@ -62,6 +62,13 @@ function applyColor(pixiObject, numericColor) {
         return
     }
 
+    // FlowTextContainer: Use custom updateColor method
+    if (pixiObject.isFlowText && typeof pixiObject.updateColor === 'function') {
+        const hex = '#' + numericColor.toString(16).padStart(6, '0')
+        pixiObject.updateColor(hex)
+        return
+    }
+
     // Background layer: Container with _backgroundGraphics child
     if (pixiObject._backgroundGraphics) {
         const gfx = pixiObject._backgroundGraphics
@@ -178,24 +185,29 @@ export class ColorChangeAction {
             return gsap.to({}, { duration })
         }
 
-        // Target a _color sub-object on pixiObject (like ScaleAction targets pixiObject.scale)
+        // Target a _animatedColorState sub-object on pixiObject (like ScaleAction targets pixiObject.scale)
         // so GSAP writes interpolated RGB values directly and they persist across seek/scrub.
         // Using a sub-object avoids overwrite conflicts with MoveAction/FadeAction
         // which also target pixiObject directly.
-        if (!pixiObject._color) {
-            pixiObject._color = { r: startRgb.r, g: startRgb.g, b: startRgb.b }
+        if (!pixiObject._animatedColorState) {
+            pixiObject._animatedColorState = { r: startRgb.r, g: startRgb.g, b: startRgb.b }
         } else {
-            pixiObject._color.r = startRgb.r
-            pixiObject._color.g = startRgb.g
-            pixiObject._color.b = startRgb.b
+            // Safety: if it was somehow set to a string or non-object in a previous buggy version
+            if (typeof pixiObject._animatedColorState !== 'object') {
+                pixiObject._animatedColorState = { r: startRgb.r, g: startRgb.g, b: startRgb.b }
+            } else {
+                pixiObject._animatedColorState.r = startRgb.r
+                pixiObject._animatedColorState.g = startRgb.g
+                pixiObject._animatedColorState.b = startRgb.b
+            }
         }
 
         // Store a function for manual color sync after seek (since onUpdate may not
         // reliably fire during masterTimeline.pause(time) in nested timeline configs)
         pixiObject._applyAnimatedColor = () => {
-            if (pixiObject._color) {
-                const num = rgbToNum(pixiObject._color.r, pixiObject._color.g, pixiObject._color.b)
-                pixiObject._color.numeric = num
+            if (pixiObject._animatedColorState) {
+                const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
+                pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
             }
         }
@@ -209,27 +221,27 @@ export class ColorChangeAction {
             immediateRender: false,
             overwrite: false,
             onUpdate: () => {
-                if (!pixiObject._color) return
-                const num = rgbToNum(pixiObject._color.r, pixiObject._color.g, pixiObject._color.b)
-                pixiObject._color.numeric = num
+                if (!pixiObject._animatedColorState) return
+                const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
+                pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
             },
             onComplete: () => {
-                if (!pixiObject._color) return
-                const num = rgbToNum(pixiObject._color.r, pixiObject._color.g, pixiObject._color.b)
-                pixiObject._color.numeric = num
+                if (!pixiObject._animatedColorState) return
+                const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
+                pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
             },
             onReverseComplete: () => {
-                if (!pixiObject._color) return
+                if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(startRgb.r, startRgb.g, startRgb.b)
-                pixiObject._color.numeric = num
+                pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
             },
             ...options.gsapOptions
         }
 
-        return gsap.fromTo(pixiObject._color,
+        return gsap.fromTo(pixiObject._animatedColorState,
             { r: startRgb.r, g: startRgb.g, b: startRgb.b },
             toVars
         )

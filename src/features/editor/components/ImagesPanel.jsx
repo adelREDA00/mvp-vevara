@@ -140,7 +140,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
             className="flex flex-col h-full relative transition-all duration-300"
             style={{
                 width: isMobile ? '100%' : `${width}px`,
-                backgroundColor: isMobile ? 'transparent' : '#0f1015',
+                backgroundColor: isMobile ? 'transparent' : '#090a0d',
                 backdropFilter: isMobile ? 'none' : 'blur(20px)',
                 WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
                 borderRight: isMobile ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',

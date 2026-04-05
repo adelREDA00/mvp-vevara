@@ -28,7 +28,7 @@ function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
     <div
       className="w-[72px] lg:w-[80px] h-full flex flex-col items-center flex-shrink-0 overflow-y-auto transition-all duration-300"
       style={{
-        backgroundColor: '#0f1015',
+        backgroundColor: '#090a0d',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
       }}

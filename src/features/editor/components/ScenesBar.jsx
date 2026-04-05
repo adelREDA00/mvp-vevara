@@ -1765,24 +1765,25 @@ const ScenesBar = React.memo(({
   }
 
   // Add global mouse event listeners for dragging
+  // [PERF] Uses rAF-based throttling so heavy seek operations (video sync, texture
+  // uploads) only run once per display frame instead of on every mousemove pixel.
+  // The playhead visual position still updates instantly for responsiveness.
   useEffect(() => {
     if (!isDraggingPlayhead) return
 
-    const handleMouseMove = (e) => {
-      if (!cardsContainerRef.current || !onSeek) return
+    let rafId = null
+    let pendingSeekTime = null
 
-      // Calculate position based on actual card container, not timeline ruler
+    const computeSeekTime = (clientX) => {
+      if (!cardsContainerRef.current) return null
+
       const containerRect = cardsContainerRef.current.getBoundingClientRect()
-      const mouseX = e.clientX - containerRect.left
-
-      // Clamp to container bounds
+      const mouseX = clientX - containerRect.left
       const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
 
-      // Convert pixel position to time using cumulative offsets (no loop)
       const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
       let seekTime = 0
 
-      // Find which scene the mouse is over
       const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
       const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
 
@@ -1794,27 +1795,52 @@ const ScenesBar = React.memo(({
         seekTime = tTime
       }
 
-      // Update playhead position directly for instant feedback
+      // Update playhead position directly for instant visual feedback (no throttle needed)
       if (playheadElementRef.current) {
         playheadElementRef.current.style.left = `${16 + clampedX}px`
       }
 
-      // Update tooltip time and position
+      // Update tooltip
       setPlayheadTooltipTime(seekTime)
       if (timelineRef.current) {
         const timelineRect = timelineRef.current.getBoundingClientRect()
-        // Position tooltip above the caret tip (caret is -1.5rem = -6px, plus caret height ~10px = -16px from top)
         setPlayheadTooltipPosition({
-          top: timelineRect.top - 16 - 28, // 16px for caret tip, 28px for tooltip height + spacing
-          left: timelineRect.left + 16 + clampedX, // 16px padding + playhead position
+          top: timelineRect.top - 16 - 28,
+          left: timelineRect.left + 16 + clampedX,
         })
       }
 
-      // Update time state
-      onSeek(seekTime)
+      return seekTime
+    }
+
+    const handleMouseMove = (e) => {
+      if (!onSeek) return
+      const seekTime = computeSeekTime(e.clientX)
+      if (seekTime === null) return
+
+      // [PERF] Batch seek calls to once per animation frame.
+      // Visual playhead position is already updated above for instant feedback.
+      pendingSeekTime = seekTime
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null
+          if (pendingSeekTime !== null) {
+            onSeek(pendingSeekTime)
+          }
+        })
+      }
     }
 
     const handleMouseUp = () => {
+      // Flush any pending seek on release to ensure final position is exact
+      if (pendingSeekTime !== null) {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId)
+          rafId = null
+        }
+        onSeek(pendingSeekTime)
+        pendingSeekTime = null
+      }
       setIsDraggingPlayhead(false)
       setPlayheadTooltipTime(null)
     }
@@ -1835,6 +1861,7 @@ const ScenesBar = React.memo(({
     document.addEventListener('touchend', handleMouseUp)
 
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
       document.removeEventListener('touchmove', handleTouchMove)
@@ -2122,7 +2149,7 @@ const ScenesBar = React.memo(({
       style={{
         minWidth: '100%',
         width: `${Math.max(totalCardsWidth + 32, 100)}px`,
-        backgroundColor: '#0f1015',
+        backgroundColor: '#090a0d',
       }}
     >
       {/* Timeline Ruler */}

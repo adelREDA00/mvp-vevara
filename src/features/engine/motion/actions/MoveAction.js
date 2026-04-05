@@ -6,10 +6,12 @@
 import { gsap } from 'gsap'
 import { MotionPathPlugin } from 'gsap/MotionPathPlugin'
 import { CustomEase } from "gsap/CustomEase";
+import { getCatmullRomPath } from '../../../editor/utils/curveUtils'
 
 // Register the plugin
 gsap.registerPlugin(MotionPathPlugin)
 gsap.registerPlugin(CustomEase);
+
 
 export class MoveAction {
   constructor() {
@@ -78,15 +80,19 @@ export class MoveAction {
         y: startY + cp.y
       }))
 
-      // Path strictly contains the control points and the final target.
-      // GSAP automatically curves from the start position (enforced by fromVars)
-      const path = [
+      // [SMOOTH PATHING]: Generate a high-resolution Centripetal Catmull-Rom spline.
+      // This bypasses GSAP's default 'thru' heuristic and ensures professional-grade 
+      // motion quality that is consistent across all layers.
+      const fullPoints = [
+        { x: startX, y: startY },
         ...worldControlPoints,
         { x: targetX, y: targetY }
       ]
+      
+      const smoothPath = getCatmullRomPath(fullPoints, 20) // Use 20 segments per loop for high precision
 
       gsapVars.motionPath = {
-        path: path,
+        path: smoothPath,
         autoRotate: false,
         useRadians: true
       }
@@ -97,10 +103,10 @@ export class MoveAction {
       delete gsapVars.y
 
       // Ensure start position is in fromVars so motionPath builds the curve correctly
-      // from the deterministic start point regardless of current playhead position
       fromVars.x = startX
       fromVars.y = startY
     }
+
     
     // [DEBUG]
 

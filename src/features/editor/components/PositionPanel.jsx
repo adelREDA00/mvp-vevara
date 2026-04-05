@@ -45,7 +45,7 @@ function PositionPanel({
       'opacity:1',
       'box-shadow:0 12px 28px rgba(0,0,0,0.5)',
       'pointer-events:none',
-      'background:#1a1b20',
+      'background:#090a0d',
       'box-sizing:border-box',
     ].join(';')
     document.body.appendChild(ghost)
@@ -184,7 +184,7 @@ function PositionPanel({
       className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
       style={{
         width: isMobile ? '100%' : `${panelWidth}px`,
-        backgroundColor: isMobile ? 'transparent' : '#0f1015',
+        backgroundColor: isMobile ? 'transparent' : '#090a0d',
         backdropFilter: isMobile ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
         borderRight: isMobile ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',

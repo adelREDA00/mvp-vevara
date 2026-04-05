@@ -542,12 +542,17 @@ function MotionPanel({
 
   const renderInactiveStep = (step, stepIndex) => {
     const { layerCount, actionCount } = getStepSummary(step)
-    const isExpanded = expandedSteps.has(step.id)
+    const isSelected = editingStepId === step.id
+    const isExpanded = expandedSteps.has(step.id) || isSelected
 
     return (
       <div
         key={step.id}
-        className="border rounded-xl p-3 transition-all duration-300 border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60"
+        className={`border rounded-xl p-3 transition-all duration-300 ${
+          isSelected 
+            ? 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]' 
+            : 'border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60'
+        }`}
       >
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -556,10 +561,12 @@ function MotionPanel({
             onClick={() => toggleStepExpand(step.id)}
           >
             <ChevronDown className={`h-3.5 w-3.5 text-zinc-500 flex-shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
-            <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-zinc-800 text-zinc-400">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+              isSelected ? 'bg-purple-500 text-white' : 'bg-zinc-800 text-zinc-400'
+            }`}>
               {stepIndex + 1}
             </div>
-            <span className="text-xs font-semibold text-zinc-100">
+            <span className={`text-xs font-semibold ${isSelected ? 'text-white' : 'text-zinc-100'}`}>
               Step {stepIndex + 1}
             </span>
             {layerCount > 0 && (
@@ -571,8 +578,10 @@ function MotionPanel({
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => handleEditStep(step.id)}
-              className="p-1.5 text-zinc-500 hover:text-purple-400 hover:bg-zinc-800 rounded-md transition-all"
-              title="Edit on canvas"
+              className={`p-1.5 rounded-md transition-all ${
+                isSelected ? 'text-purple-400 bg-purple-500/10' : 'text-zinc-500 hover:text-purple-400 hover:bg-zinc-800'
+              }`}
+              title="Update Step"
             >
               <Zap className="h-4 w-4" />
             </button>
@@ -623,7 +632,7 @@ function MotionPanel({
           top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : `${topToolbarHeight}px`,
           height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '80vh' : 'auto',
           width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
-          backgroundColor: 'rgba(8, 9, 12, 0.96)',
+          backgroundColor: 'rgba(9, 10, 13, 0.96)',
           backdropFilter: 'blur(32px)',
           WebkitBackdropFilter: 'blur(32px)',
           borderColor: 'rgba(255, 255, 255, 0.15)',
@@ -711,11 +720,12 @@ function MotionPanel({
             </div>
           ) : (
             <>
-              {motionFlow.map((step, stepIndex) => (
-                editingStepId === step.id
+              {motionFlow.map((step, stepIndex) => {
+                const isEditing = isMotionCaptureActive && editingStepId === step.id;
+                return isEditing
                   ? renderActiveStep(step, stepIndex)
-                  : renderInactiveStep(step, stepIndex)
-              ))}
+                  : renderInactiveStep(step, stepIndex);
+              })}
 
               {/* + Add Step button — only when not currently editing */}
               {!isMotionCaptureActive && motionFlow.length > 0 && (

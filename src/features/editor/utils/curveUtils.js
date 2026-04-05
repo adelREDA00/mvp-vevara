@@ -4,41 +4,73 @@
  */
 
 /**
- * Calculates a point on a Catmull-Rom spline.
- * @param {Object} p0 - Point 0 {x, y}
- * @param {Object} p1 - Point 1 {x, y}
- * @param {Object} p2 - Point 2 {x, y}
- * @param {Object} p3 - Point 3 {x, y}
- * @param {number} t - Interpolation value (0 to 1)
+ * Calculates a point on a Centripetal Catmull-Rom spline.
+ * Centripetal version (alpha=0.5) is superior for motion design as it
+ * avoids "loops" and "overshoots" common in uniform splines.
+ * @param {Object} p0, p1, p2, p3 - Control points {x, y}
+ * @param {number} t - Interpolation value (0 to 1) for the current segment (p1 to p2)
  * @returns {Object} - Resulting point {x, y}
  */
-export function getCatmullRomPoint(p0, p1, p2, p3, t) {
-    const t2 = t * t;
-    const t3 = t2 * t;
+export function getCentripetalPoint(p0, p1, p2, p3, t) {
+    const alpha = 0.5; // Centripetal parameter
 
-    const f0 = -0.5 * t3 + t2 - 0.5 * t;
-    const f1 = 1.5 * t3 - 2.5 * t2 + 1.0;
-    const f2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t;
-    const f3 = 0.5 * t3 - 0.5 * t2;
+    function getT(tPrev, pA, pB) {
+        const dx = pB.x - pA.x;
+        const dy = pB.y - pA.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        return tPrev + Math.pow(len, alpha);
+    }
 
-    return {
-        x: p0.x * f0 + p1.x * f1 + p2.x * f2 + p3.x * f3,
-        y: p0.y * f0 + p1.y * f1 + p2.y * f2 + p3.y * f3,
-    };
+    const t0 = 0;
+    const t1 = getT(t0, p0, p1);
+    const t2 = getT(t1, p1, p2);
+    const t3 = getT(t2, p2, p3);
+
+    // Safety check to avoid division by zero
+    if (t1 === t0 && t2 === t1) return p1;
+    if (t2 === t1) return p1;
+    if (t3 === t2 && t2 === t1) return p2;
+
+    const currentTime = t1 + t * (t2 - t1);
+
+    function a(pA, pB, tA, tB, time) {
+        if (Math.abs(tB - tA) < 0.0001) return pA;
+        const f = (tB - time) / (tB - tA);
+        const g = (time - tA) / (tB - tA);
+        return {
+            x: pA.x * f + pB.x * g,
+            y: pA.y * f + pB.y * g
+        };
+    }
+
+    const a1 = a(p0, p1, t0, t1, currentTime);
+    const a2 = a(p1, p2, t1, t2, currentTime);
+    const a3 = a(p2, p3, t2, t3, currentTime);
+
+    const b1 = a(a1, a2, t0, t2, currentTime);
+    const b2 = a(a2, a3, t1, t3, currentTime);
+
+    return a(b1, b2, t1, t2, currentTime);
 }
 
 /**
- * Generates a list of points representing a Catmull-Rom spline.
- * Optimized to minimize allocations by reusing objects if needed.
+ * Legacy wrapper for backward compatibility or simple naming.
+ * Now uses the superior Centripetal logic.
+ */
+export function getCatmullRomPoint(p0, p1, p2, p3, t) {
+    return getCentripetalPoint(p0, p1, p2, p3, t);
+}
+
+/**
+ * Generates a list of points representing a Centripetal Catmull-Rom spline.
  * @param {Array} points - Array of {x, y} points.
  * @param {number} segmentsPerLoop - Number of segments between each pair of control points.
  * @returns {Array} - Array of {x, y} points for rendering.
  */
-export function getCatmullRomPath(points, segmentsPerLoop = 6) {
+export function getCatmullRomPath(points, segmentsPerLoop = 20) {
     if (points.length < 2) return points;
 
-    // [ROBUSTNESS] Filter out consecutive duplicate points to prevent 0-length segments
-    // which cause math instability in Catmull-Rom calculations.
+    // Filter out consecutive duplicate points
     const uniquePoints = [points[0]];
     for (let i = 1; i < points.length; i++) {
         const prev = points[i - 1];
@@ -57,32 +89,32 @@ export function getCatmullRomPath(points, segmentsPerLoop = 6) {
         const p1 = uniquePoints[i];
         const p2 = uniquePoints[i + 1];
 
-        // Virtual points for start/end
+        // Virtual points for start/end to ensure the spline passes through all points
         const p0 = i === 0 ? { x: p1.x - (p2.x - p1.x), y: p1.y - (p2.y - p1.y) } : uniquePoints[i - 1];
         const p3 = i === n - 2 ? { x: p2.x + (p2.x - p1.x), y: p2.y + (p2.y - p1.y) } : uniquePoints[i + 2];
 
-        for (let j = 0; j <= segmentsPerLoop; j++) {
+        // We use '<' instead of '<=' to avoid duplicating the join points
+        for (let j = 0; j < segmentsPerLoop; j++) {
             const t = j / segmentsPerLoop;
-            path.push(getCatmullRomPoint(p0, p1, p2, p3, t));
+            path.push(getCentripetalPoint(p0, p1, p2, p3, t));
         }
     }
+    
+    // Add the final endpoint explicitly
+    path.push(uniquePoints[n - 1]);
 
     return path;
 }
 
 /**
  * Returns the midpoint of a segment on the spline for subdivision.
- * @param {Object} p1 - Start point
- * @param {Object} p2 - End point
- * @param {Object} prev - Previous point (or null)
- * @param {Object} next - Next point (or null)
- * @returns {Object} - Midpoint {x, y}
  */
 export function getSegmentMidpoint(p1, p2, prev, next) {
     const p0 = prev || { x: p1.x - (p2.x - p1.x), y: p1.y - (p2.y - p1.y) };
     const p3 = next || { x: p2.x + (p2.x - p1.x), y: p2.y + (p2.y - p1.y) };
-    return getCatmullRomPoint(p0, p1, p2, p3, 0.5);
+    return getCentripetalPoint(p0, p1, p2, p3, 0.5);
 }
+
 
 /**
  * Calculates distance between two points.

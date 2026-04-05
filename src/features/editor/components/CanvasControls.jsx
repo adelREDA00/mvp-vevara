@@ -3,7 +3,8 @@ import {
   Minus, ChevronDown,
   Settings, Zap, X, MoreVertical, Layers,
   Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
-  Plus, Check
+  Plus, Check, Eye, EyeOff, Waves,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -29,7 +30,9 @@ function CanvasControls({
   onFlipCardFrame,
   requestOpenControl = null,
   stepsCount = 0,
-  editingStepActionCount = 0
+  editingStepActionCount = 0,
+  showPasteboard = true,
+  onTogglePasteboard
 }) {
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
@@ -224,7 +227,7 @@ function CanvasControls({
         {/* Canvas Background Color Picker - Specific UI */}
         {selectedCanvas && currentScene && (
           <div className="flex items-center gap-2 flex-shrink-0 mr-2">
-            <span className="text-white text-xs">Background:</span>
+            {/* <span className="text-white text-xs">Background:</span> */}
             <button
               onClick={() => {
                 if (onOpenColorPicker) {
@@ -235,6 +238,16 @@ function CanvasControls({
               style={{ backgroundColor: getCanvasBackgroundColor() }}
               title="Canvas Background Color"
             />
+            <button
+              onClick={() => onTogglePasteboard?.()}
+              className={`h-6 px-1.5 rounded-md transition-all flex items-center justify-center border ${showPasteboard
+                ? 'bg-[#7c4af0]/20 border-[#7c4af0]/50 text-[#7c4af0]'
+                : 'text-white/40 hover:bg-white/10 border-transparent hover:border-white/10'
+                }`}
+              title={showPasteboard ? "Hide Pasteboard" : "Show Pasteboard"}
+            >
+              {showPasteboard ? <Eye className="h-4 w-4" strokeWidth={2.5} /> : <EyeOff className="h-4 w-4" strokeWidth={2.5} />}
+            </button>
             <div className="w-px h-4 bg-zinc-700 mx-1" />
           </div>
         )}
@@ -318,34 +331,111 @@ function CanvasControls({
               </div>
             </DropdownMenu>
 
-            {/* Alignment Toggle */}
-            <button
-              onClick={() => {
-                const currentAlign = selectedLayer.data?.textAlign || 'left'
-                let newAlign = 'center'
+            {/* Combined Alignment & Water Flow Dropdown */}
+            <DropdownMenu
+              trigger={
+                <button
+                  className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center min-w-[44px] border ${selectedLayer.data?.enableFlow
+                    ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                    : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
+                    }`}
+                  title={selectedLayer.data?.enableFlow ? "Water Flow Enabled" : `Align: ${selectedLayer.data?.textAlign || 'left'}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <div className="relative">
+                      {selectedLayer.data?.textAlign === 'center' ? (
+                        <AlignCenter className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                      ) : selectedLayer.data?.textAlign === 'right' ? (
+                        <AlignRight className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                      ) : (
+                        <AlignLeft className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                      )}
 
-                if (currentAlign === 'center') {
-                  newAlign = 'right'
-                } else if (currentAlign === 'right') {
-                  newAlign = 'left'
-                }
+                      {selectedLayer.data?.enableFlow && (
+                        <Waves
+                          className="absolute -top-1 -right-1 h-2 w-2 text-[#22c55e] opacity-90 animate-pulse"
+                          strokeWidth={2.5}
+                        />
+                      )}
+                    </div>
 
-                handleLayerUpdate({
-                  data: {
-                    ...selectedLayer.data,
-                    textAlign: newAlign
-                  }
-                })
-              }}
-              className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center min-w-[32px] border border-transparent hover:border-white/10"
-              title={`Align: ${selectedLayer.data?.textAlign || 'left'}`}
+                    <ChevronDown className="h-3 w-3 opacity-40" strokeWidth={2.5} />
+                  </div>
+                </button>
+              }
             >
-              <div className="flex flex-col gap-0.5 items-center">
-                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
-                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-2 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-2' : 'w-2 self-start')}`} />
-                <div className={`h-0.5 bg-current rounded-full transition-all duration-200 ${selectedLayer.data?.textAlign === 'right' ? 'w-4 self-end' : (selectedLayer.data?.textAlign === 'center' ? 'w-4' : 'w-4 self-start')}`} />
+              <div className="py-1 min-w-[180px]">
+                <DropdownMenuItem
+                  onClick={() => handleLayerUpdate({
+                    data: {
+                      ...selectedLayer.data,
+                      textAlign: 'left'
+                    }
+                  })}
+                >
+                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'left' ? 'text-purple-400' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <AlignLeft className="h-4 w-4" strokeWidth={2} />
+                      <span className="font-medium">Left Alignment</span>
+                    </div>
+                    {selectedLayer.data?.textAlign === 'left' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </div>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={() => handleLayerUpdate({
+                    data: {
+                      ...selectedLayer.data,
+                      textAlign: 'center'
+                    }
+                  })}
+                >
+                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'center' ? 'text-purple-400' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <AlignCenter className="h-4 w-4" strokeWidth={2} />
+                      <span className="font-medium">Center</span>
+                    </div>
+                    {selectedLayer.data?.textAlign === 'center' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </div>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={() => handleLayerUpdate({
+                    data: {
+                      ...selectedLayer.data,
+                      textAlign: 'right'
+                    }
+                  })}
+                >
+                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'right' ? 'text-purple-400' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <AlignRight className="h-4 w-4" strokeWidth={2} />
+                      <span className="font-medium">Right Alignment</span>
+                    </div>
+                    {selectedLayer.data?.textAlign === 'right' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </div>
+                </DropdownMenuItem>
+
+                <div className="h-px bg-white/5 my-1 mx-2" />
+
+                <DropdownMenuItem
+                  onClick={() => handleLayerUpdate({
+                    data: {
+                      ...selectedLayer.data,
+                      enableFlow: !selectedLayer.data?.enableFlow
+                    }
+                  })}
+                >
+                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.enableFlow ? 'text-purple-400 font-semibold' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <Waves className={`h-4 w-4 ${selectedLayer.data?.enableFlow ? 'animate-pulse' : ''}`} strokeWidth={2} />
+                      <span className="font-medium">Water Flow (Wrap)</span>
+                    </div>
+                    {selectedLayer.data?.enableFlow && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </div>
+                </DropdownMenuItem>
               </div>
-            </button>
+            </DropdownMenu>
 
           </>
         )}

@@ -11,7 +11,7 @@ const InAppBrowserModal = ({ isOpen, onClose }) => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-[#0f1015]/80 backdrop-blur-md transition-opacity"
+                className="absolute inset-0 bg-[#090a0d]/80 backdrop-blur-md transition-opacity"
                 onClick={onClose}
             />
 

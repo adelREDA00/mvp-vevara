@@ -127,6 +127,7 @@ function Stage({
   onFinishEditing,
   onStartTextEditing,
   totalTime = 0,
+  showPasteboard = true,
 }, ref) { // Add ref parameter
   // =============================================================================
   // STATE MANAGEMENT
@@ -571,7 +572,7 @@ function Stage({
   // Memoize selected layer object lookup - only recalculates when scene membership, layerObjects, or ID changes
   const selectedLayerObject = useMemo(() =>
     belongsToCurrentScene && layerObjects ? layerObjects.get(selectedLayerId) : null,
-    [belongsToCurrentScene, layerObjects, selectedLayerId]
+    [belongsToCurrentScene, layerObjects, selectedLayerId, layerObjectsVersion]
   )
 
   // Combined selected layer data for backward compatibility
@@ -635,7 +636,12 @@ function Stage({
     // This is highly performant (only 8 triangles) and stable on all hardware.
     overlay.clear()
     const margin = 50000 // Large margin to cover screen during zoom/pan
-    const bgColor = 0x0f1015 // Match app background color
+    
+    // [UX CHANGE] Use semi-transparent overlay instead of opaque background
+    // This allows layers outside the canvas to be visible but clearly "off-stage".
+    // [NEW] Controlled by showPasteboard toggle
+    const overlayColor = 0x000000
+    const overlayAlpha = showPasteboard ? 0.4 : 1.0
 
     // Top
     overlay.rect(-margin, -margin, worldWidth + margin * 2, margin)
@@ -645,7 +651,7 @@ function Stage({
     overlay.rect(-margin, 0, margin, worldHeight)
     // Right
     overlay.rect(worldWidth, 0, margin, worldHeight)
-    overlay.fill(bgColor)
+    overlay.fill({ color: overlayColor, alpha: overlayAlpha })
 
     // Ensure stageContainer has NO mask so interactions work outside world bounds
     if (stageContainer.mask) {
@@ -663,7 +669,7 @@ function Stage({
     return () => {
       // No need to cleanup on every re-run to avoid flicker
     }
-  }, [stageContainer, layersContainer, isReady, worldWidth, worldHeight])
+  }, [stageContainer, layersContainer, isReady, worldWidth, worldHeight, showPasteboard])
 
   // Cleanup cached objects and timeouts on unmount
   useEffect(() => {
@@ -795,24 +801,15 @@ function Stage({
     const updatedLayer = { ...data.selectedLayer, ...updates }
     const layerObject = layerObjects.get(data.selectedLayerId)
 
-    // Check if layer is completely outside canvas after update
-    if (isLayerCompletelyOutside(updatedLayer, layerObject, worldWidth, worldHeight)) {
-      // [FIX] Skip deletion if motion capture mode is active.
-      if (!motionCaptureMode?.isActive) {
-        // Layer is completely outside canvas - delete it
-        dispatch(deleteLayer(data.selectedLayerId))
-        dispatch(clearLayerSelection())
-      }
-    } else {
-      // Layer is still inside or partially inside - update it
-      // Simplified data merging: always preserve existing data and merge updates
-      const updatePayload = {
-        id: data.selectedLayerId,
-        ...updates
-      }
-
-      dispatch(updateLayer(updatePayload))
+    // [UX CHANGE] Layers are NO LONGER deleted when moved outside the canvas.
+    // The only way to delete a layer is for the user to manually trigger it.
+    // This allows for a "pasteboard" workflow similar to professional design tools.
+    const updatePayload = {
+      id: data.selectedLayerId,
+      ...updates
     }
+
+    dispatch(updateLayer(updatePayload))
   }, [layerObjects, worldWidth, worldHeight, dispatch])
 
   useSelectionBox(
@@ -829,7 +826,8 @@ function Stage({
     isPlaying, // Pass playing state to hide selection box during playback
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
     handleLockedInteraction, // Pass locked interaction callback
-    effectiveZoom // Pass zoom for handle scaling
+    effectiveZoom, // Pass zoom for handle scaling
+    layerObjectsVersion // [Bug 2 Fix] Force re-initialization when layer PIXI instances change
   )
 
   // =============================================================================
@@ -989,7 +987,7 @@ function Stage({
     contextMenu && createPortal(
       <>
         <div
-          className="fixed z-[10010] bg-[#0f1015]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95"
+          className="fixed z-[10010] bg-[#090a0d]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={() => {
             if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
@@ -1162,7 +1160,7 @@ function Stage({
 
                 {subMenu === 'position' && (
                   <div 
-                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 bg-[#0f1015]/90 backdrop-blur-2xl rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200`}
+                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 bg-[#090a0d]/90 backdrop-blur-2xl rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200`}
                     onMouseEnter={() => {
                       if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
                     }}
@@ -1558,7 +1556,7 @@ function Stage({
       {/* Locked Layer Tooltip */}
       {lockedTooltip && createPortal(
         <div
-          className="locked-interaction-tooltip fixed z-[10020] bg-[#0f1015]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-3.5 flex flex-col gap-4 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-300 min-w-[200px] max-w-[240px] origin-top-left"
+          className="locked-interaction-tooltip fixed z-[10020] bg-[#090a0d]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-3.5 flex flex-col gap-4 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-300 min-w-[200px] max-w-[240px] origin-top-left"
           style={{
             left: Math.min(window.innerWidth - 240, lockedTooltip.x + 20),
             top: Math.min(window.innerHeight - 160, lockedTooltip.y + 20),

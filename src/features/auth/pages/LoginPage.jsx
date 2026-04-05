@@ -41,7 +41,7 @@ const LoginPage = () => {
     }
 
     return (
-        <div className="min-h-[100dvh] bg-[#0f1015] flex flex-col items-center justify-start md:justify-center p-0 md:p-12 font-normal selection:bg-[#6940c9]/30 overflow-y-auto overflow-x-hidden relative">
+        <div className="min-h-[100dvh] bg-[#090a0d] flex flex-col items-center justify-start md:justify-center p-0 md:p-12 font-normal selection:bg-[#6940c9]/30 overflow-y-auto overflow-x-hidden relative">
             {/* Background elements */}
             <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-[#6940c9]/3 rounded-full blur-[80px] pointer-events-none" />
             <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-[#6940c9]/2 rounded-full blur-[80px] pointer-events-none" />
@@ -67,7 +67,7 @@ const LoginPage = () => {
                         <div className="flex items-center gap-3">
                             <div className="flex -space-x-2">
                                 {[1, 2, 3].map(i => (
-                                    <div key={i} className="w-7 h-7 rounded-full border-2 border-[#0f1015] bg-[#1a1b23] flex items-center justify-center">
+                                    <div key={i} className="w-7 h-7 rounded-full border-2 border-[#090a0d] bg-[#1a1b23] flex items-center justify-center">
                                         <div className="w-full h-full rounded-full bg-gradient-to-br from-[#6940c9]/20 to-transparent" />
                                     </div>
                                 ))}
@@ -150,7 +150,7 @@ const LoginPage = () => {
                                 <div className="w-full border-t border-white/5"></div>
                             </div>
                             <div className="relative flex justify-center text-[12px] font-semibold uppercase tracking-widest">
-                                <span className="bg-[#0f1015] md:bg-transparent px-4 text-white/10">or</span>
+                                <span className="bg-[#090a0d] md:bg-transparent px-4 text-white/10">or</span>
                             </div>
                         </div>
 

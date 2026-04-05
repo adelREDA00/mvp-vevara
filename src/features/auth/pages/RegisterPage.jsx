@@ -54,7 +54,7 @@ const RegisterPage = () => {
     }
 
     return (
-        <div className="min-h-[100dvh] bg-[#0f1015] flex flex-col items-center justify-start md:justify-center p-0 md:p-12 font-normal selection:bg-[#6940c9]/30 overflow-y-auto overflow-x-hidden relative">
+        <div className="min-h-[100dvh] bg-[#090a0d] flex flex-col items-center justify-start md:justify-center p-0 md:p-12 font-normal selection:bg-[#6940c9]/30 overflow-y-auto overflow-x-hidden relative">
             {/* Background elements */}
             <div className="absolute -top-[10%] -right-[10%] w-[50%] h-[50%] bg-[#6940c9]/3 rounded-full blur-[80px] pointer-events-none" />
             <div className="absolute -bottom-[10%] -left-[10%] w-[40%] h-[40%] bg-[#6940c9]/2 rounded-full blur-[80px] pointer-events-none" />
@@ -176,7 +176,7 @@ const RegisterPage = () => {
                                 <div className="w-full border-t border-white/5"></div>
                             </div>
                             <div className="relative flex justify-center text-[12px] font-semibold uppercase tracking-widest">
-                                <span className="bg-[#0f1015] md:bg-transparent px-4 text-white/10">or</span>
+                                <span className="bg-[#090a0d] md:bg-transparent px-4 text-white/10">or</span>
                             </div>
                         </div>
 

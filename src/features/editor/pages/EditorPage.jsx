@@ -352,6 +352,7 @@ function EditorPage() {
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
+  const [showPasteboard, setShowPasteboard] = useState(true)
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
@@ -411,7 +412,7 @@ function EditorPage() {
     if (!isLoading || loadingMode === 'local') return null;
 
     return (
-      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#0f1015] p-6 text-center transition-opacity duration-500">
+      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090a0d] p-6 text-center transition-opacity duration-500">
         <div className="relative mb-8">
           <div className="w-20 h-20 border-[3px] border-white/5 rounded-full" />
           <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
@@ -1918,7 +1919,6 @@ function EditorPage() {
             nextEntry.didBlur = true
           }
           if (data.cornerRadius !== undefined) {
-            console.log('[DEBUG] onPositionUpdate cornerRadius mutation:', { layerId, radius: data.cornerRadius })
             nextEntry.cornerRadius = data.cornerRadius
             nextEntry.didCornerRadius = true
           }
@@ -1963,7 +1963,6 @@ function EditorPage() {
           // If controlPoints is undefined, preserve existing value (don't overwrite)
 
           trackedLayers.set(layerId, nextEntry)
-          console.log('[DEBUG] Incrementing captureVersion for re-render:', { layerId, newRadius: nextEntry.cornerRadius })
           setCaptureVersion(v => v + 1)
         },
         trackedLayers: initialTrackedLayers, // Pass the synchronized map
@@ -3141,7 +3140,6 @@ function EditorPage() {
             if (data.opacity !== undefined) entry.opacity = data.opacity
             if (data.blur !== undefined) entry.blur = data.blur
             if (data.cornerRadius !== undefined) {
-              console.log('[DEBUG] onPositionUpdate cornerRadius mutation (StartMotion path):', { layerId: data.layerId, radius: data.cornerRadius })
               entry.cornerRadius = data.cornerRadius
               entry.didCornerRadius = true
             }
@@ -3157,8 +3155,6 @@ function EditorPage() {
             } else if (data.controlPoints === null) {
               entry.controlPoints = []
             }
-            
-            console.log('[DEBUG] Incrementing captureVersion (StartMotion path):', { layerId: data.layerId, newRadius: entry.cornerRadius })
             setCaptureVersion(v => v + 1)
           }
         },
@@ -3767,7 +3763,7 @@ function EditorPage() {
       if (actionType === 'scale') { pixiObj.scale.x = init.scaleX; pixiObj.scale.y = init.scaleY }
       if (actionType === 'rotate') { pixiObj.rotation = init.rotation * (Math.PI / 180) }
       if (actionType === 'fade') { pixiObj.alpha = init.opacity ?? 1 }
-      if (actionType === 'cornerRadius') { 
+      if (actionType === 'cornerRadius') {
         const radius = init.cornerRadius ?? 0
         pixiObj._storedShapeData = { ...pixiObj._storedShapeData, cornerRadius: radius }
         if (pixiObj._updateShapeRadiusVisuals) pixiObj._updateShapeRadiusVisuals(radius)
@@ -3805,7 +3801,7 @@ function EditorPage() {
       data-editor-container
       style={{
         touchAction: 'none',
-        backgroundColor: '#0f1015'
+        backgroundColor: '#090a0d'
       }}
       onDragStart={(e) => {
         // Prevent drag operations that might trigger text selection
@@ -3848,7 +3844,7 @@ function EditorPage() {
 
       {/* Loading Overlay */}
       {projectStatus === 'loading' && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#0f1015]/60 backdrop-blur-sm">
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#090a0d]/60 backdrop-blur-sm">
           <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
         </div>
       )}
@@ -4093,7 +4089,7 @@ function EditorPage() {
                   height: '80vh',
                   minHeight: '360px',
                   maxHeight: '90vh',
-                  backgroundColor: '#0f1015',
+                  backgroundColor: '#090a0d',
                   paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -4103,7 +4099,7 @@ function EditorPage() {
                   <div className="w-10 h-1 rounded-full bg-white/20" aria-hidden />
                 </div>
                 {/* Panel content - scrollable, same bg as sheet */}
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: '#0f1015' }}>
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: '#090a0d' }}>
                   {activeSidebarItem === 'Design' && (
                     <DesignPanel onClose={handleClosePanel} />
                   )}
@@ -4298,17 +4294,16 @@ function EditorPage() {
                       effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
                       effectiveMotionCaptureMode.onInteractionEnd(layerId)
                     }
-                    
+
                     // [BUG FIX] Corner radius update from slider (nested in data)
                     const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
                     if (radiusUpdate !== undefined) {
-                      console.log('[DEBUG] onLayerUpdate cornerRadius interceptor:', { layerId, radiusUpdate })
                       const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusUpdate))
                       effectiveMotionCaptureMode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
                       effectiveMotionCaptureMode.onInteractionEnd(layerId)
                     }
-                    
-                    
+
+
                     // [BUG FIX] Only trigger color change if the value actually changed
                     // (prevents ghost actions when sliders spread entire data object)
                     const newColor = updates.data?.fill || updates.data?.color
@@ -4357,6 +4352,8 @@ function EditorPage() {
               onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
               requestOpenControl={requestOpenControl}
               stepsCount={currentSceneMotionFlow?.steps?.length || 0}
+              showPasteboard={showPasteboard}
+              onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
             />
           </div>
 
@@ -4370,7 +4367,7 @@ function EditorPage() {
               bottom: initialBottomHeight || 0,
               left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
               right: 0,
-              backgroundColor: '#0f1015',
+              backgroundColor: '#090a0d',
               zIndex: 10,
             }}
           >
@@ -4402,12 +4399,12 @@ function EditorPage() {
               captureVersion={captureVersion}
               onMotionStateChange={setMotionControls}
               editingStepId={editingStepId}
-              //text editing
               editingTextLayerId={editingTextLayerId}
               onTextChange={handleTextChange}
               onFinishEditing={handleFinishEditing}
               onStartTextEditing={startTextEditing}
               totalTime={totalTime}
+              showPasteboard={showPasteboard}
             />
 
             {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
@@ -4480,7 +4477,7 @@ function EditorPage() {
           className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
           style={{
             left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-            backgroundColor: '#0f1015',
+            backgroundColor: '#090a0d',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
             borderTop: '1px solid rgba(255, 255, 255, 0.05)',

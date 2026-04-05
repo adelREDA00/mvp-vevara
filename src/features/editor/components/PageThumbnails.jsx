@@ -258,7 +258,7 @@ function PageThumbnails({ pages = [], currentPage = 0, onPageClick, onAddPage, o
     <div
       className="flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 md:py-2.5 flex-shrink-0 overflow-x-auto scrollbar-hide touch-pan-x backdrop-blur-md"
       style={{
-        backgroundColor: '#0f1015',
+        backgroundColor: '#090a0d',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
       }}

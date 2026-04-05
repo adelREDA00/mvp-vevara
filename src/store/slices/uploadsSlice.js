@@ -1,9 +1,9 @@
 import { createSlice, createSelector, createAsyncThunk } from '@reduxjs/toolkit'
 import api from '../../api/client'
 
-// [NEW] Module-level variable to store the abort controller for the current upload
-// This avoids putting non-serializable values in the Redux state
-let currentAbortController = null;
+// [NEW] Module-level variable to store the abort controllers for multiple uploads
+// Keyed by tempId. This avoids putting non-serializable values in the Redux state
+let abortControllers = {};
 
 export const fetchUploads = createAsyncThunk(
   'uploads/fetch',
@@ -87,17 +87,17 @@ function getVideoDimensions(file) {
 
 export const uploadFile = createAsyncThunk(
   'uploads/upload',
-  async (file, { dispatch, rejectWithValue }) => {
+  async ({ tempId, file }, { dispatch, rejectWithValue }) => {
     try {
       // Create a new AbortController for this upload
-      if (currentAbortController) currentAbortController.abort();
-      currentAbortController = new AbortController()
-      const signal = currentAbortController.signal;
+      if (abortControllers[tempId]) abortControllers[tempId].abort();
+      abortControllers[tempId] = new AbortController()
+      const signal = abortControllers[tempId].signal;
 
       const formData = new FormData()
       formData.append('file', file)
 
-      // Extract media dimensions before upload (now with 4s timeout)
+      // Extract media dimensions before upload
       let dimensions = { width: 0, height: 0, duration: 0 }
       if (file.type.startsWith('image/')) {
         const url = URL.createObjectURL(file)
@@ -120,18 +120,78 @@ export const uploadFile = createAsyncThunk(
       formData.append('metadata', JSON.stringify(dimensions))
 
       const data = await api.upload('/uploads', formData, {
-        signal, // [NEW] Pass the abort signal
+        signal,
         onProgress: (percent) => {
-          dispatch(setUploadProgress(percent))
+          dispatch(updateUploadProgress({ tempId, progress: percent }))
         }
       })
-      return data
+      
+      // Cleanup controller on success
+      delete abortControllers[tempId];
+      return { tempId, data }
     } catch (error) {
+      delete abortControllers[tempId];
       if (error.message === 'cancelled') {
-        return rejectWithValue('cancelled')
+        return rejectWithValue({ tempId, error: 'cancelled' })
       }
-      return rejectWithValue(error.message)
+      return rejectWithValue({ tempId, error: error.message })
     }
+  }
+)
+
+/**
+ * Thunk to orchestrate batch uploads with concurrency control.
+ */
+export const startBatchUpload = createAsyncThunk(
+  'uploads/startBatch',
+  async (files, { dispatch }) => {
+    const fileArray = Array.from(files)
+    const uploads = fileArray.map(file => ({
+      tempId: crypto.randomUUID(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type
+    }))
+
+    // Enqueue all immediately
+    uploads.forEach(u => {
+      dispatch(enqueueUpload({
+        tempId: u.tempId,
+        name: u.name,
+        size: u.size,
+        type: u.type
+      }))
+    })
+
+    // Concurrency control: process max 3 at a time
+    const limit = 3
+    let active = 0
+    let index = 0
+
+    const next = async () => {
+      if (index >= uploads.length) return
+      
+      const current = uploads[index++]
+      active++
+      
+      try {
+        await dispatch(uploadFile({ tempId: current.tempId, file: current.file })).unwrap()
+      } catch (err) {
+        // Error handled by uploadFile.rejected
+      } finally {
+        active--
+        await next()
+      }
+    }
+
+    // Start initial batch
+    const initialBatch = []
+    for (let i = 0; i < Math.min(limit, uploads.length); i++) {
+      initialBatch.push(next())
+    }
+    
+    await Promise.all(initialBatch)
   }
 )
 
@@ -149,10 +209,11 @@ export const deleteUpload = createAsyncThunk(
 
 const initialState = {
   uploadedImages: {}, // id -> { id, name, url, metadata, uploadedAt }
+  uploadQueue: {}, // tempId -> { id: tempId, name, size, type, progress, status, error, createdAt }
   isFetching: false,
   fetchError: null,
   uploadingCount: 0,
-  uploadProgress: 0, // Current upload progress (%)
+  uploadProgress: 0, // Legacy: overall or last progress if needed
   hasLargeUpload: false,
   uploadError: null,
   lastUploadedId: null,
@@ -192,14 +253,44 @@ const uploadsSlice = createSlice({
     setUploadProgress: (state, action) => {
       state.uploadProgress = action.payload
     },
-    cancelUpload: (state) => {
-      if (currentAbortController) {
-        currentAbortController.abort()
-        currentAbortController = null
+    enqueueUpload: (state, action) => {
+      const { tempId, name, size, type } = action.payload
+      state.uploadQueue[tempId] = {
+        id: tempId,
+        name,
+        size,
+        type,
+        progress: 0,
+        status: 'pending',
+        createdAt: Date.now()
       }
-      state.uploadingCount = 0
-      state.uploadProgress = 0
-      state.hasLargeUpload = false
+    },
+    updateUploadProgress: (state, action) => {
+      const { tempId, progress } = action.payload
+      if (state.uploadQueue[tempId]) {
+        state.uploadQueue[tempId].progress = progress
+        state.uploadQueue[tempId].status = 'uploading'
+      }
+    },
+    cancelUpload: (state, action) => {
+      const tempId = action.payload
+      if (tempId && abortControllers[tempId]) {
+        abortControllers[tempId].abort()
+        delete abortControllers[tempId]
+      } else if (!tempId) {
+        // Cancel all
+        Object.values(abortControllers).forEach(ctrl => ctrl.abort())
+        abortControllers = {}
+      }
+
+      if (tempId) {
+        delete state.uploadQueue[tempId]
+      } else {
+        state.uploadQueue = {}
+        state.uploadingCount = 0
+        state.uploadProgress = 0
+        state.hasLargeUpload = false
+      }
     },
   },
   extraReducers: (builder) => {
@@ -227,31 +318,42 @@ const uploadsSlice = createSlice({
       // === Upload file ===
       .addCase(uploadFile.pending, (state, action) => {
         state.uploadingCount += 1
-        state.uploadProgress = 0
-        // Check if this specific file is large (> 50MB)
-        if (action.meta.arg.size > 50 * 1024 * 1024) {
+        // Check if this specific file is large (> 50MB) 
+        // Note: action.meta.arg is { tempId, file }
+        if (action.meta.arg.file?.size > 50 * 1024 * 1024) {
           state.hasLargeUpload = true
         }
         state.uploadError = null
       })
       .addCase(uploadFile.fulfilled, (state, action) => {
-        const item = action.payload
+        const { tempId, data: item } = action.payload
         const imageId = item._id
         state.uploadedImages[imageId] = normalizeAsset(item)
         state.uploadingCount = Math.max(0, state.uploadingCount - 1)
-        state.uploadProgress = 0
+        
+        // Remove from queue on success
+        delete state.uploadQueue[tempId]
+        
         if (state.uploadingCount === 0) {
           state.hasLargeUpload = false
+          state.uploadProgress = 0
         }
         state.lastUploadedId = imageId
       })
       .addCase(uploadFile.rejected, (state, action) => {
         state.uploadingCount = Math.max(0, state.uploadingCount - 1)
-        state.uploadProgress = 0
+        const { tempId, error } = action.payload || {}
+        
+        if (tempId && state.uploadQueue[tempId]) {
+          state.uploadQueue[tempId].status = 'failed'
+          state.uploadQueue[tempId].error = error || 'Upload failed'
+        }
+
         if (state.uploadingCount === 0) {
           state.hasLargeUpload = false
+          state.uploadProgress = 0
         }
-        state.uploadError = action.payload || 'Upload failed'
+        state.uploadError = error || 'Upload failed'
       })
 
       // === Delete upload ===
@@ -267,7 +369,13 @@ const uploadsSlice = createSlice({
   },
 })
 
-export const { clearUploadError, clearFetchError, cancelUpload } = uploadsSlice.actions
+export const { 
+  clearUploadError, 
+  clearFetchError, 
+  cancelUpload, 
+  enqueueUpload, 
+  updateUploadProgress 
+} = uploadsSlice.actions
 
 // Selectors
 export const selectUploadedImages = (state) => state.uploads.uploadedImages
@@ -282,6 +390,11 @@ export const selectUploadError = (state) => state.uploads.uploadError
 export const selectFetchError = (state) => state.uploads.fetchError
 export const selectLastUploadedId = (state) => state.uploads.lastUploadedId
 export const selectUploadProgress = (state) => state.uploads.uploadProgress
+export const selectUploadQueue = (state) => state.uploads.uploadQueue
+export const selectUploadQueueArray = createSelector(
+  [selectUploadQueue],
+  (queue) => Object.values(queue).sort((a, b) => b.createdAt - a.createdAt)
+)
 const { setUploadProgress } = uploadsSlice.actions
 export { setUploadProgress }
 

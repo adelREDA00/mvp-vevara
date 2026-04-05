@@ -374,7 +374,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       }
       // Clear GSAP color properties on force reset to prevent stale values
       if (force) {
-        delete displayObject._color
+        delete displayObject._animatedColorState
         delete displayObject._applyAnimatedColor
         delete displayObject._lastAppliedColor
       }
@@ -529,6 +529,44 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
            if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
         }
       }
+    } else if (displayObject.isFlowText) {
+      // [FLOW TEXT FIX] Dedicated sync path for FlowTextContainer.
+      // FlowTextContainer is a PIXI.Container, NOT a PIXI.Text, so we must NOT let it
+      // fall into the generic container branch which sets .width/.height (breaks scale).
+      // Instead we sync wordWrapWidth and compute pivot identically to PIXI.Text.
+      if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
+        const currentWidth = layer.width || 200
+        if (displayObject.wordWrapWidth !== currentWidth) {
+          displayObject.wordWrapWidth = currentWidth
+        }
+        
+        // [COLOR SYNC] Support live color updates in FlowTextContainer during Capture Mode
+        if (force || capturedLayer || shouldApplyBaseState) {
+          const textColor = capturedLayer?.color ?? layer.data?.color ?? '#000000'
+          if (displayObject.updateColor) {
+              displayObject.updateColor(textColor)
+          }
+        }
+
+        // Container pivot is always geometric center (no anchor to compensate)
+        // [FIX] Stable Zero Pivot: FlowTextContainer handles its own internal centering
+        // relative to (0,0). External pivot must remain (0,0) to prevent top-right shifts.
+        displayObject.pivot.set(0, 0)
+        
+        // Sync anchor data for compatibility (does not affect pivot)
+        if (displayObject.anchor) {
+          const align = layer.data?.textAlign || 'left'
+          displayObject.anchor.x = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+          displayObject.anchor.y = 0
+        }
+
+        // Clear GSAP color properties on force reset to prevent stale values
+        if (force) {
+            delete displayObject._animatedColorState
+            delete displayObject._applyAnimatedColor
+            delete displayObject._lastAppliedColor
+        }
+      }
     } else if (!(displayObject instanceof PIXI.Graphics) && !(displayObject instanceof PIXI.Sprite)) {
       if (force || (!isActuallyPlaying && (capturedLayer || shouldApplyBaseState))) {
         if (layer.width !== undefined) displayObject.width = layer.width
@@ -537,8 +575,8 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     }
   }
 
-  // 5. Anchor Synchronization (for standard Sprites that aren't Text or Cropped Containers)
-  if (!(displayObject instanceof PIXI.Text) && !(displayObject._imageSprite || displayObject._videoSprite)) {
+  // 5. Anchor Synchronization (for standard Sprites that aren't Text or Cropped Containers or FlowText)
+  if (!(displayObject instanceof PIXI.Text) && !displayObject.isFlowText && !(displayObject._imageSprite || displayObject._videoSprite)) {
     if (displayObject.anchor) {
       const anchorX = layer.anchorX !== undefined ? layer.anchorX : (displayObject.anchor.x ?? 0.5)
       const anchorY = layer.anchorY !== undefined ? layer.anchorY : (displayObject.anchor.y ?? 0.5)
@@ -610,7 +648,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       }
       // Clear GSAP color properties on force reset to prevent stale values
       if (force) {
-        delete displayObject._color
+        delete displayObject._animatedColorState
         delete displayObject._applyAnimatedColor
         delete displayObject._lastAppliedColor
       }
@@ -654,7 +692,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       }
       // Clear GSAP color properties on force reset to prevent stale values
       if (force) {
-        delete displayObject._color
+        delete displayObject._animatedColorState
         delete displayObject._applyAnimatedColor
         delete displayObject._lastAppliedColor
       }
@@ -924,6 +962,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     const engine = getGlobalMotionEngine()
     const isActuallyPlaying = playbackState.isPlaying
     const currentTime = playbackState.time
+    let anyChangesInThisPass = false
 
     // [FIX] checkReadiness uses ONLY refs (always current) to avoid stale closure issues.
     // The counter tracks in-flight async loads. On mobile, also check the queue length.
@@ -942,7 +981,24 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       const layer = layers?.[layerId]
       if (!layer) return
 
+      const pixiObjectRef = layerObjects.get(layerId)
+      
+      // [MODE MISMATCH FIX] If enableFlow changed, we MUST destroy and recreate
+      // Standard PIXI.Text and FlowTextContainer are fundamentally different objects.
+      const modeMismatch = pixiObjectRef && (!!layer.data?.enableFlow !== !!pixiObjectRef.isFlowText)
+      
+      if (modeMismatch) {
+        // console.log(`[DEBUG] useCanvasLayers: Mode mismatch for ${layerId}. Re-creating...`)
+        engine.unregisterLayerObject(layerId)
+        pixiObjectRef.destroy({ children: true })
+        layerObjects.delete(layerId)
+        createdLayers.delete(layerId)
+        anyChangesInThisPass = true
+      }
+
       if (createdLayers.has(layerId)) return
+
+      anyChangesInThisPass = true
 
       // [FIX] Identify startTimeOffset from augmented renderData (raw Redux layers don't have it)
       const currentLayerRenderData = layerRenderData[layerId]
@@ -991,7 +1047,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           adoptedObject.eventMode = layerData.visible ? 'static' : 'none'
         }
 
-        applyTransformInline(adoptedObject, layer, dragStateAPI, layerId, motionCaptureMode, true, null, null, startTimeOffset)
+        if (layer.type === LAYER_TYPES.BACKGROUND) adoptedObject.isBackground = true
         engine.registerLayerObject(layerId, adoptedObject, { sceneId: layer.sceneId })
         return
       }
@@ -1000,10 +1056,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
       if (layer.type === LAYER_TYPES.TEXT) {
         pixiObject = createTextLayer(layer)
+        applyTransformInline(pixiObject, layer, dragStateAPI, layerId, motionCaptureMode, true, editingTextLayerId, editingStepId, startTimeOffset)
         engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
       }
       else if (layer.type === LAYER_TYPES.SHAPE) {
         pixiObject = createShapeLayer(layer)
+        applyTransformInline(pixiObject, layer, dragStateAPI, layerId, motionCaptureMode, true, editingTextLayerId, editingStepId, startTimeOffset)
         engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
       }
       else if (layer.type === LAYER_TYPES.BACKGROUND) {
@@ -1024,6 +1082,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         container._storedImageUrl = undefined // Set to undefined to force initial load in update block
 
         pixiObject = container
+        pixiObject.isBackground = true // [LIQUID FLOW] Skip backgrounds as obstacles
         engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
       }
       else if (layer.type === LAYER_TYPES.IMAGE) {
@@ -1173,6 +1232,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           if (stageContainer) stageContainer.addChild(pixiObject)
           layerObjects.set(layerId, pixiObject)
 
+          // [FIX] Force initial transform sync for frames even before texture loads
+          applyTransformInline(pixiObject, layer, dragStateAPI, layerId, motionCaptureMode, true, editingTextLayerId, editingStepId, startTimeOffset)
+
           const layerData = layerRenderData[layerId]
           if (layerData) {
             pixiObject.visible = layerData.visible
@@ -1203,6 +1265,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }
         layerObjects.set(layerId, pixiObject)
         createdLayers.add(layerId)
+        anyChangesInThisPass = true
 
         // Set initial visibility for newly created synchronous layers
         const layerData = layerRenderData[layerId]
@@ -1212,6 +1275,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }
       }
     })
+
+    // [FIX] Increment version if any layers were created/adopted/recreated
+    // this ensures useCanvasInteractions rebinds listeners immediately.
+    if (anyChangesInThisPass) {
+      setLayerObjectsVersion(v => v + 1)
+    }
 
     // [MOBILE FIX] Drain the mobile load queue sequentially
     if (_isMobileDevice && mobileLoadQueueRef.current.length > 0 && !mobileLoadRunningRef.current) {
@@ -1292,123 +1361,116 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         // Opacity and Z-order are handled below.
       } else {
         if (layer.type === LAYER_TYPES.TEXT && layer.data && (!isActuallyPlaying || isLayerCaptured)) {
-          // [SYNC FIX] Remove scrubbing/scene-start skip.
-          // We always want to sync text if the timeline is paused so Redux truth is visible.
-          // Only update text content if it actually changed
-          if (pixiObject.text !== layer.data.content) {
-            // console.log(`[useCanvasLayers] Text content changed for ${layerId}: "${pixiObject.text}" -> "${layer.data.content}"`)
-            pixiObject.text = layer.data.content || ''
+          // [SAFETY CHECK] Mode Mismatch Guard
+          // If the Redux state (enableFlow) doesn't match the current object type,
+          // we MUST destroy it and re-create it to avoid crashes and freezes.
+          const isFlowObject = !!pixiObject.isFlowText
+          const shouldBeFlow = !!layer.data?.enableFlow
 
-            // In PIXI v8, changing .text doesn't always immediately update bounds until the next render
-            // forcing it helps for immediate height sync back to Redux
-            if (pixiObject.updateText) pixiObject.updateText(true);
-
-            // Re-calculate height if text changed
-            const currentFontSize = layer.data.fontSize || 16
-            const wordWrapWidth = layer.width || 200
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              currentFontSize,
-              wordWrapWidth,
-              layer.data.fontFamily,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            )
+          if (isFlowObject !== shouldBeFlow) {
+            if (pixiObject.parent) pixiObject.parent.removeChild(pixiObject)
+            pixiObject.destroy({ children: true, texture: false })
+            layerObjects.delete(layerId)
+            createdLayers.delete(layerId)
+            setLayerObjectsVersion(v => v + 1)
+            return
           }
 
-          // Sync wordWrapWidth whenever layer.width changes
-          const style = pixiObject.style
           const wordWrapWidth = layer.width || 200
-          if (style.wordWrapWidth !== wordWrapWidth) {
-            style.wordWrapWidth = wordWrapWidth
-            // Force re-measure immediately
-            if (pixiObject.updateText) pixiObject.updateText(true)
 
-            // Recalculate height whenever width/wrap changes
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              style.fontSize || 16,
-              wordWrapWidth,
-              layer.data.fontFamily,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            )
-          }
+          // [LIQUID FLOW] Handle FlowTextContainer specifically
+          if (shouldBeFlow && isFlowObject) {
+            const d = layer.data || {}
+            
+            // 1. Structural Sync (Content, Font, Alignment, Weight, Style) — Always sync from Redux
+            const structuralChanged = pixiObject._content !== (d.content || '') || 
+                                    pixiObject._fontFamily !== (d.fontFamily || 'Arial') || 
+                                    pixiObject._fontSize !== (d.fontSize || 24) ||
+                                    pixiObject._textAlign !== (d.textAlign || 'left') ||
+                                    pixiObject._fontWeight !== (d.fontWeight || 'normal') ||
+                                    pixiObject._fontStyle !== (d.fontStyle || 'normal')
 
-          if (style.fontSize !== (layer.data.fontSize || 16)) {
-            style.fontSize = layer.data.fontSize || 16
-            // Recalculate height on font size change
-            calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
-          }
-          // Color sync: during capture, use captured color; otherwise only sync at scene start (like opacity)
-          if (capturedLayerData?.color !== undefined) {
-            style.fill = capturedLayerData.color || '#000000'
-          } else if (isAtSceneStart && style.fill !== (layer.data.color || '#000000')) {
-            style.fill = layer.data.color || '#000000'
-          } else if (!isAtSceneStart && pixiObject._color?.numeric !== undefined) {
-            if (style.fill !== pixiObject._color.numeric) {
-              style.fill = pixiObject._color.numeric
+            if (structuralChanged) {
+                pixiObject.data = d
+                pixiObject.updateText()
             }
-          }
-          if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
-          if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
-          if (style.fontStyle !== (layer.data.fontStyle || 'normal')) style.fontStyle = layer.data.fontStyle || 'normal'
-          if (style.letterSpacing !== 0) style.letterSpacing = 0
 
-          // If the fonts loaded version changes, we MUST force a re-render of this text object
-          if (pixiObject._fontsLoadedVersion !== fontsLoadedVersion) {
-            pixiObject._fontsLoadedVersion = fontsLoadedVersion;
+            // 2. Color Sync (Visual) — Guarded by isAtSceneStart to prevent snap-back
+            if (isLayerCaptured && capturedLayerData?.color !== undefined) {
+                pixiObject.updateColor(capturedLayerData.color)
+            } else if (isAtSceneStart && pixiObject._color !== (d.color || '#000000')) {
+                pixiObject.updateColor(d.color || '#000000')
+            }
+            if (pixiObject.wordWrapWidth !== wordWrapWidth) {
+              pixiObject.wordWrapWidth = wordWrapWidth
+            }
+          } else {
+            // [STANDARD TEXT] Handle normal PIXI.Text objects
+            const style = pixiObject.style || {}
+            
+            // Content Sync
+            if (pixiObject.text !== (layer.data.content || '')) {
+              pixiObject.text = layer.data.content || ''
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize || 16, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
+            }
 
-            // [NUCLEAR REFRESH] Toggling font family forces PIXI to re-query the browser's metrics/rasterizer
-            const targetFont = layer.data?.fontFamily || 'Arial';
+            // Word Wrap Width Sync
+            if (style.wordWrapWidth !== wordWrapWidth) {
+              style.wordWrapWidth = wordWrapWidth
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize || 16, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
+            }
 
-            // Temporal switch to invalid/generic font and back triggers deep dirty flag in PIXI v8
-            style.fontFamily = 'monospace';
-            if (pixiObject.updateText) pixiObject.updateText(true);
+            // Font Size Sync
+            if (style.fontSize !== (layer.data.fontSize || 16)) {
+              style.fontSize = layer.data.fontSize || 16
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
+            }
 
-            style.fontFamily = targetFont;
-            if (pixiObject.updateText) pixiObject.updateText(true);
+            // Color Sync
+            if (capturedLayerData?.color !== undefined) {
+              style.fill = capturedLayerData.color || '#000000'
+            } else if (isAtSceneStart && style.fill !== (layer.data.color || '#000000')) {
+              style.fill = layer.data.color || '#000000'
+            }
 
-            // Force re-measure and re-pivot immediately
-            const align = layer.data?.textAlign || 'left';
-            const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0);
-            const currentWidth = layer.width || 200;
-            const bounds = pixiObject.getLocalBounds();
+            // Font Style Sync (Family, Weight, Style)
+            const newFontFamily = layer.data.fontFamily || 'Arial'
+            const newFontWeight = layer.data.fontWeight || 'normal'
+            const newFontStyle = layer.data.fontStyle || 'normal'
+            const fontChanged = style.fontFamily !== newFontFamily || 
+                                style.fontWeight !== newFontWeight || 
+                                style.fontStyle !== newFontStyle
 
-            pixiObject.anchor.set(anchorX, 0);
-            pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2);
+            if (fontChanged) {
+              style.fontFamily = newFontFamily
+              style.fontWeight = newFontWeight
+              style.fontStyle = newFontStyle
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize || 16, wordWrapWidth, newFontFamily, newFontWeight, newFontStyle, dispatch, layerId === editingTextLayerId)
+            }
 
-            // Re-calculate the Redux height so selection boxes fit
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              layer.data.fontSize || 16,
-              currentWidth,
-              targetFont,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            );
-          }
+            // Text Alignment & Pivot Sync
+            if (style.align !== (layer.data.textAlign || 'left')) {
+              style.align = layer.data.textAlign || 'left'
+              const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
+              if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
+              
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              const actualHeight = (pixiObject.getLocalBounds()?.height) || layer.height || 40
+              pixiObject.pivot.set((0.5 - anchorX) * wordWrapWidth, actualHeight / 2)
+            }
 
-          if (style.align !== (layer.data.textAlign || 'left')) {
-            style.align = layer.data.textAlign || 'left'
-            const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
-            if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
-
-            // Update pivot to keep centered rotation
-            // CRITICAL FIX: Use actual text height instead of layer.height
-            const width = layer.width || 200
-            pixiObject.updateText?.(true)
-            const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
-            pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
+            // Font Loading version sync (Nuclear Refresh)
+            if (pixiObject._fontsLoadedVersion !== fontsLoadedVersion) {
+              pixiObject._fontsLoadedVersion = fontsLoadedVersion
+              style.fontFamily = 'monospace'
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              style.fontFamily = newFontFamily
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize || 16, wordWrapWidth, newFontFamily, newFontWeight, newFontStyle, dispatch, layerId === editingTextLayerId)
+            }
           }
         }
 
@@ -1854,9 +1916,17 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
         layerObjects.delete(layerId)
         createdLayers.delete(layerId)
-        previousLayerValuesRef.current.delete(layerId)
+
+        anyChangesInThisPass = true
       }
     })
+
+    // [MODIFIER] Increment version if any layers were created or adopted in this pass.
+    // This ensures interaction hooks (useCanvasInteractions, useSelectionBox) always
+    // bind to the latest PIXI objects, preventing "stuck" interactions after mode toggles.
+    if (anyChangesInThisPass) {
+      setLayerObjectsVersion(v => v + 1)
+    }
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 

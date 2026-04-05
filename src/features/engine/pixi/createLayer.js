@@ -9,6 +9,7 @@ import * as PIXI from 'pixi.js'
 import { drawDashedRect } from './dashUtils'
 import { loadTextureRobust } from './textureUtils'
 import { getGlobalMotionEngine } from '../motion/index'
+import { FlowTextContainer } from '../text/FlowTextContainer'
 
 // [MOBILE FIX] Detect mobile devices to conditionally disable GPU-heavy features
 const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
@@ -28,6 +29,18 @@ const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Andro
  */
 export function createTextLayer(config) {
   const { data = {}, x = 0, y = 0, width, opacity = 1 } = config
+
+  // FLOW MODE: Use high-performance wrapping container if enabled
+  if (data.enableFlow) {
+    const flowText = new FlowTextContainer(config)
+    flowText.x = x
+    flowText.y = y
+    flowText.alpha = opacity
+    flowText.eventMode = 'static'
+    flowText.cursor = 'pointer'
+    if (config.id) flowText.label = `layer-${config.id}`
+    return flowText
+  }
 
   const text = new PIXI.Text({
     text: data.content || 'Text',
@@ -115,6 +128,7 @@ export function createTextLayer(config) {
 export function drawShapePath(graphics, shapeType, centerX, centerY, width, height, cornerRadius = 0) {
   const rx = width / 2   // half-width  == outer X radius
   const ry = height / 2  // half-height == outer Y radius
+  const path = [] // Store vertices for exact layout wrapping
 
   switch (shapeType) {
     case 'circle':
@@ -127,6 +141,9 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX + rx, centerY + ry)
       graphics.lineTo(centerX - rx, centerY + ry)
       graphics.closePath()
+      path.push({x: centerX, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY + ry})
+      path.push({x: centerX - rx, y: centerY + ry})
       break
 
     case 'hexagon':
@@ -138,19 +155,16 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX - rx, centerY + ry / 3)
       graphics.lineTo(centerX - rx, centerY - ry / 3)
       graphics.closePath()
+      path.push({x: centerX, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY - ry / 3})
+      path.push({x: centerX + rx, y: centerY + ry / 3})
+      path.push({x: centerX, y: centerY + ry})
+      path.push({x: centerX - rx, y: centerY + ry / 3})
+      path.push({x: centerX - rx, y: centerY - ry / 3})
       break
 
     case 'star': {
       // Make ALL four extreme points of the star touch the bbox edges exactly.
-      //
-      // For a 5-point upward star (first outer point at -90°, i.e. top):
-      //   - Widest outer points at angles ±(90°−72°) = ±18° from horizontal
-      //       x-extent = cos(18°)·outerRx  →  outerRx = halfW / cos(18°) = halfW / cos(π/10)
-      //   - Top point at -90°: y-extent = -outerRy
-      //   - Bottom outer points at 54°/126°: y-extent = sin(54°)·outerRy
-      //       Solving top+bottom simultaneously: (1 + sin(54°))·outerRy = height
-      //       →  outerRy = height / (1 + sin(3π/10))
-      //   - Vertical shift to center the result: yOffset = outerRy − halfH
       const halfW = width / 2
       const halfH = height / 2
       const outerRx = halfW / Math.cos(Math.PI / 10)              // halfW / cos(18°) ≈ halfW × 1.0514
@@ -160,18 +174,20 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       const yOffset = outerRy - halfH  // shifts star down so top AND bottom touch their edges
       const pts = 5
       const start = -Math.PI / 2
-      graphics.moveTo(
-        centerX + Math.cos(start) * outerRx,
-        centerY + Math.sin(start) * outerRy + yOffset
-      )
+      
+      const pxStart = centerX + Math.cos(start) * outerRx
+      const pyStart = centerY + Math.sin(start) * outerRy + yOffset
+      graphics.moveTo(pxStart, pyStart)
+      path.push({x: pxStart, y: pyStart})
+      
       for (let i = 1; i < pts * 2; i++) {
         const angle = start + (i * Math.PI) / pts
         const ex = i % 2 === 0 ? outerRx : innerRx
         const ey = i % 2 === 0 ? outerRy : innerRy
-        graphics.lineTo(
-          centerX + Math.cos(angle) * ex,
-          centerY + Math.sin(angle) * ey + yOffset
-        )
+        const px = centerX + Math.cos(angle) * ex
+        const py = centerY + Math.sin(angle) * ey + yOffset
+        graphics.lineTo(px, py)
+        path.push({x: px, y: py})
       }
       graphics.closePath()
       break
@@ -180,14 +196,24 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
     case 'line':
       // A line is just a thin filled rect — fill handles the colour
       graphics.rect(centerX - rx, centerY - ry, width, height)
+      path.push({x: centerX - rx, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY + ry})
+      path.push({x: centerX - rx, y: centerY + ry})
       break
 
     default: {
       // rect / square and any unknown type
       const clampedRadius = Math.min(cornerRadius || 0, Math.min(width, height) / 2)
       graphics.roundRect(centerX - rx, centerY - ry, width, height, clampedRadius)
+      path.push({x: centerX - rx, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY + ry})
+      path.push({x: centerX - rx, y: centerY + ry})
     }
   }
+  
+  return path
 }
 
 /**
@@ -254,7 +280,7 @@ export function createShapeLayer(config) {
   const isDotted = strokeStyle === 'dotted' && stroke !== null && strokeWidth > 0
 
   // Draw shape outline (path needed before fill)
-  drawShapePath(graphics, shapeType, shapeCenterX, shapeCenterY, width, height, data.cornerRadius || 0)
+  const shapePath = drawShapePath(graphics, shapeType, shapeCenterX, shapeCenterY, width, height, data.cornerRadius || 0)
 
   // Apply fill color (or transparent fill for clickability)
   if (fill !== null) {
@@ -309,8 +335,14 @@ export function createShapeLayer(config) {
     shapeType,
     cornerRadius: data.cornerRadius || 0,
     shapeCenterX,
-    shapeCenterY
+    shapeCenterY,
+    shapePath
   }
+  
+  // [METADATA] Store shape info for the Liquid Flow engine
+  graphics.shapeType = shapeType
+  graphics.cornerRadius = data.cornerRadius || 0
+  
   graphics._storedFill = data.fill || null
   graphics._storedStroke = data.stroke || null
   graphics._storedStrokeWidth = strokeWidth
@@ -1021,18 +1053,6 @@ export async function createVideoLayer(config) {
   container._videoTexture = texture
   container._videoElement = videoElement
   container.addChild(sprite)
-
-  // PERFORMANCE: Enable mipmapping for videos if possible
-  // [MOBILE FIX] Disable mipmapping on mobile
-  if (texture.source) {
-    if (!_isMobileDevice) {
-      texture.source.autoGenerateMipmaps = true
-      texture.source.mipMap = 'on'
-    } else {
-      texture.source.autoGenerateMipmaps = false
-    }
-    texture.source.scaleMode = 'linear'
-  }
 
   // CROP SYSTEM: Store intrinsic media dimensions
   const texWidth = videoElement?.videoWidth || texture.width || data.width || 300

@@ -203,7 +203,7 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
 // =============================================================================
 
 
-export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, onLockedInteraction = null, zoom = 1) {
+export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, onLockedInteraction = null, zoom = 1, layerObjectsVersion = 0) {
   // ===========================================================================
   // STATE MANAGEMENT - React refs and state variables for tracking interactions
   // ===========================================================================
@@ -417,13 +417,20 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (currentLayer.type === 'text' && currentLayerObject instanceof PIXI.Text) {
         return calculateTextDimensions(currentLayerObject, currentLayer)
       }
+      // [FLOW TEXT FIX] Handle FlowTextContainer in motion capture mode
+      if (currentLayer.type === 'text' && currentLayerObject?.isFlowText) {
+        return { width: currentLayer.width || 100, height: currentLayerObject._actualHeight || 100 }
+      }
       return {
         width: trackedLayer.cropWidth ?? trackedLayer.width ?? 100,
         height: trackedLayer.cropHeight ?? trackedLayer.height ?? 100
       }
     }
 
-    if (currentLayerObject instanceof PIXI.Text) {
+    if (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) {
+      if (currentLayerObject?.isFlowText) {
+        return { width: currentLayer.width || 100, height: currentLayerObject._actualHeight || 100 }
+      }
       return calculateTextDimensions(currentLayerObject, currentLayer)
     }
 
@@ -1164,20 +1171,32 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   const immediateTextUpdate = useCallback((textObject, newWidth, isCornerHandle, state, currentLayer) => {
     const isWidthOnly = !isCornerHandle
 
-    if (isWidthOnly) {
-      // Only adjust width, keep font size constant
-      textObject.style.wordWrapWidth = newWidth
-    } else if (isCornerHandle) {
-      // Scale font size proportionally
-      const widthScale = newWidth / state.startWidth
-      const newFontSize = Math.max(8, state.startFontSize * widthScale)
-      textObject.style.fontSize = newFontSize
-      textObject.style.wordWrapWidth = newWidth
-      textObject.style.lineHeight = newFontSize * 1.2 // Ensure line height scales for consistency
+    if (textObject.isFlowText) {
+      // FlowTextContainer supports wordWrapWidth and updateText()
+      if (isWidthOnly) {
+        textObject.wordWrapWidth = newWidth
+      } else if (isCornerHandle) {
+        const widthScale = newWidth / state.startWidth
+        const newFontSize = Math.max(8, state.startFontSize * widthScale)
+        // FlowTextContainer has its own data sync in updateText()
+        textObject.data = { ...textObject.data, fontSize: newFontSize }
+        textObject.wordWrapWidth = newWidth
+      }
+      // Re-layout immediately to get new height
+      textObject.updateText()
+    } else {
+      // Standard PIXI.Text
+      if (isWidthOnly) {
+        textObject.style.wordWrapWidth = newWidth
+      } else if (isCornerHandle) {
+        const widthScale = newWidth / state.startWidth
+        const newFontSize = Math.max(8, state.startFontSize * widthScale)
+        textObject.style.fontSize = newFontSize
+        textObject.style.wordWrapWidth = newWidth
+        textObject.style.lineHeight = newFontSize * 1.2
+      }
+      textObject.updateText?.(true)
     }
-
-    // Update text SYNCHRONOUSLY to ensure immediate bounds update for measuring
-    textObject.updateText?.(true)
   }, [])
 
 
@@ -1254,6 +1273,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     if (
       !(currentLayerObject instanceof PIXI.Graphics) &&
       !(currentLayerObject instanceof PIXI.Text) &&
+      !currentLayerObject?.isFlowText &&
       !(currentLayerObject instanceof PIXI.Sprite) &&
       !(currentLayerObject instanceof PIXI.Container && (currentLayerObject._imageSprite || currentLayerObject._videoSprite))
     ) {
@@ -1479,9 +1499,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     state._lastX = newX
     state._lastY = newY
 
-    syncBoxVisuals()
-    updateSnappingGuides(centerSnap, safeZoneSnap)
-
     if (Object.keys(updates).length > 0) {
       const targetObject = currentLayerObject._cachedSprite || currentLayerObject
       const isMediaEdgeResize = state.isMediaElement && ['n', 's', 'e', 'w'].includes(state.handleType)
@@ -1538,7 +1555,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         }
       }
 
-      if (currentLayerObject instanceof PIXI.Text && !isCaptureMode) {
+      if ((currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) && !isCaptureMode) {
         const isCorner = ['nw', 'ne', 'sw', 'se'].includes(state.handleType)
         immediateTextUpdate(currentLayerObject, newWidth, isCorner, state, currentLayer)
 
@@ -1548,16 +1565,35 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           updates.data = { ...(updates.data || {}), ...currentLayer.data, fontSize: newFontSize }
         }
 
-        const textDims = calculateTextDimensions(currentLayerObject, currentLayer, newWidth)
-        if (Math.abs(textDims.height - state.startHeight) > 1) updates.height = textDims.height
-        cachedTextHeightRef.current = textDims.height
+        let actualHeight
+        if (currentLayerObject.isFlowText) {
+          actualHeight = currentLayerObject._actualHeight
+        } else {
+          const textDims = calculateTextDimensions(currentLayerObject, currentLayer, newWidth)
+          actualHeight = textDims.height
+        }
+
+        if (Math.abs(actualHeight - state.startHeight) > 1) updates.height = actualHeight
+        cachedTextHeightRef.current = actualHeight
+
+        // [SYNC FIX] Update state._lastHeight with the recalculated fluid height
+        // This ensures syncBoxVisuals reads the correct dimension immediately.
+        state._lastHeight = actualHeight
 
         targetObject.x = newX
         targetObject.y = newY
+
         const align = currentLayer.data?.textAlign || 'left'
         const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
-        targetObject.anchor.set(anchorX, 0)
-        targetObject.pivot.set((0.5 - anchorX) * newWidth, textDims.height / 2)
+
+        if (currentLayerObject.isFlowText) {
+          // FlowTextContainer is already centered, we don't manually anchor/pivot it like PIXI.Text
+          // applyTransformInline handles the pivot (0,0) stability.
+        } else {
+          targetObject.anchor.set(anchorX, 0)
+          targetObject.pivot.set((0.5 - anchorX) * newWidth, actualHeight / 2)
+        }
+
         targetObject._selectionBoxX = newX
         targetObject._selectionBoxY = newY
 
@@ -1597,6 +1633,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           })
         }
       }
+
+      // [UI SYNC FIX] Call syncBoxVisuals AFTER all text height/scaling recalculations are complete.
+      // This ensures the purple outline perfectly encapsulates the actual rendered text height.
+      syncBoxVisuals()
+      updateSnappingGuides(centerSnap, safeZoneSnap)
 
       if (state.isMediaElement) {
         const isEdgeHandle = ['n', 's', 'e', 'w'].includes(state.handleType)
@@ -1849,7 +1890,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       let hoverBoxHeight = newHeight
-      if (currentLayerObject instanceof PIXI.Text) {
+      if (currentLayerObject?.isFlowText && currentLayerObject._actualHeight !== undefined) {
+        hoverBoxHeight = currentLayerObject._actualHeight
+      } else if (currentLayerObject instanceof PIXI.Text) {
         hoverBoxHeight = calculateTextDimensions(currentLayerObject, latestLayerRef.current, newWidth).height
       }
 
@@ -1904,32 +1947,40 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const isTextElement = currentLayerObject instanceof PIXI.Text
       const isImageElement = currentLayer?.type === LAYER_TYPES.IMAGE || currentLayer?.type === LAYER_TYPES.VIDEO || currentLayer?.type === LAYER_TYPES.FRAME
 
-      if (isTextElement) {
-        currentLayerObject.updateText?.(false)
+      if (isTextElement || currentLayerObject?.isFlowText) {
+        if (currentLayerObject.updateText) currentLayerObject.updateText(false)
         const resizeState = interactionStateRef.current.resize
-        // [FIX] Use the dynamic interaction width/pos, NOT the stale Redux layer data
         const finalWidth = resizeState?._lastWidth ?? currentLayer.width ?? 100
         const finalX = resizeState?._lastX ?? (currentLayer.x || 0)
         const finalY = resizeState?._lastY ?? (currentLayer.y || 0)
 
-        const finalDimensions = calculateTextDimensions(currentLayerObject, currentLayer, finalWidth)
-        const finalUpdates = { 
+        let finalHeight
+        if (currentLayerObject.isFlowText) {
+          finalHeight = currentLayerObject._actualHeight
+        } else {
+          const finalDimensions = calculateTextDimensions(currentLayerObject, currentLayer, finalWidth)
+          finalHeight = finalDimensions.height
+        }
+
+        const finalUpdates = {
           width: finalWidth,
-          height: finalDimensions.height,
+          height: finalHeight,
           x: finalX,
           y: finalY
         }
 
-        if (currentLayerObject.style) {
+        if (currentLayerObject instanceof PIXI.Text && currentLayerObject.style) {
           currentLayerObject.style.wordWrapWidth = finalWidth
-          // Force text refresh one last time to match final Redux state exactly
           currentLayerObject.updateText?.(true)
+        } else if (currentLayerObject.isFlowText) {
+          currentLayerObject.wordWrapWidth = finalWidth
+          currentLayerObject.updateText?.()
         }
 
         const isCapture = latestMotionCaptureModeRef.current?.isActive
         if (latestOnUpdateRef.current && !isCapture) latestOnUpdateRef.current(finalUpdates)
-        
-        cachedTextHeightRef.current = finalDimensions.height
+
+        cachedTextHeightRef.current = finalHeight
         lastTextWidthRef.current = finalWidth
 
         // Removed visual reversion to N-1 to prevent flicker before Redux update N arrives
@@ -2019,11 +2070,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const rotation = currentLayer.rotation || 0
     const rotationRad = (rotation * Math.PI) / 180
 
-    const startFontSize = currentLayerObject instanceof PIXI.Text
-      ? (currentLayer.data?.fontSize || currentLayerObject.style?.fontSize || 24)
+    const startFontSize = (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText)
+      ? (currentLayer.data?.fontSize || currentLayerObject.style?.fontSize || currentLayerObject._fontSize || 24)
       : null
 
-    const isTextElement = currentLayerObject instanceof PIXI.Text
+    const isTextElement = currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText
     const { anchorX: stateAnchorX, anchorY: stateAnchorY } = resolveAnchors(currentLayer, currentLayerObject)
 
     // Check for captured transform overrides during motion capture
@@ -2104,12 +2155,21 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
     }
 
-    if (currentLayerObject instanceof PIXI.Text) {
-      const dims = calculateTextDimensions(currentLayerObject, currentLayer, currentSessionWidth)
-      cachedTextHeightRef.current = dims.height
-      lastTextWidthRef.current = currentSessionWidth
-      initialState.startHeight = dims.height
-      initialState.initialTextHeight = dims.height
+    if (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) {
+      const currentWidth = currentSessionWidth
+      let actualHeight = currentSessionHeight
+
+      if (currentLayerObject.isFlowText) {
+        actualHeight = currentLayerObject._actualHeight || currentSessionHeight
+      } else {
+        const dims = calculateTextDimensions(currentLayerObject, currentLayer, currentWidth)
+        actualHeight = dims.height
+      }
+
+      cachedTextHeightRef.current = actualHeight
+      lastTextWidthRef.current = currentWidth
+      initialState.startHeight = actualHeight
+      initialState.initialTextHeight = actualHeight
     }
 
     // Add dimensions badge
@@ -2151,12 +2211,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     dragStateAPI.setInteractionState(true, false, currentLayer.id)
 
-    const initialDims = currentLayerObject instanceof PIXI.Text
-      ? calculateTextDimensions(currentLayerObject, currentLayer)
-      : {
+    let initialDims
+    if (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) {
+      if (currentLayerObject.isFlowText) {
+        initialDims = { width: currentLayer.width || 100, height: currentLayerObject._actualHeight || 100 }
+      } else {
+        initialDims = calculateTextDimensions(currentLayerObject, currentLayer)
+      }
+    } else {
+      initialDims = {
         width: capturedLayer?.cropWidth ?? (initialState.isMediaElement ? (currentLayer.cropWidth ?? currentLayer.width ?? 100) : (currentLayer.width ?? 100)),
         height: capturedLayer?.cropHeight ?? (initialState.isMediaElement ? (currentLayer.cropHeight ?? currentLayer.height ?? 100) : (currentLayer.height ?? 100))
       }
+    }
 
     updateHoverBox(
       initialState.startX,
@@ -2278,12 +2345,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     dragStateAPI.setInteractionState(false, true, currentLayer.id)
 
     const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO || currentLayer.type === LAYER_TYPES.FRAME
-    const rotationDims = currentLayerObject instanceof PIXI.Text
-      ? calculateTextDimensions(currentLayerObject, currentLayer)
-      : {
+    let rotationDims
+    if (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) {
+      if (currentLayerObject.isFlowText) {
+        rotationDims = { width: currentLayer.width || 100, height: currentLayerObject._actualHeight || 100 }
+      } else {
+        rotationDims = calculateTextDimensions(currentLayerObject, currentLayer)
+      }
+    } else {
+      rotationDims = {
         width: capturedLayer?.cropWidth ?? (isMediaElement ? (currentLayer.cropWidth ?? currentLayer.width ?? 100) : (currentLayer.width ?? 100)),
         height: capturedLayer?.cropHeight ?? (isMediaElement ? (currentLayer.cropHeight ?? currentLayer.height ?? 100) : (currentLayer.height ?? 100))
       }
+    }
 
     const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
 
@@ -2378,7 +2452,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           : null
         const dims = effectiveDims ?? {
           width: captured?.cropWidth ?? (latestL.cropWidth ?? latestL.width ?? 100),
-          height: captured?.cropHeight ?? (latestL.cropHeight ?? latestL.height ?? 100)
+          height: (latestObj?.isFlowText && latestObj._actualHeight !== undefined)
+            ? latestObj._actualHeight
+            : (captured?.cropHeight ?? (latestL.cropHeight ?? latestL.height ?? 100))
         }
         updateHoverBox(latestObj.x, latestObj.y, dims.width, dims.height, newRotation, 0.5, 0.5, captured?.scaleX ?? latestL.scaleX ?? 1, captured?.scaleY ?? latestL.scaleY ?? 1, 1 / v.scale.x)
       }
@@ -2402,12 +2478,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const onRotateEnd = () => {
       if (!interactionStateRef.current.rotate) return
       if (updateThrottleRef.current) { cancelAnimationFrame(updateThrottleRef.current); updateThrottleRef.current = null }
-      if (pendingUpdateRef.current && latestOnUpdateRef.current) { 
+      if (pendingUpdateRef.current && latestOnUpdateRef.current) {
         const isCapture = latestMotionCaptureModeRef.current?.isActive
         if (!isCapture) {
           latestOnUpdateRef.current(pendingUpdateRef.current)
         }
-        pendingUpdateRef.current = null 
+        pendingUpdateRef.current = null
       }
 
       const v = latestViewportRef.current
@@ -2809,15 +2885,25 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       height = trackedLayer.cropHeight ?? trackedLayer.height ?? 100
 
       // For text elements, we still need to calculate the height based on word wrap
-      if (layerObject instanceof PIXI.Text) {
-        const textDims = calculateTextDimensions(layerObject, layer, width)
+      if (layerObject instanceof PIXI.Text || layerObject?.isFlowText) {
+        if (layerObject.isFlowText) {
+          height = layerObject._actualHeight || 100
+        } else {
+          const textDims = calculateTextDimensions(layerObject, layer, width)
+          height = textDims.height
+        }
+      }
+    } else if (layerObject instanceof PIXI.Text || layerObject?.isFlowText) {
+      // Text layers: Use text area width (user-settable) for selection box, but actual text height
+      if (layerObject?.isFlowText) {
+        width = layer.width || 100
+        // Use FlowTextContainer's internally-managed height from Pretext layout
+        height = layerObject._actualHeight || 100
+      } else {
+        const textDims = calculateTextDimensions(layerObject, layer)
+        width = layer.width || 100
         height = textDims.height
       }
-    } else if (layerObject instanceof PIXI.Text) {
-      // Text layers: Use text area width (user-settable) for selection box, but actual text height
-      const textDims = calculateTextDimensions(layerObject, layer)
-      width = layer.width || 100
-      height = textDims.height
     } else if (layerObject instanceof PIXI.Sprite || (layerObject instanceof PIXI.Container && (layerObject._imageSprite || layerObject._videoSprite))) {
       // Image and Video: single source of truth — cropped visible area (reactive PIXI or Redux)
       const mediaDims = getEffectiveLayerDimensions(layer, layerObject, motionCaptureMode)
@@ -2860,7 +2946,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Position the outline based on layer anchor
     let localBoundsX, localBoundsY
-    if (layerObject instanceof PIXI.Text) {
+    if (layerObject instanceof PIXI.Text || layerObject?.isFlowText) {
       // Text layers use anchor-based positioning for predictable resizing
       localBoundsX = -(scaledWidth * anchorX)
       localBoundsY = -(scaledHeight * anchorY)
@@ -2903,7 +2989,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
 
     // Handle creation based on element type
-    const isTextElement = layerObject instanceof PIXI.Text
+    const isTextElement = layerObject instanceof PIXI.Text || layerObject?.isFlowText
 
     // Check if we should hide side handles in motion capture mode
     // We hide them if we're in capture mode AND it's a text element (no area adjustment during capture)
@@ -2970,6 +3056,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // [FIX] IMMEDIATELY apply visibility rules to avoid flickering handles when past base step
     // We call this after adding all children to ensure they are properly hidden if necessary.
+
+
     updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, isAnimated)
 
   }, [
@@ -2992,6 +3080,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     forceUpdate,
     motionCaptureMode?.isActive, // Only recreate if capture mode state changes
     zoom, // Force redraw when zoom changes to update handle sizes
+    layerObjectsVersion, // [Bug 2 Fix] Force re-creation when PIXI instances are swapped
   ])
 
   // =========================================================================

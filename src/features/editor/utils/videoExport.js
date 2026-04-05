@@ -163,12 +163,46 @@ async function createExportVideoLayer(layer) {
 
 /**
  * Seeks a video element to an exact time and waits for the decoded frame.
+ * [PERF] For sequential frames (natural playback order), uses requestVideoFrameCallback
+ * which leverages the browser's hardware-accelerated decode pipeline instead of
+ * expensive random-access I-frame seeking.
  */
-function seekVideoToTime(video, targetTime) {
+const _hasRVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+
+function seekVideoToTime(video, targetTime, fps) {
     return new Promise(resolve => {
         if (Math.abs(video.currentTime - targetTime) < 0.01 && !video.seeking && video.readyState >= 2) {
             resolve();
             return;
+        }
+
+        // [PERF] Check if this is a sequential frame (natural playback order)
+        // If the target is roughly one frame ahead, let the video play naturally
+        // and use requestVideoFrameCallback for much faster decoding.
+        if (_hasRVFC && fps) {
+            const frameDelta = 1 / fps;
+            const delta = targetTime - video.currentTime;
+            const isSequential = delta > 0 && delta < frameDelta * 2.5;
+
+            if (isSequential && !video.paused) {
+                let timeoutId;
+                const callbackId = video.requestVideoFrameCallback(() => {
+                    if (timeoutId) clearTimeout(timeoutId);
+                    resolve();
+                });
+                timeoutId = setTimeout(() => {
+                    video.cancelVideoFrameCallback(callbackId);
+                    // Fallback to seek if natural playback didn't deliver in time
+                    video.currentTime = targetTime;
+                    const onSeeked = () => {
+                        video.removeEventListener('seeked', onSeeked);
+                        resolve();
+                    };
+                    video.addEventListener('seeked', onSeeked);
+                    setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 3000);
+                }, 200);
+                return;
+            }
         }
 
         let timeoutId;
@@ -196,7 +230,7 @@ function captureFrame(canvas) {
     return new Promise(resolve => {
         canvas.toBlob(blob => {
             if (!blob) {
-                const b64 = canvas.toDataURL('image/jpeg', 0.85);
+                const b64 = canvas.toDataURL('image/jpeg', 0.95);
                 const bin = atob(b64.split(',')[1]);
                 const arr = new Uint8Array(bin.length);
                 for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -204,7 +238,7 @@ function captureFrame(canvas) {
                 return;
             }
             blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
-        }, 'image/jpeg', 0.85);
+        }, 'image/jpeg', 0.95);
     });
 }
 
@@ -535,6 +569,7 @@ export const exportVideo = async ({
             backgroundColor: 0x000000,
             antialias: true,
             preserveDrawingBuffer: true,
+            roundPixels: true,
             resolution: 1,
         });
 
@@ -638,6 +673,7 @@ export const exportVideo = async ({
                         graphics.rect(0, 0, worldWidth, worldHeight);
                         graphics.fill(layer.data?.color || 0x000000);
                         pixiObject = graphics;
+                        pixiObject.isBackground = true;
 
                         // [COLOR FIX] Store background metadata for redrawing during colorChange actions in export
                         pixiObject._storedWidth = worldWidth;
@@ -704,6 +740,35 @@ export const exportVideo = async ({
 
         onProgress?.({ status: 'rendering', progress: 0 });
 
+        // [PERF] Start all export videos playing (muted) so sequential frame
+        // capture via requestVideoFrameCallback can use hardware-accelerated decoding
+        // instead of expensive random-access seeks for every frame.
+        for (const video of exportVideoElements) {
+            if (video) {
+                video.muted = true;
+                video.currentTime = 0;
+                video.playbackRate = 1;
+                try { await video.play(); } catch (e) { /* ignore autoplay blocks */ }
+            }
+        }
+
+        // [PERF] Build video lookup indexes once before the loop instead of per-frame.
+        // videoToLayerObj: video element -> PIXI container (reverse lookup)
+        // sceneVideoMap: sceneId -> [{ video, obj }] (scene-grouped for fast iteration)
+        const videoToLayerObj = new Map();
+        const sceneVideoMap = new Map();
+        for (const video of exportVideoElements) {
+            if (!video) continue;
+            const obj = video._parentLayer || [...layerObjects.values()].find(o => o._videoElement === video);
+            if (!obj) continue;
+            videoToLayerObj.set(video, obj);
+            const sceneId = obj._sceneId;
+            if (sceneId) {
+                if (!sceneVideoMap.has(sceneId)) sceneVideoMap.set(sceneId, []);
+                sceneVideoMap.get(sceneId).push({ video, obj });
+            }
+        }
+
         // =====================================================================
         // CHUNKED FRAME-BY-FRAME RENDER LOOP
         // =====================================================================
@@ -753,37 +818,46 @@ export const exportVideo = async ({
                 }
             });
 
-            for (const video of exportVideoElements) {
-                if (!video) continue;
-                
-                // Find parent layer and its scene info
-                const obj = video._parentLayer || [...layerObjects.values()].find(o => o._videoElement === video);
-                if (!obj || obj.destroyed || !obj.visible) continue;
-
-                const sceneId = obj._sceneId;
+            // [PERF] Only iterate videos in active scenes (using pre-built scene index)
+            // instead of all exportVideoElements. Seek in parallel.
+            const seekPromises = [];
+            sceneVideoMap.forEach((entries, sceneId) => {
                 const range = exportEngine?.sceneRanges?.get(sceneId);
-                if (!range) continue;
+                if (!range) return;
+                // Skip entire scene's videos if time is outside range
+                if (time < range.startTime - 0.001 || time >= range.endTime + 0.001) return;
 
-                const srcStart = video._layerSourceStartTime !== undefined ? video._layerSourceStartTime : (obj._sourceStartTime || 0);
-                const srcEnd = video._layerSourceEndTime !== undefined ? video._layerSourceEndTime : obj._sourceEndTime;
-                
-                const localTime = time - range.startTime;
-                let targetVideoTime = Math.max(0, localTime + srcStart);
-                if (srcEnd !== undefined) targetVideoTime = Math.min(targetVideoTime, srcEnd);
+                for (const { video, obj } of entries) {
+                    if (!obj || obj.destroyed || !obj.visible) continue;
 
-                await seekVideoToTime(video, targetVideoTime);
+                    const srcStart = video._layerSourceStartTime !== undefined ? video._layerSourceStartTime : (obj._sourceStartTime || 0);
+                    const srcEnd = video._layerSourceEndTime !== undefined ? video._layerSourceEndTime : obj._sourceEndTime;
 
-                // Update texture if needed
-                // Find which sprite this video belongs to
-                const sprites = [obj._videoSprite, obj._imageSprite, obj._backSprite].filter(Boolean);
-                for (const s of sprites) {
-                    if (s.texture?.source?.resource === video) {
-                        try { s.texture.source.update(); } catch (e) { /* texture/source may be destroyed */ }
-                    }
+                    const localTime = time - range.startTime;
+                    let targetVideoTime = Math.max(0, localTime + srcStart);
+                    if (srcEnd !== undefined) targetVideoTime = Math.min(targetVideoTime, srcEnd);
+
+                    seekPromises.push(
+                        seekVideoToTime(video, targetVideoTime, fps).then(() => {
+                            const sprites = [obj._videoSprite, obj._imageSprite, obj._backSprite].filter(Boolean);
+                            for (const s of sprites) {
+                                if (s.texture?.source?.resource === video) {
+                                    try { s.texture.source.update(); } catch (e) { /* texture/source may be destroyed */ }
+                                }
+                            }
+                        })
+                    );
                 }
+            });
+            if (seekPromises.length > 0) {
+                await Promise.all(seekPromises);
             }
 
             if (app && !app._exportDestroyed && app.renderer && !app.renderer.destroyed) {
+                // [GHOSTING FIX] Explicitly clear the framebuffer before rendering each frame.
+                // With preserveDrawingBuffer:true, some WebGL implementations retain previous
+                // frame data in semi-transparent/anti-aliased edge regions, causing ghost trails.
+                app.renderer.clear();
                 app.render();
             }
 

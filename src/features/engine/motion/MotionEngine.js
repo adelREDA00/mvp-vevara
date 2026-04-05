@@ -1,3 +1,4 @@
+import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { MotionTimeline } from './MotionTimeline.js'
 import { getActionHandler } from './actions/index.js'
@@ -7,11 +8,20 @@ import { getActionHandler } from './actions/index.js'
  * It manages which layers are registered and handles loading their 
  * motion flows into GSAP timelines.
  */
+// [PERF] Mobile detection for throttling
+const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+
 export class MotionEngine {
   constructor() {
     this.activeTimelines = new Map() // layerId -> MotionTimeline
     this.registeredObjects = new Map() // layerId -> PIXI.DisplayObject
     this.backgroundMedia = new Map() // layerId -> { _videoElement, _sceneId, _sourceStartTime, _sourceEndTime }
+    // [PERF] Index of only video-bearing registered objects for fast syncMedia iteration
+    this._videoObjects = new Map() // layerId -> PIXI.DisplayObject (subset of registeredObjects)
+
+    // [Dimentions Tracking] For relative occupancy filtering
+    this.projectWidth = 1920
+    this.projectHeight = 1080
 
     this.isPlaying = false
     this.onAllCompleteCallbacks = []
@@ -25,8 +35,19 @@ export class MotionEngine {
       onComplete: () => this._handleAllComplete(),
       onUpdate: () => {
         const time = this.masterTimeline.time()
-        // [SCRIB SYNC] Standard sync handles playhead movement and scrubbing
-        this.syncMedia(time, false)
+        // [PERF] On mobile, throttle syncMedia to ~30fps (every 33ms) to reduce CPU overhead.
+        // Audio sync tolerance is 100ms, so 33ms intervals are well within bounds.
+        const now = performance.now()
+        if (!_isMobileDevice || !this._lastSyncTime || now - this._lastSyncTime > 33) {
+          this.syncMedia(time, false)
+          this._lastSyncTime = now
+        }
+        // [PERF] Throttle refreshFlows to ~10fps during playback.
+        // Text reflow does not need per-frame precision during animation.
+        if (!this.isPlaying || !this._lastFlowRefresh || now - this._lastFlowRefresh > 100) {
+          this.refreshFlows()
+          this._lastFlowRefresh = now
+        }
         this._handleUpdate()
       }
     })
@@ -44,6 +65,9 @@ export class MotionEngine {
 
     // TRACKING: State for UI buffering indicator
     this._activeVideoElements = new Set()
+    // [PERF] Track all video elements registered with the engine for orphan cleanup
+    // Replaces document.querySelectorAll('video') DOM queries
+    this._allTrackedVideos = new Set()
     this.isInternalPaused = false // Track if engine paused itself due to buffering
     // When true, syncMedia forces all in-range videos muted (fast preview / tweenTo)
     this._muteVideosForFastPreview = false
@@ -51,15 +75,120 @@ export class MotionEngine {
     // [BLUR SCRUB FIX] Timestamp of last seek/scrub so getIsPlaying() can treat "recently seeked"
     // as "playing" for a short grace period. This stops useCanvasLayers from resetting layers
     // (e.g. blur filter) to Redux base state during timeline scrubbing.
+    // [STABILITY FIX] Metadata for recently seeked to prevent resets
     this._lastInteractionTime = 0
+    // [PERF] Flag for scrubbing mode - relaxes video sync thresholds during playhead dragging
+    this._isScrubbing = false
+  }
+
+  /**
+   * Update the engine's known project dimensions for accurate relative filtering.
+   */
+  setProjectConfig(config = {}) {
+    if (config.width) this.projectWidth = config.width
+    if (config.height) this.projectHeight = config.height
+  }
+
+  /**
+   * Refresh all Liquid Flow text layers by harvesting current world-space 
+   * coordinates of all potential obstacles.
+   */
+  refreshFlows() {
+    // 1. Gather all potential obstacles (non-text layers in the current screen)
+    const obstacles = []
+    
+    // [AUTOMATIC BOUNDARY DETECTION] Use the background layer to find true project dimensions
+    // fallback to standard 1080p if background not yet registered.
+    let screenWidth = 1920
+    let screenHeight = 1080
+
+    this.registeredObjects.forEach((obj) => {
+      if (obj.isBackground && !obj.destroyed) {
+        const bounds = obj.getBounds()
+        screenWidth = Math.max(screenWidth, bounds.width)
+        screenHeight = Math.max(screenHeight, bounds.height)
+      }
+    })
+
+    this.registeredObjects.forEach((obj, id) => {
+      // Skip destroyed objects or those without bounds
+      if (!obj || obj.destroyed || !obj.getBounds) return
+      
+      // [LIQUID FLOW] Only wrap around Shapes, Images, and Frames.
+      const isText = obj.isFlowText || obj instanceof PIXI.Text
+      const isBackground = obj.isBackground === true
+      const isMask = obj.isMask === true
+      
+      // Skip the source container (to avoid text wrapping around itself)
+      if (obj.isFlowText) return
+      
+      // [FILTER] Filter out environment layers (backgrounds, global masks)
+      if (obj.isBackground || obj.isMask) return
+
+      const bounds = obj.getBounds()
+      
+      // Hybrid Occupancy Filter: Skip layers that cover >95% of the screen
+      if (screenWidth > 0 && screenHeight > 0) {
+        const occupancyX = bounds.width / screenWidth
+        const occupancyY = bounds.height / screenHeight
+        
+        if (occupancyX > 0.95 && occupancyY > 0.95) {
+           return
+        }
+
+        // [POLYGON WRAP FIX] Harvest exact geometric path for perfect hugging
+        let localPath = obj._storedShapeData?.shapePath
+        if (!localPath && obj._storedShapeData?.shapeType !== 'circle' && obj.shapeType !== 'circle') {
+           const lb = obj.getLocalBounds()
+           localPath = [
+             {x: lb.x, y: lb.y},
+             {x: lb.x + lb.width, y: lb.y},
+             {x: lb.x + lb.width, y: lb.y + lb.height},
+             {x: lb.x, y: lb.y + lb.height}
+           ]
+        }
+        
+        // Convert to absolute world space
+        const worldPath = localPath ? localPath.map(p => obj.worldTransform.apply(p)) : null
+
+        obstacles.push({
+          id,
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          worldPath: worldPath,
+          shapeType: obj._storedShapeData?.shapeType || obj.shapeType || (obj instanceof PIXI.Graphics ? 'rect' : 'img'),
+          cornerRadius: obj._storedShapeData?.cornerRadius !== undefined ? obj._storedShapeData.cornerRadius : (obj.cornerRadius || 0)
+        })
+      }
+    })
+
+    // 2. Notify all text flow containers to recalculate wrapping
+    this.registeredObjects.forEach((obj) => {
+      if (obj.isFlowText && obj.refresh) {
+        // [SYNC FIX] Force updates to the text container's own world matrix
+        // so its inverse mappings use the absolute latest canvas coordinates,
+        // eliminating jitter and coordinate lag during drag interactions.
+        if (obj.getBounds) obj.getBounds()
+        obj.refresh(obstacles)
+      }
+    })
   }
 
   get isBuffering() {
-    // Engine is buffering ONLY if an ACTIVE (in-range) video is seeking OR not ready
+    // [PERF FIX] Only consider the timeline "buffering" if ALL active videos are
+    // stalled, not just one. Previously, one slow video would pause the entire
+    // timeline causing a play-pause oscillation that made all videos stutter.
+    // With multiple videos, brief individual buffering is normal and the timeline
+    // should keep advancing to avoid cascading stalls.
+    if (this._activeVideoElements.size === 0) return false
+    let bufferingCount = 0
     for (const video of this._activeVideoElements) {
-      if (video.seeking || video.readyState < 3) return true
+      if (video.seeking || video.readyState < 3) bufferingCount++
     }
-    return false
+    // Only stall the timeline if ALL active videos are buffering
+    return bufferingCount === this._activeVideoElements.size
   }
 
   /**
@@ -77,12 +206,19 @@ export class MotionEngine {
     if (customData.sourceStartTime !== undefined) pixiObject._sourceStartTime = customData.sourceStartTime
     if (customData.sourceEndTime !== undefined) pixiObject._sourceEndTime = customData.sourceEndTime
 
+    // [PERF] Track video elements for orphan cleanup (replaces DOM queries)
+    // and index video-bearing objects for fast syncMedia iteration
+    if (pixiObject._videoElement) {
+      this._allTrackedVideos.add(pixiObject._videoElement)
+      this._videoObjects.set(layerId, pixiObject)
+    }
+
     // [FIX] Immediate Sync: Sync media state immediately when a new layer is added.
     const currentTime = this.masterTimeline.time()
-    
+
     // [GSAP FIX] Ensure the object has all reactive properties defined so GSAP can safely set/animate them.
     this._ensureGSAPProperties(pixiObject)
-    
+
     this.syncMedia(currentTime, false)
   }
 
@@ -159,6 +295,19 @@ export class MotionEngine {
    * Unregister a PIXI object from the engine
    */
   unregisterLayerObject(layerId) {
+    // [PERF] Clean up video indexes
+    const obj = this.registeredObjects.get(layerId)
+    if (obj?._videoElement) {
+      this._videoObjects.delete(layerId)
+      // Only remove from tracked videos if not also in backgroundMedia
+      let stillTracked = false
+      this.backgroundMedia.forEach((data) => {
+        if (data._videoElement === obj._videoElement) stillTracked = true
+      })
+      if (!stillTracked) {
+        this._allTrackedVideos.delete(obj._videoElement)
+      }
+    }
     this.registeredObjects.delete(layerId)
     this.unloadMotionFlow(layerId)
   }
@@ -219,9 +368,25 @@ export class MotionEngine {
       _sourceEndTime: data.sourceEndTime,
       isBackground: true
     })
+
+    // [PERF] Track video element for orphan cleanup
+    if (videoElement) {
+      this._allTrackedVideos.add(videoElement)
+    }
   }
 
   unregisterBackgroundMedia(layerId) {
+    const data = this.backgroundMedia.get(layerId)
+    if (data?._videoElement) {
+      // Only remove from tracked set if not also in _videoObjects
+      let stillTracked = false
+      this._videoObjects.forEach((obj) => {
+        if (obj._videoElement === data._videoElement) stillTracked = true
+      })
+      if (!stillTracked) {
+        this._allTrackedVideos.delete(data._videoElement)
+      }
+    }
     this.backgroundMedia.delete(layerId)
   }
 
@@ -658,6 +823,7 @@ export class MotionEngine {
     }
 
     const mediaIntents = new Map() // videoElement -> { shouldPlay, targetTime, inAnyRange, layerId }
+    const videoToObject = new Map() // videoElement -> PIXI object (reverse lookup for texture updates)
 
     // Logic to calculate intent for a given object/data
     const processObject = (obj, id) => {
@@ -679,6 +845,16 @@ export class MotionEngine {
 
       if (!videoElement) return
 
+      // [PERF] Lazily promote to _videoObjects index on first discovery
+      if (id && !this._videoObjects.has(id) && this.registeredObjects.has(id)) {
+        this._videoObjects.set(id, obj)
+        this._allTrackedVideos.add(videoElement)
+      }
+
+      // [PERF] Build reverse lookup for O(1) access in texture update pass
+      if (!videoToObject.has(videoElement)) {
+        videoToObject.set(videoElement, obj)
+      }
 
       const sceneId = obj._sceneId
       const range = this.sceneRanges.get(sceneId)
@@ -732,12 +908,13 @@ export class MotionEngine {
       }
     }
 
-    // 1. Process active PIXI objects
-    this.registeredObjects.forEach((obj, id) => processObject(obj, id))
+    // 1. Process video-bearing PIXI objects only (skips text, shape, image layers)
+    // [PERF] Uses _videoObjects index instead of full registeredObjects iteration
+    this._videoObjects.forEach((obj, id) => processObject(obj, id))
 
     // 2. Process background media (not on stage but in project)
     this.backgroundMedia.forEach((data, id) => {
-      if (!this.registeredObjects.has(id)) {
+      if (!this._videoObjects.has(id)) {
         processObject(data, id)
       }
     })
@@ -778,11 +955,12 @@ export class MotionEngine {
 
     // 3. Final Pass: Apply intents to DOM video elements
     mediaIntents.forEach((intent, videoElement) => {
-      // [Bug 1 Fix] Tighter sync tolerance:
-      // - 100ms (0.1s) for active playback (standard A/V sync window)
-      // - 40ms (0.04s) for paused/static sync (perfect alignment)
-      // - 0 for forced seeks (ensure exact frame match)
-      const threshold = force ? 0 : (isPaused ? 0.04 : 0.1)
+      // [PERF FIX] Adaptive sync tolerance based on context:
+      // - 0 for forced seeks (exact frame match for programmatic jumps)
+      // - 150ms during continuous scrubbing (user is dragging fast, don't seek every pixel)
+      // - 40ms for paused/static (perfect alignment after releasing scrub)
+      // - 250ms for active playback (let the browser's video pipeline run freely)
+      const threshold = force ? 0 : (isPaused ? (this._isScrubbing ? 0.15 : 0.04) : 0.25)
       const deviation = Math.abs(videoElement.currentTime - intent.targetTime)
 
       const isSeeking = videoElement.seeking
@@ -790,13 +968,22 @@ export class MotionEngine {
       // [REFINED SEEK GUARD]
       // Allow overriding a seek if:
       // 1. We are NOT seeking (standard deviation check)
-      // 2. OR we ARE seeking, but the targetTime has moved significantly (>0.2s) 
+      // 2. OR we ARE seeking, but the targetTime has moved significantly (>0.2s)
       //    since the last time we updated this videoElement. This prevents "decoder lockout"
       //    where a slow decoder stays stale while the playhead has moved on.
       const lastTarget = videoElement._lastMotionTargetTime || -1
-      const targetMovedSignificantly = Math.abs(intent.targetTime - lastTarget) > 0.2
+      // [PERF] During scrubbing, allow larger movement before overriding a pending seek.
+      // This prevents seek storms when the user drags fast across the timeline.
+      const overrideThreshold = this._isScrubbing ? 0.5 : 0.2
+      const targetMovedSignificantly = Math.abs(intent.targetTime - lastTarget) > overrideThreshold
 
-      if (intent.targetTime !== -1 && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
+      // [PERF FIX] During active playback, don't re-seek videos that are already
+      // playing and roughly in sync. Let the browser's hardware decoder run freely.
+      // Only seek when deviation is large enough to be noticeable.
+      const isAlreadyPlaying = !videoElement.paused && intent.shouldPlay
+      const needsSeek = !isAlreadyPlaying || deviation > threshold
+
+      if (intent.targetTime !== -1 && needsSeek && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
 
         videoElement.currentTime = intent.targetTime
         videoElement._lastMotionTargetTime = intent.targetTime // Track last request
@@ -838,20 +1025,26 @@ export class MotionEngine {
         }
       }
 
-      // [A/V SYNC FIX] Force the PIXI VideoSource to update its WebGL texture immediately.
-      // Because audio plays instantly from the HTMLAudio/Video element, but WebGL takes 
-      // an extra frame to pull from the canvas/video, visual playback appears ~1-2 frames behind.
-      // By forcing update here (tied to GSAP ticker), we minimize that pipeline delay.
-      if (intent.shouldPlay || (!isPaused && deviation > 0)) {
-        // Find the PIXI object for this video
-        const obj = [...this.registeredObjects.values()].find(o =>
-          o._videoElement === videoElement ||
-          (o._videoSprite && o._videoSprite.texture?.source?.resource === videoElement)
-        );
-        if (obj) {
-          const sprite = obj._videoSprite;
-          if (sprite && sprite.texture && sprite.texture.source) {
-            sprite.texture.source.update();
+      // [A/V SYNC FIX] Force the PIXI VideoSource to update its WebGL texture.
+      // When a video is PAUSED and we've just seeked, PIXI won't auto-update the
+      // texture, so we must force it. During active playback, PIXI's VideoResource
+      // already auto-updates the texture each frame, so we skip the manual call
+      // to avoid redundant GPU uploads (especially costly with multiple videos).
+      //
+      // [PERF] Only force-update for paused/seeked videos, not actively playing ones.
+      const justSeeked = force || (deviation > threshold && needsSeek)
+      const videoIsPlaying = !videoElement.paused && intent.shouldPlay
+      if (justSeeked || (!videoIsPlaying && (intent.shouldPlay || (!isPaused && deviation > 0)))) {
+        const currentVideoTime = videoElement.currentTime
+        const lastUpdated = videoElement._lastTextureUpdateTime
+        if (force || currentVideoTime !== lastUpdated) {
+          const obj = videoToObject.get(videoElement)
+          if (obj) {
+            const sprite = obj._videoSprite
+            if (sprite && sprite.texture && sprite.texture.source) {
+              sprite.texture.source.update()
+              videoElement._lastTextureUpdateTime = currentVideoTime
+            }
           }
         }
       }
@@ -859,11 +1052,11 @@ export class MotionEngine {
 
     // Orphan cleanup: pause any playing video elements NOT tracked by mediaIntents.
     // Run at most every 3 seconds to avoid main-thread stutter.
+    // [PERF] Uses tracked set instead of document.querySelectorAll('video') DOM query.
     const now = Date.now()
     if (!this._lastCleanupTime || now - this._lastCleanupTime > 3000) {
       this._lastCleanupTime = now
-      const allVideos = document.querySelectorAll('video')
-      allVideos.forEach(v => {
+      this._allTrackedVideos.forEach(v => {
         if (!v.paused && !mediaIntents.has(v)) {
           v.pause()
         }
@@ -881,6 +1074,14 @@ export class MotionEngine {
       this.masterTimeline.remove(timeline.instance)
       timeline.destroy()
       this.activeTimelines.delete(layerId)
+    }
+
+    // [COLOR SYNC FIX] Remove animated state handlers if this layer no longer has motion
+    const obj = this.registeredObjects.get(layerId)
+    if (obj) {
+      delete obj._animatedColorState
+      delete obj._applyAnimatedColor
+      delete obj._lastAppliedColor
     }
   }
 
@@ -906,6 +1107,11 @@ export class MotionEngine {
     // Clear flip metadata from registered objects before clearing timelines
     this.registeredObjects.forEach((obj) => {
       if (obj._flipActions) delete obj._flipActions
+      
+      // [COLOR SYNC FIX] Clear persistent animated state handlers on full engine restart
+      delete obj._animatedColorState
+      delete obj._applyAnimatedColor
+      delete obj._lastAppliedColor
     })
     this.masterTimeline.clear()
     this.activeTimelines.forEach(tl => tl.destroy())
@@ -962,14 +1168,19 @@ export class MotionEngine {
     this._muteVideosForFastPreview = false
     this.masterTimeline.pause(0)
     this.isPlaying = false
+    // [FLOW TEXT FIX] Ensure layout is properly restored when returning to time 0
+    this.refreshFlows()
   }
 
   /**
-   * Seek to a specific time (seconds)
+   * Seek to a specific time (seconds).
+   * Full seek: forces exact video sync, text reflow, and flip state evaluation.
+   * Use for programmatic seeks (scene clicks, step navigation, etc).
    */
   seek(time) {
     this._muteVideosForFastPreview = false
     this._lastInteractionTime = Date.now()
+    this._isScrubbing = false
 
     // [FIX] Kill any active scrubbing tweens from tweenTo() to prevent fighting
     gsap.killTweensOf(this.masterTimeline, { time: true })
@@ -1004,6 +1215,63 @@ export class MotionEngine {
 
     // Force immediate media sync during seek
     this.syncMedia(time, true)
+
+    // [FLOW TEXT FIX] Ensure word wrapping calculates the latest layout synchronously
+    this.refreshFlows()
+
+    this._handleUpdate()
+  }
+
+  /**
+   * Lightweight seek optimized for continuous playhead scrubbing.
+   * [PERF] Skips expensive operations that are unnecessary during rapid mouse drags:
+   * - Uses relaxed video sync (force=false) instead of force=true
+   * - Throttles refreshFlows to every 150ms instead of every call
+   * - Throttles flip state evaluation to every 100ms
+   * - Applies animated state only to video-bearing objects + backgrounds
+   * This makes scrubbing smooth with multiple video layers on mobile/low-end.
+   */
+  scrub(time) {
+    this._lastInteractionTime = Date.now()
+    this._isScrubbing = true
+
+    // Kill active tweenTo transitions
+    gsap.killTweensOf(this.masterTimeline, { time: true })
+
+    // Ensure child timelines can scrub with parent
+    this.activeTimelines.forEach(tl => {
+      if (tl.instance && tl.instance.paused()) tl.instance.paused(false)
+    })
+
+    this.masterTimeline.pause(time)
+    this.isPlaying = false
+
+    // [PERF] Apply animated state (color/blur/corner) — needed for visual accuracy.
+    // But skip flip evaluation on every scrub (throttled below).
+    this.registeredObjects.forEach((obj) => {
+      if (obj.destroyed) return
+      if (obj._applyAnimatedColor) obj._applyAnimatedColor()
+      if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
+      if (obj._applyAnimatedCornerRadius) obj._applyAnimatedCornerRadius()
+    })
+
+    // [PERF] Throttle flip state evaluation during scrubbing (~100ms)
+    const now = performance.now()
+    if (!this._lastFlipEvalTime || now - this._lastFlipEvalTime > 100) {
+      this._evaluateFlipStates(time)
+      this._lastFlipEvalTime = now
+    }
+
+    // [PERF] Use non-forced sync: allows 40ms tolerance for paused videos,
+    // avoiding redundant seeks that stall the video decoder.
+    this.syncMedia(time, false)
+
+    // [PERF] Throttle text reflow during scrubbing (~150ms)
+    if (!this._lastScrubFlowRefresh || now - this._lastScrubFlowRefresh > 150) {
+      this.refreshFlows()
+      this._lastScrubFlowRefresh = now
+    }
+
     this._handleUpdate()
   }
 
@@ -1096,6 +1364,8 @@ export class MotionEngine {
         this._lastInteractionTime = Date.now()
         // Evaluate flip visibility during fast preview
         this._evaluateFlipStates(this.masterTimeline.time())
+        // [FLOW TEXT FIX] Ensure continuous word wrap recalculation during fast-preview playback
+        this.refreshFlows()
         // Internal tick for UI/React sync
         this._handleUpdate()
       },
@@ -1104,6 +1374,8 @@ export class MotionEngine {
         this.isPlaying = false
         // Final flip evaluation at target time
         this._evaluateFlipStates(targetTime)
+        // [FLOW TEXT FIX] Ensure final rest layout state is accurate
+        this.refreshFlows()
         if (onComplete) onComplete()
         this._handleAllComplete()
       }

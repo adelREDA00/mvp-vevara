@@ -31,7 +31,7 @@ function ToolsPanel({ onClose }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#0f1015',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#090a0d',
         backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',

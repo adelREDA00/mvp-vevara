@@ -117,9 +117,13 @@ export function getEffectiveLayerDimensions(layer, layerObject, motionCaptureMod
   }
 
   if (layer.type === 'text') {
+    // [DYNAMIC SYNC] For flow-text layers, use the actual calculated layout height & width if available.
+    // This keeps the selection box and interaction areas perfectly synchronized with the wrapped text.
+    const dynamicHeight = layerObject?._actualHeight || layer.height || DEFAULT_DIMENSION / 5
+    const dynamicWidth = layerObject?._actualWidth || layer.width || DEFAULT_DIMENSION
     return {
-      width: capturedLayer?.width ?? layer.width ?? DEFAULT_DIMENSION,
-      height: capturedLayer?.height ?? layer.height ?? DEFAULT_DIMENSION / 5
+      width: capturedLayer?.width ?? dynamicWidth,
+      height: capturedLayer?.height ?? dynamicHeight
     }
   }
 
