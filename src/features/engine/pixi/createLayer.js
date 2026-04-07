@@ -100,11 +100,32 @@ export function createTextLayer(config) {
   // Store layer ID for reference
   if (config.id) {
     text.label = `layer-${config.id}`
+    text.data = data // [FIX] Attach data to standard PIXI.Text so revealProgress can find content
   }
 
   // Enable interactions
   text.eventMode = 'static'
   text.cursor = 'pointer'
+
+  // TYPEWRITER: Support character reveal for standard text layers too
+  text._revealProgress = 1
+  Object.defineProperty(text, 'revealProgress', {
+    get() { return this._revealProgress },
+    set(val) {
+      if (this._revealProgress !== val) {
+        this._revealProgress = Math.max(0, Math.min(1, val))
+        // [FIX] Prioritize live data content. If it changes in Redux, it must change here.
+        // We only fallback to _fullContent if data is missing or stale.
+        const fullContent = this.data?.content ?? this._fullContent ?? this.text ?? 'Text'
+        this._fullContent = fullContent
+        
+        const graphemes = [...fullContent]
+        const visibleCount = Math.floor(this._revealProgress * graphemes.length)
+        this.text = graphemes.slice(0, visibleCount).join('')
+      }
+    },
+    configurable: true
+  })
 
   return text
 }

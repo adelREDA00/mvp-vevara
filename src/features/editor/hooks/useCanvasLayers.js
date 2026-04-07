@@ -1409,10 +1409,22 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const style = pixiObject.style || {}
             
             // Content Sync
-            if (pixiObject.text !== (layer.data.content || '')) {
-              pixiObject.text = layer.data.content || ''
+            const targetContent = layer.data.content || ''
+            if (pixiObject._fullContent !== targetContent || (pixiObject._revealProgress >= 1 && pixiObject.text !== targetContent)) {
+              pixiObject._fullContent = targetContent
+              pixiObject.data = layer.data // [FIX] Sync live data object so setter sees the new content
+              
+              if (pixiObject._revealProgress !== undefined && pixiObject._revealProgress < 1) {
+                  // If typewriter is active, force recalculate the sliced string
+                  const currentProgress = pixiObject._revealProgress
+                  pixiObject._revealProgress = -1
+                  pixiObject.revealProgress = currentProgress
+              } else {
+                  pixiObject.text = targetContent
+              }
+              
               if (pixiObject.updateText) pixiObject.updateText(true)
-              calculateTextHeight(layerId, pixiObject.text, style.fontSize || 16, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
+              calculateTextHeight(layerId, targetContent, style.fontSize || 16, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
             }
 
             // Word Wrap Width Sync

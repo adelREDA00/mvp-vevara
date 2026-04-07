@@ -1015,6 +1015,8 @@ const projectSlice = createSlice({
             },
           }
           step.layerActions[layerId].push(newAction)
+
+          // Removed [TYPEWRITER] opacity=0 base state mutation in favor of pure revealProgress logic
         }
         state.isDirty = true
         state.version++
@@ -1057,7 +1059,9 @@ const projectSlice = createSlice({
       if (motionFlow) {
         const step = motionFlow.steps.find(s => s.id === stepId)
         if (step && step.layerActions[layerId]) {
+          const actionToDelete = step.layerActions[layerId].find(a => a.id === actionId)
           step.layerActions[layerId] = step.layerActions[layerId].filter(a => a.id !== actionId)
+
           // Clean up if no actions left for this layer
           if (step.layerActions[layerId].length === 0) {
             delete step.layerActions[layerId]

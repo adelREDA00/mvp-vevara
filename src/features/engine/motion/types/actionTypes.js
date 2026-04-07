@@ -14,6 +14,7 @@ export const ACTION_TYPES = {
   COLOR_CHANGE: 'colorChange',
   FLIP: 'flip',
   CORNER_RADIUS: 'cornerRadius',
+  TYPEWRITER: 'typewriter',
 }
 
 /**

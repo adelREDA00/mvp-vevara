@@ -518,7 +518,9 @@ export class MotionEngine {
           cornerRadius: baseLayer?.data?.cornerRadius ?? (obj._storedShapeData?.cornerRadius ?? 0),
           color: baseLayer?.data?.fill || baseLayer?.data?.color || null,
           // Card frame flip state — defaults to true (front) if not explicitly set
-          showingFront: baseLayer?.data?.showingFront !== false
+          showingFront: baseLayer?.data?.showingFront !== false,
+          // [TYPEWRITER] Track reveal progress across steps
+          revealProgress: baseLayer?.revealProgress ?? (obj.revealProgress !== undefined ? obj.revealProgress : 1)
         })
       })
     }
@@ -574,14 +576,11 @@ export class MotionEngine {
           // perfectly represents the layer's predicted origin state at the beginning of the scene.
           if (startState) {
             timeline.add((gsapTimeline) => {
-              gsapTimeline.set(pixiObject, {
+              const baseline = {
                 x: startState.x,
                 y: startState.y,
                 rotation: startState.rotation * (Math.PI / 180),
                 alpha: startState.opacity !== undefined ? startState.opacity : 1,
-                // [SYNC FIX] Force baseline for crop and side properties at scene start.
-                // This ensures GSAP forcibly resets these properties during backward seeks,
-                // preventing "sticky" visual states from previous motion steps.
                 cropX: startState.cropX !== undefined ? startState.cropX : 0,
                 cropY: startState.cropY !== undefined ? startState.cropY : 0,
                 cropWidth: startState.cropWidth,
@@ -589,7 +588,14 @@ export class MotionEngine {
                 mediaWidth: startState.mediaWidth,
                 mediaHeight: startState.mediaHeight,
                 showingFront: startState.showingFront !== false
-              }, startTimeOffset) // Anchor explicitly at the beginning of the scene
+              }
+
+              // [TYPEWRITER] Only apply revealProgress if the object supports it
+              if (pixiObject.revealProgress !== undefined) {
+                baseline.revealProgress = startState.revealProgress !== undefined ? startState.revealProgress : 1
+              }
+
+              gsapTimeline.set(pixiObject, baseline, startTimeOffset) // Anchor explicitly at the beginning of the scene
 
               // Scale must be set on the inner .scale object natively
               if (pixiObject.scale) {
@@ -629,6 +635,10 @@ export class MotionEngine {
             ? action.values.duration / 1000
             : stepDuration
 
+          if (action.type === 'typewriter') {
+            console.log(`[DEBUG] MotionEngine: preparing typewriter action for ${layerId}`, { stepStartTime, actionDuration })
+          }
+
           // Clamp: never let a tween extend past the scene boundary
           const maxDuration = sceneEndTime - stepStartTime
           if (maxDuration > 0) {
@@ -655,6 +665,9 @@ export class MotionEngine {
           builder.timeline.add((gsapTimeline) => {
             const tween = handler.execute(pixiObject, action, actionOptions)
             if (tween) {
+              if (action.type === 'typewriter') {
+                console.log(`[DEBUG] MotionEngine: adding typewriter tween to timeline for ${layerId}`)
+              }
               gsapTimeline.add(tween, stepStartTime)
             }
           })
@@ -700,6 +713,10 @@ export class MotionEngine {
               state.rotation += dangle
               if (dangle !== 0) updatedDeltas.add('rotation')
             }
+          } else if (action.type === 'typewriter') {
+            console.log(`[DEBUG] MotionEngine: updating state tracker for typewriter ${layerId}`)
+            state.revealProgress = 1
+            state.opacity = 1
           } else if (action.type === 'fade') {
             if (action.values?.opacity !== undefined) {
               state.opacity = action.values.opacity

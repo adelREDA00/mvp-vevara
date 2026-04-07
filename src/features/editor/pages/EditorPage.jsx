@@ -3707,6 +3707,43 @@ function EditorPage() {
         }
         break
       }
+      case 'typewriter': {
+        // [TYPEWRITER] Dispatch the action directly to Redux
+        dispatch(addSceneMotionAction({
+          sceneId: currentSceneId,
+          stepId: editingStepId,
+          layerId,
+          type: 'typewriter',
+          values: {
+            duration: 1000, // Default duration
+            easing: 'none'
+          }
+        }))
+
+        // [FAST PREVIEW] Provide immediate visual feedback on the canvas when the user adds the effect
+        if (pixiObj && typeof pixiObj.revealProgress !== 'undefined') {
+          // Kill any lingering Tweens on revealProgress to prevent conflicts
+          gsap.killTweensOf(pixiObj, "revealProgress")
+          
+          // Reset to 0 visually and animate to 1 smoothly
+          pixiObj.revealProgress = 0
+          gsap.to(pixiObj, {
+            revealProgress: 1,
+            duration: 1.0, // [FIX] Speed up to 1s to match standard fast preview
+            ease: "none",
+            onComplete: () => {
+              // Mark as tracked so MotionPanel's "tryPreview" or state sync knows an interaction occurred
+              if (tracked) {
+                tracked.didTypewriter = true
+              }
+              if (effectiveMotionCaptureMode?.onInteractionEnd) {
+                effectiveMotionCaptureMode.onInteractionEnd(layerId)
+              }
+            }
+          })
+        }
+        break
+      }
       default:
         break
     }

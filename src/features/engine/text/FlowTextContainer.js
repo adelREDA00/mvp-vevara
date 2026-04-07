@@ -32,6 +32,7 @@ export class FlowTextContainer extends PIXI.Container {
     this._lineHeight = this._fontSize * 1.2
     this._wordWrapWidth = config.width || 200
     this._actualHeight = this._lineHeight // Initial estimate before first layout
+    this._revealProgress = 1 // 0 to 1 for typewriter effect
     
     // Pooling: re-use text objects for lines
     this._linePool = []
@@ -146,6 +147,18 @@ export class FlowTextContainer extends PIXI.Container {
   }
 
   _syncLines(linesData) {
+    this._lastLines = linesData // Store for revealProgress updates
+    
+    // 1. Calculate total character count (grapheme-aware)
+    let totalChars = 0
+    for (let i = 0; i < linesData.length; i++) {
+        // [PERF] Use spread to handle multi-code-unit graphemes correctly
+        totalChars += [...linesData[i].text].length
+    }
+    
+    let charsToShow = Math.floor(this._revealProgress * totalChars)
+    console.log(`[DEBUG] FlowTextContainer._syncLines id=${this.id} reveal=${this._revealProgress.toFixed(2)} total=${totalChars} show=${charsToShow}`)
+
     // Return all active lines to pool
     this._activeLines.forEach(l => l.visible = false)
     this._activeLines = []
@@ -177,7 +190,23 @@ export class FlowTextContainer extends PIXI.Container {
         lineObj.style.align = this._textAlign || 'left'
       }
 
-      lineObj.text = ld.text
+      // [TYPEWRITER] Slice text based on reveal progress
+      let lineText = ld.text
+      if (this._revealProgress < 1) {
+          const graphemes = [...lineText]
+          const lineLen = graphemes.length
+          
+          if (charsToShow <= 0) {
+              lineText = ''
+          } else if (charsToShow < lineLen) {
+              lineText = graphemes.slice(0, charsToShow).join('')
+              charsToShow = 0
+          } else {
+              charsToShow -= lineLen
+          }
+      }
+
+      lineObj.text = lineText
       // Position each line at layout offset + alignment adjustment.
       const availableW = ld.spanWidth || (this._wordWrapWidth - ld.x)
       let alignX = ld.x
@@ -189,7 +218,7 @@ export class FlowTextContainer extends PIXI.Container {
       }
       lineObj.x = alignX
       lineObj.y = ld.y
-      lineObj.visible = true
+      lineObj.visible = lineText.length > 0
       
       // SCALE LOCK: Ensure no character distortion
       lineObj.scale.set(1)
@@ -228,6 +257,20 @@ export class FlowTextContainer extends PIXI.Container {
   }
 
   get resolution() { return this._resolution || 2 }
+  
+  /**
+   * revealProgress: 0 to 1 property used by TypewriterAction for character reveal.
+   */
+  get revealProgress() { return this._revealProgress }
+  set revealProgress(val) {
+      if (this._revealProgress !== val) {
+          console.log(`[DEBUG] FlowTextContainer.revealProgress set id=${this.id} val=${val.toFixed(3)}`)
+          this._revealProgress = Math.max(0, Math.min(1, val))
+          if (this._lastLines) {
+              this._syncLines(this._lastLines)
+          }
+      }
+  }
 
   // [BUG FIX] Decouple logical width (wrapping boundary) from scale
   get wordWrapWidth() { return this._wordWrapWidth }
