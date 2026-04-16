@@ -10,6 +10,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
     const containerRef = useRef(null)
     const [isVisible, setIsVisible] = useState(false)
     const [isLoaded, setIsLoaded] = useState(false)
+    const [isPlaying, setIsPlaying] = useState(false)
     const [shouldRenderVideo, setShouldRenderVideo] = useState(false)
 
     useEffect(() => {
@@ -41,12 +42,17 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
         if (!videoRef.current) return
 
         if (isVisible) {
-            videoRef.current.play().catch(e => {
-                // Autoplay might be blocked until user interaction
-                // console.log('Autoplay blocked or video missing:', e)
-            })
+            if (videoRef.current) {
+                videoRef.current.muted = true
+                videoRef.current.play()
+                    .then(() => setIsPlaying(true))
+                    .catch(() => setIsPlaying(false))
+            }
         } else {
-            videoRef.current.pause()
+            if (videoRef.current) {
+                videoRef.current.pause()
+                setIsPlaying(false)
+            }
         }
     }, [isVisible, shouldRenderVideo])
 
@@ -60,11 +66,10 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                 <video
                     ref={videoRef}
                     src={project.videoUrl}
-                    className={`w-full h-full object-contain transition-opacity duration-500 pointer-events-none ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    className={`w-full h-full object-contain transition-opacity duration-500 pointer-events-none ${isPlaying && isLoaded ? 'opacity-100' : 'opacity-0'}`}
                     muted
                     loop
                     playsInline
-                    autoPlay
                     preload="metadata"
                     onLoadedData={() => setIsLoaded(true)}
                     onCanPlay={() => setIsLoaded(true)}
