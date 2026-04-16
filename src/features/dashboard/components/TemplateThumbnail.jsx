@@ -5,7 +5,7 @@ import { Layers } from 'lucide-react'
  * Optimized TemplateThumbnail component with lazy-loading videos.
  * Only renders the <video> element when it's near the viewport.
  */
-const TemplateThumbnail = memo(({ project, buttonText = "Edit Template", hasInteracted = false }) => {
+const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
     const videoRef = useRef(null)
     const containerRef = useRef(null)
     const [isVisible, setIsVisible] = useState(false)
@@ -39,14 +39,28 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template", hasInte
     }, [project._id])
 
     useEffect(() => {
-        if (!videoRef.current) return
-
-        if (isVisible) {
-            if (videoRef.current) {
+        const attemptPlay = () => {
+            if (isVisible && videoRef.current) {
                 videoRef.current.muted = true
                 videoRef.current.play()
                     .then(() => setIsPlaying(true))
                     .catch(() => setIsPlaying(false))
+            }
+        }
+
+        if (isVisible) {
+            attemptPlay()
+            
+            // If play was blocked, it will stay hidden (isPlaying: false).
+            // We listen for any touch/click on the document to try again.
+            // This is the most robust way to unlock autoplay on mobile.
+            if (!isPlaying) {
+                window.addEventListener('touchstart', attemptPlay, { once: true })
+                window.addEventListener('mousedown', attemptPlay, { once: true })
+                return () => {
+                    window.removeEventListener('touchstart', attemptPlay)
+                    window.removeEventListener('mousedown', attemptPlay)
+                }
             }
         } else {
             if (videoRef.current) {
@@ -54,7 +68,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template", hasInte
                 setIsPlaying(false)
             }
         }
-    }, [isVisible, shouldRenderVideo, hasInteracted])
+    }, [isVisible, shouldRenderVideo, isPlaying])
 
     return (
         <div 

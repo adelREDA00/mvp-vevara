@@ -90,17 +90,8 @@ const DashboardPage = () => {
     const [canScrollRight, setCanScrollRight] = useState(false)
     const [isMessageCollapsed, setIsMessageCollapsed] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
-    const [hasInteracted, setHasInteracted] = useState(false)
-
-    useEffect(() => {
-        const unlock = () => setHasInteracted(true)
-        window.addEventListener('touchstart', unlock, { once: true })
-        window.addEventListener('mousedown', unlock, { once: true })
-        return () => {
-            window.removeEventListener('touchstart', unlock)
-            window.removeEventListener('mousedown', unlock)
-        }
-    }, [])
+    const [bottomFeedback, setBottomFeedback] = useState('')
+    const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
 
     const CATEGORIES = [
         'All',
@@ -282,6 +273,22 @@ const DashboardPage = () => {
             setIsDeleting(false)
         }
     }
+    const handleFeedbackSubmit = async (e) => {
+        if (e) e.preventDefault();
+        if (!bottomFeedback.trim() || feedbackStatus === 'loading') return;
+
+        try {
+            setFeedbackStatus('loading');
+            await api.post('/feedback', { text: bottomFeedback });
+            setFeedbackStatus('success');
+            setBottomFeedback('');
+            setTimeout(() => setFeedbackStatus('idle'), 3000);
+        } catch (error) {
+            console.error('Failed to send feedback:', error);
+            setFeedbackStatus('error');
+            setTimeout(() => setFeedbackStatus('idle'), 3000);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[#7c4af0]/20 flex overflow-x-hidden">
@@ -520,7 +527,7 @@ const DashboardPage = () => {
                                                 className="group cursor-pointer"
                                                 onClick={() => handleDuplicateTemplate(project._id)}
                                             >
-                                                <TemplateThumbnail project={project} hasInteracted={hasInteracted} />
+                                                <TemplateThumbnail project={project} />
                                                 <div className="px-0.5">
                                                     <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
                                                     <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
@@ -608,18 +615,36 @@ const DashboardPage = () => {
                                                         <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
                                                     </div>
 
-                                                    <div className="relative group/input">
+                                                    <form 
+                                                        onSubmit={handleFeedbackSubmit}
+                                                        className="relative group/input"
+                                                    >
                                                         <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
-                                                            <input
-                                                                type="text"
-                                                                placeholder="Type your idea, request or a bug report..."
-                                                                className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
-                                                            />
-                                                            <button className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all">
-                                                                Submit
-                                                            </button>
+                                                            {feedbackStatus === 'success' ? (
+                                                                <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
+                                                                    <span className="font-bold text-[13px]">Thank you for your feedback!</span>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={bottomFeedback}
+                                                                        onChange={(e) => setBottomFeedback(e.target.value)}
+                                                                        disabled={feedbackStatus === 'loading'}
+                                                                        placeholder="Type your idea, request or a bug report..."
+                                                                        className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
+                                                                    />
+                                                                    <button 
+                                                                        type="submit"
+                                                                        disabled={!bottomFeedback.trim() || feedbackStatus === 'loading'}
+                                                                        className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        {feedbackStatus === 'loading' ? '...' : 'Submit'}
+                                                                    </button>
+                                                                </>
+                                                            )}
                                                         </div>
-                                                    </div>
+                                                    </form>
                                                 </div>
                                             </div>
                                         )}
