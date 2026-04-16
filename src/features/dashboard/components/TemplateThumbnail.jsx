@@ -7,6 +7,7 @@ import { Layers } from 'lucide-react'
  */
 const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
     const videoRef = useRef(null)
+    const containerRef = useRef(null)
     const [isVisible, setIsVisible] = useState(false)
     const [isLoaded, setIsLoaded] = useState(false)
     const [shouldRenderVideo, setShouldRenderVideo] = useState(false)
@@ -24,11 +25,11 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
             },
             { 
                 threshold: 0.01,
-                rootMargin: '200px' // Start loading video 200px before it enters viewport
+                rootMargin: '600px' // Start loading video 600px before it enters viewport
             }
         )
 
-        const currentRef = videoRef.current || document.getElementById(`template-container-${project._id}`)
+        const currentRef = containerRef.current
         if (currentRef) {
             observer.observe(currentRef)
         }
@@ -51,6 +52,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
 
     return (
         <div 
+            ref={containerRef}
             id={`template-container-${project._id}`}
             className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] md:rounded-[16px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/30 transition-all duration-300 shadow-sm"
         >
@@ -62,8 +64,10 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                     muted
                     loop
                     playsInline
-                    preload="none"
+                    autoPlay
+                    preload="metadata"
                     onLoadedData={() => setIsLoaded(true)}
+                    onCanPlay={() => setIsLoaded(true)}
                     poster={project.thumbnail}
                 />
             ) : null}
