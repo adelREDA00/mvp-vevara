@@ -25,7 +25,7 @@ const destroyImageSprite = (sprite, layer) => {
 
   // Handle Video resource cleanup (critical for preventing frozen elements/memory leaks)
   const isVideo = layer?.type === LAYER_TYPES.VIDEO || (layer?.type === LAYER_TYPES.FRAME && layer?.data?.assetIsVideo)
-  
+
   if (isVideo) {
     // Release from the global cache and kill the element
     if (layer.id) {
@@ -318,11 +318,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
   // CRITICAL: Lockout - Do not apply any transforms if the layer is currently being interactively modified
   // OR during a visual flip animation (managed by GSAP scaling on the object itself)
-  const isInteracting = displayObject._isResizing === true || 
-                        displayObject._isRotating === true || 
-                        displayObject._isFlipping === true ||
-                        (dragStateAPI && dragStateAPI.isResizing()) || 
-                        (dragStateAPI && dragStateAPI.isRotating())
+  const isInteracting = displayObject._isResizing === true ||
+    displayObject._isRotating === true ||
+    displayObject._isFlipping === true ||
+    (dragStateAPI && dragStateAPI.isResizing()) ||
+    (dragStateAPI && dragStateAPI.isRotating())
 
   if (isInteracting) {
     return
@@ -521,12 +521,12 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
         // SYNC Sprite visibility for Frames (consistent with Card side logic)
         if (displayObject._isFrame) {
-            const showing = capturedLayer?.showingFront !== undefined
-              ? capturedLayer.showingFront
-              : (layer.data?.showingFront !== false)
-            displayObject._showingFront = showing
-           if (sprite) sprite.visible = showing && displayObject._frameHasAsset
-           if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
+          const showing = capturedLayer?.showingFront !== undefined
+            ? capturedLayer.showingFront
+            : (layer.data?.showingFront !== false)
+          displayObject._showingFront = showing
+          if (sprite) sprite.visible = showing && displayObject._frameHasAsset
+          if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
         }
       }
     } else if (displayObject.isFlowText) {
@@ -539,12 +539,12 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         if (displayObject.wordWrapWidth !== currentWidth) {
           displayObject.wordWrapWidth = currentWidth
         }
-        
+
         // [COLOR SYNC] Support live color updates in FlowTextContainer during Capture Mode
         if (force || capturedLayer || shouldApplyBaseState) {
           const textColor = capturedLayer?.color ?? layer.data?.color ?? '#000000'
           if (displayObject.updateColor) {
-              displayObject.updateColor(textColor)
+            displayObject.updateColor(textColor)
           }
         }
 
@@ -552,7 +552,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         // [FIX] Stable Zero Pivot: FlowTextContainer handles its own internal centering
         // relative to (0,0). External pivot must remain (0,0) to prevent top-right shifts.
         displayObject.pivot.set(0, 0)
-        
+
         // Sync anchor data for compatibility (does not affect pivot)
         if (displayObject.anchor) {
           const align = layer.data?.textAlign || 'left'
@@ -562,9 +562,9 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
         // Clear GSAP color properties on force reset to prevent stale values
         if (force) {
-            delete displayObject._animatedColorState
-            delete displayObject._applyAnimatedColor
-            delete displayObject._lastAppliedColor
+          delete displayObject._animatedColorState
+          delete displayObject._applyAnimatedColor
+          delete displayObject._lastAppliedColor
         }
       }
     } else if (!(displayObject instanceof PIXI.Graphics) && !(displayObject instanceof PIXI.Sprite)) {
@@ -613,21 +613,21 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     if (!isActuallyPlaying) {
       const targetRadius = capturedLayer?.cornerRadius ?? (shouldApplyBaseState ? (layer.data?.cornerRadius ?? 0) : null)
       if (targetRadius !== null && displayObject._storedShapeData.cornerRadius !== targetRadius) {
-        console.log('[DEBUG] applyTransformInline cornerRadius redraw:', { layerId, old: displayObject._storedShapeData.cornerRadius, new: targetRadius })
+
         displayObject._storedShapeData.cornerRadius = targetRadius
-        
+
         // [VISUAL FIX] Immediately redraw the shape to reflect the new radius.
         // We use redrawShapeWithColors to ensure all offsets and styles match Redux/Capture.
         const width = capturedLayer?.width ?? layer.width ?? 100
         const height = capturedLayer?.height ?? layer.height ?? 100
         const currentColor = capturedLayer?.color ?? layer.data?.fill ?? layer.data?.color ?? null
-        
+
         redrawShapeWithColors(
-          displayObject, 
-          { ...layer.data, cornerRadius: targetRadius, fill: currentColor }, 
-          width, 
-          height, 
-          layer.anchorX ?? 0.5, 
+          displayObject,
+          { ...layer.data, cornerRadius: targetRadius, fill: currentColor },
+          width,
+          height,
+          layer.anchorX ?? 0.5,
           layer.anchorY ?? 0.5
         )
       }
@@ -863,18 +863,18 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   useEffect(() => {
     const engine = getGlobalMotionEngine()
     let lastUpdateTime = 0
-    
+
     const handleUpdate = () => {
       if (!engine.masterTimeline) return
       const currentTime = engine.masterTimeline.time()
       const isPlaying = engine.getIsPlaying()
-      
+
       // PERFORMANCE: Throttle React updates during active playback (10fps is enough for UI sync).
       // During seeking/scrubbing (isPlaying=false), we use a high-frequency update (~60fps)
       // to ensure the "snap-back" to base state feels instantaneous.
       const now = Date.now()
       const throttleMs = isPlaying ? 100 : 16
-      
+
       if (now - lastUpdateTime >= throttleMs) {
         setPlaybackState({ time: currentTime, isPlaying })
         lastUpdateTime = now
@@ -982,11 +982,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       if (!layer) return
 
       const pixiObjectRef = layerObjects.get(layerId)
-      
+
       // [MODE MISMATCH FIX] If enableFlow changed, we MUST destroy and recreate
       // Standard PIXI.Text and FlowTextContainer are fundamentally different objects.
       const modeMismatch = pixiObjectRef && (!!layer.data?.enableFlow !== !!pixiObjectRef.isFlowText)
-      
+
       if (modeMismatch) {
         // console.log(`[DEBUG] useCanvasLayers: Mode mismatch for ${layerId}. Re-creating...`)
         engine.unregisterLayerObject(layerId)
@@ -1019,7 +1019,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               const oldEnd = oldLayer.data?.sourceEndTime || 0
               const newStart = layer.data?.sourceStartTime || 0
               if (Math.abs(oldEnd - newStart) > 0.05) {
-                // console.log(`[useCanvasLayers] Skipping video adoption due to discontinuity: ${oldEnd.toFixed(2)} -> ${newStart.toFixed(2)}`)
                 continue
               }
             }
@@ -1329,11 +1328,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
       // [FIX] Anti-Jitter: Skip Redux updates if the layer is being actively transformed by the user
       // This prevents the "tug-of-war" between immediate mouse updates and delayed Redux state
-      const isInteracting = pixiObject._isResizing || 
-                            pixiObject._isRotating || 
-                            pixiObject._isDragging || 
-                            (dragStateAPI && dragStateAPI.isResizing()) || 
-                            (dragStateAPI && dragStateAPI.isRotating())
+      const isInteracting = pixiObject._isResizing ||
+        pixiObject._isRotating ||
+        pixiObject._isDragging ||
+        (dragStateAPI && dragStateAPI.isResizing()) ||
+        (dragStateAPI && dragStateAPI.isRotating())
 
       // -----------------------------------------------------------------------
       // VISIBILITY & INTERACTION SYNC (from old useLayoutEffect)
@@ -1381,25 +1380,25 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           // [LIQUID FLOW] Handle FlowTextContainer specifically
           if (shouldBeFlow && isFlowObject) {
             const d = layer.data || {}
-            
+
             // 1. Structural Sync (Content, Font, Alignment, Weight, Style) — Always sync from Redux
-            const structuralChanged = pixiObject._content !== (d.content || '') || 
-                                    pixiObject._fontFamily !== (d.fontFamily || 'Arial') || 
-                                    pixiObject._fontSize !== (d.fontSize || 24) ||
-                                    pixiObject._textAlign !== (d.textAlign || 'left') ||
-                                    pixiObject._fontWeight !== (d.fontWeight || 'normal') ||
-                                    pixiObject._fontStyle !== (d.fontStyle || 'normal')
+            const structuralChanged = pixiObject._content !== (d.content || '') ||
+              pixiObject._fontFamily !== (d.fontFamily || 'Arial') ||
+              pixiObject._fontSize !== (d.fontSize || 24) ||
+              pixiObject._textAlign !== (d.textAlign || 'left') ||
+              pixiObject._fontWeight !== (d.fontWeight || 'normal') ||
+              pixiObject._fontStyle !== (d.fontStyle || 'normal')
 
             if (structuralChanged) {
-                pixiObject.data = d
-                pixiObject.updateText()
+              pixiObject.data = d
+              pixiObject.updateText()
             }
 
             // 2. Color Sync (Visual) — Guarded by isAtSceneStart to prevent snap-back
             if (isLayerCaptured && capturedLayerData?.color !== undefined) {
-                pixiObject.updateColor(capturedLayerData.color)
+              pixiObject.updateColor(capturedLayerData.color)
             } else if (isAtSceneStart && pixiObject._color !== (d.color || '#000000')) {
-                pixiObject.updateColor(d.color || '#000000')
+              pixiObject.updateColor(d.color || '#000000')
             }
             if (pixiObject.wordWrapWidth !== wordWrapWidth) {
               pixiObject.wordWrapWidth = wordWrapWidth
@@ -1407,22 +1406,22 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           } else {
             // [STANDARD TEXT] Handle normal PIXI.Text objects
             const style = pixiObject.style || {}
-            
+
             // Content Sync
             const targetContent = layer.data.content || ''
             if (pixiObject._fullContent !== targetContent || (pixiObject._revealProgress >= 1 && pixiObject.text !== targetContent)) {
               pixiObject._fullContent = targetContent
               pixiObject.data = layer.data // [FIX] Sync live data object so setter sees the new content
-              
+
               if (pixiObject._revealProgress !== undefined && pixiObject._revealProgress < 1) {
-                  // If typewriter is active, force recalculate the sliced string
-                  const currentProgress = pixiObject._revealProgress
-                  pixiObject._revealProgress = -1
-                  pixiObject.revealProgress = currentProgress
+                // If typewriter is active, force recalculate the sliced string
+                const currentProgress = pixiObject._revealProgress
+                pixiObject._revealProgress = -1
+                pixiObject.revealProgress = currentProgress
               } else {
-                  pixiObject.text = targetContent
+                pixiObject.text = targetContent
               }
-              
+
               if (pixiObject.updateText) pixiObject.updateText(true)
               calculateTextHeight(layerId, targetContent, style.fontSize || 16, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
             }
@@ -1451,9 +1450,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const newFontFamily = layer.data.fontFamily || 'Arial'
             const newFontWeight = layer.data.fontWeight || 'normal'
             const newFontStyle = layer.data.fontStyle || 'normal'
-            const fontChanged = style.fontFamily !== newFontFamily || 
-                                style.fontWeight !== newFontWeight || 
-                                style.fontStyle !== newFontStyle
+            const fontChanged = style.fontFamily !== newFontFamily ||
+              style.fontWeight !== newFontWeight ||
+              style.fontStyle !== newFontStyle
 
             if (fontChanged) {
               style.fontFamily = newFontFamily
@@ -1468,7 +1467,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               style.align = layer.data.textAlign || 'left'
               const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
               if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
-              
+
               if (pixiObject.updateText) pixiObject.updateText(true)
               const actualHeight = (pixiObject.getLocalBounds()?.height) || layer.height || 40
               pixiObject.pivot.set((0.5 - anchorX) * wordWrapWidth, actualHeight / 2)
@@ -1599,8 +1598,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               pixiObject._storedFill !== currentFill || pixiObject._storedStroke !== currentStroke ||
               pixiObject._storedStrokeWidth !== currentStrokeWidth || pixiObject._storedStrokeStyle !== currentStrokeStyle ||
               (pixiObject._storedShapeData?.cornerRadius ?? 0) !== currentCornerRadius) {
-
-              console.log('[DEBUG] useCanvasLayers sync loop redraw:', { layerId, currentCornerRadius, stored: pixiObject._storedShapeData?.cornerRadius })
               const drawData = { ...layer.data, fill: currentFill, cornerRadius: currentCornerRadius }
               redrawShapeWithColors(pixiObject, drawData, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
             }
@@ -1738,13 +1735,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           const reduxHasAsset = !!(layer.data?.assetUrl || layer.data?.url || layer.data?.src)
           const reduxHasBackAsset = !!layer.data?.backAssetUrl
 
-          if (layerId.includes('1774619177814')) {
-            console.log(`[useCanvasLayers] 🧐 Layer: ${layerId}, Type: ${layer.type}, hasReduxAsset: ${reduxHasAsset}, pixiHasAsset: ${pixiObject._frameHasAsset}`);
-          }
-
           // Case A: Front asset detached
           if (pixiObject._frameHasAsset && !reduxHasAsset) {
-            console.log(`[useCanvasLayers] ⚡ Detach detected (Front) for layer: ${layerId}`);
             const sprite = pixiObject._imageSprite
             if (sprite) {
               sprite.texture = PIXI.Texture.WHITE
@@ -1752,7 +1744,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             }
             // Clear video element reference and pause it
             if (pixiObject._videoElement) {
-              console.log(`[useCanvasLayers] ⚡ Pausing and clearing video element for layer: ${layerId}`);
               pixiObject._videoElement.pause()
               pixiObject._videoElement = null
               // [RESOURCE CLEANUP] Release from global cache to prevent looping/memory leaks
@@ -1769,7 +1760,6 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
           // Case B: Back asset detached (for Card Frames)
           if (pixiObject._frameHasBackAsset && !reduxHasBackAsset) {
-            console.log(`[useCanvasLayers] ⚡ Detach detected (Back) for layer: ${layerId}`);
             const backSprite = pixiObject._backSprite
             if (backSprite) {
               backSprite.texture = PIXI.Texture.WHITE
@@ -1795,7 +1785,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
             if (!isActuallyPlaying && !pixiObject._isResizing && (isLayerCaptured || canSyncReduxBase)) {
               const useCaptured = isLayerCaptured && !isAtSceneStart
-            
+
               const mediaW = (useCaptured ? capturedLayerData?.mediaWidth : null) ?? layer.mediaWidth ?? layer.width ?? 100
               const mediaH = (useCaptured ? capturedLayerData?.mediaHeight : null) ?? layer.mediaHeight ?? layer.height ?? 100
               const cropX = (useCaptured ? capturedLayerData?.cropX : null) ?? layer.cropX ?? 0
@@ -1862,11 +1852,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
                 const activeHasAsset = isCardFrame
                   ? (showingFront ? pixiObject._frameHasAsset : pixiObject._frameHasBackAsset)
                   : pixiObject._frameHasAsset
-                
+
                 if (!pixiObject._isDropTarget) {
                   pixiObject._framePlaceholder.visible = !activeHasAsset
                 }
-                
+
                 if (!activeHasAsset) {
                   const placeholderData = isCardFrame && capturedLayerData?.showingFront !== undefined
                     ? { ...layer.data, showingFront }

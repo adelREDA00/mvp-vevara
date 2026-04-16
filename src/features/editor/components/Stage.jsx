@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { createSelector } from '@reduxjs/toolkit'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useContainerResize } from '../hooks/useContainerResize'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { usePixiCanvas } from '../hooks/usePixiCanvas'
@@ -128,6 +129,7 @@ function Stage({
   onStartTextEditing,
   totalTime = 0,
   showPasteboard = true,
+  onError, // Callback for fatal graphics errors
 }, ref) { // Add ref parameter
   // =============================================================================
   // STATE MANAGEMENT
@@ -137,6 +139,7 @@ function Stage({
 
 
   // Component state
+  const { theme } = React.useContext(ThemeContext)
   const [contextMenu, setContextMenu] = useState(null)
   const [subMenu, setSubMenu] = useState(null) // 'position' or null
   const subMenuTimerRef = useRef(null)
@@ -214,13 +217,20 @@ function Stage({
 
   // Initialize Pixi canvas
   // Screen dimensions match container, world dimensions are fixed
-  const { viewport, stageContainer, layersContainer, pixiApp, isReady, error, retry } = usePixiCanvas(containerRef, {
+  const { viewport, stageContainer, layersContainer, artboardSurface, artboardShadow, pixiApp, isReady, error, retry } = usePixiCanvas(containerRef, {
     width: stageSize.width || 800,
     height: stageSize.height || 600,
     worldWidth,
     worldHeight,
     zoom: effectiveZoom, // Pass zoom for camera scaling
   })
+
+  // Propagate error to parent
+  useEffect(() => {
+    if (error && onError) {
+      onError(error)
+    }
+  }, [error, onError])
 
   const getViewportSyncData = useCallback(() => {
     if (!viewport) return null
@@ -262,6 +272,13 @@ function Stage({
       onReady()
     }
   }, [isReady, onReady])
+
+  // Update Pixi canvas background color based on theme
+  useEffect(() => {
+    if (pixiApp?.renderer) {
+      pixiApp.renderer.background.color = theme === 'light' ? 0xffffff : 0x0f1015
+    }
+  }, [theme, pixiApp])
 
   // Expose viewport controls to parent
   React.useImperativeHandle(ref, () => ({
@@ -639,8 +656,10 @@ function Stage({
     
     // [UX CHANGE] Use semi-transparent overlay instead of opaque background
     // This allows layers outside the canvas to be visible but clearly "off-stage".
-    // [NEW] Controlled by showPasteboard toggle
-    const overlayColor = 0x000000
+    // [NEW] Controlled by showPasteboard toggle and light theme
+    const overlayColor = theme === 'light'
+      ? (showPasteboard ? 0xe1e3eb : 0xffffff)
+      : 0x000000
     const overlayAlpha = showPasteboard ? 0.4 : 1.0
 
     // Top
@@ -669,7 +688,7 @@ function Stage({
     return () => {
       // No need to cleanup on every re-run to avoid flicker
     }
-  }, [stageContainer, layersContainer, isReady, worldWidth, worldHeight, showPasteboard])
+  }, [stageContainer, layersContainer, isReady, worldWidth, worldHeight, showPasteboard, theme])
 
   // Cleanup cached objects and timeouts on unmount
   useEffect(() => {
@@ -1507,32 +1526,73 @@ function Stage({
           }}
         />
 
-        {/* Error State */}
+        {/* Error State — Robust Recovery UI */}
         {error ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 z-50">
-            <div className="bg-gray-800 p-6 rounded-lg border border-red-500/50 shadow-xl max-w-sm text-center">
-              <h3 className="text-red-400 font-bold mb-2">Visual Engine Error</h3>
-              <p className="text-gray-300 text-sm mb-4 text-balance">
-                Unable to initialize the graphics engine. This may happen on devices with limited memory or disabled WebGL.
-              </p>
-              {error.message && (
-                <div className="bg-gray-900 p-2 rounded text-xs text-red-300 mb-4 font-mono overflow-auto max-h-24">
-                  {error.message}
-                </div>
-              )}
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090a0d]/90 backdrop-blur-md p-8 text-center transition-all animate-in fade-in duration-500">
+            <div className="w-20 h-20 mb-8 rounded-3xl bg-red-500/10 flex items-center justify-center border border-red-500/20 shadow-[0_0_40px_rgba(239,68,68,0.1)]">
+              <Unlink className="w-10 h-10 text-red-500" />
+            </div>
+            
+            <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Graphics Engine Error</h3>
+            <p className="text-white/50 text-[13px] max-w-sm mb-10 leading-relaxed font-medium">
+              Your browser's graphics processor ran into a temporary issue. This
+              usually happens when GPU resources are low. Try Re-initializing
+              first — in most cases it recovers instantly.
+            </p>
+            
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              {/* Primary: re-init in-place (cleans GPU contexts, re-creates renderer) */}
               <button
-                onClick={retry}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded transition-colors w-full"
+                onClick={() => retry()}
+                className="w-full h-12 bg-[#6940c9] hover:bg-[#7b4ee3] text-white text-[13px] font-bold rounded-2xl transition-all active:scale-95 shadow-[0_10px_20px_rgba(105,64,201,0.2)] flex items-center justify-center gap-2"
               >
-                Retry Initialization
+                Re-initialize Engine
               </button>
+
+              {/* Secondary: full page reload */}
+              <button
+                onClick={() => window.location.reload()}
+                className="w-full h-12 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-[13px] font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center"
+              >
+                Reload Page
+              </button>
+
+              {/* Tertiary: nuclear option — kill ALL WebGL contexts then reload */}
+              <button
+                onClick={() => {
+                  try {
+                    // Release every WebGL context on the entire page
+                    document.querySelectorAll('canvas').forEach((c) => {
+                      try {
+                        const gl = c.getContext('webgl2') || c.getContext('webgl')
+                        if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext()
+                      } catch (_) {}
+                    })
+                  } catch (_) {}
+                  // Hard reload after a small delay so drivers can reclaim
+                  setTimeout(() => window.location.reload(), 400)
+                }}
+                className="w-full h-10 text-white/30 hover:text-white/50 text-[11px] font-medium rounded-xl transition-all flex items-center justify-center"
+              >
+                Clear GPU & Restart
+              </button>
+            </div>
+            
+            <div className="mt-12 group cursor-pointer">
+              <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.2em] font-bold text-white/20 group-hover:text-red-400/40 transition-colors">
+                Technical Details
+              </div>
+              <div className="mt-4 bg-black/40 border border-white/5 p-4 rounded-xl text-[10px] text-red-400/60 font-mono text-left max-w-md overflow-hidden text-ellipsis whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+                {error.message || 'Renderer failed to initialize hardware contexts (WebGL)'}
+              </div>
             </div>
           </div>
         ) : !isReady ? (
-          /* Empty Canvas Content - Only show when Pixi is not ready and no error */
+          /* Initializing state — only when Pixi is starting up and no error */
           <div className="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none" style={{ zIndex: 0 }}>
-            <div className="text-center">
-              <p className="text-sm animate-pulse">Initializing engine...</p>
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-white/10 border-t-[#6940c9] rounded-full animate-spin" />
+              <p className="text-sm text-white/30 animate-pulse">Initializing engine...</p>
             </div>
           </div>
         ) : null}

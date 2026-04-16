@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
-function DropdownMenu({ trigger, children }) {
+function DropdownMenu({ trigger, children, className = "" }) {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
   const triggerRef = useRef(null)
@@ -30,17 +30,16 @@ function DropdownMenu({ trigger, children }) {
       const triggerRect = triggerRef.current.getBoundingClientRect()
       const menu = menuRef.current
       const viewportWidth = window.innerWidth
-      const menuWidth = 220 // Default min-width or estimated width
+      const menuWidth = 220
 
       let left = triggerRect.left
 
-      // Collision detection: check if menu would go off the right edge
       if (left + menuWidth > viewportWidth) {
         left = Math.max(8, viewportWidth - menuWidth - 8)
       }
 
       menu.style.position = 'fixed'
-      menu.style.top = `${triggerRect.bottom + 4}px`
+      menu.style.top = `${triggerRect.bottom + 8}px`
       menu.style.left = `${left}px`
       menu.style.zIndex = '9999'
     }
@@ -48,14 +47,15 @@ function DropdownMenu({ trigger, children }) {
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <div ref={triggerRef} onClick={() => setIsOpen(!isOpen)}>{trigger}</div>
+      <div ref={triggerRef} className="cursor-pointer" onClick={() => setIsOpen(!isOpen)}>{trigger}</div>
       {isOpen && createPortal(
         <div
           ref={menuRef}
-          className="fixed shadow-2xl min-w-[200px] py-1 border border-white/10 rounded-xl overflow-hidden"
+          className={`fixed shadow-2xl min-w-[200px] py-1 border rounded-xl overflow-hidden animate-in fade-in zoom-in duration-200 ${className}`}
           style={{
             zIndex: 9999,
-            backgroundColor: 'rgba(15, 16, 21, 0.8)',
+            backgroundColor: 'var(--dropdown-bg)',
+            borderColor: 'var(--dropdown-border)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
           }}
@@ -74,7 +74,7 @@ function DropdownMenu({ trigger, children }) {
   )
 }
 
-function DropdownMenuItem({ children, onClick, onClose }) {
+function DropdownMenuItem({ children, onClick, onClose, className = "" }) {
   const handleClick = () => {
     if (onClick) onClick()
     if (onClose) onClose()
@@ -82,7 +82,12 @@ function DropdownMenuItem({ children, onClick, onClose }) {
 
   return (
     <div
-      className="px-4 py-2.5 text-sm text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors mx-1 my-0.5 rounded-lg"
+      className={`px-4 py-2.5 text-sm cursor-pointer transition-colors mx-1 my-0.5 rounded-lg flex items-center gap-2 ${className}`}
+      style={{
+        color: 'var(--dropdown-text)',
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--dropdown-hover)'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       onClick={handleClick}
     >
       {children}
@@ -91,4 +96,3 @@ function DropdownMenuItem({ children, onClick, onClose }) {
 }
 
 export { DropdownMenu, DropdownMenuItem }
-

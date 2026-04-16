@@ -1,106 +1,95 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useContext, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate, Link } from 'react-router-dom'
 import api from '../../../api/client'
-import { logoutUser } from '../../../store/slices/authSlice'
-import { Plus, Folder, Layout, LogOut, Settings, User as UserIcon, ExternalLink, Trash2, ChevronDown, Layers, Loader2, X, Music, Presentation, Sparkles, Box, Wand2 } from 'lucide-react'
+import { logoutUser, updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
+import {
+    Plus, Folder, Layout, LogOut, Settings, User as UserIcon,
+    ExternalLink, Trash2, ChevronDown, Layers, Loader2, X,
+    Music, Presentation, Sparkles, Box, Wand2, Play, Share2,
+    Search, Menu, Sun, Moon
+} from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from '../../editor/components/DropdownMenu'
 import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
 import ProjectStarterModal from '../components/ProjectStarterModal'
+import DashboardSidebar from '../components/DashboardSidebar'
+import DashboardHero from '../components/DashboardHero'
+import TemplateThumbnail from '../components/TemplateThumbnail'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 
 const TUTORIAL_VIDEO_URL = "/first.mp4"
 
-const TemplateThumbnail = ({ project }) => {
-    const videoRef = React.useRef(null)
-    const [isVisible, setIsVisible] = useState(false)
-    const [isLoaded, setIsLoaded] = useState(false)
+const CATEGORY_STYLES = {
+    'All': { icon: Layers, color: '#8b5cf6' },
+    'Featured': { icon: Sparkles, color: '#f43f5e' },
+    'Logo': { icon: Box, color: '#f59e0b' },
+    'Ads': { icon: Presentation, color: '#10b981' },
+    'Social': { icon: Share2, color: '#ec4899' },
+    'Website': { icon: Layout, color: '#06b6d4' },
+}
 
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                setIsVisible(entry.isIntersecting)
-            },
-            { threshold: 0.1 }
-        )
-
-        if (videoRef.current) {
-            observer.observe(videoRef.current)
-        }
-
-        return () => observer.disconnect()
-    }, [])
-
-    useEffect(() => {
-        if (!videoRef.current) return
-
-        if (isVisible) {
-            videoRef.current.play().catch(e => {
-                // Autoplay might be blocked or file not found
-                console.log('Autoplay blocked or video missing:', e)
-            })
-        } else {
-            videoRef.current.pause()
-        }
-    }, [isVisible])
+const CategoryCircle = ({ label, active, onClick, isStuck }) => {
+    const style = CATEGORY_STYLES[label] || { icon: Layout, color: '#7c4af0' }
+    const Icon = style.icon
 
     return (
-        <div className="aspect-video bg-[#f5f5f5] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
-            {project.videoUrl ? (
-                <video
-                    ref={videoRef}
-                    src={project.videoUrl}
-                    className={`w-full h-full object-contain transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-                    muted
-                    loop
-                    playsInline
-                    preload="auto"
-                    onLoadedData={() => setIsLoaded(true)}
-                    poster={project.thumbnail}
-                />
-            ) : null}
-
-            {/* Fallback Image / Static Thumbnail */}
-            {(!project.videoUrl || !isLoaded) && (
-                <div className={`absolute inset-0 transition-opacity duration-300 ${isLoaded ? 'opacity-0' : 'opacity-100'}`}>
-                    {project.thumbnail ? (
-                        <img
-                            src={project.thumbnail}
-                            alt={`${project.name} thumbnail`}
-                            className="w-full h-full object-contain"
-                        />
-                    ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
-                            <Layers size={32} strokeWidth={1.5} className="opacity-50" />
-                            <span className="text-[12px] font-semibold uppercase tracking-widest opacity-50">Preview</span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm duration-300">
-                <button className="h-9 px-5 bg-white text-black text-[12px] font-semibold rounded-[10px] shadow-sm transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">DUPLICATE & EDIT</button>
+        <button
+            onClick={onClick}
+            className={`flex flex-col items-center group transition-all shrink-0 ${isStuck 
+                ? 'min-w-[60px] md:min-w-[75px] pt-0.5 gap-1 md:gap-1' 
+                : 'min-w-[70px] md:min-w-[80px] pt-2 gap-1.5 md:gap-2'
+                }`}
+        >
+            <div
+                className={`rounded-full flex items-center justify-center transition-all duration-500 border-2 ${isStuck
+                    ? 'w-8 h-8 md:w-9 md:h-9'
+                    : 'w-10 h-10 md:w-11 md:h-11'
+                    } ${active ? 'scale-110' : 'opacity-80 group-hover:opacity-100 group-hover:scale-105'
+                    }`}
+                style={{
+                    backgroundColor: style.color,
+                    borderColor: active ? (isStuck ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.25)') : 'transparent',
+                    boxShadow: active ? `0 0 12px ${style.color}44` : 'none',
+                    color: 'white'
+                }}
+            >
+                <Icon size={isStuck ? 14 : 18} strokeWidth={active ? 2.5 : 2} fill={active ? "rgba(255,255,255,0.2)" : "none"} />
             </div>
-        </div>
+            <span className={`font-semibold tracking-tight transition-all duration-300 ${isStuck ? 'text-[9px]' : 'text-[10px]'
+                } ${active
+                    ? (isStuck ? 'text-[var(--dashboard-text)] scale-105' : 'text-[var(--dashboard-text)] scale-105')
+                    : 'text-[var(--dashboard-text-muted)] group-hover:text-[var(--dashboard-text)] opacity-60 group-hover:opacity-100'
+                }`}>
+                {label === 'YouTube & Podcast Intros/Outros' ? 'Video' : label}
+            </span>
+        </button>
     )
 }
+
 
 const DashboardPage = () => {
     const dispatch = useDispatch()
     const navigate = useNavigate()
     const { user, isAuthenticated, status } = useSelector((state) => state.auth)
+    const { theme, setTheme, isLight } = useContext(ThemeContext)
+
     const [projects, setProjects] = useState([])
     const [templateProjects, setTemplateProjects] = useState([])
     const [loading, setLoading] = useState(true)
-    const [scrolled, setScrolled] = useState(false)
     const [projectToDelete, setProjectToDelete] = useState(null)
-    const [feedbackText, setFeedbackText] = useState('')
-    const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, sending, success, error
-    const [showBetaMessage, setShowBetaMessage] = useState(() => {
-        return localStorage.getItem('vevara_hide_beta_message') !== 'true'
-    })
     const [selectedCategory, setSelectedCategory] = useState('All')
     const [isProjectStarterModalOpen, setIsProjectStarterModalOpen] = useState(false)
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+    const [isFilterStuck, setIsFilterStuck] = useState(false)
+    const scrollContainerRef = useRef(null)
+    const filterRef = useRef(null)
+    const filterSentinelRef = useRef(null)
+    const categoriesScrollRef = useRef(null)
+    const [canScrollLeft, setCanScrollLeft] = useState(false)
+    const [canScrollRight, setCanScrollRight] = useState(false)
+    const [isMessageCollapsed, setIsMessageCollapsed] = useState(false)
+    const [isDeleting, setIsDeleting] = useState(false)
 
     const CATEGORIES = [
         'All',
@@ -108,47 +97,66 @@ const DashboardPage = () => {
         'Logo',
         'Ads',
         'Social',
-        "Website",
-        'YouTube & Podcast Intros/Outros'
+        'Website',
+        // 'YouTube & Podcast Intros/Outros'
     ]
 
-    const toggleBetaMessage = () => {
-        const newState = !showBetaMessage
-        setShowBetaMessage(newState)
-        if (!newState) {
-            localStorage.setItem('vevara_hide_beta_message', 'true')
-        } else {
-            localStorage.removeItem('vevara_hide_beta_message')
-        }
-    }
-
-    const handleSendFeedback = async () => {
-        if (!feedbackText.trim() || feedbackStatus === 'sending') return
-
-        try {
-            setFeedbackStatus('sending')
-            await api.post('/api/feedback', { text: feedbackText })
-            setFeedbackStatus('success')
-            setFeedbackText('')
-            setTimeout(() => setFeedbackStatus('idle'), 3000)
-        } catch (error) {
-            console.error('Failed to send feedback:', error)
-            setFeedbackStatus('error')
-            setTimeout(() => setFeedbackStatus('idle'), 3000)
-        }
-    }
-
     useEffect(() => {
-        const handleScroll = () => {
-            setScrolled(window.scrollY > 20)
+        const container = scrollContainerRef.current
+        if (!container) return
+
+        // Use IntersectionObserver to detect when filter hits the top
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                setIsFilterStuck(!entry.isIntersecting)
+            },
+            {
+                threshold: [1],
+                root: container,
+                rootMargin: '-12px 0px 0px 0px' // Adjusted for mobile-friendly top offset
+            }
+        )
+
+        if (filterSentinelRef.current) {
+            observer.observe(filterSentinelRef.current)
         }
-        window.addEventListener('scroll', handleScroll)
-        return () => window.removeEventListener('scroll', handleScroll)
+
+        return () => {
+            observer.disconnect()
+        }
     }, [])
 
+    // Category scroll indicators
+    const checkScroll = () => {
+        const el = categoriesScrollRef.current
+        if (!el) return
+        setCanScrollLeft(el.scrollLeft > 10)
+        setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 10)
+    }
+
     useEffect(() => {
-        // Only redirect if we are sure the user is not authenticated
-        // Wait for status to NOT be loading or idle (which means checkAuth hasn't finished)
+        const timeoutId = setTimeout(checkScroll, 100)
+        window.addEventListener('resize', checkScroll)
+        return () => {
+            clearTimeout(timeoutId)
+            window.removeEventListener('resize', checkScroll)
+        }
+    }, [templateProjects, selectedCategory, loading])
+
+    // Scroll to section based on hash
+    useEffect(() => {
+        const hash = window.location.hash
+        if (hash) {
+            const id = hash.replace('#', '')
+            const element = document.getElementById(id)
+            if (element && scrollContainerRef.current) {
+                // We need to wait a bit for the content to render if needed, but here it should be fine
+                element.scrollIntoView({ behavior: 'smooth' })
+            }
+        }
+    }, [window.location.hash])
+
+    useEffect(() => {
         if (status !== 'loading' && status !== 'idle' && !isAuthenticated) {
             navigate('/login')
             return
@@ -161,19 +169,11 @@ const DashboardPage = () => {
                     api.get('/projects'),
                     api.get('/projects/template')
                 ])
-                console.log('[Dashboard] Projects loaded:', data.length)
-                if (data.length > 0) {
-                    console.log('[Dashboard] Sample project thumbnail present:', !!data[0].thumbnail)
-                    if (data[0].thumbnail) {
-                        console.log('[Dashboard] Thumbnail length:', data[0].thumbnail.length)
-                    }
-                }
                 setProjects(data)
                 setTemplateProjects(templateData)
             } catch (error) {
                 console.error('Failed to fetch projects:', error)
             } finally {
-                // Wait a bit for premium feel
                 setTimeout(() => setLoading(false), 200)
             }
         }
@@ -188,18 +188,9 @@ const DashboardPage = () => {
         navigate('/login')
     }
 
-    const handleTutorialClick = async () => {
-        await dispatch(logoutUser())
-        window.location.href = '/'
-    }
-
-
-    const handleOpenStarterModal = () => {
-        setIsProjectStarterModalOpen(true)
-    }
-
     const handleCreateProject = async () => {
         try {
+            setIsDuplicating(true)
             const sceneId = uid()
             const bgLayerId = uid()
             const now = Date.now()
@@ -241,13 +232,10 @@ const DashboardPage = () => {
                     sceneMotionFlows: {}
                 }
             })
-            // [FIX] Force full page reload when entering the editor.
-            // PIXI.js has global GPU state (batch geometry, buffer systems) that
-            // can't be cleaned up within a SPA navigation. A full page load
-            // guarantees a fresh WebGL context — same approach Canva uses.
             window.location.href = `/project/${newProject._id}`
         } catch (error) {
             console.error('Failed to create project:', error)
+            setIsDuplicating(false)
         }
     }
 
@@ -270,293 +258,245 @@ const DashboardPage = () => {
     }
 
     const confirmDeleteProject = async () => {
-        if (!projectToDelete) return
+        if (!projectToDelete || isDeleting) return
         try {
+            setIsDeleting(true)
             await api.delete(`/projects/${projectToDelete}`)
-            setProjects(projects.filter(p => p._id !== projectToDelete))
+            setProjects(prev => prev.filter(p => p._id !== projectToDelete))
+            setProjectToDelete(null)
         } catch (error) {
             console.error('Failed to delete project:', error)
+            alert('Failed to delete project. Please try again.')
         } finally {
-            setProjectToDelete(null)
+            setIsDeleting(false)
         }
     }
 
-
     return (
-        <div className="min-h-[100dvh] bg-[#090a0d] text-white font-extralight selection:bg-[#6940c9]/30 overflow-x-hidden">
-            {/* Top Navigation Bar (Reactive) */}
-            <header
-                className={`fixed top-0 left-0 right-0 h-[var(--header-height)] flex items-center justify-between px-6 md:px-8 z-50 transition-all duration-200 ease-in-out ${scrolled
-                    ? 'bg-[#090a0d]/80 backdrop-blur-2xl border-b border-white/5 shadow-sm'
-                    : 'bg-transparent'
-                    }`}
+        <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[#7c4af0]/20 flex overflow-x-hidden">
+            {/* Sidebar */}
+            <DashboardSidebar
+                isOpen={isSidebarOpen}
+                onClose={() => setIsSidebarOpen(false)}
+                onCreateProject={() => setIsProjectStarterModalOpen(true)}
+            />
+
+            {/* Content Wrapper (Scrollable) */}
+            <div
+                ref={scrollContainerRef}
+                className="flex-1 lg:ml-[var(--sidebar-width)] h-screen overflow-y-auto transition-all custom-scrollbar pb-2 md:pb-3 pr-2 md:pr-3 pt-1 md:pt-2"
             >
-                <div className="flex items-center gap-8">
-                    <a href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                        <span className="font-semibold text-[16px] tracking-tight">vevara</span>
-                    </a>
-                </div>
-                <div className="flex items-center gap-4">
-                    <a
-                        href="#learn-vevara"
-                        className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/5 border border-white/10 text-white/50 text-[12px] font-medium uppercase tracking-wider hover:bg-white/10 hover:text-white transition-all duration-200"
-                    >
-                        Learn Vevara in 40s
-                    </a>
-                    {isAuthenticated && (
-                        <DropdownMenu
-                            trigger={
-                                <button className="flex items-center gap-2 group outline-none">
-                                    <div className="w-8 h-8 rounded-full bg-[#1a1b23] hover:bg-[#25262e] border border-white/10 flex items-center justify-center transition-all duration-200 overflow-hidden shadow-sm">
-                                        {user?.email ? (
-                                            <span className="text-white text-[12px] font-semibold uppercase">
-                                                {user.email.substring(0, 2)}
-                                            </span>
-                                        ) : (
-                                            <UserIcon size={16} strokeWidth={2} className="text-white/40" />
-                                        )}
-                                    </div>
-                                    <ChevronDown size={14} strokeWidth={2} className="text-white/20 group-hover:text-white/40 transition-colors" />
-                                </button>
-                            }
-                        >
-                            <div className="px-4 py-3 border-b border-white/5 mb-1">
-                                <p className="text-[12px] font-medium text-white/50 truncate">{user?.email}</p>
-                            </div>
-                            <DropdownMenuItem onClick={handleLogout}>
-                                <div className="flex items-center gap-3 text-rose-400">
-                                    <LogOut size={16} strokeWidth={2} />
-                                    <span className="text-[14px] font-medium">Logout</span>
-                                </div>
-                            </DropdownMenuItem>
-                        </DropdownMenu>
-                    )}
-                </div>
-            </header>
+                <div className="min-h-full bg-[var(--dashboard-bg)] rounded-[16px] md:rounded-[24px] border border-[var(--dashboard-border)] shadow-md dashboard-page-container flex flex-col relative">
+                    {/* Brand Gradient Background - Softer Start */}
+                    <div className="absolute inset-x-0 top-0 h-[500px] bg-gradient-to-b from-[var(--dashboard-accent)]/20 via-[var(--dashboard-accent)]/5 to-transparent pointer-events-none z-0 rounded-t-[16px] md:rounded-t-[24px]" />
 
-            {/* Main Content (Now Full Width & Scrollable) */}
-            <main className="w-full min-h-screen">
-                {/* Hero Section */}
-                <section className="pt-32 pb-16 px-6 md:px-8 bg-gradient-to-b from-[#6940c9]/5 to-transparent">
-                    <div className="max-w-[1000px] mx-auto text-center">
-                        <h1 className="text-2xl md:text-4xl font-medium tracking-tight leading-tight mb-16">
-                            Change anything<span className="text-[#6940c9] italic font-semibold"> Vevara</span> animates the difference.
-                        </h1>
-
-                        <div className="max-w-xl mx-auto space-y-8">
-                            {showBetaMessage && (
-                                <div className="relative bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[20px] p-8 text-left animate-in fade-in slide-in-from-top-4 duration-200">
-                                    <button
-                                        onClick={toggleBetaMessage}
-                                        className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-white/5 text-white/20 hover:text-white transition-all duration-200"
-                                    >
-                                        <X size={16} strokeWidth={2} />
-                                    </button>
-
-                                    <div className="space-y-6">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[12px] font-semibold uppercase tracking-widest text-[#6940c9] bg-[#6940c9]/10 px-2.5 py-1 rounded-[6px]">Rédaction</span>
-                                        </div>
-
-                                        <div className="space-y-4 text-white/70 text-[14px] leading-relaxed font-normal">
-                                            <p>Thanks for being one of the first + 200 creators exploring Vevara.</p>
-                                            <p>This is an early beta to test a new approach to motion design, so you may encounter bugs in places. I’ll continue improving the app based on your feedback.</p>
-                                            <p className="text-rose-500 font-medium">For now, Vevara works best on desktop, mobile support is still unstable.</p>
-                                            <div className="pt-4">
-                                                <a href="#learn-vevara" className="inline-flex items-center gap-2 text-[#6940c9] hover:text-[#7b52da] font-semibold transition-colors duration-200">
-                                                    Learn Vevara in 40 seconds <ExternalLink size={14} strokeWidth={2.5} />
-                                                </a>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Feedback Input Section */}
-                            <div className="bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-[20px] p-4 sm:p-6 flex flex-col items-start gap-4 shadow-sm">
-                                <div className="w-full flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <h3 className="text-[12px] font-semibold uppercase tracking-widest text-white/30">Share your thoughts</h3>
-                                        {!showBetaMessage && (
-                                            <button
-                                                onClick={toggleBetaMessage}
-                                                className="text-[12px] text-[#6940c9] hover:text-[#7b52da] font-semibold transition-all duration-200 ml-1 underline underline-offset-4 decoration-[#6940c9]/30 hover:decoration-[#6940c9]"
-                                            >
-                                                Show update message
-                                            </button>
-                                        )}
-                                    </div>
-                                    {feedbackStatus === 'success' && (
-                                        <span className="text-[12px] text-emerald-500 font-medium">Feedback sent!</span>
-                                    )}
-                                </div>
-                                <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                                    <input
-                                        type="text"
-                                        value={feedbackText}
-                                        onChange={(e) => setFeedbackText(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleSendFeedback()}
-                                        placeholder="What's missing or broken?"
-                                        className="h-11 flex-1 bg-white/[0.03] border border-white/5 rounded-[12px] px-4 text-[14px] text-white placeholder:text-white/20 outline-none focus:border-[#6940c9]/40 transition-all duration-200 font-normal w-full"
-                                    />
-                                    <button
-                                        onClick={handleSendFeedback}
-                                        disabled={!feedbackText.trim() || feedbackStatus === 'sending'}
-                                        className="h-11 px-6 bg-[#6940c9] hover:bg-[#7b52da] disabled:opacity-50 disabled:cursor-not-allowed rounded-[12px] text-[14px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
-                                    >
-                                        {feedbackStatus === 'sending' ? <Loader2 size={16} strokeWidth={2} className="animate-spin" /> : 'Send'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <div className="max-w-[1200px] mx-auto px-6 md:px-8 pb-32 space-y-24">
-                    {/* Projects Section (Optimized Grid) */}
-                    <section id="projects">
-                        <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-6">
-                            <h2 className="text-2xl font-semibold tracking-tight">Your <span className="font-normal italic">Projects</span></h2>
-                            <button
-                                onClick={handleOpenStarterModal}
-                                className="h-10 px-6 bg-[#6940c9] text-white rounded-[12px] text-[14px] font-semibold hover:bg-[#7c4af0] transition-all duration-200 flex items-center gap-2 shadow-sm"
-                            >
-                                <Plus size={18} strokeWidth={2.5} />
-                                New Project
-                            </button>
-                        </div>
-
-                        {loading ? (
-                            <div className="flex items-center justify-center py-24">
-                                <div className="w-6 h-6 border-[1.5px] border-[#6940c9]/20 border-t-[#6940c9] rounded-full animate-spin"></div>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-                                {/* 10 Second Tutorial Special Card */}
-                                <div
-                                    className="group cursor-pointer"
-                                    onClick={handleTutorialClick}
-                                >
-                                    <div className="aspect-video bg-[#1a1b23] border border-[#6940c9]/30 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9] transition-all duration-300 flex flex-col items-center justify-center p-6 text-center bg-[radial-gradient(circle_at_center,_rgba(105,64,201,0.15)_0%,_transparent_70%)] shadow-sm">
-                                        {/* Aesthetic Background Image */}
-                                        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity duration-700 flex items-center justify-center p-4">
-                                            <img
-                                                src="/img2.png"
-                                                alt="Tutorial Preview"
-                                                className="h-[120%] w-auto object-contain scale-[0.7] rotate-[8deg] group-hover:rotate-[4deg] group-hover:scale-[0.75] transition-all duration-1000 drop-shadow-2xl"
-                                            />
-                                            <div className="absolute inset-0 bg-gradient-to-t from-[#090a0d]/60 via-transparent to-transparent"></div>
-                                        </div>
-
-                                        <div className="absolute inset-0 opacity-10 group-hover:opacity-20 transition-opacity bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
-
-                                        <div className="relative z-10 space-y-2 group-hover:opacity-0 transition-opacity duration-300">
-                                            <div className="w-10 h-10 bg-[#6940c9]/20 rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6940c9]/30 group-hover:scale-110 transition-transform duration-500">
-                                                <Wand2 size={20} className="text-[#6940c9]" />
-                                            </div>
-                                            <h3 className="text-[16px] font-semibold text-white tracking-tight group-hover:text-[#7c4af0] transition-colors">10 second tutorial</h3>
-                                            <p className="text-[10px] text-white/40 font-semibold uppercase tracking-[0.2em] leading-tight">create your first iphone ad</p>
-                                        </div>
-
-                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#090a0d]/60 backdrop-blur-[4px] z-20">
-                                            <div className="h-9 px-5 bg-white text-black text-[12px] font-bold rounded-full flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-all duration-300 shadow-sm">
-                                                START GUIDE <Sparkles size={14} className="text-[#6940c9]" />
-                                            </div>
-                                        </div>
-
-                                        <div className="absolute top-3 left-3 bg-[#6940c9] rounded-[4px] px-1.5 py-0.5 text-[10px] font-bold text-white tracking-widest uppercase shadow-sm">
-                                            SPECIAL
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <h3 className="text-[14px] font-medium text-white group-hover:text-[#6940c9] transition-colors">10 second tutorial</h3>
-                                        <p className="text-[12px] text-white/40 mt-1 font-normal italic">Start your journey here</p>
-                                    </div>
-                                </div>
-
-                                {projects.map((project) => (
-                                    <div
-                                        key={project._id}
-                                        className="group cursor-pointer"
-                                        onClick={() => window.location.href = `/project/${project._id}`}
-                                    >
-                                        <div className="aspect-video bg-[#f5f5f5] border border-white/5 rounded-[16px] overflow-hidden relative mb-4 group-hover:border-[#6940c9]/40 transition-all duration-300 shadow-sm">
-                                            {project.thumbnail ? (
-                                                <img
-                                                    src={project.thumbnail}
-                                                    alt={`${project.name} thumbnail`}
-                                                    className="w-full h-full object-contain"
-                                                />
-                                            ) : (
-                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 gap-3">
-                                                    <Layers size={32} strokeWidth={1.5} className="opacity-50" />
-                                                    <span className="text-[12px] font-semibold uppercase tracking-widest opacity-50">Empty Canvas</span>
-                                                </div>
-                                            )}
-
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-[#6940c9]/5 backdrop-blur-sm duration-300">
-                                                <button className="h-9 px-5 bg-white text-black text-[12px] font-semibold rounded-[10px] shadow-sm transform translate-y-2 group-hover:translate-y-0 transition-all duration-300">EDIT PROJECT</button>
-                                            </div>
-                                            <div className="absolute top-3 left-3 bg-black/60 border border-white/10 rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold text-white/40 tracking-widest">
-                                                PRIVATE
-                                            </div>
-                                            <button
-                                                onClick={(e) => handleDeleteProject(e, project._id)}
-                                                className="absolute top-3 right-3 p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500/40 hover:text-rose-500 rounded-[8px] opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
-                                            >
-                                                <Trash2 size={16} strokeWidth={2} />
-                                            </button>
-                                        </div>
-                                        <div className="flex items-start justify-between gap-4 px-1">
-                                            <div className="min-w-0">
-                                                <h3 className="text-[14px] font-medium text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
-                                                <p className="text-[12px] text-white/20 mt-1 uppercase tracking-tight">Motion • Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                    <div className="px-4 md:px-10 pb-4 md:pb-10 max-w-[1600px] mx-auto w-full flex-1 relative z-10">
+                        {/* Header */}
+                        {/* Header - Non-sticky */}
+                        <header className="flex items-center justify-between mb-8 md:mb-6 pt-4 md:pt-10">
+                            <div className="flex items-center gap-4">
+                                {/* Mobile Menu Button - Top Left Initial Position */}
                                 <button
-                                    onClick={handleOpenStarterModal}
-                                    className="aspect-video bg-[#090a0d] border border-dashed border-white/10 rounded-[16px] flex flex-col items-center justify-center gap-3 group hover:border-[#6940c9]/30 transition-all duration-300"
+                                    onClick={() => setIsSidebarOpen(true)}
+                                    className="lg:hidden w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:bg-[var(--dashboard-card-hover)] rounded-full transition-all"
                                 >
-                                    <div className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                        <Plus size={24} strokeWidth={2} className="text-white/30" />
-                                    </div>
-                                    <span className="text-[12px] font-semibold text-white/20 group-hover:text-white/40 uppercase tracking-widest">Create New</span>
+                                    <Menu size={20} />
                                 </button>
+
+                                {/* <div className="hidden lg:flex flex-col">
+                                    <h2 className="text-[13px] font-bold text-[var(--dashboard-text-muted)] uppercase tracking-widest opacity-40">Vevara Motion</h2>
+                                    <p className="text-[16px] font-bold text-[var(--dashboard-text)]">Dashboard</p>
+                                </div> */}
                             </div>
-                        )}
-                    </section>
 
-                    {/* Templates Section */}
-                    {templateProjects.length > 0 && (
-                        <section id="templates">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 border-b border-white/5 pb-6 gap-6">
-                                <h2 className="text-2xl font-semibold tracking-tight shrink-0">Templates</h2>
+                            <div className="flex items-center gap-4">
+                                <button
+                                    onClick={() => {
+                                        const newTheme = theme === 'light' ? 'dark' : 'light'
+                                        setTheme(newTheme)
+                                        if (isAuthenticated) {
+                                            dispatch(setLocalTheme(newTheme))
+                                            dispatch(updateUserTheme(newTheme))
+                                        }
+                                    }}
+                                    className="w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] transition-all"
+                                >
+                                    {isLight ? <Moon size={18} /> : <Sun size={18} />}
+                                </button>
 
-                                {/* Category Filters */}
-                                <div className="w-full md:w-auto flex items-center gap-2 overflow-x-auto no-scrollbar py-2 -mx-2 px-2">
-                                    {CATEGORIES.map(cat => (
-                                        <button
-                                            key={cat}
-                                            onClick={() => setSelectedCategory(cat)}
-                                            className={`h-8 px-4 rounded-full text-[12px] font-semibold uppercase tracking-wider transition-all duration-200 whitespace-nowrap border ${selectedCategory === cat
-                                                ? 'bg-[#6940c9] border-[#6940c9] text-white shadow-sm'
-                                                : 'bg-white/5 border-white/10 text-white/40 hover:text-white hover:bg-white/10'
-                                                }`}
-                                        >
-                                            {cat}
-                                        </button>
-                                    ))}
-                                </div>
+                                {isAuthenticated && (
+                                    <DropdownMenu
+                                        trigger={
+                                            <button className="flex items-center gap-2 outline-none group">
+                                                <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)] flex items-center justify-center text-white font-bold text-[11px] shadow-md group-hover:scale-105 transition-transform">
+                                                    {user?.email?.substring(0, 2).toUpperCase()}
+                                                </div>
+                                                <ChevronDown size={12} className="text-[var(--dashboard-text-muted)] mt-0.5" />
+                                            </button>
+                                        }
+                                        className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] shadow-xl"
+                                    >
+                                        <div className="px-4 py-3 border-b border-[var(--dashboard-border)] mb-1">
+                                            <p className="text-[12px] font-medium text-[var(--dashboard-text-muted)] truncate">{user?.email}</p>
+                                        </div>
+                                        <DropdownMenuItem onClick={handleLogout} className="hover:bg-[var(--dashboard-card-hover)]">
+                                            <div className="flex items-center gap-3 text-rose-500">
+                                                <LogOut size={16} strokeWidth={2} />
+                                                <span className="text-[14px] font-semibold">Logout</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                    </DropdownMenu>
+                                )}
+                            </div>
+                        </header>
+
+                        <DashboardHero userName={user?.firstName} />
+
+                        {/* Recent Projects Section */}
+                        <section id="projects" className="scroll-mt-24 mb-16">
+                            <div className="flex items-center justify-between mb-8">
+                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Recent Designs</h2>
+                                {/* <div className="flex items-center gap-3">
+                                    <button className="text-[12px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5 border border-[var(--dashboard-border)] rounded-lg px-3 py-1.5 transition-all">
+                                        Owner <ChevronDown size={12} />
+                                    </button>
+                                    <button className="text-[12px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5 border border-[var(--dashboard-border)] rounded-lg px-3 py-1.5 transition-all">
+                                        Any type <ChevronDown size={12} />
+                                    </button>
+                                </div> */}
                             </div>
 
                             {loading ? (
-                                <div className="flex items-center justify-center py-24">
-                                    <div className="w-6 h-6 border-[1.5px] border-[#6940c9]/20 border-t-[#6940c9] rounded-full animate-spin"></div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {[1, 2, 3, 4, 5, 6].map(i => (
+                                        <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
+                                    ))}
+                                </div>
+                            ) : projects.length === 0 ? (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    <div
+                                        onClick={() => setIsProjectStarterModalOpen(true)}
+                                        className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
+                                    >
+                                        <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
+                                            <Plus size={20} strokeWidth={2} />
+                                        </div>
+                                        <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Start your first project</p>
+                                    </div>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-10">
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {projects.slice(0, 12).map((project) => (
+                                        <div
+                                            key={project._id}
+                                            className="group cursor-pointer"
+                                            onClick={() => window.location.href = `/project/${project._id}`}
+                                        >
+                                            <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
+                                                {project.thumbnail ? (
+                                                    <img
+                                                        src={project.thumbnail}
+                                                        alt={`${project.name} thumbnail`}
+                                                        className="w-full h-full object-contain"
+                                                    />
+                                                ) : (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
+                                                        <Layers size={28} strokeWidth={1.5} />
+                                                    </div>
+                                                )}
+
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] duration-300">
+                                                    <button className="h-8 px-4 bg-white text-black text-[11px] font-bold rounded-lg shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 uppercase">Open</button>
+                                                </div>
+                                                <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md rounded-md px-1.5 py-0.5 text-[8px] font-bold text-white uppercase tracking-widest flex items-center gap-1">
+                                                    <X size={8} className="rotate-45" /> Private
+                                                </div>
+                                                <button
+                                                    onClick={(e) => handleDeleteProject(e, project._id)}
+                                                    className="absolute bottom-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+                                                >
+                                                    <Trash2 size={14} strokeWidth={2} />
+                                                </button>
+                                            </div>
+                                            <div className="px-0.5">
+                                                <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        {/* Categories - Vibing Circular Filters (Sticky) */}
+                        <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
+                        <section
+                            className="sticky top-2 md:top-6 z-30 mb-8 md:mb-20 flex justify-center pointer-events-none"
+                        >
+                            <div
+                                className={`transition-all duration-500 ease-in-out pointer-events-auto flex items-center relative ${isFilterStuck
+                                    ? 'bg-[var(--dashboard-bg)]/90 backdrop-blur-2xl shadow-xl py-0.5 md:py-1 px-2 md:px-8 border border-[var(--dashboard-border)] rounded-full w-fit max-w-[98%] md:max-w-[95%] ring-1 ring-white/5'
+                                    : 'bg-transparent py-2 md:py-4 w-full border-none rounded-none justify-center'
+                                    }`}
+                            >
+                                {/* Pinned Mobile Hamburger - Corrected Baseline to Match Circles */}
+                                <div
+                                    className={`lg:hidden shrink-0 flex items-center justify-center transition-all duration-500 overflow-hidden ${isFilterStuck ? 'w-10 opacity-100 mr-2 ml-1 grow-0' : 'w-0 opacity-0'
+                                        }`}
+                                >
+                                    <button
+                                        onClick={() => setIsSidebarOpen(true)}
+                                        className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/20 text-[var(--dashboard-accent)] shadow-sm transform transition-transform hover:scale-105"
+                                    >
+                                        <Menu size={16} />
+                                    </button>
+                                </div>
+
+                                <div className={`relative max-w-full overflow-hidden rounded-full ${!isFilterStuck ? 'flex-1' : ''}`}>
+                                    {/* Left Fade Indicator - More Subtle */}
+                                    <div className={`absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`} />
+
+                                    <div
+                                        ref={categoriesScrollRef}
+                                        onScroll={checkScroll}
+                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck 
+                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6' 
+                                            : 'py-2 md:py-4 px-2 gap-4 md:gap-8'
+                                            }`}
+                                    >
+                                        {CATEGORIES.map(cat => (
+                                            <CategoryCircle
+                                                key={cat}
+                                                label={cat}
+                                                active={selectedCategory === cat}
+                                                onClick={() => {
+                                                    setSelectedCategory(cat)
+                                                    // Scroll to top of templates section when category is changed
+                                                    const element = document.getElementById('templates')
+                                                    if (element && scrollContainerRef.current) {
+                                                        element.scrollIntoView({ behavior: 'smooth' })
+                                                    }
+                                                }}
+                                                isStuck={isFilterStuck}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    {/* Right Fade Indicator - More Subtle */}
+                                    <div className={`absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollRight ? 'opacity-100' : 'opacity-0'}`} />
+                                </div>
+                            </div>
+                        </section>
+
+
+                        {/* Templates Section */}
+                        {templateProjects.length > 0 && (
+                            <section id="templates" className="scroll-mt-24">
+                                <div className="flex items-center justify-between mb-8">
+                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Try a Template</h2>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
                                     {templateProjects
                                         .filter(project => {
                                             if (selectedCategory === 'All') return true
@@ -570,167 +510,168 @@ const DashboardPage = () => {
                                                 onClick={() => handleDuplicateTemplate(project._id)}
                                             >
                                                 <TemplateThumbnail project={project} />
-                                                <div className="flex items-start justify-between gap-4 px-1">
-                                                    <div className="min-w-0">
-                                                        <h3 className="text-[16px] font-medium text-white/80 group-hover:text-white transition-colors truncate">{project.name}</h3>
-                                                        <p className="text-[13px] text-white/20 mt-1 uppercase tracking-tight">
-                                                            {project.category && project.category !== 'none' ? project.category : 'Template'}
-                                                        </p>
-                                                    </div>
+                                                <div className="px-0.5">
+                                                    <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                    <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
+                                                        {project.category && project.category !== 'none' ? project.category : 'Template'}
+                                                    </p>
                                                 </div>
                                             </div>
                                         ))}
                                 </div>
-                            )}
+                            </section>
+                        )}
 
-                            {/* Empty State for Filter */}
-                            {!loading && templateProjects.filter(project => {
-                                if (selectedCategory === 'All') return true
-                                const projectCat = project.category || 'none'
-                                return projectCat === selectedCategory
-                            }).length === 0 && (
-                                    <div className="flex flex-col items-center justify-center py-24 text-white/20">
-                                        <Sparkles size={48} strokeWidth={1.5} className="mb-4 opacity-20" />
-                                        <p className="text-[14px] font-normal">No templates found in this category</p>
-                                        <button
-                                            onClick={() => setSelectedCategory('All')}
-                                            className="mt-4 text-[12px] font-semibold text-[#6940c9] hover:underline uppercase tracking-widest"
-                                        >
-                                            Show all templates
-                                        </button>
+                        {/* Learn & Updates Section */}
+                        <section id="learn" className="scroll-mt-24 mb-16 pt-16">
+                            <div className="flex items-center justify-between mb-8">
+                                <h2 className="text-[20px] font-clean tracking-tight flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-lg bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
+                                        <Play size={18} fill="currentColor" />
                                     </div>
-                                )}
-                        </section>
-                    )}
-
-                    {/* Learn Vevara Section - Wide Video Tutorial */}
-                    <section id="learn-vevara" className="text-center flex flex-col items-center scroll-mt-24">
-                        <div className="flex flex-col items-center mb-8">
-                            <h2 className="text-[12px] font-semibold uppercase tracking-[0.2em] text-white/30 mb-2">Learn Vevara</h2>
-                            <div className="h-px w-10 bg-[#6940c9]/30" />
-                        </div>
-
-                        <div className="max-w-4xl w-full aspect-video bg-[#050505] border border-white/10 rounded-[24px] overflow-hidden relative group shadow-sm ring-1 ring-white/5 mx-auto">
-                            <video
-                                className="w-full h-full object-cover"
-                                controls
-                                playsInline
-                                preload="metadata"
-                            >
-                                <source src={TUTORIAL_VIDEO_URL} type="video/mp4" />
-                                Your browser does not support the video tag.
-                            </video>
-
-                            {/* Premium overlay effect when hovered */}
-                            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-                        </div>
-
-                        <div className="mt-12">
-                            <h4 className="text-xl font-medium tracking-tight text-white/90">Getting Started with <span className="text-[#6940c9] italic font-semibold">vevara</span></h4>
-
-
-                            <button className="mt-8 text-[12px] text-[#6940c9] hover:text-[#7b52da] font-semibold flex items-center gap-2 transition-colors duration-200 mx-auto opacity-50 hover:opacity-100">
-                                EXPLORE ALL <ExternalLink size={14} strokeWidth={2.5} />
-                            </button>
-                        </div>
-                    </section>
-                    {/* Upcoming Features Section */}
-                    <section className="pt-16">
-                        <div className="flex flex-col gap-3 mb-12">
-                            <div className="flex items-center gap-2">
-                                <Sparkles size={16} strokeWidth={2} className="text-[#6940c9]" />
-                                <h2 className="text-[12px] font-semibold uppercase tracking-[0.2em] text-white/30">Upcoming Features</h2>
+                                    Learn & Updates
+                                </h2>
                             </div>
-                            <h3 className="text-2xl font-semibold tracking-tight">What's <span className="font-normal italic">Next</span> for vevara</h3>
-                        </div>
 
-                        <div className="max-w-2xl space-y-10">
-                            {[
-                                {
-                                    icon: <Presentation />,
-                                    title: "Presentation Mode",
-                                    desc: "Create animated school presentations with premium fluid transitions."
-                                },
-                                {
-                                    icon: <Music />,
-                                    title: "Music Support",
-                                    desc: "Integrated audio tracks with waveform-perfect syncing."
-                                },
-                                {
-                                    icon: <Layers />,
-                                    title: "Animated Component Library",
-                                    desc: "Ready-to-use animated components and high-quality image assets."
-                                }
-                            ].map((feature, i) => (
-                                <div key={i} className="flex items-start gap-5 group">
-                                    <div className="w-10 h-10 rounded-[12px] bg-white/[0.03] border border-white/5 flex items-center justify-center shrink-0 group-hover:border-[#6940c9]/30 transition-colors duration-200 shadow-sm">
-                                        {React.cloneElement(feature.icon, { size: 20, className: 'text-white/40 group-hover:text-[#6940c9] transition-colors', strokeWidth: 1.5 })}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                                {/* Videos Section */}
+                                <div className="space-y-6">
+                                    <div className="aspect-video bg-[var(--dashboard-card-bg)] border-2 border-[var(--dashboard-border)] rounded-[24px] overflow-hidden shadow-sm relative group">
+                                        <video
+                                            src="/first.mp4"
+                                            className="w-full h-full object-cover"
+                                            controls
+                                            playsInline
+                                        />
+                                        <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-widest border border-white/10">
+                                            Quick Start Guide
+                                        </div>
                                     </div>
-                                    <div className="space-y-1.5 pt-1">
-                                        <h4 className="text-[16px] font-medium text-white/80 group-hover:text-white transition-colors">{feature.title}</h4>
-                                        <p className="text-[14px] text-white/30 font-normal leading-relaxed">{feature.desc}</p>
+                                    <div className="px-2">
+                                        <h3 className="text-[16px] font-bold text-[var(--dashboard-text)] mb-2">Mastering Vevara Motion</h3>
+                                        <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium leading-relaxed opacity-80">
+                                            Everything you need to know to create stunning motion designs in minutes. Watch our interactive guide to get started.
+                                        </p>
                                     </div>
                                 </div>
-                            ))}
+
+                                {/* Updates & Feedback Section */}
+                                <div className="space-y-6" id="dev-message">
+                                    {/* Collapsible Card - Developer Message */}
+                                    <div className={`bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] overflow-hidden transition-all duration-300 ${isMessageCollapsed ? 'h-[64px]' : 'h-auto pb-6'}`}>
+                                        <div
+                                            className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[var(--dashboard-card-hover)] transition-colors"
+                                            onClick={() => setIsMessageCollapsed(!isMessageCollapsed)}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
+                                                    <UserIcon size={16} />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[14px] font-bold tracking-tight">A Message from the Dev</span>
+                                                    {isMessageCollapsed && <span className="text-[10px] text-[var(--dashboard-text-muted)] opacity-60 font-medium uppercase tracking-wider">Tap to read full message</span>}
+                                                </div>
+                                            </div>
+                                            <ChevronDown size={18} className={`transition-transform duration-300 text-[var(--dashboard-text-muted)] ${isMessageCollapsed ? '' : 'rotate-180'}`} />
+                                        </div>
+
+                                        {!isMessageCollapsed && (
+                                            <div className="px-6 space-y-6 animate-in fade-in duration-300">
+                                                <div className="py-2 space-y-4">
+                                                    <div className="p-4 bg-[var(--dashboard-bg)]/30 rounded-xl border border-[var(--dashboard-border)] border-dashed">
+                                                        <p className="text-[14px] leading-relaxed text-[var(--dashboard-text)] font-medium">
+                                                            👋 Hi there! <span className="text-[var(--dashboard-accent)] font-semibold">Vevara</span> is currently in Beta.
+                                                            We are actively improving the editor every single day to bring you the best motion design experience.
+                                                        </p>
+                                                        <div className="mt-4 pt-4 border-t border-[var(--dashboard-border)] border-dashed">
+                                                            <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium">
+                                                                <span className="text-[var(--dashboard-accent)] font-semibold">Recommended:</span> For the best performance, especially when using Video Elements, we highly recommend using a PC.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-4 pt-4 border-t border-[var(--dashboard-border)]">
+                                                    <div className="flex flex-col gap-1">
+                                                        <h4 className="text-[11px] font-bold text-[#7c4af0] uppercase tracking-wider">Request a Template</h4>
+                                                        <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
+                                                    </div>
+
+                                                    <div className="relative group/input">
+                                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Type your idea, request or a bug report..."
+                                                                className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
+                                                            />
+                                                            <button className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all">
+                                                                Submit
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    {/* Footer */}
+                    <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
+                        <div className="flex items-center gap-6">
+                            <span>&copy; 2026 Vevara</span>
+                            <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Privacy Policy</a>
+                            <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Terms of Service</a>
                         </div>
-                    </section>
-
+                        <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
+                            <span>All Systems Operational</span>
+                        </div>
+                    </footer>
                 </div>
-            </main>
+            </div>
 
-            {/* Global Custom CSS for scrollbars */}
-            <style dangerouslySetInnerHTML={{
-                __html: `
-                .no-scrollbar::-webkit-scrollbar { display: none; }
-                .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-                body { overflow-y: auto !important; }
-            `}} />
-
-            {/* Duplicating Template Loading Modal */}
-            <Modal
-                isOpen={isDuplicating}
-                onClose={() => { }} // User cannot close this manually
-                hideCloseButton={true}
-                maxWidth="max-w-sm"
-            >
-                <div className="flex flex-col items-center justify-center py-8 space-y-8">
-                    <div className="relative">
-                        <div className="w-16 h-16 border-4 border-[#6940c9]/10 rounded-full"></div>
-                        <div className="w-16 h-16 border-4 border-[#6940c9] border-t-transparent rounded-full animate-spin absolute inset-0"></div>
-                        <Layers size={24} strokeWidth={2} className="text-[#6940c9] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
-                    </div>
-                    <div className="text-center space-y-3">
-                        <h3 className="text-[20px] font-semibold text-white tracking-tight">Duplicating Template</h3>
-                        <p className="text-[14px] text-white/50 leading-relaxed max-w-[240px] mx-auto font-normal">
-                            Setting up a fresh copy of everything for you...
-                        </p>
-                    </div>
+            {/* Modal Components */}
+            <Modal isOpen={isDuplicating} onClose={() => { }} hideCloseButton={true} maxWidth="max-w-sm">
+                <div className="flex flex-col items-center justify-center py-8 space-y-6">
+                    <div className="w-10 h-10 border-4 border-[var(--dashboard-accent)]/10 border-t-[var(--dashboard-accent)] rounded-full animate-spin" />
+                    <h3 className="text-[16px] font-semibold text-[var(--dashboard-text)] uppercase tracking-tight">Creating Design...</h3>
                 </div>
             </Modal>
 
-            {/* Delete Confirmation Modal */}
-            <Modal
-                isOpen={!!projectToDelete}
-                onClose={() => setProjectToDelete(null)}
-                title="Delete Project"
+            <Modal 
+                isOpen={!!projectToDelete} 
+                onClose={() => !isDeleting && setProjectToDelete(null)} 
+                title="Delete Project" 
                 maxWidth="max-w-sm"
             >
-                <div className="space-y-8">
-                    <p className="text-[14px] text-white/50 leading-relaxed font-normal">
-                        Are you sure you want to delete this project? This action cannot be undone and all data will be permanently removed.
+                <div className="space-y-6">
+                    <p className="text-[14px] text-[var(--dashboard-text-muted)] leading-relaxed font-medium">
+                        Permanently delete this design? This cannot be undone.
                     </p>
-                    <div className="flex gap-4">
-                        <button
-                            onClick={() => setProjectToDelete(null)}
-                            className="h-11 flex-1 px-4 bg-white/5 hover:bg-white/10 text-white/90 rounded-[12px] text-[14px] font-medium transition-all duration-200 border border-white/5"
+                    <div className="flex gap-3">
+                        <button 
+                            disabled={isDeleting}
+                            onClick={() => setProjectToDelete(null)} 
+                            className="h-10 flex-1 bg-[var(--dashboard-card-bg)] text-[var(--dashboard-text)] rounded-lg text-[13px] font-semibold border border-[var(--dashboard-border)] disabled:opacity-50"
                         >
                             Cancel
                         </button>
-                        <button
-                            onClick={confirmDeleteProject}
-                            className="h-11 flex-1 px-4 bg-rose-500/80 hover:bg-rose-500 text-white rounded-[12px] text-[14px] font-semibold transition-all duration-200 shadow-sm"
+                        <button 
+                            disabled={isDeleting}
+                            onClick={confirmDeleteProject} 
+                            className="h-10 flex-1 bg-rose-500 text-white rounded-lg text-[13px] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-rose-600 transition-colors"
                         >
-                            Delete
+                            {isDeleting ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Deleting...</span>
+                                </>
+                            ) : (
+                                'Delete'
+                            )}
                         </button>
                     </div>
                 </div>
@@ -739,14 +680,8 @@ const DashboardPage = () => {
             <ProjectStarterModal
                 isOpen={isProjectStarterModalOpen}
                 onClose={() => setIsProjectStarterModalOpen(false)}
-                onSelectBlank={() => {
-                    setIsProjectStarterModalOpen(false)
-                    handleCreateProject()
-                }}
-                onSelectTemplate={(templateId) => {
-                    setIsProjectStarterModalOpen(false)
-                    handleDuplicateTemplate(templateId)
-                }}
+                onSelectBlank={() => { setIsProjectStarterModalOpen(false); handleCreateProject(); }}
+                onSelectTemplate={(templateId) => { setIsProjectStarterModalOpen(false); handleDuplicateTemplate(templateId); }}
                 featuredTemplates={templateProjects.filter(p => (p.category || '').toLowerCase() === 'featured')}
             />
         </div>

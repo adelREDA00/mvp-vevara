@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useSelector } from 'react-redux'
+import { useState, useContext } from 'react'
+import { useSelector, useDispatch } from 'react-redux'
 import { Link } from 'react-router-dom'
 import {
   Share2,
@@ -15,10 +15,14 @@ import {
   MoreVertical,
   Undo2,
   Redo2,
+  Moon,
+  Sun,
 } from 'lucide-react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import Modal from './Modal'
 import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
+import { updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
 
 function TopToolbar({
   projectName = 'Untitled Project',
@@ -36,14 +40,30 @@ function TopToolbar({
   onUndo,
   onRedo,
   hideExport = false,
+  sidebarWidth = '0px',
 }) {
   const { isAuthenticated, user } = useSelector((state) => state.auth)
+  const dispatch = useDispatch()
   const canUndo = useSelector(selectCanUndo)
   const canRedo = useSelector(selectCanRedo)
+  const { theme, setTheme } = useContext(ThemeContext)
+
+  const handleThemeToggle = () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+    
+    // Sync with backend if authenticated
+    if (isAuthenticated) {
+      dispatch(setLocalTheme(newTheme))
+      dispatch(updateUserTheme(newTheme))
+    }
+  }
   const [isEditingName, setIsEditingName] = useState(false)
   const [editedName, setEditedName] = useState(projectName)
   const [isResizeModalOpen, setIsResizeModalOpen] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+
+  const isLight = theme === 'light'
 
   const handleNameSubmit = () => {
     setIsEditingName(false)
@@ -161,8 +181,14 @@ function TopToolbar({
           </div>
         </div>
 
-        {/* Center Section - Project Name (centered) */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        {/* Center Section - Project Name (centered relative to workspace) */}
+        <div 
+          className="absolute inset-x-0 bottom-0 h-full flex items-center justify-center pointer-events-none"
+          style={{ 
+            left: sidebarWidth,
+            right: 0
+          }}
+        >
           <div className="pointer-events-auto">
             <input
               type="text"
@@ -224,6 +250,16 @@ function TopToolbar({
                   </div>
                 </DropdownMenuItem>
               )}
+              <DropdownMenuItem onClick={handleThemeToggle}>
+                <div className="flex items-center gap-2">
+                  {theme === 'light' ? (
+                    <Moon className="h-3.5 w-3.5" />
+                  ) : (
+                    <Sun className="h-3.5 w-3.5" />
+                  )}
+                  <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+                </div>
+              </DropdownMenuItem>
             </DropdownMenu>
           </div>
 
@@ -262,6 +298,18 @@ function TopToolbar({
           )}
 
           <button
+            onClick={handleThemeToggle}
+            className="hidden md:flex h-9 w-9 rounded-[10px] bg-white/5 hover:bg-white/10 active:bg-white/20 items-center justify-center transition-all border border-white/5 shadow-sm text-white/80 hover:text-white"
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          >
+            {theme === 'light' ? (
+              <Moon className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <Sun className="h-4 w-4" strokeWidth={2} />
+            )}
+          </button>
+
+          <button
             onClick={() => onNavigate && onNavigate(isAuthenticated ? "/dashboard" : "/login")}
             className="h-9 w-9 rounded-[10px] bg-[#1a1b23] hover:bg-[#25262e] active:bg-[#2a2b33] flex items-center justify-center transition-all border border-white/10 overflow-hidden flex-shrink-0 shadow-sm"
             title={isAuthenticated ? "Dashboard" : "Login"}
@@ -291,30 +339,24 @@ function TopToolbar({
         title="Choose Canvas Size"
       >
         <div className="space-y-2">
-          <button
-            onClick={() => handleResizeOption(1080, 1920)}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            Vertical Video (TikTok / Reels / Shorts) – 1080 × 1920
-          </button>
-          <button
-            onClick={() => handleResizeOption(1080, 1080)}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            Square Video (IG / FB Feed) – 1080 × 1080
-          </button>
-          <button
-            onClick={() => handleResizeOption(1920, 1080)}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            Landscape Video (YouTube / FB / IG) – 1920 × 1080
-          </button>
-          <button
-            onClick={() => handleResizeOption(1920, 1080)}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            Presentation (16:9) – 1920 × 1080
-          </button>
+          {[
+            { label: 'Vertical Video (TikTok / Reels / Shorts) – 1080 × 1920', w: 1080, h: 1920 },
+            { label: 'Square Video (IG / FB Feed) – 1080 × 1080', w: 1080, h: 1080 },
+            { label: 'Landscape Video (YouTube / FB / IG) – 1920 × 1080', w: 1920, h: 1080 },
+            { label: 'Presentation (16:9) – 1920 × 1080', w: 1920, h: 1080 },
+          ].map((opt, i) => (
+            <button
+              key={i}
+              onClick={() => handleResizeOption(opt.w, opt.h)}
+              className={`w-full text-left p-4 rounded-xl text-sm transition-all border ${
+                isLight 
+                  ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' 
+                  : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </Modal>
 
@@ -325,30 +367,24 @@ function TopToolbar({
         title="Select Export Resolution"
       >
         <div className="space-y-2">
-          <button
-            onClick={() => handleExportOption('720p')}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            720p (HD) (fast)
-          </button>
-          <button
-            onClick={() => handleExportOption('1080p')}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            1080p (Full HD) (fast)
-          </button>
-          <button
-            onClick={() => handleExportOption('1440p')}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            2K (QHD) (medium)
-          </button>
-          <button
-            onClick={() => handleExportOption('2160p')}
-            className="w-full text-left p-3 rounded-lg bg-white/5 hover:bg-white/10 text-white text-sm transition-colors border border-white/5"
-          >
-            4K (Ultra HD) (slightly slow)
-          </button>
+          {[
+            { label: '720p (HD) (fast)', id: '720p' },
+            { label: '1080p (Full HD) (fast)', id: '1080p' },
+            { label: '2K (QHD) (medium)', id: '2k' },
+            { label: '4K (Ultra HD) (slightly slow)', id: '4k' },
+          ].map((opt, i) => (
+            <button
+              key={i}
+              onClick={() => handleExportOption(opt.id)}
+              className={`w-full text-left p-4 rounded-xl text-sm transition-all border ${
+                isLight 
+                  ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' 
+                  : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </Modal>
     </div>

@@ -223,6 +223,43 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       path.push({x: centerX - rx, y: centerY + ry})
       break
 
+    case 'arrow': {
+      // Points for a standard right-pointing arrow
+      const headWidth = Math.min(width * 0.4, height * 1.5)
+      const stemHeight = height * 0.3
+      const stemRight = centerX + rx - headWidth
+
+      graphics.moveTo(centerX - rx, centerY - stemHeight / 2)
+      graphics.lineTo(stemRight, centerY - stemHeight / 2)
+      graphics.lineTo(stemRight, centerY - ry)
+      graphics.lineTo(centerX + rx, centerY)
+      graphics.lineTo(stemRight, centerY + ry)
+      graphics.lineTo(stemRight, centerY + stemHeight / 2)
+      graphics.lineTo(centerX - rx, centerY + stemHeight / 2)
+      graphics.closePath()
+
+      path.push({x: centerX - rx, y: centerY - stemHeight / 2})
+      path.push({x: stemRight, y: centerY - stemHeight / 2})
+      path.push({x: stemRight, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY})
+      path.push({x: stemRight, y: centerY + ry})
+      path.push({x: stemRight, y: centerY + stemHeight / 2})
+      path.push({x: centerX - rx, y: centerY + stemHeight / 2})
+      break
+    }
+
+    case 'arrowhead':
+      // Triangular head that fills the bounding box
+      graphics.moveTo(centerX - rx, centerY - ry)
+      graphics.lineTo(centerX + rx, centerY)
+      graphics.lineTo(centerX - rx, centerY + ry)
+      graphics.closePath()
+      path.push({x: centerX - rx, y: centerY - ry})
+      path.push({x: centerX + rx, y: centerY})
+      path.push({x: centerX - rx, y: centerY + ry})
+      break
+
+
     default: {
       // rect / square and any unknown type
       const clampedRadius = Math.min(cornerRadius || 0, Math.min(width, height) / 2)

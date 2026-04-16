@@ -571,7 +571,12 @@ export const exportVideo = async ({
             preserveDrawingBuffer: true,
             roundPixels: true,
             resolution: 1,
+            // [STABILITY] Force WebGL for exports as well to avoid WebGPU instability
+            preference: 'webgl',
+            hello: true
         });
+
+        console.log(`[PIXI-EXPORT] Init successful: ${app.renderer.name}`);
 
         app.ticker.stop();
 

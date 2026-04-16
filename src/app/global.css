@@ -42,6 +42,34 @@
 
   /* Layout */
   --header-height: 48px;
+
+  /* Editor Panels */
+  --editor-panel-bg: rgba(15, 16, 21, 0.85);
+  --editor-panel-bg-opaque: rgba(25, 26, 31, 1);
+  --editor-panel-border: rgba(255, 255, 255, 0.1);
+  --editor-panel-text: #ffffff;
+  --editor-panel-text-muted: rgba(255, 255, 255, 0.4);
+  --editor-panel-item-hover: rgba(255, 255, 255, 0.1);
+  --editor-panel-item-active: rgba(255, 255, 255, 0.15);
+  --editor-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* Dashboard Theme Variables (Default Dark) */
+  --dashboard-bg: #090a0d;
+  --dashboard-sidebar-bg: #090a0d;
+  --dashboard-text: #ffffff;
+  --dashboard-text-muted: rgba(255, 255, 255, 0.4);
+  --dashboard-border: rgba(255, 255, 255, 0.05);
+  --dashboard-card-bg: rgba(255, 255, 255, 0.02);
+  --dashboard-card-hover: rgba(255, 255, 255, 0.04);
+  --dashboard-hero-bg: linear-gradient(180deg, rgba(139, 92, 246, 0.06) 0%, rgba(9, 10, 13, 0) 600px);
+  --dashboard-accent: #8b5cf6;
+  
+  --dropdown-bg: rgba(20, 21, 26, 0.95);
+  --dropdown-text: rgba(255, 255, 255, 0.9);
+  --dropdown-hover: rgba(255, 255, 255, 0.08);
+  --dropdown-border: rgba(255, 255, 255, 0.1);
+
+  --sidebar-width: 64px;
 }
 
 @media (max-width: 767px) {
@@ -59,6 +87,50 @@ body {
   padding: 0;
   overflow: hidden;
   background-color: #090a0d;
+}
+
+/* Light Theme Overrides */
+body.theme-light {
+  background-color: #ffffff !important;
+  --editor-panel-bg: rgba(255, 255, 255, 0.85);
+  --editor-panel-bg-opaque: #ffffff;
+  --editor-panel-border: rgba(0, 0, 0, 0.1);
+  --editor-panel-text: #1a1b1e;
+  --editor-panel-text-muted: rgba(0, 0, 0, 0.5);
+  --editor-panel-item-hover: rgba(0, 0, 0, 0.05);
+  --editor-panel-item-active: rgba(0, 0, 0, 0.08);
+  --editor-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+
+  /* Dashboard Theme Variables (Light Mode) */
+  --dashboard-bg: #f8f9fc;
+  --dashboard-sidebar-bg: #ffffff;
+  --dashboard-text: #1a1b1e;
+  --dashboard-text-muted: rgba(0, 0, 0, 0.5);
+  --dashboard-border: rgba(0, 0, 0, 0.06);
+  --dashboard-card-bg: #ffffff;
+  --dashboard-card-hover: #f1f3f7;
+  --dashboard-sidebar-bg: #f8f5fd;
+  --dashboard-hero-bg: linear-gradient(180deg, rgba(124, 74, 240, 0.08) 0%, rgba(248, 249, 252, 0) 600px);
+
+  --dropdown-bg: #ffffff;
+  --dropdown-text: #1a1b1f;
+  --dropdown-hover: #f4f5f8;
+  --dropdown-border: rgba(0, 0, 0, 0.08);
+}
+
+body.theme-light .canvas-wrapper {
+  background-color: #ffffff !important;
+}
+
+/* Scrollbar tweaks for Light mode */
+body.theme-light * {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent !important;
+}
+body.theme-light *::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15) !important;
+}
+body.theme-light *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Modern minimal scrollbar styling */
@@ -315,4 +387,51 @@ body {
     border-radius: 10px !important;
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
+}
+
+/* Dashboard Specific Utilities */
+.dashboard-glass {
+  background: var(--dashboard-card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--dashboard-border);
+}
+
+.dashboard-hero-gradient {
+  background: var(--dashboard-hero-bg);
+}
+
+.dashboard-page-container {
+  background: var(--dashboard-bg);
+  background-image: var(--dashboard-hero-bg);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  font-weight: 500;
+}
+
+.font-clean {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.font-medium-bold {
+  font-weight: 600;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
 }

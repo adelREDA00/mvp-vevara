@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
@@ -41,6 +42,7 @@ import { resetGlobalMotionEngine } from '../../engine/motion'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
+import { updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
@@ -308,14 +310,19 @@ const GUEST_TEMPLATE = {
 }
 
 function EditorPage() {
+  const { theme, setTheme } = useContext(ThemeContext)
+  const isLight = theme === 'light';
+
   const dispatch = useDispatch()
   const scenes = useSelector(selectScenes)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const selectedLayerIds = useSelector(selectSelectedLayerIds)
   const selectedCanvas = useSelector(selectSelectedCanvas)
   const layers = useSelector(selectLayers)
-  const { isAuthenticated } = useSelector((state) => state.auth)
+  const { isAuthenticated, user } = useSelector((state) => state.auth)
   const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
+
+
 
 
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
@@ -327,6 +334,7 @@ function EditorPage() {
   const projectVersion = useSelector(selectProjectVersion)
   const isSavingRedux = useSelector(selectIsSavingRedux)
   const [isSaving, setIsSaving] = useState(false)
+  const [isNavigating, setIsNavigating] = useState(false)
   const editingStepActionCount = useSelector(selectEditingStepActionCount)
   const aspectRatio = useSelector(selectAspectRatio)
   const loadingMode = useSelector(selectLoadingMode)
@@ -376,6 +384,7 @@ function EditorPage() {
   const [isPixiReady, setIsPixiReady] = useState(false)
   const [pixiApp, setPixiApp] = useState(null)
   const [isStageReady, setIsStageReady] = useState(false) // Track PIXI object population
+  const [pixiError, setPixiError] = useState(null) // NEW: Track fatal graphics errors
 
   // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
   const [minTimeElapsed, setMinTimeElapsed] = useState(false)
@@ -393,47 +402,43 @@ function EditorPage() {
     if (!layers) return false
     return Object.values(layers).some(l => l && (l.type === 'image' || l.type === 'video'))
   }, [layers])
-
-  const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed, hasAsyncAssets }) => {
+  
+  const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed, hasAsyncAssets, error }) => {
     // [STRICT] Loading gate must be the bridge to total readiness.
-    // 1. projectStatus must be 'succeeded' (we have the data)
-    // 2. isPreloading must be false (binary assets: fonts, textures, video buffers are ready)
-    // 3. isStageReady must be true (PIXI objects are on the stage)
-    // 4. minTimeElapsed must be true (prevent flicker)
-
+    // However, if there is a fatal Pixi error, we MUST yield visibility to the Stage's error recovery UI.
     const projectDataReady = projectStatus === 'succeeded';
     const binaryAssetsReady = !isPreloading;
     const pixiObjectsReady = isStageReady;
 
     const isLoading = !projectDataReady || !binaryAssetsReady || !pixiObjectsReady || !minTimeElapsed;
 
-    // [NEW] If we are in local loading mode, we never show the full-screen preloader
-    // This allows single assets to be added without blocking the entire UI.
-    if (!isLoading || loadingMode === 'local') return null;
+    // [NEW] If we are in local loading mode, OR IF THERE IS A FATAL ERROR, we never show the full-screen preloader
+    // Allowing the error UI to be visible.
+    if (!isLoading || loadingMode === 'local' || error) return null;
 
     return (
-      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090a0d] p-6 text-center transition-opacity duration-500">
+      <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center p-6 text-center transition-opacity duration-500 ${isLight ? 'bg-[#f3f4f7]' : 'bg-[#090a0d]'}`}>
         <div className="relative mb-8">
-          <div className="w-20 h-20 border-[3px] border-white/5 rounded-full" />
+          <div className={`w-20 h-20 border-[3px] rounded-full ${isLight ? 'border-black/5' : 'border-white/5'}`} />
           <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
           <Layers className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[#6940c9] animate-pulse" />
         </div>
 
         <div className="space-y-3 max-w-xs">
-          <h2 className="text-xl font-medium tracking-tight text-white">Preparing your creative space</h2>
-          <p className="text-[13px] text-white/40 leading-relaxed">
+          <h2 className={`text-xl font-medium tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Preparing your creative space</h2>
+          <p className={`text-[13px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
             We're optimizing your assets for high-performance motion design...
           </p>
 
           {/* Progress Bar */}
           <div className="pt-4 space-y-2">
-            <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className={`h-1 w-full rounded-full overflow-hidden ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
               <div
                 className="h-full bg-[#6940c9] transition-all duration-500 ease-out"
                 style={{ width: `${progress?.percent || 0}%` }}
               />
             </div>
-            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/20">
+            <div className={`flex justify-between items-center text-[10px] font-bold uppercase tracking-widest ${isLight ? 'text-black/20' : 'text-white/20'}`}>
               <span>Loading Assets</span>
               <span>{progress?.loaded || 0} / {progress?.total || 0}</span>
             </div>
@@ -663,6 +668,13 @@ function EditorPage() {
       }
 
       await dispatch(saveProject({ thumbnail })).unwrap()
+      
+      // Also sync theme on save to ensure persistence
+      if (isAuthenticated) {
+        dispatch(setLocalTheme(theme))
+        dispatch(updateUserTheme(theme))
+      }
+
       lastSavedStateRef.current = stateString
       setLastSaved(Date.now())
     } catch (error) {
@@ -670,17 +682,21 @@ function EditorPage() {
     } finally {
       if (!silent) setIsSaving(false)
     }
-  }, [dispatch, isAuthenticated, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight])
+  }, [dispatch, isAuthenticated, theme, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight])
 
   // handleNavigate ensures we save the project before leaving the editor
   // when the user clicks the dashboard/user icon.
   const handleNavigate = useCallback(async (path) => {
+    setIsNavigating(true)
     if (isAuthenticated) {
-      await handleSave({ silent: false })
+      // Ensure theme is synced before leaving
+      dispatch(setLocalTheme(theme))
+      dispatch(updateUserTheme(theme))
+      await handleSave({ silent: true })
     }
     // [FIX] Force full page reload to release WebGL context
     window.location.href = path
-  }, [isAuthenticated, handleSave])
+  }, [isAuthenticated, theme, dispatch, handleSave])
 
   const handleCancelExport = useCallback(() => {
     if (exportAbortControllerRef.current) {
@@ -3833,12 +3849,13 @@ function EditorPage() {
   }, [currentSceneId, timelineInfo, playheadTime, motionControls, dispatch, seek])
 
   return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
     <div
-      className="h-dvh flex flex-col text-white overflow-hidden relative select-none"
+      className={`h-dvh flex flex-col overflow-hidden relative select-none ${theme === 'light' ? 'theme-light text-gray-900 bg-[#f3f4f7]' : 'theme-dark text-white bg-[#090a0d]'}`}
       data-editor-container
       style={{
         touchAction: 'none',
-        backgroundColor: '#090a0d'
+        backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d'
       }}
       onDragStart={(e) => {
         // Prevent drag operations that might trigger text selection
@@ -3854,11 +3871,11 @@ function EditorPage() {
           showCloseButton={true}
         >
           <div className="flex flex-col items-center text-center">
-            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mb-4">
-              <FileText className="h-6 w-6 text-purple-400" />
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isLight ? 'bg-purple-100' : 'bg-purple-500/20'}`}>
+              <FileText className={`h-6 w-6 ${isLight ? 'text-purple-600' : 'text-purple-400'}`} />
             </div>
-            <h3 className="text-lg font-bold text-white mb-2">Open account to save</h3>
-            <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
+            <h3 className={`text-lg font-bold mb-2 ${isLight ? 'text-gray-900' : 'text-white'}`}>Open account to save</h3>
+            <p className={`text-sm mb-6 leading-relaxed ${isLight ? 'text-gray-500' : 'text-zinc-400'}`}>
               Create a free account to save your projects and access professional templates.
             </p>
             <div className="flex flex-col w-full gap-2">
@@ -3870,7 +3887,7 @@ function EditorPage() {
               </button>
               <button
                 onClick={() => setShowGuestModal(false)}
-                className="w-full py-2 text-zinc-500 hover:text-zinc-300 text-xs font-medium transition-all"
+                className={`w-full py-2 text-xs font-medium transition-all ${isLight ? 'text-gray-400 hover:text-gray-600' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
                 Not now
               </button>
@@ -3881,7 +3898,7 @@ function EditorPage() {
 
       {/* Loading Overlay */}
       {projectStatus === 'loading' && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[#090a0d]/60 backdrop-blur-sm">
+        <div className={`absolute inset-0 z-[100] flex items-center justify-center backdrop-blur-sm ${isLight ? 'bg-white/60' : 'bg-[#090a0d]/60'}`}>
           <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
         </div>
       )}
@@ -3911,6 +3928,7 @@ function EditorPage() {
             if (isMotionCaptureActive) captureUndoSyncRef.current = true
             dispatch(redo())
           }}
+          sidebarWidth={typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth}
         />
       </div>
 
@@ -3918,7 +3936,7 @@ function EditorPage() {
         className="hidden lg:block absolute left-0 z-50"
         style={{
           top: `${topToolbarHeight}px`,
-          height: `calc(100vh - ${topToolbarHeight}px - ${bottomSectionHeight}px)`,
+          height: `calc(100vh - ${topToolbarHeight}px)`,
           transition: isResizingBottom ? 'none' : 'height 0.3s ease',
         }}
       >
@@ -3945,7 +3963,7 @@ function EditorPage() {
             <div className="hidden lg:block absolute left-20 z-40 shadow-2xl transition-all duration-300" style={{
               top: `${topToolbarHeight}px`,
               height: `calc(100vh - ${topToolbarHeight}px)`,
-              borderRight: '1px solid rgba(255, 255, 255, 0.05)'
+              borderRight: `1px solid ${theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`
             }}>
               {activeSidebarItem === 'Design' && (
                 <DesignPanel onClose={handleClosePanel} />
@@ -4121,22 +4139,22 @@ function EditorPage() {
                 aria-hidden
               />
               <div
-                className="lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t border-white/10 shadow-2xl mobile-sheet-in"
+                className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t shadow-2xl mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
                 style={{
                   height: '80vh',
                   minHeight: '360px',
                   maxHeight: '90vh',
-                  backgroundColor: '#090a0d',
+                  backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
                   paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Drag handle */}
                 <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
-                  <div className="w-10 h-1 rounded-full bg-white/20" aria-hidden />
+                  <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-black/10' : 'bg-white/20'}`} aria-hidden />
                 </div>
                 {/* Panel content - scrollable, same bg as sheet */}
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: '#090a0d' }}>
+                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}>
                   {activeSidebarItem === 'Design' && (
                     <DesignPanel onClose={handleClosePanel} />
                   )}
@@ -4260,7 +4278,7 @@ function EditorPage() {
                 </div>
                 {/* Horizontal minimal nav at bottom of sheet */}
                 <div
-                  className="flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t border-white/5 bg-black/20"
+                  className={`flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
                   style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
                 >
                   {SIDEBAR_ITEMS.map((item) => {
@@ -4270,7 +4288,11 @@ function EditorPage() {
                       <button
                         key={item.label}
                         onClick={() => handleSidebarItemClick(item.label)}
-                        className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${isActive ? 'bg-white/10 text-white' : 'text-zinc-400 active:bg-white/5'}`}
+                        className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${
+                          isActive 
+                            ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white') 
+                            : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
+                        }`}
                       >
                         <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />
                         <span className="text-[10px] font-medium">{item.label}</span>
@@ -4287,7 +4309,15 @@ function EditorPage() {
         {/* Canvas and Bottom Sections */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
           {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
-          <div ref={topControlsRef} className="absolute left-1/2 transform -translate-x-1/2 z-30 pointer-events-none" style={{ top: `${topToolbarHeight + 8}px` }}>
+          <div 
+            ref={topControlsRef} 
+            className="absolute z-30 pointer-events-none flex justify-center" 
+            style={{ 
+              top: `${topToolbarHeight + 8}px`,
+              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+              right: 0
+            }}
+          >
             <CanvasControls
               duration={`${totalTime.toFixed(1)}s`}
               selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
@@ -4404,7 +4434,7 @@ function EditorPage() {
               bottom: initialBottomHeight || 0,
               left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
               right: 0,
-              backgroundColor: '#090a0d',
+              backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
               zIndex: 10,
             }}
           >
@@ -4424,10 +4454,12 @@ function EditorPage() {
               zoom={zoom}
               onZoomChange={setZoom}
               onViewportChange={handleViewportChange}
+              onError={setPixiError} // Propagate error from Stage to EditorPage
               topToolbarHeight={topToolbarHeight}
               isResizingBottom={isResizingBottom}
               onReady={() => {
                 setIsPixiReady(true)
+                setPixiError(null) // Clear error on successful re-init
                 const app = stageRef.current?.getApp?.()
                 if (app) setPixiApp(app)
               }}
@@ -4452,6 +4484,7 @@ function EditorPage() {
               projectStatus={projectStatus}
               minTimeElapsed={minTimeElapsed}
               hasAsyncAssets={hasAsyncAssets}
+              error={pixiError}
             />
 
 
@@ -4514,10 +4547,10 @@ function EditorPage() {
           className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
           style={{
             left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-            backgroundColor: '#090a0d',
+            backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            borderTop: 'none',
             paddingBottom: 'env(safe-area-inset-bottom, 8px)',
             ...(customBottomHeight !== null ? {
               height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
@@ -4616,9 +4649,9 @@ function EditorPage() {
                 max={300}
                 value={zoom === -1 ? 100 : Math.min(300, Math.max(10, zoom))}
                 onChange={(e) => setZoom(Number(e.target.value))}
-                className="w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none bg-white/20 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+                className={`w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`}
               />
-              <span className="text-[10px] font-mono text-white/60 tabular-nums w-8">
+              <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
                 {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
               </span>
             </div>
@@ -4686,7 +4719,7 @@ function EditorPage() {
               </div>
             )}
 
-            <h3 className="text-lg font-bold mb-2 tracking-tight text-white">
+            <h3 className={`text-lg font-bold mb-2 tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
               {exportState.status === 'initializing' && 'Preparing Export...'}
               {exportState.status === 'rendering' && 'Rendering Frames...'}
               {exportState.status === 'encoding' && 'Finalizing Video...'}
@@ -4694,7 +4727,7 @@ function EditorPage() {
               {exportState.status === 'error' && 'Export Failed'}
             </h3>
 
-            <div className="text-white/40 text-[13px] mb-8 text-center max-w-[320px] leading-relaxed">
+            <div className={`text-[13px] mb-8 text-center max-w-[320px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
               <p>
                 {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
                 {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
@@ -4702,11 +4735,11 @@ function EditorPage() {
                 {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
               </p>
               {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'initializing') && (
-                <div className="mt-4 px-4 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                  <p className="text-yellow-500/80 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
-                  <p className="text-white/60 text-[12px]">
+                <div className={`mt-4 px-4 py-2 border rounded-lg ${isLight ? 'bg-yellow-500/5 border-yellow-500/10' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
+                  <p className="text-yellow-600 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
+                  <p className={`text-[12px] ${isLight ? 'text-gray-600' : 'text-white/60'}`}>
                     4K and 2K exports with video elements take a long time.
-                    <span className="block font-bold text-white/80 mt-1">Please do not close this page.</span>
+                    <span className={`block font-bold mt-1 ${isLight ? 'text-gray-900' : 'text-white/80'}`}>Please do not close this page.</span>
                   </p>
                 </div>
               )}
@@ -4716,9 +4749,9 @@ function EditorPage() {
               <div className="w-full">
                 <div className="flex justify-between items-end mb-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]">Progress</span>
-                  <span className="text-base font-mono font-medium text-white/90">{exportState.progress}%</span>
+                  <span className={`text-base font-mono font-medium ${isLight ? 'text-gray-900' : 'text-white/90'}`}>{exportState.progress}%</span>
                 </div>
-                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                <div className={`w-full h-1.5 rounded-full overflow-hidden border shadow-inner ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/5'}`}>
                   <div
                     className="h-full bg-gradient-to-r from-[#7c4af0] to-indigo-500 shadow-[0_0_15px_rgba(124,74,240,0.4)] transition-all duration-300 ease-out"
                     style={{ width: `${exportState.progress}%` }}
@@ -4730,7 +4763,7 @@ function EditorPage() {
             {exportState.status !== 'error' && exportState.status !== 'completed' && (
               <button
                 onClick={handleCancelExport}
-                className="mt-8 w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
+                className={`mt-8 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
               >
                 Cancel Export
               </button>
@@ -4739,7 +4772,7 @@ function EditorPage() {
             {exportState.status === 'completed' && (
               <button
                 onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
+                className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
               >
                 Close Window
               </button>
@@ -4755,7 +4788,7 @@ function EditorPage() {
                 </button>
                 <button
                   onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/90 rounded-xl text-[12px] font-medium transition-all border border-white/5"
+                  className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
                 >
                   Cancel
                 </button>
@@ -4766,19 +4799,23 @@ function EditorPage() {
       </Modal>
       {/* Project Status Loading Modal */}
       <Modal
-        isOpen={isSaving}
+        isOpen={isSaving || isNavigating}
         showCloseButton={false}
         maxWidth="max-w-[280px]"
-        className="border-white/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]"
+        className={`${isLight ? 'border-black/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.1)]' : 'border-white/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]'}`}
       >
         <div className="flex flex-col items-center justify-center py-4 gap-4">
           <div className="relative">
-            <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full scale-150 animate-pulse" />
+            <div className={`absolute inset-0 blur-xl rounded-full scale-150 animate-pulse ${isLight ? 'bg-blue-500/10' : 'bg-blue-500/20'}`} />
             <Loader2 className="w-10 h-10 text-blue-400 animate-spin relative z-10" strokeWidth={1.5} />
           </div>
           <div className="flex flex-col items-center gap-1 text-center">
-            <h3 className="text-white font-medium text-[15px] tracking-tight">Saving Project</h3>
-            <p className="text-white/40 text-[12px]">Please wait a moment...</p>
+            <h3 className={`font-medium text-[15px] tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
+              {isNavigating ? 'Returning to Dashboard' : 'Saving Project'}
+            </h3>
+            <p className={`${isLight ? 'text-gray-500' : 'text-white/40'} text-[12px]`}>
+              {isNavigating ? 'Finalizing your profile sync...' : 'Please wait a moment...'}
+            </p>
           </div>
         </div>
       </Modal>
@@ -4796,6 +4833,7 @@ function EditorPage() {
         }}
       />
     </div>
+    </ThemeContext.Provider>
   )
 }
 

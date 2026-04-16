@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useContext } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import {
   Plus,
   Move,
@@ -18,6 +19,7 @@ import {
   Palette,
   Film,
   Type,
+  Pencil,
 } from 'lucide-react'
 
 // Custom Corner Radius Icon representing a rounded corner path
@@ -140,6 +142,8 @@ function MotionPanel({
 
   // Collapsible layers (Map<layerId, boolean> for manual overrides)
   const [manualLayerState, setManualLayerState] = useState(new Map())
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   // Reset manual layer overrides when editing step changes
   useEffect(() => { setManualLayerState(new Map()) }, [editingStepId])
@@ -223,19 +227,19 @@ function MotionPanel({
       const src = layer.data?.url || layer.data?.src
       return src
         ? <img src={src} alt="" className="w-full h-full object-cover rounded-md" />
-        : <div className="w-full h-full rounded-md bg-gradient-to-br from-white/20 to-white/5" />
+        : <div className={`w-full h-full rounded-md ${isLight ? 'bg-slate-200' : 'bg-gradient-to-br from-white/20 to-white/5'}`} />
     }
 
     if (layer.type === LAYER_TYPES.VIDEO) {
       const thumb = layer.data?.thumbnail
       return (
-        <div className="w-full h-full relative rounded-md overflow-hidden bg-zinc-900">
+        <div className={`w-full h-full relative rounded-md overflow-hidden ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
           {thumb
             ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-            : <div className="w-full h-full bg-zinc-900" />
+            : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />
           }
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-            <Film className="h-3 w-3 text-white/70" />
+          <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+            <Film className={`h-3 w-3 ${isLight ? 'text-gray-600' : 'text-white/70'}`} />
           </div>
         </div>
       )
@@ -243,9 +247,9 @@ function MotionPanel({
 
     if (layer.type === LAYER_TYPES.TEXT) {
       const text = layer.data?.content || ''
-      const color = layer.data?.color || '#ffffff'
+      const color = layer.data?.color || (isLight ? '#111827' : '#ffffff')
       return (
-        <div className="w-full h-full rounded-md bg-white/5 border border-white/10 flex items-center justify-center px-1 overflow-hidden">
+        <div className={`w-full h-full rounded-md flex items-center justify-center px-1 overflow-hidden ${isLight ? 'bg-white border border-gray-100 shadow-sm' : 'bg-white/5 border border-white/10'}`}>
           <span
             style={{ fontSize: '10px', color, lineHeight: 1.1, wordBreak: 'break-all' }}
             className="text-center font-bold"
@@ -259,21 +263,21 @@ function MotionPanel({
     if (layer.type === LAYER_TYPES.SHAPE) {
       const fill = layer.data?.fill
       const shapeType = layer.data?.shapeType || 'rect'
-      const fillColor = fill && fill !== 'transparent' ? fill : 'rgba(255,255,255,0.18)'
+      const fillColor = fill && fill !== 'transparent' ? fill : (isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.18)')
 
       if (shapeType === 'circle') {
         return (
           <div className="w-full h-full flex items-center justify-center">
-            <div className="w-4 h-4 rounded-full border border-white/10" style={{ backgroundColor: fillColor }} />
+            <div className={`w-4 h-4 rounded-full border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
           </div>
         )
       }
-      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: fillColor }} />
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
     }
 
     if (layer.type === LAYER_TYPES.FRAME) {
       return (
-        <div className="w-full h-full rounded-md bg-white/10 border border-white/10 flex items-center justify-center text-[8px] text-white/50">
+        <div className={`w-full h-full rounded-md flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-100 border border-gray-200 text-slate-500' : 'bg-white/10 border border-white/10 text-white/50'}`}>
           {layer.data?.isCardFrame ? 'C' : 'F'}
         </div>
       )
@@ -282,8 +286,8 @@ function MotionPanel({
     if (layer.type === LAYER_TYPES.BACKGROUND) {
       const color = typeof layer.data?.color === 'number'
         ? '#' + layer.data.color.toString(16).padStart(6, '0')
-        : (layer.data?.color || '#ffffff')
-      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: color }} />
+        : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: color }} />
     }
 
     return (
@@ -322,12 +326,14 @@ function MotionPanel({
   const renderActionRow = (action, stepId, layerId, readOnly) => (
     <div
       key={action.id}
-      className="flex items-center gap-2 p-1.5 bg-zinc-900/60 rounded-lg border border-zinc-800/20 text-[11px] group/action"
+      className={`flex items-center gap-2 p-1.5 rounded-lg border text-[11px] group/action ${
+        isLight ? 'bg-white border-slate-100/10 shadow-sm' : 'bg-zinc-900/60 border-zinc-800/20 shadow-none'
+      }`}
     >
-      <div className="text-zinc-400 opacity-60">
+      <div className={`${isLight ? 'text-slate-400 opacity-80' : 'text-zinc-400 opacity-60'}`}>
         {renderActionIcon(action.type)}
       </div>
-      <span className="text-zinc-100 flex-1 font-medium">
+      <span className={`flex-1 font-medium ${isLight ? 'text-slate-700' : 'text-zinc-100'}`}>
         {renderActionLabel(action.type)}
       </span>
       {!readOnly && (
@@ -373,8 +379,10 @@ function MotionPanel({
       <div
         key={layerId}
         data-layer-id={layerId}
-        className={`bg-zinc-800/20 rounded-xl p-2.5 border transition-all ${
-          isSelected ? 'border-purple-500/40 bg-purple-500/[0.03]' : 'border-zinc-800/10 hover:border-zinc-800/30'
+        className={`rounded-xl p-2.5 border transition-all ${
+          isSelected 
+            ? (isLight ? 'border-purple-200 bg-purple-50/50 shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03]') 
+            : (isLight ? 'border-slate-100 bg-white shadow-sm hover:border-slate-200' : 'border-zinc-800/10 bg-zinc-800/20 hover:border-zinc-800/30')
         }`}
       >
         {/* Layer Header */}
@@ -386,16 +394,16 @@ function MotionPanel({
           } : undefined}
         >
           {!readOnly && (
-            <ChevronDown className={`h-3 w-3 text-zinc-500 flex-shrink-0 transition-transform ${isLayerExpanded ? '' : '-rotate-90'}`} />
+            <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isLayerExpanded ? '' : '-rotate-90'}`} />
           )}
-          <div className="w-7 h-7 flex-shrink-0 bg-black/20 rounded-lg overflow-hidden border border-white/5">
+          <div className={`w-7 h-7 flex-shrink-0 rounded-lg overflow-hidden border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-black/20 border-white/5'}`}>
             {renderLayerPreview(layer)}
           </div>
-          <span className="text-[10px] text-white font-semibold truncate leading-tight flex-1">
+          <span className={`text-[10px] font-semibold truncate leading-tight flex-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>
             {getLayerDisplayName(layer)}
           </span>
           {!isLayerExpanded && hasAnimations && (
-            <span className="text-[9px] text-zinc-500 flex-shrink-0">
+            <span className={`text-[9px] flex-shrink-0 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
               {layerActions.length} action{layerActions.length > 1 ? 's' : ''}
             </span>
           )}
@@ -425,7 +433,11 @@ function MotionPanel({
                       setAddAnimMenuLayerId(layerId)
                     }
                   }}
-                  className="flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-purple-400 transition-colors px-1.5 py-1 rounded-md hover:bg-white/[0.03]"
+                  className={`flex items-center gap-1.5 text-[10px] transition-colors px-1.5 py-1 rounded-md ${
+                    isLight 
+                      ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50' 
+                      : 'text-zinc-500 hover:text-purple-400 hover:bg-white/[0.03]'
+                  }`}
                 >
                   <Plus className="h-3 w-3" />
                   Add Animation
@@ -433,7 +445,9 @@ function MotionPanel({
 
                 {/* Context Menu */}
                 {addAnimMenuLayerId === layerId && (
-                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 bg-zinc-900 border border-zinc-700/60 rounded-lg shadow-xl py-1 min-w-[140px]`}>
+                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 border rounded-lg shadow-xl py-1 min-w-[140px] ${
+                    isLight ? 'bg-white border-gray-200' : 'bg-zinc-900 border-zinc-700/60'
+                  }`}>
                     {available.map((actionType) => {
                       const meta = getActionMeta(actionType)
                       if (!meta) return null
@@ -445,9 +459,11 @@ function MotionPanel({
                             setAddAnimMenuLayerId(null)
                             onAddAnimation?.(layerId, actionType)
                           }}
-                          className="flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+                          className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] transition-colors ${
+                            isLight ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-50' : 'text-zinc-300 hover:text-white hover:bg-white/[0.06]'
+                          }`}
                         >
-                          <Icon className="h-3.5 w-3.5 text-zinc-500" />
+                          <Icon className={`h-3.5 w-3.5 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
                           {meta.label}
                         </button>
                       )
@@ -469,7 +485,11 @@ function MotionPanel({
   const renderActiveStep = (step, stepIndex) => (
     <div
       key={step.id}
-      className="border rounded-xl p-3 transition-all duration-300 border-[#7c4af0]/40 bg-[#7c4af0]/5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]"
+      className={`border rounded-xl p-3 transition-all duration-300 ${
+        isLight 
+          ? 'border-purple-200 bg-white shadow-[0_4px_12px_rgba(124,74,240,0.08)]' 
+          : 'border-[#7c4af0]/40 bg-[#7c4af0]/5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
+      }`}
     >
       {/* Step Header */}
       <div className="flex items-center justify-between">
@@ -477,17 +497,19 @@ function MotionPanel({
           <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-purple-500 text-white">
             {stepIndex + 1}
           </div>
-          <span className="text-xs font-semibold text-white">
+          <span className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
             Step {stepIndex + 1}
           </span>
-          <span className="text-[9px] text-purple-300 font-medium px-1.5 py-0.5 rounded-full bg-purple-500/15">
+          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-300 bg-purple-500/15'}`}>
             Active
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => onCancelMotion?.()}
-            className="px-2.5 py-1 text-[10px] font-semibold text-zinc-400 hover:text-white hover:bg-zinc-700/50 rounded-md transition-all flex items-center gap-1.5"
+            className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+              isLight ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'
+            }`}
             title="Cancel Step"
           >
             <X className="h-3 w-3" />
@@ -495,7 +517,9 @@ function MotionPanel({
           </button>
           <button
             onClick={() => handleDeleteStep(step.id)}
-            className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all"
+            className={`p-1.5 rounded-md transition-all ${
+              isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
+            }`}
             title="Delete step"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -504,8 +528,8 @@ function MotionPanel({
       </div>
 
       {/* Helper hint */}
-      <div className="mt-3 px-2 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
-        <p className="text-[10px] text-zinc-400 italic leading-relaxed">
+      <div className={`mt-3 px-2 py-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/[0.03] border-white/[0.06]'}`}>
+        <p className={`text-[10px] italic leading-relaxed ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
           Edit anything on the canvas. Animations will appear here.
         </p>
       </div>
@@ -522,13 +546,15 @@ function MotionPanel({
       </div>
 
       {/* Bottom Save Step */}
-      <div className="mt-3 pt-3 border-t border-white/[0.06]">
+      <div className={`mt-3 pt-3 border-t ${isLight ? 'border-slate-100' : 'border-white/[0.06]'}`}>
         <button
           onClick={() => onApplyMotion?.()}
           className={`w-full py-2 text-[11px] font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-sm rounded-lg ${
             getStepSummary(step).actionCount > 0
               ? 'text-white bg-[#7c4af0] hover:bg-[#8b5cf6]'
-              : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80'
+              : (isLight 
+                  ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-default' 
+                  : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80')
           }`}
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
@@ -552,8 +578,8 @@ function MotionPanel({
         key={step.id}
         className={`border rounded-xl p-3 transition-all duration-300 ${
           isSelected 
-            ? 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]' 
-            : 'border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60'
+            ? (isLight ? 'border-purple-200 bg-white shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]') 
+            : (isLight ? 'border-slate-100 bg-slate-50 hover:bg-white hover:border-slate-200' : 'border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60')
         }`}
       >
         {/* Header */}
@@ -562,17 +588,19 @@ function MotionPanel({
             className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
             onClick={() => toggleStepExpand(step.id)}
           >
-            <ChevronDown className={`h-3.5 w-3.5 text-zinc-500 flex-shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+            <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isExpanded ? '' : '-rotate-90'}`} />
             <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              isSelected ? 'bg-purple-500 text-white' : 'bg-zinc-800 text-zinc-400'
+              isSelected 
+                ? 'bg-purple-500 text-white' 
+                : (isLight ? 'bg-slate-200 text-slate-500' : 'bg-zinc-800 text-zinc-400')
             }`}>
               {stepIndex + 1}
             </div>
-            <span className={`text-xs font-semibold ${isSelected ? 'text-white' : 'text-zinc-100'}`}>
+            <span className={`text-xs font-semibold ${isSelected ? (isLight ? 'text-slate-900' : 'text-white') : (isLight ? 'text-slate-600' : 'text-zinc-100')}`}>
               Step {stepIndex + 1}
             </span>
             {layerCount > 0 && (
-              <span className="text-[9px] text-zinc-500">
+              <span className={`text-[9px] ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
                 {layerCount} layer{layerCount > 1 ? 's' : ''}, {actionCount} action{actionCount !== 1 ? 's' : ''}
               </span>
             )}
@@ -580,16 +608,20 @@ function MotionPanel({
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => handleEditStep(step.id)}
-              className={`p-1.5 rounded-md transition-all ${
-                isSelected ? 'text-purple-400 bg-purple-500/10' : 'text-zinc-500 hover:text-purple-400 hover:bg-zinc-800'
+              className={`p-2 rounded-lg transition-all ${
+                isSelected 
+                  ? (isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-400 bg-purple-500/10') 
+                  : (isLight ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50' : 'text-zinc-500 hover:text-purple-400 hover:bg-purple-500/10')
               }`}
               title="Update Step"
             >
-              <Zap className="h-4 w-4" />
+              <Pencil className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleDeleteStep(step.id)}
-              className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all"
+              className={`p-1.5 rounded-md transition-all ${
+                isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
+              }`}
               title="Delete step"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -599,7 +631,7 @@ function MotionPanel({
 
         {/* Expanded read-only view */}
         {isExpanded && step.layerActions && Object.keys(step.layerActions).length > 0 && (
-          <div className="mt-3 space-y-2 border-t border-zinc-800/50 pt-3">
+          <div className={`mt-3 space-y-2 border-t pt-3 ${isLight ? 'border-slate-100' : 'border-zinc-800/50'}`}>
             {Object.entries(step.layerActions).map(([layerId]) => {
               const layer = layers[layerId]
               if (!layer) return null
@@ -634,27 +666,27 @@ function MotionPanel({
           top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : `${topToolbarHeight}px`,
           height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '80vh' : 'auto',
           width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
-          backgroundColor: 'rgba(9, 10, 13, 0.96)',
+          backgroundColor: isLight ? '#f9fafb' : '#090a0d',
           backdropFilter: 'blur(32px)',
           WebkitBackdropFilter: 'blur(32px)',
-          borderColor: 'rgba(255, 255, 255, 0.15)',
+          borderColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
         }}
       >
         {/* Mobile Drag Handle */}
         <div className="lg:hidden flex justify-center pt-2.5 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-white/20" />
+          <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-slate-200' : 'bg-white/20'}`} />
         </div>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 flex-shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2.5">
+          <h2 className={`text-sm font-semibold flex items-center gap-2.5 ${isLight ? 'text-gray-900' : 'text-zinc-200'}`}>
             <Zap className="h-4 w-4 text-[#7c4af0]" />
             Animation
           </h2>
           <div className="flex items-center gap-1">
             <button
               onClick={onClose}
-              className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-white/5 rounded-md transition-all"
+              className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-slate-600 hover:bg-slate-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'}`}
               aria-label="Close panel"
             >
               <X className="h-4 w-4" />
@@ -664,9 +696,9 @@ function MotionPanel({
 
         {/* Left resize handle */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 hover:bg-zinc-700/50 transition-colors"
+          className={`absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 transition-colors ${isLight ? 'hover:bg-purple-500/10' : 'hover:bg-zinc-700/50'}`}
           style={{
-            borderLeft: '0.5px solid rgba(255, 255, 255, 0.15)',
+            borderLeft: isLight ? '1px solid rgba(0, 0, 0, 0.05)' : '0.5px solid rgba(255, 255, 255, 0.15)',
           }}
           onMouseDown={(e) => {
             e.preventDefault()
@@ -700,7 +732,7 @@ function MotionPanel({
 
         {/* Step count summary */}
         <div className="px-5 pb-3 flex-shrink-0">
-          <div className="text-[10px] text-zinc-400 font-bold tracking-widest uppercase">
+          <div className={`text-[10px] font-bold tracking-widest uppercase ${isLight ? 'text-slate-400' : 'text-zinc-400'}`}>
             {motionFlow.length === 0 ? 'No animation steps' : `${motionFlow.length} Step${motionFlow.length > 1 ? 's' : ''}`}
           </div>
         </div>
@@ -708,13 +740,13 @@ function MotionPanel({
         {/* Steps List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {motionFlow.length === 0 && !isMotionCaptureActive ? (
-            <div className="text-center text-gray-500 py-12">
-              <Play className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-sm mb-2">Start building animation</p>
-              <p className="text-xs mb-6">Add your first step to begin</p>
+            <div className="text-center py-12">
+              <Play className={`h-12 w-12 mx-auto mb-4 opacity-50 ${isLight ? 'text-slate-300' : 'text-zinc-600'}`} />
+              <p className={`text-sm mb-2 ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>Start building animation</p>
+              <p className={`text-xs mb-6 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Add your first step to begin</p>
               <button
                 onClick={() => onStartMotionCapture?.()}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#7c4af0] hover:bg-[#8b5cf6] rounded-lg transition-all shadow-sm"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#7c4af0] hover:bg-[#8b5cf6] rounded-lg transition-all shadow-md shadow-purple-500/10"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add Step
@@ -733,7 +765,11 @@ function MotionPanel({
               {!isMotionCaptureActive && motionFlow.length > 0 && (
                 <button
                   onClick={() => onStartMotionCapture?.()}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold text-zinc-400 hover:text-purple-400 border border-dashed border-zinc-800/60 hover:border-purple-500/30 rounded-xl transition-all hover:bg-white/[0.02]"
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold rounded-xl transition-all border border-dashed ${
+                    isLight 
+                      ? 'text-slate-400 hover:text-purple-600 border-slate-200 hover:border-purple-300 hover:bg-purple-50/50' 
+                      : 'text-zinc-400 hover:text-purple-400 border-zinc-800/60 hover:border-purple-500/30 hover:bg-white/[0.02]'
+                  }`}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Step
@@ -745,9 +781,9 @@ function MotionPanel({
 
         {/* Footer — total duration */}
         {motionFlow.length > 0 && (
-          <div className="flex-shrink-0 p-4 border-t border-white/10 bg-black/20">
-            <div className="text-xs text-white/60 text-center">
-              Total Animation Duration: <span className="text-white font-mono font-bold">{(motionFlowData.pageDuration / 1000).toFixed(1)}s</span>
+          <div className={`flex-shrink-0 p-4 border-t ${isLight ? 'border-slate-100 bg-white' : 'border-white/10 bg-black/20'}`}>
+            <div className={`text-xs text-center ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
+              Total Animation Duration: <span className={`font-mono font-bold ${isLight ? 'text-[#7c4af0]' : 'text-white'}`}>{(motionFlowData.pageDuration / 1000).toFixed(1)}s</span>
             </div>
           </div>
         )}

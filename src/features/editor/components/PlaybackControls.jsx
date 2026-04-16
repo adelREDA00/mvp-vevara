@@ -1,4 +1,6 @@
-import { Play, Pause, Scissors, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { useContext } from 'react'
+import { Play, Pause, Scissors, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 
 function PlaybackControls({
   isPlaying = false,
@@ -11,6 +13,7 @@ function PlaybackControls({
   onUpdateStep,
   onDeleteStep,
 }) {
+  const { theme } = useContext(ThemeContext)
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
@@ -34,7 +37,9 @@ function PlaybackControls({
             e.stopPropagation()
             if (onSplit) onSplit()
           }}
-          className="p-1.5 rounded-md hover:bg-white/8 active:bg-white/15 text-white/40 hover:text-white/80 transition-all"
+          className={`p-1.5 rounded-md transition-all ${theme === 'light' 
+            ? 'hover:bg-gray-200 text-gray-400 hover:text-gray-700' 
+            : 'hover:bg-white/8 active:bg-white/15 text-white/40 hover:text-white/80'}`}
           title="Split page at playhead (S)"
           type="button"
         >
@@ -56,7 +61,7 @@ function PlaybackControls({
           title={canUpdateStep ? 'Update step at playhead' : 'Move playhead over a step to update'}
           type="button"
         >
-          <RefreshCw className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           {/* Active step indicator dot */}
           {canUpdateStep && (
             <span
@@ -97,7 +102,7 @@ function PlaybackControls({
       <div className="flex items-center justify-center px-4 h-8 sm:h-9 md:h-10 flex-shrink-0 relative z-10">
         <div className="flex items-center justify-center gap-3 sm:gap-4 md:gap-5">
           <div
-            className="text-white/45 text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-right tabular-nums"
+            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-right tabular-nums`}
             style={{
               fontFamily: 'Inter, system-ui, sans-serif',
               whiteSpace: 'nowrap',
@@ -136,7 +141,7 @@ function PlaybackControls({
           </button>
 
           <div
-            className="text-white/45 text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-left tabular-nums"
+            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-left tabular-nums`}
             style={{
               fontFamily: 'Inter, system-ui, sans-serif',
               whiteSpace: 'nowrap',

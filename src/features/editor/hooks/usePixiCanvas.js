@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as PIXI from 'pixi.js'
-import { createApp } from '../../engine/pixi/createApp'
+import { createApp, drawArtboardBackground, releaseOrphanedWebGLContexts } from '../../engine/pixi/createApp'
 
 
 /**
@@ -8,34 +8,90 @@ import { createApp } from '../../engine/pixi/createApp'
  * Creates and initializes the PIXI application, viewport, and containers.
  * Handles canvas resizing, zoom management, and provides access to the PIXI app instance.
  * Manages the separation between world coordinates and screen coordinates.
+ *
+ * [STABILITY REWRITE]
+ * The retry mechanism now uses an always-incrementing `initKey` so every call
+ * to `retry()` is guaranteed to trigger the useEffect, even on the very first
+ * failure.  Previous approach reset `retryCount` to 0 which could no-op.
  */
 export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHeight, zoom = 100 }) {
   const appRef = useRef(null)
   const [isReady, setIsReady] = useState(false)
   const [error, setError] = useState(null)
-  const [retryCount, setRetryCount] = useState(0)
 
-  // Create canvas only once - don't recreate on resize
+  // `initKey` is an always-incrementing counter.  Changing it forces the
+  // initialization useEffect to re-run.  Unlike the old `retryCount` approach,
+  // this guarantees a re-trigger even when the value was already 0.
+  const initKeyRef = useRef(0)
+  const [initKey, setInitKey] = useState(0)
+
+  // Track auto-retry attempts (capped at 3) — separate from manual retries
+  const autoRetryCountRef = useRef(0)
+
+  // ─── Robust App Destruction ─────────────────────────────────────────────
+  // Centralised cleanup to ensure GPU resources are released in every case.
+  const destroyApp = useCallback((appInstance) => {
+    if (!appInstance) return
+
+    try {
+      appInstance._isBeingDestroyed = true
+      if (appInstance.ticker) appInstance.ticker.stop()
+
+      // Force GPU context loss to immediately free the WebGL context slot
+      if (appInstance.renderer?.canvas) {
+        try {
+          const gl =
+            appInstance.renderer.canvas.getContext('webgl2') ||
+            appInstance.renderer.canvas.getContext('webgl')
+          if (gl) {
+            const ext = gl.getExtension('WEBGL_lose_context')
+            if (ext) ext.loseContext()
+          }
+        } catch (_) {}
+      }
+
+      // Remove canvas from DOM
+      if (containerRef.current && appInstance.renderer?.canvas) {
+        try {
+          if (containerRef.current.contains(appInstance.renderer.canvas)) {
+            containerRef.current.removeChild(appInstance.renderer.canvas)
+          }
+        } catch (_) {}
+      }
+
+      // Destroy the application
+      if (appInstance.renderer && !appInstance.destroyed) {
+        appInstance.destroy({ removeView: true, children: true, texture: true })
+      }
+    } catch (e) {
+      console.warn('[usePixiCanvas] Error during app cleanup:', e)
+    }
+  }, [containerRef])
+
+  // ─── Initialization Effect ──────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return
-    if (appRef.current) return // Already created, don't recreate
 
     let isMounted = true
     let pendingApp = null
 
     const init = async () => {
-      // [STABILITY FIX] Clean up any existing app before re-initializing.
-      // This helps release WebGL contexts if a retry is triggered quickly.
+      // Clean up any existing app before re-initializing
       if (appRef.current?.app) {
-        try {
-          const oldApp = appRef.current.app
-          if (oldApp.renderer?.canvas) {
-            const gl = oldApp.renderer.canvas.getContext('webgl2') || oldApp.renderer.canvas.getContext('webgl')
-            if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext()
-          }
-          oldApp.destroy({ removeView: true })
-        } catch (e) {}
+        destroyApp(appRef.current.app)
         appRef.current = null
+      }
+
+      // Clear any stale child canvases left behind by a previous failed init
+      if (containerRef.current) {
+        const staleCanvases = containerRef.current.querySelectorAll('canvas')
+        staleCanvases.forEach((c) => {
+          try {
+            const gl = c.getContext('webgl2') || c.getContext('webgl')
+            if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext()
+            c.remove()
+          } catch (_) {}
+        })
       }
 
       try {
@@ -47,11 +103,11 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         })
 
         if (!isMounted) {
-          result.app.destroy({ removeView: true })
+          destroyApp(result.app)
           return
         }
 
-        const { app, viewport, stageContainer, layersContainer } = result
+        const { app, viewport, stageContainer, layersContainer, artboardSurface, artboardShadow } = result
         pendingApp = app
 
         // Mount the canvas to the container
@@ -64,29 +120,36 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
           containerRef.current.appendChild(canvas)
         }
 
-        appRef.current = { app, viewport, stageContainer, layersContainer }
+        appRef.current = { app, viewport, stageContainer, layersContainer, artboardSurface, artboardShadow }
+        autoRetryCountRef.current = 0 // Reset auto-retry on success
+        setError(null)
         setIsReady(true)
       } catch (error) {
         if (!isMounted) return
-        
+
         // Ensure any partially initialized app is cleaned up
         if (pendingApp) {
-          try {
-            pendingApp.destroy({ removeView: true })
-          } catch (e) {
-            console.warn('Failed to cleanup pending app after init error', e)
-          }
+          destroyApp(pendingApp)
           pendingApp = null
         }
 
-        console.error('Failed to initialize Pixi.js application:', error)
+        console.error('[usePixiCanvas] Failed to initialize PixiJS:', error)
         setError(error)
         setIsReady(false)
 
-        if (retryCount < 3) {
-          const delay = Math.pow(2, retryCount) * 1000
+        // Auto-retry up to 3 times with exponential backoff
+        if (autoRetryCountRef.current < 3) {
+          const attempt = autoRetryCountRef.current
+          const delay = Math.pow(2, attempt) * 1000 // 1s, 2s, 4s
+          console.log(`[usePixiCanvas] Auto-retry ${attempt + 1}/3 in ${delay}ms`)
+
           setTimeout(() => {
-            if (isMounted) setRetryCount(prev => prev + 1)
+            if (!isMounted) return
+            autoRetryCountRef.current++
+            // Release orphaned contexts before auto-retry
+            releaseOrphanedWebGLContexts()
+            initKeyRef.current++
+            setInitKey(initKeyRef.current)
           }, delay)
         }
       }
@@ -97,63 +160,26 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
     return () => {
       isMounted = false
       if (appRef.current?.app) {
-        const { app } = appRef.current
-        // [FIX] Signal to the webglcontextlost handler that this is an intentional
-        // destruction. Without this flag, the handler calls preventDefault() which
-        // tells the browser to hold onto GPU resources — starving the new context.
-        app._isBeingDestroyed = true
-        // [FIX] Stop the ticker FIRST to prevent in-flight render calls from
-        // drawing on a destroyed WebGL context (causes GL_INVALID_OPERATION)
-        if (app.ticker) app.ticker.stop()
-        if (containerRef.current && app.renderer && app.renderer.canvas && containerRef.current.contains(app.renderer.canvas)) {
-          containerRef.current.removeChild(app.renderer.canvas)
-        }
-        
-        // [FIX] Force GPU context loss before destroy to immediately free WebGL contexts limit instead of waiting for GC
-        if (app.renderer && app.renderer.canvas) {
-          try {
-            const gl = app.renderer.canvas.getContext('webgl2') || app.renderer.canvas.getContext('webgl');
-            if (gl) {
-              const loseCtx = gl.getExtension('WEBGL_lose_context');
-              if (loseCtx) loseCtx.loseContext();
-            }
-          } catch(e) {}
-        }
-
-        if (app.renderer && !app.destroyed) {
-          app.destroy({ removeView: true })
-        }
+        destroyApp(appRef.current.app)
         appRef.current = null
       } else if (pendingApp) {
-        // [FIX] Safety check for pending app
-        if (pendingApp.renderer && pendingApp.renderer.canvas) {
-          try {
-            const gl = pendingApp.renderer.canvas.getContext('webgl2') || pendingApp.renderer.canvas.getContext('webgl');
-            if (gl) {
-              const loseCtx = gl.getExtension('WEBGL_lose_context');
-              if (loseCtx) loseCtx.loseContext();
-            }
-          } catch(e) {}
-        }
-        if (pendingApp.renderer && !pendingApp.destroyed) {
-          pendingApp.destroy({ removeView: true })
-        }
+        destroyApp(pendingApp)
       }
-      // [FIX] Deep Cleanup: Clear global PIXI Assets cache to prevent memory leaks 
+
+      // Deep Cleanup: Clear global PIXI Assets cache to prevent memory leaks
       // when repeatedly switching between Dashboard and Editor.
       try {
         PIXI.Assets.unloadAll()
-        // Also clear the internal cache to ensure fresh loads next time
         if (PIXI.Assets.cache) {
           PIXI.Assets.cache.reset()
         }
-      } catch (e) {
+      } catch (_) {
         // Ignore cleanup errors during unmount
       }
 
       setIsReady(false)
     }
-  }, [containerRef, retryCount])
+  }, [containerRef, initKey, destroyApp])
 
   // Handle resize - separate from zoom to avoid performance issues
   useEffect(() => {
@@ -204,22 +230,57 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
     }
   }, [width, height, worldWidth, worldHeight, isReady])
 
+  // Redraw artboard background when world dimensions change (e.g. aspect ratio shift)
+  useEffect(() => {
+    if (!appRef.current || !isReady) return
+    const { artboardSurface, artboardShadow } = appRef.current
+    if (artboardSurface && artboardShadow && worldWidth && worldHeight) {
+      drawArtboardBackground(artboardSurface, artboardShadow, worldWidth, worldHeight)
+    }
+  }, [worldWidth, worldHeight, isReady])
+
   // Zoom handling moved to Stage.jsx for unified behavior
+
+  // ─── Manual Retry ───────────────────────────────────────────────────────
+  // The user can trigger this from the error UI.  It always forces a full
+  // re-initialization cycle regardless of the current state.
+  const retry = useCallback(() => {
+    console.log('[usePixiCanvas] Manual retry requested')
+
+    // 1. Clean up the current app if any
+    if (appRef.current?.app) {
+      destroyApp(appRef.current.app)
+      appRef.current = null
+    }
+
+    // 2. Release orphaned GPU contexts across the page
+    releaseOrphanedWebGLContexts()
+
+    // 3. Reset auto-retry counter so we get fresh attempts
+    autoRetryCountRef.current = 0
+
+    // 4. Clear error/ready state
+    setError(null)
+    setIsReady(false)
+
+    // 5. Increment initKey (always unique) to force the effect to re-run
+    //    We use a small delay to give the GPU driver a moment to reclaim
+    //    the contexts we just released.
+    setTimeout(() => {
+      initKeyRef.current++
+      setInitKey(initKeyRef.current)
+    }, 300)
+  }, [destroyApp])
 
   return {
     pixiApp: appRef.current?.app,
     viewport: appRef.current?.viewport,
     stageContainer: appRef.current?.stageContainer,
     layersContainer: appRef.current?.layersContainer,
+    artboardSurface: appRef.current?.artboardSurface,
+    artboardShadow: appRef.current?.artboardShadow,
     isReady,
     error,
-    retryCount,
-    // Provide a manual retry function for external use
-    retry: useCallback(() => {
-      setError(null)
-      setRetryCount(0)
-      setIsReady(false)
-    }, []),
+    retry,
   }
 }
-

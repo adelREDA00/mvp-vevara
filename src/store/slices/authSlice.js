@@ -54,6 +54,24 @@ export const checkAuth = createAsyncThunk(
     }
 )
 
+export const updateUserTheme = createAsyncThunk(
+    'auth/updateTheme',
+    async (theme, { rejectWithValue }) => {
+        try {
+            const data = await api.put('/auth/theme', { theme })
+            const userString = localStorage.getItem('vevara_user')
+            if (userString) {
+                const user = JSON.parse(userString)
+                user.theme = theme
+                localStorage.setItem('vevara_user', JSON.stringify(user))
+            }
+            return data.user
+        } catch (error) {
+            return rejectWithValue(error.message)
+        }
+    }
+)
+
 const initialState = {
     user: JSON.parse(localStorage.getItem('vevara_user') || 'null'),
     isAuthenticated: !!localStorage.getItem('vevara_user'),
@@ -67,6 +85,12 @@ const authSlice = createSlice({
     reducers: {
         clearError: (state) => {
             state.error = null
+        },
+        setLocalTheme: (state, action) => {
+            if (state.user) {
+                state.user.theme = action.payload
+                localStorage.setItem('vevara_user', JSON.stringify(state.user))
+            }
         }
     },
     extraReducers: (builder) => {
@@ -116,8 +140,13 @@ const authSlice = createSlice({
                 state.isAuthenticated = false
                 state.status = 'idle'
             })
+            .addCase(updateUserTheme.fulfilled, (state, action) => {
+                if (state.user) {
+                    state.user.theme = action.payload.theme
+                }
+            })
     },
 })
 
-export const { clearError } = authSlice.actions
+export const { clearError, setLocalTheme } = authSlice.actions
 export default authSlice.reducer

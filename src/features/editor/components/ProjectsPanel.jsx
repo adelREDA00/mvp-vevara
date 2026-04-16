@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
+import React, { useState, useContext } from 'react'
 import { X, Search, FolderOpen, Plus } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 
 function ProjectsPanel({ onClose }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [width, setWidth] = useState(320)
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   const projects = [
     { name: 'Project Alpha', modified: '2 hours ago' },
@@ -18,10 +21,10 @@ function ProjectsPanel({ onClose }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: '#090a0d',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
+        backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+        WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />

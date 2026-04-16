@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
+import React, { useState, useMemo, useRef, useContext } from 'react'
 import { X, Search, Plus, FileText } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import AdvancedColorPickerModal from './AdvancedColorPickerModal'
@@ -25,6 +26,8 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
   const [showAdvancedPicker, setShowAdvancedPicker] = useState(false)
   const addColorButtonRef = useRef(null)
   const [width, setWidth] = useState(320)
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   // Filter colors based on search query
   const filteredColors = useMemo(() => {
@@ -101,22 +104,22 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
         className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
         style={{
           width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
-          backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#090a0d',
+          backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
           backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
           WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
-          borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+          borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
         }}
       >
         <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
 
         {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50 flex-shrink-0">
+        <div className={`px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-white">Colour</h2>
+            <h2 className={`text-lg font-semibold ${isLight ? 'text-gray-900' : 'text-white'}`}>Colour</h2>
             {onClose && (
               <button
                 onClick={onClose}
-                className="text-zinc-400 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-800"
+                className={`transition-colors p-1 rounded-md ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
               >
                 <X className="h-4 w-4" strokeWidth={1.5} />
               </button>
@@ -125,13 +128,17 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
 
           {/* Search Bar */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={1.5} />
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isLight ? 'text-gray-400' : 'text-zinc-500'}`} strokeWidth={1.5} />
             <input
               type="text"
               placeholder='Try "blue" or "#00c4cc"'
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-zinc-700 focus:ring-1 focus:ring-zinc-700"
+              className={`w-full pl-9 pr-4 py-2 border rounded-lg text-sm transition-all focus:outline-none focus:ring-1 ${
+                isLight 
+                  ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400 focus:border-purple-500 focus:ring-purple-500/20' 
+                  : 'bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500 focus:border-zinc-700 focus:ring-zinc-700'
+              }`}
             />
           </div>
         </div>
@@ -141,8 +148,8 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
           {/* Document Colours Section */}
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3">
-              <FileText className="h-4 w-4 text-zinc-400" strokeWidth={1.5} />
-              <h3 className="text-sm font-medium text-zinc-300">Document colours</h3>
+              <FileText className={`h-4 w-4 ${isLight ? 'text-gray-400' : 'text-zinc-400'}`} strokeWidth={1.5} />
+              <h3 className={`text-sm font-medium ${isLight ? 'text-gray-700' : 'text-zinc-300'}`}>Document colours</h3>
             </div>
             <div className="flex items-center gap-2">
               {/* Add Custom Color - Gradient Circle with Plus */}
@@ -150,7 +157,7 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
                 <button
                   ref={addColorButtonRef}
                   onClick={handleAddCustomColor}
-                  className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-zinc-600 transition-all"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all ${isLight ? 'hover:ring-2 hover:ring-gray-300' : 'hover:ring-2 hover:ring-zinc-600'}`}
                   style={{
                     background: 'linear-gradient(135deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3)',
                   }}
@@ -164,10 +171,12 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
               {colorType !== 'canvas' && (
                 <button
                   onClick={handleTransparent}
-                  className={`w-8 h-8 rounded-full cursor-pointer transition-all ${isSelected('transparent') ? 'ring-2 ring-purple-500' : 'hover:ring-2 hover:ring-zinc-600'
+                  className={`w-8 h-8 rounded-full cursor-pointer transition-all ${isSelected('transparent') ? 'ring-2 ring-purple-500' : (isLight ? 'hover:ring-2 hover:ring-gray-300' : 'hover:ring-2 hover:ring-zinc-600')
                     }`}
                   style={{
-                    backgroundImage: 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)',
+                    backgroundImage: isLight 
+                      ? 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb)'
+                      : 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)',
                     backgroundSize: '6px 6px',
                     backgroundPosition: '0 0, 3px 3px',
                   }}
@@ -191,17 +200,17 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
 
           {/* Brand Kit Message */}
           <div className="mb-6">
-            <p className="text-xs text-zinc-500">No brand colours set for this Brand Kit.</p>
+            <p className={`text-xs ${isLight ? 'text-gray-400' : 'text-zinc-500'}`}>No brand colours set for this Brand Kit.</p>
           </div>
 
           {/* Default Solid Colours Section */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-zinc-400" strokeWidth={1.5} />
-                <h3 className="text-sm font-medium text-zinc-300">Default solid colours</h3>
+                <FileText className={`h-4 w-4 ${isLight ? 'text-gray-400' : 'text-zinc-400'}`} strokeWidth={1.5} />
+                <h3 className={`text-sm font-medium ${isLight ? 'text-gray-700' : 'text-zinc-300'}`}>Default solid colours</h3>
               </div>
-              <button className="text-xs text-zinc-400 hover:text-zinc-300 transition-colors">
+              <button className={`text-xs transition-colors ${isLight ? 'text-gray-400 hover:text-gray-600' : 'text-zinc-400 hover:text-zinc-300'}`}>
                 See all
               </button>
             </div>

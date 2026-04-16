@@ -12,6 +12,8 @@ import {
   Frame,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { ThemeContext } from '../../../app/context/ThemeContext'
+import React from 'react'
 
 export const SIDEBAR_ITEMS = [
   { icon: Grid3x3, label: 'Elements' },
@@ -24,11 +26,14 @@ export const SIDEBAR_ITEMS = [
 ]
 
 function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
+  const { theme } = React.useContext(ThemeContext)
+  const isLight = theme === 'light'
+
   return (
     <div
-      className="w-[72px] lg:w-[80px] h-full flex flex-col items-center flex-shrink-0 overflow-y-auto transition-all duration-300"
+      className={`w-[72px] lg:w-[80px] h-full flex flex-col items-center flex-shrink-0 overflow-y-auto transition-all duration-300`}
       style={{
-        backgroundColor: '#090a0d',
+        backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
       }}
@@ -43,7 +48,15 @@ function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
             <button
               key={item.label}
               onClick={() => onItemClick?.(item.label)}
-              className={`flex flex-col items-center justify-center gap-1.5 rounded-[12px] transition-all duration-300 touch-manipulation w-full aspect-square relative group ${isActive ? 'bg-white/10 shadow-medium text-white' : 'text-zinc-400 hover:text-white hover:bg-white/5 active:bg-white/10'}`}
+              className={`flex flex-col items-center justify-center gap-1.5 rounded-[12px] transition-all duration-300 touch-manipulation w-full aspect-square relative group ${
+                isActive
+                  ? isLight
+                    ? 'bg-gray-100 shadow-medium text-gray-900'
+                    : 'bg-white/10 shadow-medium text-white'
+                  : isLight
+                    ? 'text-gray-500 hover:text-gray-900 hover:bg-gray-50 active:bg-gray-100'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5 active:bg-white/10'
+              }`}
             >
               {isActive && (
                 <div className="absolute left-0 w-1 h-6 bg-[#7c4af0] rounded-r-full" />

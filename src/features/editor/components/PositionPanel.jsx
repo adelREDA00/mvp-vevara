@@ -1,4 +1,5 @@
-import { useMemo, useState, useRef, useCallback } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
+import React, { useMemo, useState, useRef, useCallback, useContext } from 'react'
 import { GripVertical, X, Film } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import { LAYER_TYPES } from '../../../store/models'
@@ -20,6 +21,8 @@ function PositionPanel({
   onReorder,
   onClose,
 }) {
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
   const [panelWidth, setPanelWidth] = useState(320)
   const [overId, setOverId] = useState(null)
 
@@ -45,7 +48,8 @@ function PositionPanel({
       'opacity:1',
       'box-shadow:0 12px 28px rgba(0,0,0,0.5)',
       'pointer-events:none',
-      'background:#090a0d',
+      'background:' + (isLight ? '#ffffff' : '#090a0d'),
+      'color:' + (isLight ? '#000000' : '#ffffff'),
       'box-sizing:border-box',
     ].join(';')
     document.body.appendChild(ghost)
@@ -99,20 +103,20 @@ function PositionPanel({
       const src = layer.data?.url || layer.data?.src
       return src
         ? <img src={src} alt="" className="w-full h-full object-cover rounded-md" />
-        : <div className="w-full h-full rounded-md bg-gradient-to-br from-white/20 to-white/5" />
+        : <div className={`w-full h-full rounded-md ${isLight ? 'bg-slate-200' : 'bg-gradient-to-br from-white/20 to-white/5'}`} />
     }
 
     // ── VIDEO ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.VIDEO) {
       const thumb = layer.data?.thumbnail
       return (
-        <div className="w-full h-full relative rounded-md overflow-hidden bg-zinc-900">
+        <div className={`w-full h-full relative rounded-md overflow-hidden ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
           {thumb
             ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-            : <div className="w-full h-full bg-zinc-900" />
+            : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />
           }
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-            <Film className="h-4 w-4 text-white/70" />
+          <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+            <Film className={`h-4 w-4 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
           </div>
         </div>
       )
@@ -121,15 +125,15 @@ function PositionPanel({
     // ── TEXT ──────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.TEXT) {
       const text = layer.data?.content || ''
-      const color = layer.data?.color || '#ffffff'
+      const color = layer.data?.color || (isLight ? '#111827' : '#ffffff')
       const fs = getTextFontSize(text)
       return (
-        <div className="w-full h-full rounded-md bg-white/5 border border-white/10 flex items-center justify-center px-2 overflow-hidden">
+        <div className={`w-full h-full rounded-md flex items-center justify-center px-2 overflow-hidden ${isLight ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}>
           <span
             style={{ fontSize: fs, color, lineHeight: 1.2, wordBreak: 'break-all' }}
-            className="text-center"
+            className="text-center font-semibold"
           >
-            {text || <span className="text-white/30 italic">empty</span>}
+            {text || <span className={`${isLight ? 'text-slate-300' : 'text-white/30'} italic`}>empty</span>}
           </span>
         </div>
       )
@@ -139,12 +143,12 @@ function PositionPanel({
     if (layer.type === LAYER_TYPES.SHAPE) {
       const fill = layer.data?.fill
       const shapeType = layer.data?.shapeType || 'rect'
-      const fillColor = fill && fill !== 'transparent' ? fill : 'rgba(255,255,255,0.18)'
+      const fillColor = fill && fill !== 'transparent' ? fill : (isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.18)')
 
       if (shapeType === 'circle') {
         return (
           <div className="w-full h-full flex items-center justify-center">
-            <div className="w-8 h-8 rounded-full border border-white/10" style={{ backgroundColor: fillColor }} />
+            <div className={`w-8 h-8 rounded-full border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
           </div>
         )
       }
@@ -159,19 +163,19 @@ function PositionPanel({
           </div>
         )
       }
-      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: fillColor }} />
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
     }
 
     // ── BACKGROUND ────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.BACKGROUND) {
       const color = typeof layer.data?.color === 'number'
         ? '#' + layer.data.color.toString(16).padStart(6, '0')
-        : (layer.data?.color || '#ffffff')
-      return <div className="w-full h-full rounded-md border border-white/10" style={{ backgroundColor: color }} />
+        : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: color }} />
     }
 
     return (
-      <div className="w-full h-full rounded-md bg-white/10 border border-white/10 flex items-center justify-center text-[10px] text-white/50">
+      <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/10 border border-white/10 text-white/50'}`}>
         {(layer.type || 'L').charAt(0).toUpperCase()}
       </div>
     )
@@ -184,23 +188,23 @@ function PositionPanel({
       className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
       style={{
         width: isMobile ? '100%' : `${panelWidth}px`,
-        backgroundColor: isMobile ? 'transparent' : '#090a0d',
+        backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: isMobile ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
-        borderRight: isMobile ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+        borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setPanelWidth} initialWidth={panelWidth} minWidth={240} />
 
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/50 flex-shrink-0">
+      <div className={`px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/40 mb-0.5">Layers</div>
-            <h2 className="text-lg font-semibold text-white leading-tight">Position</h2>
+            <div className={`text-[10px] uppercase tracking-[0.2em] mb-0.5 ${isLight ? 'text-gray-500' : 'text-white/40'}`}>Layers</div>
+            <h2 className={`text-lg font-semibold leading-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Position</h2>
           </div>
           {onClose && (
-            <button onClick={onClose} className="text-zinc-400 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-800">
+            <button onClick={onClose} className={`transition-colors p-1 rounded-md ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}>
               <X className="h-4 w-4" strokeWidth={1.5} />
             </button>
           )}
@@ -214,9 +218,9 @@ function PositionPanel({
         onDrop={(e) => { e.preventDefault(); e.stopPropagation() }}
       >
         {frontToBack.length === 0 && (
-          <div className="text-sm text-white/50 px-3 py-4 rounded-lg border border-dashed border-white/10 text-center leading-relaxed">
+          <div className={`text-sm px-3 py-6 rounded-xl border border-dashed text-center leading-relaxed ${isLight ? 'border-slate-200 text-slate-400 bg-white shadow-sm' : 'border-white/10 text-white/50 animate-pulse'}`}>
             Add elements to start reordering.<br />
-            <span className="text-white/30 text-xs">Background is always at the bottom.</span>
+            <span className={`text-[11px] mt-1 block ${isLight ? 'text-slate-300' : 'text-white/30'}`}>Background is always at the bottom</span>
           </div>
         )}
 
@@ -259,15 +263,15 @@ function PositionPanel({
               className={[
                 'group flex items-center gap-2 px-2 rounded-lg border transition-all select-none cursor-grab active:cursor-grabbing',
                 isSelected
-                  ? 'border-purple-500/60 bg-purple-500/10 shadow-[0_0_0_1px_rgba(168,85,247,0.15)]'
-                  : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]',
-                isDragged ? 'opacity-90 scale-[0.98] ring-1 ring-white/20' : '',
-                isOver ? 'border-purple-400/70 bg-purple-500/10 scale-[1.01]' : '',
+                  ? isLight ? 'border-purple-500 bg-purple-500/10' : 'border-purple-500/60 bg-purple-500/10 shadow-[0_0_0_1px_rgba(168,85,247,0.15)]'
+                  : isLight ? 'border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50/10' : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]',
+                isDragged ? isLight ? 'opacity-90 scale-[0.98] ring-1 ring-gray-200' : 'opacity-90 scale-[0.98] ring-1 ring-white/20' : '',
+                isOver ? isLight ? 'border-purple-400 bg-purple-50' : 'border-purple-400/70 bg-purple-500/10 scale-[1.01]' : '',
               ].join(' ')}
               style={{ height: '56px' }}
             >
               {/* Grip */}
-              <div className="text-white/25 group-hover:text-white/55 transition-colors flex-shrink-0">
+              <div className={`transition-colors flex-shrink-0 ${isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-white/25 group-hover:text-white/55'}`}>
                 <GripVertical className="h-4 w-4" />
               </div>
 
@@ -282,11 +286,11 @@ function PositionPanel({
         {/* Locked background row — no onClick, no drag */}
         {backgroundLayer && (
           <div
-            className="flex items-center gap-2 px-2 rounded-lg border border-dashed border-white/10 bg-white/[0.03] mt-1"
+            className={`flex items-center gap-2 px-2 rounded-lg border border-dashed mt-1 ${isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/10 bg-white/[0.03]'}`}
             style={{ height: '56px' }}
             title="Canvas background — cannot be reordered"
           >
-            <div className="text-white/12 flex-shrink-0">
+            <div className={`flex-shrink-0 ${isLight ? 'text-slate-200' : 'text-white/12'}`}>
               <GripVertical className="h-4 w-4" />
             </div>
             <div className="flex-1 h-10 overflow-hidden opacity-50">

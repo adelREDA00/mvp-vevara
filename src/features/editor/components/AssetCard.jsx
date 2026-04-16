@@ -1,5 +1,7 @@
 import { Trash2, Film, Loader2, Check } from 'lucide-react'
 import { useSelector } from 'react-redux'
+import { useContext } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 
 export function AssetCard({ 
@@ -22,15 +24,22 @@ export function AssetCard({
   const isUploading = status === 'uploading' || isLegacyUploading
   const isFailed = status === 'failed'
 
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
+
   const isDisabled = isUploading || isDeleting || isPreparing || isPending || isFailed
 
   return (
     <div
-      className={`group relative aspect-square rounded-xl overflow-hidden bg-white/5 border transition-all ${
-        isSelected ? 'border-[#7c4af0] shadow-[0_0_12px_rgba(124,74,240,0.3)]' : 'border-white/10'
+      className={`group relative aspect-square rounded-xl overflow-hidden border transition-all ${
+        isLight ? 'bg-slate-50' : 'bg-white/5'
+      } ${
+        isSelected 
+          ? 'border-[#7c4af0] shadow-[0_0_12px_rgba(124,74,240,0.3)]' 
+          : (isLight ? 'border-slate-100 hover:border-slate-200' : 'border-white/10 hover:border-purple-500/50')
       } ${isDisabled
         ? 'opacity-40 cursor-not-allowed'
-        : 'cursor-pointer hover:border-purple-500/50'
+        : 'cursor-pointer'
         }`}
       onClick={(e) => {
         if (isDisabled) return
@@ -55,14 +64,14 @@ export function AssetCard({
           {image.metadata?.thumbnail || image.thumbnail ? (
             <img src={image.metadata?.thumbnail || image.thumbnail} className="w-full h-full object-cover" alt="" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-zinc-900">
-              <Film className="w-6 h-6 text-white/20" />
+            <div className={`w-full h-full flex items-center justify-center ${isLight ? 'bg-slate-200' : 'bg-zinc-900'}`}>
+              <Film className={`w-6 h-6 ${isLight ? 'text-slate-400' : 'text-white/20'}`} />
             </div>
           )}
           {!isDisabled && <div className="absolute top-2 right-2 px-1 py-0.5 rounded bg-black/60 text-[8px] font-bold text-white tracking-widest">VIDEO</div>}
         </div>
       ) : (
-        <div className="w-full h-full bg-zinc-900 flex items-center justify-center overflow-hidden">
+        <div className={`w-full h-full flex items-center justify-center overflow-hidden ${isLight ? 'bg-slate-200' : 'bg-zinc-900'}`}>
           {assetUrl ? (
             <img
               src={image.metadata?.thumbnail || image.thumbnail || assetUrl}
@@ -78,10 +87,10 @@ export function AssetCard({
             />
           ) : (
             <div className="flex flex-col items-center gap-2 p-4 text-center">
-               <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
-                  {isVideo ? <Film className="w-4 h-4 text-white/40" /> : <Loader2 className="w-4 h-4 text-white/40 animate-pulse" />}
+               <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
+                  {isVideo ? <Film className={`w-4 h-4 ${isLight ? 'text-slate-400' : 'text-white/40'}`} /> : <Loader2 className={`w-4 h-4 animate-pulse ${isLight ? 'text-slate-400' : 'text-white/40'}`} />}
                </div>
-               <span className="text-[9px] text-white/40 font-medium truncate w-full px-2">{name}</span>
+               <span className={`text-[9px] font-medium truncate w-full px-2 ${isLight ? 'text-slate-500' : 'text-white/40'}`}>{name}</span>
             </div>
           )}
         </div>
@@ -139,7 +148,7 @@ export function AssetCard({
               <div className="relative w-10 h-10 mb-2">
                 <svg className="w-full h-full transform -rotate-90">
                   <circle
-                    className="text-white/10"
+                    className={isLight ? 'text-black/5' : 'text-white/10'}
                     strokeWidth="3"
                     stroke="currentColor"
                     fill="transparent"

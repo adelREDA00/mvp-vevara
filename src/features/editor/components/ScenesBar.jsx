@@ -1,8 +1,9 @@
-import { Plus, Zap, ChevronDown } from 'lucide-react'
+import { Plus, Zap, ChevronDown, Pencil } from 'lucide-react'
 import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
 import { createPortal } from 'react-dom'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming } from '../../../store/slices/projectSlice'
 import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
@@ -1348,6 +1349,8 @@ const ScenesBar = React.memo(({
   onPlay, // Optional: to resume playback after split
   onPause // Optional: to pause during split
 }) => {
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
   const dispatch = useDispatch()
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null })
   const [stepContextMenu, setStepContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null, stepId: null })
@@ -2145,11 +2148,11 @@ const ScenesBar = React.memo(({
 
   return (
     <div
-      className="relative flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
+      className={`relative flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0`}
       style={{
         minWidth: '100%',
         width: `${Math.max(totalCardsWidth + 32, 100)}px`,
-        backgroundColor: '#090a0d',
+        backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
       }}
     >
       {/* Timeline Ruler */}
@@ -2176,7 +2179,7 @@ const ScenesBar = React.memo(({
             <div
               className="whitespace-nowrap"
               style={{
-                color: 'rgba(255,255,255,0.45)',
+                color: isLight ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)',
                 fontSize: '9px',
                 fontWeight: 600,
                 fontFamily: 'Inter, system-ui, sans-serif',
@@ -2189,7 +2192,7 @@ const ScenesBar = React.memo(({
             <div style={{
               width: '1px',
               height: '4px',
-              backgroundColor: 'rgba(255,255,255,0.15)',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.15)',
               marginTop: '1px',
             }} />
           </div>
@@ -2205,7 +2208,7 @@ const ScenesBar = React.memo(({
               bottom: '0',
               width: '1px',
               height: '3px',
-              backgroundColor: 'rgba(255,255,255,0.1)'
+              backgroundColor: isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'
             }}
           />
         ))}
@@ -2283,7 +2286,7 @@ const ScenesBar = React.memo(({
         {/* Playhead diamond/triangle marker at top */}
         <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: '-2px' }}>
           <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-            <path d="M5 8L0.5 0H9.5L5 8Z" fill="#fff" />
+            <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#7c4af0' : '#ffffff'} />
           </svg>
         </div>
 
@@ -2291,11 +2294,13 @@ const ScenesBar = React.memo(({
         <div
           className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
           style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: isLight ? '#7c4af0' : '#ffffff',
             width: isDraggingPlayhead ? '2.5px' : '2px',
             top: '6px',
             borderRadius: '1px',
-            boxShadow: isDraggingPlayhead ? '0 0 6px rgba(255,255,255,0.4)' : '0 0 3px rgba(255,255,255,0.2)',
+            boxShadow: isDraggingPlayhead 
+              ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)') 
+              : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
             transition: 'width 0.1s, box-shadow 0.1s',
           }}
         />
@@ -2458,12 +2463,12 @@ const ScenesBar = React.memo(({
               pointerEvents: 'auto',
               width: '36px',
               height: `${getDefaultCardHeight()}px`,
-              backgroundColor: 'rgba(255,255,255,0.04)',
-              border: '1px dashed rgba(255,255,255,0.12)',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+              border: isLight ? '1px dashed rgba(0,0,0,0.12)' : '1px dashed rgba(255,255,255,0.12)',
               borderRadius: '6px',
             }}
           >
-            <Plus className="h-4 w-4 text-white/30 hover:text-white/60 pointer-events-none" strokeWidth={1.5} />
+            <Plus className={`h-4 w-4 pointer-events-none ${isLight ? 'text-black/30 group-hover:text-black/60' : 'text-white/30 hover:text-white/60'}`} strokeWidth={1.5} />
           </button>
 
         </div>
@@ -2568,7 +2573,7 @@ const ScenesBar = React.memo(({
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
-              <Zap className="h-3.5 w-3.5 text-purple-400" />
+              <Pencil className="h-3.5 w-3.5 text-purple-400" />
               <span>Update Step</span>
             </button>
           )}
@@ -2582,7 +2587,7 @@ const ScenesBar = React.memo(({
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
-              <Zap className="h-3.5 w-3.5 text-purple-400" />
+              <Pencil className="h-3.5 w-3.5 text-purple-400" />
               <span>Select Base State</span>
             </button>
           )}

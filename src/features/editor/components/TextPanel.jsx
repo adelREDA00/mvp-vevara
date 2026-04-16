@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useContext } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { X, Search, Type } from 'lucide-react'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
 import { DragToCloseHandle } from './DragToCloseHandle'
@@ -9,6 +10,8 @@ function TextPanel({ onClose, aspectRatio }) {
   const currentSceneId = useSelector(selectCurrentSceneId)
   const [searchQuery, setSearchQuery] = useState('')
   const [width, setWidth] = useState(320)
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   // Use the aspect ratio prop passed from parent (same as Stage.jsx)
   const getCurrentAspectRatio = () => {
@@ -145,21 +148,21 @@ function TextPanel({ onClose, aspectRatio }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
-        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#090a0d',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
-        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
       <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
 
-      <div className="px-6 pt-6 pb-5 border-b border-white/5">
+      <div className={`px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[20px] font-semibold text-white tracking-tight">Text</h2>
+          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Text</h2>
           {onClose && (
             <button
               onClick={onClose}
-              className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
+              className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
             >
               <X className="h-5 w-5" strokeWidth={2} />
             </button>
@@ -173,7 +176,11 @@ function TextPanel({ onClose, aspectRatio }) {
             placeholder="Search text styles..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-[12px] text-white text-[14px] placeholder-zinc-600 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all"
+            className={`w-full pl-10 pr-4 py-2.5 border rounded-[12px] text-[14px] focus:outline-none focus:ring-1 transition-all ${
+                isLight 
+                    ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:border-purple-500 focus:ring-purple-500/20' 
+                    : 'bg-white/5 border-white/10 text-white placeholder-zinc-600 focus:border-white/20 focus:ring-white/20'
+            }`}
           />
         </div>
       </div>
@@ -184,12 +191,16 @@ function TextPanel({ onClose, aspectRatio }) {
             <button
               key={element.id}
               onClick={element.onClick}
-              className="w-full text-left px-5 py-6 rounded-[16px] hover:bg-white/5 transition-all duration-300 border border-white/5 hover:border-white/10 group shadow-sm active:scale-[0.98]"
+              className={`w-full text-left px-5 py-6 rounded-[16px] transition-all duration-300 border group shadow-sm active:scale-[0.98] ${
+                  isLight 
+                      ? 'bg-gray-50/50 hover:bg-gray-100 border-gray-200 hover:border-gray-300' 
+                      : 'hover:bg-white/5 border-white/5 hover:border-white/10'
+              }`}
             >
               <div className="flex flex-col gap-2">
-                <span className="text-[10px] text-white/40 uppercase font-bold tracking-widest group-hover:text-white/60 transition-colors uppercase">{element.name}</span>
+                <span className={`text-[10px] uppercase font-bold tracking-widest transition-colors ${isLight ? 'text-gray-500 group-hover:text-gray-700' : 'text-white/40 group-hover:text-white/60'}`}>{element.name}</span>
                 <span
-                  className="text-white"
+                  className={isLight ? 'text-gray-900' : 'text-white'}
                   style={{
                     fontSize: element.id === 'title' ? '28px' : 
                              element.id === 'cartoon' ? '32px' :

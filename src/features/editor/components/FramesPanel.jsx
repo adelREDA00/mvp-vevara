@@ -1,11 +1,14 @@
-import { useState } from 'react'
+import { useState, useContext } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { X } from 'lucide-react'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
 
 function FramesPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   const getCurrentAspectRatio = () => {
     return aspectRatio || '16:9'
@@ -100,16 +103,20 @@ function FramesPanel({ onClose, aspectRatio }) {
     return (
       <button
         onClick={item.onClick}
-        className="w-full aspect-square flex flex-col items-center justify-center hover:bg-white/5 rounded-[12px] transition-all duration-300 group relative gap-1.5 border border-transparent hover:border-white/10 shadow-sm"
+        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${
+          isLight 
+            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10' 
+            : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
+        }`}
         title={preset.name}
       >
         <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-          <rect x={rx} y={ry} width={w} height={h} rx="3" fill="none" stroke="#a1a1aa" strokeWidth="1.5" strokeDasharray="4 2" />
+          <rect x={rx} y={ry} width={w} height={h} rx="3" fill="none" stroke={isLight ? '#64748b' : '#a1a1aa'} strokeWidth="1.5" strokeDasharray="4 2" />
           {/* Plus icon in center */}
-          <line x1="24" y1="28" x2="32" y2="28" stroke="#71717a" strokeWidth="1.5" />
-          <line x1="28" y1="24" x2="28" y2="32" stroke="#71717a" strokeWidth="1.5" />
+          <line x1="24" y1="28" x2="32" y2="28" stroke={isLight ? '#94a3b8' : '#71717a'} strokeWidth="1.5" />
+          <line x1="28" y1="24" x2="28" y2="32" stroke={isLight ? '#94a3b8' : '#71717a'} strokeWidth="1.5" />
         </svg>
-        <span className="text-[10px] text-zinc-500 font-medium tracking-wide">{preset.label}</span>
+        <span className={`text-[10px] font-medium tracking-wide ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{preset.label}</span>
       </button>
     )
   }
@@ -125,17 +132,21 @@ function FramesPanel({ onClose, aspectRatio }) {
     return (
       <button
         onClick={item.onClick}
-        className="w-full aspect-square flex flex-col items-center justify-center hover:bg-white/5 rounded-[12px] transition-all duration-300 group relative gap-1.5 border border-transparent hover:border-white/10 shadow-sm"
+        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${
+          isLight 
+            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10' 
+            : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
+        }`}
         title={preset.name}
       >
         <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
-          <rect x={rx + 2} y={ry + 2} width={w} height={h} rx="3" fill="none" stroke="#71717a" strokeWidth="1" strokeDasharray="4 2" />
-          <rect x={rx - 1} y={ry - 1} width={w} height={h} rx="3" fill="none" stroke="#a1a1aa" strokeWidth="1.5" strokeDasharray="4 2" />
+          <rect x={rx + 2} y={ry + 2} width={w} height={h} rx="3" fill="none" stroke={isLight ? '#94a3b8' : '#71717a'} strokeWidth="1" strokeDasharray="4 2" />
+          <rect x={rx - 1} y={ry - 1} width={w} height={h} rx="3" fill="none" stroke={isLight ? '#64748b' : '#a1a1aa'} strokeWidth="1.5" strokeDasharray="4 2" />
           {/* Two-rotation arrow icon in center */}
           <path d="M34 22v6h-6M22 28a6 6 0 0 1 10-4.5L34 26M22 34v-6h6M34 28a6 6 0 0 1-10 4.5L22 30" 
-            stroke="#71717a" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            stroke={isLight ? '#64748b' : '#a1a1aa'} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className="text-[10px] text-zinc-500 font-medium tracking-wide">{preset.label}</span>
+        <span className={`text-[10px] font-medium tracking-wide ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{preset.label}</span>
       </button>
     )
   }
@@ -143,8 +154,8 @@ function FramesPanel({ onClose, aspectRatio }) {
   const GridSection = ({ items, sectionName, renderItem }) => (
     <div className="mb-8">
       <div className="flex items-center justify-between px-6 mb-4">
-        <h3 className="text-[14px] font-semibold text-white/50 uppercase tracking-widest">{sectionName}</h3>
-        <span className="text-[12px] text-zinc-600 font-medium">{items.length} items</span>
+        <h3 className={`text-[14px] font-semibold uppercase tracking-widest ${isLight ? 'text-gray-500' : 'text-white/50'}`}>{sectionName}</h3>
+        <span className={`text-[12px] font-medium ${isLight ? 'text-gray-400' : 'text-zinc-600'}`}>{items.length} items</span>
       </div>
       <div className="px-6">
         <div className="grid grid-cols-3 gap-4">
@@ -161,17 +172,17 @@ function FramesPanel({ onClose, aspectRatio }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
-        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : '#090a0d',
+        backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
-        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+        borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      <div className="px-6 pt-6 pb-4 border-b border-white/5">
+      <div className={`px-6 pt-6 pb-4 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-[20px] font-semibold text-white tracking-tight">Frames</h2>
+          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Frames</h2>
           {onClose && (
-            <button onClick={onClose} className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]">
+            <button onClick={onClose} className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}>
               <X className="h-5 w-5" strokeWidth={2} />
             </button>
           )}

@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2 } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import { AssetCard } from './AssetCard'
@@ -43,16 +44,16 @@ const formatDimensions = (width, height) => {
 }
 
 // Skeleton shimmer component for loading state
-function SkeletonGrid() {
+function SkeletonGrid({ isLight }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
-          className="aspect-square rounded-xl bg-white/5 overflow-hidden relative"
+          className={`aspect-square rounded-xl overflow-hidden relative ${isLight ? 'bg-black/5' : 'bg-white/5'}`}
         >
           <div
-            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]"
+            className={`absolute inset-0 bg-gradient-to-r from-transparent to-transparent animate-[shimmer_1.5s_ease-in-out_infinite] ${isLight ? 'via-black/5' : 'via-white/5'}`}
             style={{ transform: 'translateX(-100%)', animation: `shimmer 1.5s ease-in-out infinite ${i * 200}ms` }}
           />
         </div>
@@ -91,6 +92,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const uploadQueue = useSelector(selectUploadQueueArray)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const allLayers = useSelector(selectLayers)
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
 
   const getCurrentAspectRatio = () => aspectRatio || '16:9'
 
@@ -270,21 +273,21 @@ function UploadsPanel({ onClose, aspectRatio }) {
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
         width: isMobile ? '100%' : `${width}px`,
-        backgroundColor: isMobile ? 'transparent' : '#090a0d',
+        backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: isMobile ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
-        borderRight: isMobile ? 'none' : '1px solid rgba(255, 255, 255, 0.05)',
+        borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
       {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
-      <div className="px-6 pt-6 pb-5 border-b border-white/5">
+      <div className={`px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[20px] font-semibold text-white tracking-tight">Uploads</h2>
+          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Uploads</h2>
           {onClose && (
             <button 
                 onClick={onClose} 
-                className="text-white/40 hover:text-white hover:bg-white/10 transition-all duration-300 p-2 rounded-[10px]"
+                className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
             >
               <X className="h-5 w-5" strokeWidth={2} />
             </button>
@@ -323,12 +326,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
             <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" onChange={handleFileInputChange} className="hidden" />
           </div>
         ) : (
-          <div className="py-8 px-5 text-center bg-white/5 rounded-[20px] border border-white/5 mb-2 shadow-small">
+          <div className={`py-8 px-5 text-center rounded-[20px] border mb-2 shadow-small ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/5'}`}>
             <div className="w-14 h-14 bg-[#7c4af0]/10 rounded-full flex items-center justify-center mx-auto mb-5">
               <UploadIcon className="h-7 w-7 text-[#7c4af0]" strokeWidth={2} />
             </div>
-            <h3 className="text-white text-[16px] font-semibold mb-2">Want to upload?</h3>
-            <p className="text-white/40 text-[13px] mb-5 leading-relaxed">
+            <h3 className={`text-[16px] font-semibold mb-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>Want to upload?</h3>
+            <p className={`text-[13px] mb-5 leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
               Create an account to upload your own assets and use premium templates.
             </p>
             <button
@@ -369,12 +372,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
             </div>
           )}
 
-          <div className="flex border-b border-white/5 px-6">
+          <div className={`flex border-b px-6 ${isLight ? 'border-black/5' : 'border-white/5'}`}>
             {['All', 'Images', 'Videos'].map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : 'text-zinc-500 hover:text-white'}`}
+                className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
               >
                 {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount}</span>
                 {activeTab === tab && (
@@ -385,13 +388,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
           </div>
 
           <div
-            className={`flex-1 overflow-y-auto p-6 custom-scrollbar scrollbar-hide ${isDragOver ? 'bg-[#7c4af0]/5 border-2 border-dashed border-[#7c4af0]/30' : ''}`}
+            className={`flex-1 overflow-y-auto p-6 custom-scrollbar scrollbar-hide ${isDragOver ? (isLight ? 'bg-purple-50 border-2 border-dashed border-purple-200' : 'bg-[#7c4af0]/5 border-2 border-dashed border-[#7c4af0]/30') : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
             {isUploading && (
-              <div className="mb-6 p-4 rounded-[16px] bg-white/5 border border-white/10 shadow-medium">
+              <div className={`mb-6 p-4 rounded-[16px] border shadow-medium ${isLight ? 'bg-white border-purple-100' : 'bg-white/5 border-white/10'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-[12px] font-semibold text-[#7c4af0] tracking-tight">
                     {uploadQueue.length > 0 
@@ -425,13 +428,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
             {/* Loading skeleton */}
             {isFetching && !uploadedImages.length ? (
-              <SkeletonGrid />
+              <SkeletonGrid isLight={isLight} />
             ) : filteredImages.length === 0 ? (
               <div className="h-64 flex flex-col items-center justify-center text-center">
-                <div className="p-4 bg-white/5 rounded-full mb-4">
-                  <UploadIcon className="h-8 w-8 text-zinc-600" />
+                <div className={`p-4 rounded-full mb-4 ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
+                  <UploadIcon className={`h-8 w-8 ${isLight ? 'text-slate-300' : 'text-zinc-600'}`} />
                 </div>
-                <p className="text-[14px] text-zinc-500 font-medium">
+                <p className={`text-[14px] font-medium ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
                   Drop files here to start
                 </p>
               </div>
@@ -464,9 +467,9 @@ function UploadsPanel({ onClose, aspectRatio }) {
       >
         <div className="flex flex-col items-center text-center">
           <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
-            <Trash2 className="h-6 w-6 text-red-400" />
+            <Trash2 className="h-6 w-6 text-red-500" />
           </div>
-          <p className="text-white/70 text-[13px] leading-relaxed mb-6 px-2">
+          <p className={`text-[13px] leading-relaxed mb-6 px-2 ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
             {confirmModal.message}
           </p>
           <div className="flex flex-col w-full gap-2">
@@ -478,7 +481,9 @@ function UploadsPanel({ onClose, aspectRatio }) {
             </button>
             <button
               onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-              className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white rounded-xl text-[14px] font-medium transition-all active:scale-[0.98]"
+              className={`w-full py-2.5 rounded-xl text-[14px] font-medium transition-all active:scale-[0.98] ${
+                isLight ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'bg-white/5 text-white/60 hover:text-white'
+              }`}
             >
               Cancel
             </button>

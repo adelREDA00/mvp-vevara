@@ -1,4 +1,5 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useContext } from 'react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 import {
   Minus, ChevronDown,
   Settings, Zap, X, MoreVertical, Layers,
@@ -34,6 +35,7 @@ function CanvasControls({
   showPasteboard = true,
   onTogglePasteboard
 }) {
+  const { theme } = useContext(ThemeContext)
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)
@@ -215,12 +217,13 @@ function CanvasControls({
     <div className="relative flex flex-col items-center justify-center py-2 px-3">
       <div
         ref={scrollContainerRef}
-        className="h-10 flex items-center gap-3 px-3 rounded-[12px] max-w-[calc(100vw-24px)] overflow-x-auto mobile-scrollbar backdrop-blur-md transition-all duration-300 shadow-medium"
+        className="h-10 flex items-center gap-3 px-3 rounded-[12px] max-w-[calc(100vw-24px)] overflow-x-auto mobile-scrollbar backdrop-blur-md transition-all duration-300"
         style={{
-          backgroundColor: 'rgba(15, 16, 21, 0.85)',
+          backgroundColor: 'var(--editor-panel-bg)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          border: '1px solid var(--editor-panel-border)',
+          boxShadow: 'var(--editor-panel-shadow)',
           pointerEvents: 'auto',
         }}
       >
@@ -234,21 +237,26 @@ function CanvasControls({
                   onOpenColorPicker('canvas')
                 }
               }}
-              className="w-6 h-6 rounded-full border-2 border-zinc-600 cursor-pointer hover:border-zinc-500 transition-all hover:ring-2 hover:ring-zinc-500"
-              style={{ backgroundColor: getCanvasBackgroundColor() }}
+              className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all hover:ring-2 ${theme === 'light' ? 'border-gray-300 hover:ring-gray-300' : 'border-zinc-600 hover:ring-zinc-500'}`}
+              style={{ 
+                backgroundColor: getCanvasBackgroundColor(),
+                backgroundImage: (getCanvasBackgroundColor() === '#ffffff' || getCanvasBackgroundColor() === '#FFFFFF') ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)' : undefined
+              }}
               title="Canvas Background Color"
             />
             <button
               onClick={() => onTogglePasteboard?.()}
               className={`h-6 px-1.5 rounded-md transition-all flex items-center justify-center border ${showPasteboard
                 ? 'bg-[#7c4af0]/20 border-[#7c4af0]/50 text-[#7c4af0]'
-                : 'text-white/40 hover:bg-white/10 border-transparent hover:border-white/10'
+                : (theme === 'light'
+                  ? 'text-gray-400 hover:bg-gray-100 border-transparent hover:border-gray-200'
+                  : 'text-white/40 hover:bg-white/10 border-transparent hover:border-white/10')
                 }`}
               title={showPasteboard ? "Hide Pasteboard" : "Show Pasteboard"}
             >
               {showPasteboard ? <Eye className="h-4 w-4" strokeWidth={2.5} /> : <EyeOff className="h-4 w-4" strokeWidth={2.5} />}
             </button>
-            <div className="w-px h-4 bg-zinc-700 mx-1" />
+            <div className={`w-px h-4 mx-1 ${theme === 'light' ? 'bg-gray-200' : 'bg-zinc-700'}`} />
           </div>
         )}
 
@@ -266,10 +274,16 @@ function CanvasControls({
                 }
               }}
               disabled={!selectedLayer || (selectedLayer.type !== LAYER_TYPES.SHAPE && selectedLayer.type !== LAYER_TYPES.TEXT && selectedLayer.type !== LAYER_TYPES.BACKGROUND)}
-              className="w-6 h-6 rounded-full cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:ring-2 hover:ring-zinc-500"
+              className={`w-6 h-6 rounded-full cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:ring-2 ${theme === 'light' ? 'hover:ring-gray-300 border border-gray-200' : 'hover:ring-zinc-500 border border-white/10'}`}
               style={{
                 backgroundColor: selectedLayer?.type === LAYER_TYPES.BACKGROUND ? getCanvasBackgroundColor() : (isTransparent() ? 'transparent' : getColor()),
-                backgroundImage: (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) ? 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)' : undefined,
+                backgroundImage: (selectedLayer?.type === LAYER_TYPES.BACKGROUND && (getCanvasBackgroundColor() === '#ffffff' || getCanvasBackgroundColor() === '#FFFFFF'))
+                  ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)'
+                  : (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && !isTransparent() && (getColor() === '#ffffff' || getColor() === '#FFFFFF'))
+                    ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)'
+                    : (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) 
+                      ? 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)' 
+                      : undefined,
                 backgroundSize: (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) ? '6px 6px' : undefined,
                 backgroundPosition: (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) ? '0 0, 3px 3px' : undefined,
               }}
@@ -285,7 +299,9 @@ function CanvasControls({
           <>
             <DropdownMenu
               trigger={
-                <button className="h-8 px-3 rounded-[8px] bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-2 transition-all outline-none min-w-[120px]">
+                <button className={`h-8 px-3 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[120px] ${theme === 'light'
+                  ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
+                  : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
                   <span className="truncate flex-1 text-left font-medium">{getFontFamily()}</span>
                   <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
                 </button>
@@ -306,7 +322,9 @@ function CanvasControls({
             {/* Font Size Dropdown */}
             <DropdownMenu
               trigger={
-                <button className="h-8 px-2 rounded-[8px] bg-white/5 text-white/90 text-xs border border-white/5 hover:bg-white/10 flex items-center gap-2 transition-all outline-none min-w-[60px]">
+                <button className={`h-8 px-2 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[60px] ${theme === 'light'
+                  ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
+                  : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
                   <span className="flex-1 text-left font-medium">{getFontSize()}</span>
                   <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
                 </button>
@@ -337,7 +355,9 @@ function CanvasControls({
                 <button
                   className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center min-w-[44px] border ${selectedLayer.data?.enableFlow
                     ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                    : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
+                    : (theme === 'light'
+                      ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+                      : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')
                     }`}
                   title={selectedLayer.data?.enableFlow ? "Water Flow Enabled" : `Align: ${selectedLayer.data?.textAlign || 'left'}`}
                 >
@@ -447,7 +467,9 @@ function CanvasControls({
             <DropdownMenu
               trigger={
                 <button
-                  className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+                  className={`h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border ${theme === 'light'
+                    ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+                    : 'text-white hover:bg-white/10 active:bg-white/15 border-transparent hover:border-white/10'}`}
                   title="Stroke Style"
                 >
                   <Minus className="h-4 w-4 flex-shrink-0 opacity-60" strokeWidth={2} />
@@ -456,12 +478,12 @@ function CanvasControls({
                 </button>
               }
             >
-              <div className="p-4 min-w-[280px]">
+              <div className={`p-4 min-w-[280px] ${theme === 'light' ? 'bg-white' : 'bg-zinc-900'} rounded-xl shadow-2xl`}>
                 {/* Stroke Width Slider */}
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs text-gray-300">Width</label>
-                    <span className="text-xs text-white font-medium">{getStrokeWidth()}px</span>
+                    <label className={`text-xs ${theme === 'light' ? 'text-gray-500' : 'text-gray-300'}`}>Width</label>
+                    <span className={`text-xs font-medium ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>{getStrokeWidth()}px</span>
                   </div>
                   <Slider.Root
                     className="relative flex items-center select-none touch-none w-full h-5"
@@ -478,16 +500,18 @@ function CanvasControls({
                     max={20}
                     step={0.5}
                   >
-                    <Slider.Track className="bg-zinc-700 relative grow rounded-full h-1.5">
-                      <Slider.Range className="absolute bg-white rounded-full h-full" />
+                    <Slider.Track className={`${theme === 'light' ? 'bg-gray-100' : 'bg-zinc-700'} relative grow rounded-full h-1.5`}>
+                      <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
                     </Slider.Track>
-                    <Slider.Thumb className="block w-4 h-4 bg-white rounded-full shadow-md hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-zinc-800" />
+                    <Slider.Thumb className={`block w-4 h-4 rounded-full shadow-md focus:outline-none focus:ring-2 ${theme === 'light'
+                      ? 'bg-white border-2 border-[#7c4af0] focus:ring-[#7c4af0]'
+                      : 'bg-white hover:bg-zinc-100 focus:ring-white focus:ring-offset-2 focus:ring-offset-zinc-800'}`} />
                   </Slider.Root>
                 </div>
 
                 {/* Stroke Color */}
                 <div className="mb-4">
-                  <label className="text-xs text-gray-300 mb-2 block">Color</label>
+                  <label className={`text-xs mb-2 block ${theme === 'light' ? 'text-gray-500' : 'text-gray-300'}`}>Color</label>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -495,7 +519,7 @@ function CanvasControls({
                           onOpenColorPicker('stroke')
                         }
                       }}
-                      className="w-12 h-8 rounded border-2 border-zinc-600 cursor-pointer hover:border-zinc-500 transition-colors"
+                      className={`w-12 h-8 rounded border-2 cursor-pointer transition-colors ${theme === 'light' ? 'border-gray-200 hover:border-gray-300' : 'border-zinc-600 hover:border-zinc-500'}`}
                       style={{ backgroundColor: getStrokeColor() }}
                       title="Stroke Color"
                     />
@@ -507,7 +531,7 @@ function CanvasControls({
                           handleLayerUpdate({ data: { ...selectedLayer.data, stroke: e.target.value } })
                         }
                       }}
-                      className="flex-1 bg-transparent border border-zinc-700 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-zinc-500"
+                      className={`flex-1 bg-transparent border rounded px-2 py-1.5 text-xs outline-none focus:border-[#7c4af0] ${theme === 'light' ? 'border-gray-200 text-gray-900' : 'border-zinc-700 text-white'}`}
                       placeholder="#000000"
                     />
                   </div>
@@ -515,7 +539,7 @@ function CanvasControls({
 
                 {/* Stroke Style */}
                 <div>
-                  <label className="text-xs text-gray-300 mb-2 block">Style</label>
+                  <label className={`text-xs mb-2 block ${theme === 'light' ? 'text-gray-500' : 'text-gray-300'}`}>Style</label>
                   <div className="flex gap-2">
                     {['solid', 'dashed', 'dotted'].map((style) => (
                       <button
@@ -524,8 +548,8 @@ function CanvasControls({
                           handleLayerUpdate({ data: { ...selectedLayer.data, strokeStyle: style } })
                         }}
                         className={`flex-1 px-3 py-2 rounded text-xs font-medium transition-colors ${getStrokeStyle() === style
-                          ? 'bg-purple-600 text-white shadow-[0_4px_12px_rgba(168,85,247,0.4)]'
-                          : 'bg-white/5 text-gray-300 hover:bg-white/10'
+                          ? 'bg-[#7c4af0] text-white shadow-lg shadow-[#7c4af0]/20'
+                          : (theme === 'light' ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-white/5 text-gray-300 hover:bg-white/10')
                           }`}
                       >
                         {style.charAt(0).toUpperCase() + style.slice(1)}
@@ -546,7 +570,9 @@ function CanvasControls({
               setShowBlurSlider(false)
               setShowCornerRadiusSlider(false)
             }}
-            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showOpacitySlider ? 'bg-white/20 border-white/20' : ''}`}
+            className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
+              ? (showOpacitySlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
+              : (showOpacitySlider ? 'bg-white/20 border-white/20 text-white' : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')}`}
             title="Layer Transparency"
           >
             <Ghost className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
@@ -562,7 +588,9 @@ function CanvasControls({
               setShowOpacitySlider(false)
               setShowCornerRadiusSlider(false)
             }}
-            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showBlurSlider ? 'bg-white/20 border-white/20' : ''}`}
+            className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
+              ? (showBlurSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
+              : (showBlurSlider ? 'bg-white/20 border-white/20 text-white' : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')}`}
             title="Layer Blur"
           >
             <Droplets className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
@@ -578,7 +606,9 @@ function CanvasControls({
               setShowOpacitySlider(false)
               setShowBlurSlider(false)
             }}
-            className={`text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border border-transparent hover:border-white/10 ${showCornerRadiusSlider ? 'bg-white/20 border-white/20' : ''}`}
+            className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
+              ? (showCornerRadiusSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
+              : (showCornerRadiusSlider ? 'bg-white/20 border-white/20 text-white' : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')}`}
             title="Corner Radius"
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 flex-shrink-0 opacity-70">
@@ -591,7 +621,9 @@ function CanvasControls({
         {selectedLayer?.data?.isCardFrame && (
           <button
             onClick={() => onFlipCardFrame?.()}
-            className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2.5 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+            className={`h-8 px-2.5 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border ${theme === 'light'
+              ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+              : 'text-white hover:bg-white/10 active:bg-white/15 border-transparent hover:border-white/10'}`}
             title={`Showing ${selectedLayer.data.showingFront !== false ? 'Front' : 'Back'} - Click to flip`}
           >
             <FlipHorizontal2 className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
@@ -602,7 +634,9 @@ function CanvasControls({
         {/* Position panel opener */}
         <button
           onClick={() => onOpenPositionPanel?.()}
-          className="text-white hover:bg-white/10 active:bg-white/15 h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border border-transparent hover:border-white/10"
+          className={`h-8 px-2 rounded-[8px] transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap flex-shrink-0 border ${theme === 'light'
+            ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+            : 'text-white hover:bg-white/10 active:bg-white/15 border-transparent hover:border-white/10'}`}
           title="Reorder layers"
         >
           <Layers className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
@@ -616,7 +650,9 @@ function CanvasControls({
               const isMuted = selectedLayer.data?.muted !== false // default true
               handleLayerUpdate({ data: { ...selectedLayer.data, muted: !isMuted } })
             }}
-            className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10 flex-shrink-0"
+            className={`h-7 w-7 rounded-md transition-colors flex items-center justify-center border flex-shrink-0 ${theme === 'light'
+              ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+              : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'}`}
             title={selectedLayer.data?.muted !== false ? "Unmute Video" : "Mute Video"}
           >
             {selectedLayer.data?.muted !== false ? (
@@ -649,8 +685,10 @@ function CanvasControls({
             className={`h-8 px-3 rounded-[10px] transition-all duration-300 flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
               ? (editingStepActionCount > 0
                 ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
-                : 'bg-zinc-800/80 text-zinc-500 border border-white/5 cursor-default hover:bg-zinc-800')
-              : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10'
+                : (theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-zinc-800/80 text-zinc-500') + ' border border-white/5 cursor-default')
+              : (theme === 'light'
+                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+                : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10')
               }`}
             title={isMotionCaptureActive ? "Save Step" : "Animate"}
           >
@@ -669,7 +707,7 @@ function CanvasControls({
                 onCancelMotion?.()
                 setShowAddStepHint(false)
               }}
-              className="text-white hover:bg-red-600/80 active:bg-red-700 h-7 w-7 rounded-md transition-colors flex items-center justify-center"
+              className={`${theme === 'light' ? 'text-gray-500 hover:bg-red-50' : 'text-white hover:bg-red-600/80'} active:bg-red-700 h-7 w-7 rounded-md transition-colors flex items-center justify-center`}
               title="Cancel Animation Capture"
             >
               <X className="h-4 w-4" />
@@ -679,7 +717,9 @@ function CanvasControls({
           {/* Motion Panel Menu - 3 dots to access MotionPanel for managing steps */}
           <button
             onClick={() => onToggleMotionPanel?.()}
-            className="text-white hover:bg-white/10 active:bg-white/15 h-7 w-7 rounded-md transition-colors flex items-center justify-center border border-transparent hover:border-white/10"
+            className={`h-7 w-7 rounded-md transition-colors flex items-center justify-center border ${theme === 'light'
+              ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+              : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'}`}
             title="Animation Steps"
           >
             <MoreVertical className="h-4 w-4 opacity-70" />
@@ -693,16 +733,16 @@ function CanvasControls({
         <div
           className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
           style={{
-            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
             minWidth: '240px',
             pointerEvents: 'auto'
           }}
         >
-          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Opacity</span>
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Opacity</span>
 
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
@@ -714,16 +754,18 @@ function CanvasControls({
             max={100}
             step={1}
           >
-            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
-              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
+              <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
+                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
               aria-label="Layer Opacity"
             />
           </Slider.Root>
 
-          <span className="text-white text-xs font-mono min-w-[32px] text-right">
+          <span className={`text-xs font-mono min-w-[32px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round((selectedLayer.opacity ?? 1) * 100)}%
           </span>
         </div>
@@ -734,16 +776,16 @@ function CanvasControls({
         <div
           className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
           style={{
-            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
             minWidth: '240px',
             pointerEvents: 'auto'
           }}
         >
-          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Blur</span>
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Blur</span>
 
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
@@ -756,16 +798,18 @@ function CanvasControls({
             max={BLUR_MAX}
             step={0.5}
           >
-            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
-              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
+              <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
+                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
               aria-label="Layer Blur"
             />
           </Slider.Root>
 
-          <span className="text-white text-xs font-mono min-w-[32px] text-right">
+          <span className={`text-xs font-mono min-w-[32px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
           </span>
         </div>
@@ -776,16 +820,16 @@ function CanvasControls({
         <div
           className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
           style={{
-            backgroundColor: 'rgba(15, 16, 21, 0.9)',
+            backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
             minWidth: '240px',
             pointerEvents: 'auto'
           }}
         >
-          <span className="text-white/60 text-[10px] uppercase font-bold tracking-wider select-none shrink-0">Radius</span>
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Radius</span>
           {console.log('[DEBUG] CanvasControls cornerRadius render:', selectedLayer.data?.cornerRadius)}
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
@@ -798,16 +842,18 @@ function CanvasControls({
             max={Math.min(CORNER_RADIUS_MAX, Math.min(selectedLayer.width || 100, selectedLayer.height || 100) / 2)}
             step={1}
           >
-            <Slider.Track className="bg-white/10 relative grow rounded-full h-1">
-              <Slider.Range className="absolute bg-white rounded-full h-full" />
+            <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
+              <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className="block w-3 h-3 bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110 transition-transform focus:outline-none cursor-pointer"
+              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
+                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
               aria-label="Corner Radius"
             />
           </Slider.Root>
 
-          <span className="text-white text-xs font-mono min-w-[36px] text-right">
+          <span className={`text-xs font-mono min-w-[36px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round(selectedLayer.data?.cornerRadius ?? 0)}px
           </span>
         </div>

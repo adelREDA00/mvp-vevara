@@ -9,6 +9,7 @@ import LoginPage from '../features/auth/pages/LoginPage'
 import RegisterPage from '../features/auth/pages/RegisterPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
 import ErrorBoundary from '../components/ErrorBoundary'
+import { ThemeProvider } from './context/ThemeContext'
 
 function AppContent() {
   const dispatch = useDispatch()
@@ -34,9 +35,11 @@ function AppContent() {
 function App() {
   return (
     <Provider store={store}>
-      <ErrorBoundary>
-        <AppContent />
-      </ErrorBoundary>
+      <ThemeProvider>
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
+      </ThemeProvider>
     </Provider>
   )
 }
