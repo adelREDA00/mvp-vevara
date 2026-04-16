@@ -60,7 +60,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                 <video
                     ref={videoRef}
                     src={project.videoUrl}
-                    className={`w-full h-full object-contain transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    className={`w-full h-full object-contain transition-opacity duration-500 pointer-events-none ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
                     muted
                     loop
                     playsInline
@@ -68,7 +68,6 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                     preload="metadata"
                     onLoadedData={() => setIsLoaded(true)}
                     onCanPlay={() => setIsLoaded(true)}
-                    poster={project.thumbnail}
                 />
             ) : null}
 
