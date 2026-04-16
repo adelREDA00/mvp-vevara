@@ -5,7 +5,7 @@ import { Layers } from 'lucide-react'
  * Optimized TemplateThumbnail component with lazy-loading videos.
  * Only renders the <video> element when it's near the viewport.
  */
-const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
+const TemplateThumbnail = memo(({ project, buttonText = "Edit Template", hasInteracted = false }) => {
     const videoRef = useRef(null)
     const containerRef = useRef(null)
     const [isVisible, setIsVisible] = useState(false)
@@ -54,7 +54,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                 setIsPlaying(false)
             }
         }
-    }, [isVisible, shouldRenderVideo])
+    }, [isVisible, shouldRenderVideo, hasInteracted])
 
     return (
         <div 

@@ -90,6 +90,17 @@ const DashboardPage = () => {
     const [canScrollRight, setCanScrollRight] = useState(false)
     const [isMessageCollapsed, setIsMessageCollapsed] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
+    const [hasInteracted, setHasInteracted] = useState(false)
+
+    useEffect(() => {
+        const unlock = () => setHasInteracted(true)
+        window.addEventListener('touchstart', unlock, { once: true })
+        window.addEventListener('mousedown', unlock, { once: true })
+        return () => {
+            window.removeEventListener('touchstart', unlock)
+            window.removeEventListener('mousedown', unlock)
+        }
+    }, [])
 
     const CATEGORIES = [
         'All',
@@ -509,7 +520,7 @@ const DashboardPage = () => {
                                                 className="group cursor-pointer"
                                                 onClick={() => handleDuplicateTemplate(project._id)}
                                             >
-                                                <TemplateThumbnail project={project} />
+                                                <TemplateThumbnail project={project} hasInteracted={hasInteracted} />
                                                 <div className="px-0.5">
                                                     <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
                                                     <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
