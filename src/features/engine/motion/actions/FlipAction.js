@@ -28,24 +28,10 @@ export class FlipAction {
                 const progress = tl.progress()
                 const nowShowingFront = progress < 0.5 ? wasShowingFront : !wasShowingFront
 
-                const frontSprite = pixiObject._imageSprite
-                const backSprite = pixiObject._backSprite
-                if (frontSprite && backSprite) {
-                    frontSprite.visible = nowShowingFront && pixiObject._frameHasAsset
-                    backSprite.visible = !nowShowingFront && pixiObject._frameHasBackAsset
-                    if (pixiObject._framePlaceholder) {
-                        const activeHasAsset = nowShowingFront
-                            ? pixiObject._frameHasAsset
-                            : pixiObject._frameHasBackAsset
-                        pixiObject._framePlaceholder.visible = !activeHasAsset
-                        // Update placeholder label ("Front"/"Back") for empty card frames
-                        if (!activeHasAsset && pixiObject._frameLabel) {
-                            const customLabel = (pixiObject._frameData?.label || '').trim()
-                            if (!customLabel) {
-                                pixiObject._frameLabel.text = nowShowingFront ? 'Front' : 'Back'
-                            }
-                        }
-                    }
+                // Update the reactive property. This automatically handles visibility
+                // and sets the _showingFront flag used by the sync loop for persistence.
+                if (pixiObject.showingFront !== nowShowingFront) {
+                    pixiObject.showingFront = nowShowingFront
                 }
             },
         })

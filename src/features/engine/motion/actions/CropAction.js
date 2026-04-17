@@ -205,32 +205,5 @@ export class CropAction {
           cropMask.fill(0xffffff)
         }
 
-        // [FIX] Update visibility and placeholders for frames during animation
-        if (pixiObject._isFrame) {
-            if (pixiObject._isCardFrame) {
-                // Card frame: during flip, FlipAction's onUpdate controls visibility
-                if (!pixiObject._isFlipping) {
-                    const showingFront = pixiObject._frameData?.showingFront !== false
-                    if (pixiObject._imageSprite) pixiObject._imageSprite.visible = showingFront && !!pixiObject._frameHasAsset
-                    if (pixiObject._backSprite) pixiObject._backSprite.visible = !showingFront && !!pixiObject._frameHasBackAsset
-                    if (pixiObject._framePlaceholder) {
-                        const activeHasAsset = showingFront ? pixiObject._frameHasAsset : pixiObject._frameHasBackAsset
-                        pixiObject._framePlaceholder.visible = !activeHasAsset
-                        if (!activeHasAsset) {
-                            redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
-                        }
-                    }
-                }
-            } else {
-                // Normal frame
-                if (pixiObject._imageSprite) pixiObject._imageSprite.visible = !!pixiObject._frameHasAsset
-                if (pixiObject._framePlaceholder) {
-                    pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
-                    if (!pixiObject._frameHasAsset) {
-                        redrawFramePlaceholder(pixiObject, cropW, cropH, pixiObject._frameData)
-                    }
-                }
-            }
-        }
     }
 }

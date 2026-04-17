@@ -270,7 +270,7 @@ export class MotionEngine {
               }
               
               // Special case for card frames - toggle visibility when showingFront changes
-              if (prop === 'showingFront' && this._isCardFrame && !this._isFlipping) {
+              if (prop === 'showingFront' && this._isCardFrame) {
                 const isShowing = val !== false
                 if (this._imageSprite) this._imageSprite.visible = isShowing && !!this._frameHasAsset
                 if (this._backSprite) this._backSprite.visible = !isShowing && !!this._frameHasBackAsset
@@ -278,7 +278,26 @@ export class MotionEngine {
                 // Update placeholder if no asset
                 const activeHasAsset = isShowing ? this._frameHasAsset : this._frameHasBackAsset
                 if (this._framePlaceholder) {
+                  const isDropTarget = this._isDropTarget === true
+                  if (!isDropTarget) {
                     this._framePlaceholder.visible = !activeHasAsset
+                  }
+                  
+                  // [UX] Update placeholder label for empty card frames
+                  if (!activeHasAsset && this._frameLabel) {
+                    const customLabel = (this._frameData?.label || '').trim()
+                    if (!customLabel) {
+                      this._frameLabel.text = isShowing ? 'Front' : 'Back'
+                    }
+                  }
+                }
+              }
+
+              // [FIX] Force visibility sync for normal frames whenever their state changes
+              if (this._isFrame && !this._isCardFrame) {
+                if (this._imageSprite) this._imageSprite.visible = !!this._frameHasAsset
+                if (this._framePlaceholder && !this._isDropTarget) {
+                  this._framePlaceholder.visible = !this._frameHasAsset
                 }
               }
             }

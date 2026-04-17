@@ -521,9 +521,15 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
         // SYNC Sprite visibility for Frames (consistent with Card side logic)
         if (displayObject._isFrame) {
-          const showing = capturedLayer?.showingFront !== undefined
-            ? capturedLayer.showingFront
-            : (layer.data?.showingFront !== false)
+          let showing = layer.data?.showingFront !== false
+          if (capturedLayer?.showingFront !== undefined) {
+            showing = capturedLayer.showingFront
+          } else if (hasMotion && !isAtSceneStart && !force) {
+            // [FIX] Card Frame Snap-Back: If GSAP is in control and we aren't at the start,
+            // don't force Redux base state if we don't have a captured override.
+            // This prevents flipping back to front when selecting a layer mid-animation.
+            showing = displayObject._showingFront ?? showing
+          }
           displayObject._showingFront = showing
           if (sprite) sprite.visible = showing && displayObject._frameHasAsset
           if (displayObject._backSprite) displayObject._backSprite.visible = !showing && displayObject._frameHasBackAsset
@@ -1220,6 +1226,14 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             }
 
             setLayerObjectsVersion(v => v + 1)
+            
+            // [SYNC FIX] If we are at a non-zero time and NOT playing, we must force 
+            // the engine to re-apply the current time's animated properties (crop, etc)
+            // to the newly attached asset. This ensures immediate visual consistency.
+            if (!isActuallyPlaying && currentTime > 0.01) {
+              engine.masterTimeline.seek(currentTime)
+            }
+
             checkReadiness()
           }).catch(() => {
             asyncLoadCounterRef.current--
@@ -1857,7 +1871,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
                   pixiObject._framePlaceholder.visible = !activeHasAsset
                 }
 
-                if (!activeHasAsset) {
+                if (!activeHasAsset && !pixiObject._isDropTarget) {
                   const placeholderData = isCardFrame && capturedLayerData?.showingFront !== undefined
                     ? { ...layer.data, showingFront }
                     : layer.data

@@ -39,7 +39,8 @@ import {
   getLayerCenter,
   getLayerWorldBounds,
   getRotatedAABB,
-  calculateTextDimensions
+  calculateTextDimensions,
+  getEffectiveLayerDimensions
 } from '../utils/geometry'
 import { drawDashedLine } from '../../engine/pixi/dashUtils'
 import { getCatmullRomPath, getSegmentMidpoint, getDistance } from '../utils/curveUtils'
@@ -4080,12 +4081,28 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             const frameObj = layerObjectsMap.get(overlappingFrameId)
             const frameLayer = latestLayersRef.current[overlappingFrameId]
             if (frameObj && !frameObj.destroyed && frameLayer) {
-              const w = frameLayer.cropWidth ?? frameLayer.width
-              const h = frameLayer.cropHeight ?? frameLayer.height
+              // [DYNAMIC SYNC] Use effective dimensions (current visual state including crop)
+              // for the highlight drawing, falling back to base dimensions if needed.
+              const dims = getEffectiveLayerDimensions(frameLayer, frameObj)
+              const w = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
+              const h = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
               highlightFrameDropTarget(frameObj, w, h, frameLayer.data)
             }
           }
           highlightedFrameRef.current = overlappingFrameId
+        } else if (overlappingFrameId) {
+          // [FIX] Self-healing highlight: if we are still over the same frame, 
+          // ensure it's still highlighted (in case the engine/sync loop cleared it).
+          const frameObj = layerObjectsMap.get(overlappingFrameId)
+          if (frameObj && !frameObj.destroyed && !frameObj._isDropTarget) {
+            const frameLayer = latestLayersRef.current[overlappingFrameId]
+            if (frameLayer) {
+              const dims = getEffectiveLayerDimensions(frameLayer, frameObj)
+              const w = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
+              const h = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
+              highlightFrameDropTarget(frameObj, w, h, frameLayer.data)
+            }
+          }
         }
       }
     }
