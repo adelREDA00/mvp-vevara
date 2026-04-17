@@ -614,7 +614,13 @@ const projectSlice = createSlice({
         // This allows crops to change width/height while preserving placeholder identity
         ...(type === 'frame' ? {
           mediaWidth: layerData.width || 100,
-          mediaHeight: layerData.height || 100
+          mediaHeight: layerData.height || 100,
+          data: {
+            ...layerData.data,
+            isLockedDrop: false,
+            frontIsLockedDrop: false,
+            backIsLockedDrop: false,
+          }
         } : {}),
 
         createdAt: Date.now(),
@@ -829,6 +835,25 @@ const projectSlice = createSlice({
           const nextIndex = currentIndex - 1
           scene.layers.splice(currentIndex, 1)
           scene.layers.splice(nextIndex, 0, layerId)
+        }
+        state.isDirty = true
+        state.version++
+      }
+    },
+
+    toggleFrameLock: (state, action) => {
+      const { layerId, side } = action.payload
+      const layer = state.layers[layerId]
+      if (layer && layer.type === 'frame') {
+        if (!layer.data) layer.data = {}
+        if (layer.data.isCardFrame && side) {
+          if (side === 'front') {
+            layer.data.frontIsLockedDrop = !layer.data.frontIsLockedDrop
+          } else if (side === 'back') {
+            layer.data.backIsLockedDrop = !layer.data.backIsLockedDrop
+          }
+        } else {
+          layer.data.isLockedDrop = !layer.data.isLockedDrop
         }
         state.isDirty = true
         state.version++
@@ -1973,6 +1998,7 @@ export const {
   attachAssetToFrame,
   detachAssetFromFrame,
   flipCardFrame,
+  toggleFrameLock,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders

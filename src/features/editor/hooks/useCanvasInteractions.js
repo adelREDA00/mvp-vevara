@@ -4062,8 +4062,21 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           if (!frameBounds) continue
           if (newX >= frameBounds.left && newX <= frameBounds.right &&
             newY >= frameBounds.top && newY <= frameBounds.bottom) {
-            overlappingFrameId = frameId
-            break
+            // [LOCK CHECK] Only consider this frame as a drop target if the targeted side is NOT locked
+            const isCardFrame = frameLayer.data?.isCardFrame
+            const currentShowingFront = frameObj?._showingFront !== undefined
+              ? frameObj._showingFront
+              : (frameLayer.data?.showingFront ?? true)
+            const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+
+            const isLocked = isCardFrame
+              ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+              : frameLayer.data?.isLockedDrop
+
+            if (!isLocked) {
+              overlappingFrameId = frameId
+              break
+            }
           }
         }
         const prevHighlighted = highlightedFrameRef.current
@@ -4148,6 +4161,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               : (frameLayer.data?.showingFront ?? true)
             const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
+            // [LOCK CHECK] Verify lock state before proceeding with internal drop
+            const isLocked = isCardFrame
+              ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+              : frameLayer.data?.isLockedDrop
+
+            if (isLocked) {
+              highlightedFrameRef.current = null
+              return
+            }
+
             dispatch(attachAssetToFrame({
               layerId: frameId,
               assetUrl,
@@ -4163,8 +4186,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               sourceEndTime: draggedLayer.data?.sourceEndTime,
             }))
             if (frameObj) {
-              const frameW = frameLayer.cropWidth ?? frameLayer.width
-              const frameH = frameLayer.cropHeight ?? frameLayer.height
+              const dims = getEffectiveLayerDimensions(frameLayer, frameObj, motionCaptureMode)
+              const frameW = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
+              const frameH = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
 
               // [FIX] Clear the drop target flag so the sync loop is not blocked
               unhighlightFrameDropTarget(frameObj, frameW, frameH)

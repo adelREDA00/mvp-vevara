@@ -18,6 +18,8 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronRight,
+  Lock,
+  Unlock,
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { createSelector } from '@reduxjs/toolkit'
@@ -33,10 +35,10 @@ import { useDragState } from '../hooks/useDragState'
 import { useDragSelectionBox } from '../hooks/useDragSelectionBox'
 import { useMultiSelectionBox } from '../hooks/useMultiSelectionBox'
 import TextEditOverlay from './TextEditOverlay'
-import { isLayerCompletelyOutside } from '../utils/geometry'
+import { isLayerCompletelyOutside, getEffectiveLayerDimensions } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
-import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect } from '../../../store/slices/projectSlice'
+import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock } from '../../../store/slices/projectSlice'
 import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget } from '../../engine/pixi/createLayer'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
@@ -384,13 +386,25 @@ function Stage({
       : (frameLayer.data?.showingFront ?? true)
     const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
+    // [LOCK CHECK] Prevent drop if target side is locked
+    const isLocked = isCardFrame
+      ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+      : frameLayer.data?.isLockedDrop
+
+    if (isLocked) {
+      // Show feedback that the frame is locked
+      handleLockedInteraction({ clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 })
+      return
+    }
+
     // 1. Update Redux state
     dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side, assetIsVideo }))
 
     // 2. Update PIXI object immediately for visual feedback
     if (frameObj) {
-      const frameW = frameLayer.cropWidth ?? frameLayer.width
-      const frameH = frameLayer.cropHeight ?? frameLayer.height
+      const dims = getEffectiveLayerDimensions(frameLayer, frameObj, motionCaptureMode)
+      const frameW = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
+      const frameH = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
 
       // Clear drop target highlight so the sync loop is not blocked
       unhighlightFrameDropTarget(frameObj, frameW, frameH)
@@ -444,6 +458,23 @@ function Stage({
         if (hitObject) {
           const foundId = findLayerIdFromObject(hitObject, layerObjects, stageContainer, viewport)
           if (layers[foundId]?.type === 'frame') {
+            const frameLayer = layers[foundId]
+            const isCardFrame = frameLayer.data?.isCardFrame
+            const frameObj = layerObjects?.get(foundId)
+            const currentShowingFront = frameObj?._showingFront !== undefined
+              ? frameObj._showingFront
+              : (frameLayer.data?.showingFront ?? true)
+            const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+
+            const isLocked = isCardFrame
+              ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+              : frameLayer.data?.isLockedDrop
+
+            if (isLocked) {
+              handleLockedInteraction(e)
+              return
+            }
+
             targetId = foundId
           }
         }
@@ -1006,7 +1037,11 @@ function Stage({
     contextMenu && createPortal(
       <>
         <div
-          className="fixed z-[10010] bg-[#090a0d]/80 backdrop-blur-2xl rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10 py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95"
+          className={`fixed z-[10010] backdrop-blur-2xl rounded-xl py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95 ${
+            theme === 'light' 
+              ? 'bg-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-gray-200/80' 
+              : 'bg-[#090a0d]/80 shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10'
+          }`}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={() => {
             if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
@@ -1025,7 +1060,11 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                  theme === 'light'
+                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
               >
                 <Copy className="h-3.5 w-3.5 opacity-60" />
                 Duplicate
@@ -1049,7 +1088,11 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                    theme === 'light'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
                 >
                   <ImageIcon className="h-3.5 w-3.5 opacity-60" />
                   Set as Background
@@ -1131,10 +1174,63 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                    theme === 'light'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
                 >
                   <Unlink className="h-3.5 w-3.5 opacity-60" />
                   Detach Asset
+                </button>
+              )}
+              {selectedLayer?.type === 'frame' && (
+                <button
+                  onMouseEnter={() => setSubMenu(null)}
+                  onClick={() => {
+                    if (selectedLayerIds[0]) {
+                      const frameLayer = layers[selectedLayerIds[0]]
+                      const isCardFrame = frameLayer?.data?.isCardFrame
+                      const frameObj = layerObjects?.get(selectedLayerIds[0])
+                      const currentShowingFront = frameObj?._showingFront !== undefined
+                        ? frameObj._showingFront
+                        : (frameLayer?.data?.showingFront ?? true)
+                      const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+
+                      dispatch(toggleFrameLock({ layerId: selectedLayerIds[0], side }))
+                      setContextMenu(null)
+                    }
+                  }}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                    theme === 'light'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {(() => {
+                    const frameLayer = layers[selectedLayerIds[0]]
+                    const isCardFrame = frameLayer?.data?.isCardFrame
+                    const frameObj = layerObjects?.get(selectedLayerIds[0])
+                    const currentShowingFront = frameObj?._showingFront !== undefined
+                      ? frameObj._showingFront
+                      : (frameLayer?.data?.showingFront ?? true)
+                    const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+
+                    const isLocked = isCardFrame
+                      ? (side === 'back' ? frameLayer?.data?.backIsLockedDrop : frameLayer?.data?.frontIsLockedDrop)
+                      : frameLayer?.data?.isLockedDrop
+
+                    const labelPrefix = isCardFrame
+                      ? (side === 'back' ? 'Back ' : 'Front ')
+                      : ''
+
+                    return (
+                      <>
+                        {isLocked ? <Unlock className="h-3.5 w-3.5 opacity-60" /> : <Lock className="h-3.5 w-3.5 opacity-60" />}
+                        {isLocked ? `Unlock ${labelPrefix}Asset Drop` : `Lock ${labelPrefix}Asset Drop`}
+                      </>
+                    )
+                  })()}
                 </button>
               )}
               {selectedLayer?.type === 'frame' && (
@@ -1153,7 +1249,11 @@ function Stage({
                       }
                     }
                   }}
-                  className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                    theme === 'light'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
                 >
                   <ImageIcon className="h-3.5 w-3.5 opacity-60" />
                   Set Label
@@ -1166,8 +1266,14 @@ function Stage({
                     subMenuTimerRef.current = setTimeout(() => setSubMenu('position'), 300)
                   }}
                   onClick={() => setSubMenu(subMenu === 'position' ? null : 'position')}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center justify-between gap-2.5 border-t border-white/5 mt-1 pt-2.5 ${
-                    subMenu === 'position' ? 'bg-white/10 text-white' : 'text-white/80 hover:text-white hover:bg-white/10'
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center justify-between gap-2.5 border-t mt-1 pt-2.5 ${
+                    theme === 'light'
+                      ? 'border-gray-100'
+                      : 'border-white/5'
+                  } ${
+                    subMenu === 'position' 
+                      ? (theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-white/10 text-white') 
+                      : (theme === 'light' ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100' : 'text-white/80 hover:text-white hover:bg-white/10')
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
@@ -1179,7 +1285,11 @@ function Stage({
 
                 {subMenu === 'position' && (
                   <div 
-                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 bg-[#090a0d]/90 backdrop-blur-2xl rounded-xl shadow-2xl border border-white/10 py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200`}
+                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 backdrop-blur-2xl rounded-xl shadow-2xl py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200 ${
+                      theme === 'light'
+                        ? 'bg-white/95 border border-gray-200/80 shadow-[0_8px_32px_rgba(0,0,0,0.12)]'
+                        : 'bg-[#090a0d]/90 border border-white/10 shadow-2xl'
+                    }`}
                     onMouseEnter={() => {
                       if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
                     }}
@@ -1192,7 +1302,11 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                        theme === 'light'
+                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                          : 'text-white/80 hover:text-white hover:bg-white/10'
+                      }`}
                     >
                       <Layers className="h-3.5 w-3.5 opacity-60" />
                       Bring to Front
@@ -1205,7 +1319,11 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                        theme === 'light'
+                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                          : 'text-white/80 hover:text-white hover:bg-white/10'
+                      }`}
                     >
                       <ChevronUp className="h-3.5 w-3.5 opacity-60" />
                       Bring Forward
@@ -1218,7 +1336,11 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                        theme === 'light'
+                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                          : 'text-white/80 hover:text-white hover:bg-white/10'
+                      }`}
                     >
                       <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                       Send Backward
@@ -1231,7 +1353,11 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                        theme === 'light'
+                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                          : 'text-white/80 hover:text-white hover:bg-white/10'
+                      }`}
                     >
                       <Layers3 className="h-3.5 w-3.5 opacity-60" />
                       Send to Back
@@ -1239,7 +1365,7 @@ function Stage({
                   </div>
                 )}
               </div>
-              <div className="h-px bg-white/10 my-1.5 mx-3" />
+              <div className={`h-px my-1.5 mx-3 ${theme === 'light' ? 'bg-gray-100' : 'bg-white/10'}`} />
               <button
                 onMouseEnter={() => setSubMenu(null)}
                 onClick={() => {
@@ -1247,7 +1373,11 @@ function Stage({
                   dispatch(clearLayerSelection())
                   setContextMenu(null)
                 }}
-                className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center gap-2.5"
+                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                  theme === 'light'
+                    ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
+                    : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                }`}
               >
                 <Trash2 className="h-3.5 w-3.5 opacity-70" />
                 Delete
@@ -1267,7 +1397,11 @@ function Stage({
                       }))
                       setContextMenu(null)
                     }}
-                    className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-white/80 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-2.5"
+                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                      theme === 'light'
+                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
                   >
                     <Unlink className="h-3.5 w-3.5 opacity-60" />
                     Detach Background Image
@@ -1278,7 +1412,11 @@ function Stage({
                       dispatch(removeBackgroundImage({ sceneId: currentSceneId }))
                       setContextMenu(null)
                     }}
-                    className="w-full px-3.5 py-2 text-left text-[13px] font-medium text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors flex items-center gap-2.5"
+                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
+                      theme === 'light'
+                        ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
+                        : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                    }`}
                   >
                     <Trash2 className="h-3.5 w-3.5 opacity-70" />
                     Remove Background Image
