@@ -10,7 +10,7 @@ import { gsap } from 'gsap'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
-import { exportVideo } from '../utils/videoExport'
+import { exportVideo, initFFmpeg } from '../utils/videoExport'
 import { Loader2 } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
@@ -601,6 +601,7 @@ function EditorPage() {
     progress: 0,
     error: null
   })
+  const [gifExportModalOpen, setGifExportModalOpen] = useState(false)
 
   // PERFORMANCE: Optimize rendering and animations based on tab visibility
   usePerformanceOptimization(pixiApp, motionControls, exportState.isActive)
@@ -706,8 +707,16 @@ function EditorPage() {
     setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
   }, [])
 
-  const handleExport = useCallback(async (resolution) => {
+  const handleExport = useCallback(async (options) => {
     if (exportState.isActive) return
+
+    // Backwards compatibility: a bare resolution string still works.
+    const opts = typeof options === 'string'
+      ? { format: 'mp4', resolution: options }
+      : (options || { format: 'mp4', resolution: '720p' })
+    const format = opts.format === 'gif' ? 'gif' : 'mp4'
+    const resolution = opts.resolution || '720p'
+    const gifOptions = opts.gifOptions || { width: 480, fps: 24, loop: 0 }
 
     const savedTime = playheadTimeRef.current || 0
 
@@ -726,7 +735,7 @@ function EditorPage() {
     exportAbortControllerRef.current = controller
 
     try {
-      const videoBlob = await exportVideo({
+      const resultBlob = await exportVideo({
         scenes,
         layers,
         sceneMotionFlows,
@@ -734,6 +743,8 @@ function EditorPage() {
         aspectRatio,
         resolution,
         fps: 30,
+        format,
+        gifOptions,
         onProgress: (update) => {
           if (controller.signal.aborted) return
           setExportState(prev => ({
@@ -746,7 +757,11 @@ function EditorPage() {
         editorMotionControls: motionControls
       })
 
-      saveAs(videoBlob, `${projectName || 'video'}_${resolution}.mp4`)
+      if (format === 'gif') {
+        saveAs(resultBlob, `${projectName || 'animation'}_${gifOptions.width}.gif`)
+      } else {
+        saveAs(resultBlob, `${projectName || 'video'}_${resolution}.mp4`)
+      }
 
       setExportState(prev => ({
         ...prev,
@@ -778,6 +793,23 @@ function EditorPage() {
       }
     }
   }, [scenes, layers, sceneMotionFlows, timelineInfo, projectName, exportState.isActive, motionControls, aspectRatio])
+
+  // [PERF] Warm up the FFmpeg WASM core while the editor is idle so the first
+  // user-triggered export doesn't have to wait for a 2-3s download. Skipped on
+  // low-memory devices — we don't want to spend 20MB of idle RAM on a phone
+  // that may never export.
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return
+    if ((navigator.deviceMemory || 4) < 4) return
+    const idleCb = window.requestIdleCallback || ((fn) => setTimeout(fn, 800))
+    const cancelIdleCb = window.cancelIdleCallback || clearTimeout
+    const idleHandle = idleCb(() => {
+      initFFmpeg().catch(() => { /* warm-up failures are non-fatal */ })
+    })
+    return () => {
+      try { cancelIdleCb(idleHandle) } catch (e) { /* ignore */ }
+    }
+  }, [])
 
   const handleFinishEditing = useCallback(() => {
     setEditingTextLayerId(null)
@@ -1243,6 +1275,8 @@ function EditorPage() {
       cropWidth: tracked.cropWidth ?? base.cropWidth,
       cropHeight: tracked.cropHeight ?? base.cropHeight,
       blur: tracked.blur !== undefined ? Math.max(0, Math.min(BLUR_MAX, tracked.blur)) : (base.blur ?? 0),
+      tiltX: tracked.tiltX !== undefined ? tracked.tiltX : (base.tiltX ?? 0),
+      tiltY: tracked.tiltY !== undefined ? tracked.tiltY : (base.tiltY ?? 0),
       data: {
         ...(base.data || {}),
         cornerRadius: tracked.cornerRadius !== undefined ? Math.max(0, Math.min(CORNER_RADIUS_MAX, tracked.cornerRadius)) : (base.data?.cornerRadius ?? 0)
@@ -1392,6 +1426,9 @@ function EditorPage() {
       const layerObject = motionControls?.layerObjects?.get?.(layerId)
       let currentMediaWidth = layer.mediaWidth || layerObject?._mediaWidth || layerObject?._originalWidth || layer.width || 100
       let currentMediaHeight = layer.mediaHeight || layerObject?._mediaHeight || layerObject?._originalHeight || layer.height || 100
+      // [TILT] Track cumulative tilt from previous steps (absolute per step, like blur)
+      let currentTiltX = layer.tiltX !== undefined ? layer.tiltX : 0
+      let currentTiltY = layer.tiltY !== undefined ? layer.tiltY : 0
 
       for (let i = 0; i < stepIndex; i++) {
         const prevStep = existingFlow[i]
@@ -1463,6 +1500,13 @@ function EditorPage() {
         if (flipAction) {
           currentShowingFront = !currentShowingFront
         }
+
+        // Tilt: absolute per step like blur/opacity
+        const tiltAction = actions.find(a => a.type === 'tilt')
+        if (tiltAction) {
+          if (tiltAction.values?.tiltX !== undefined) currentTiltX = tiltAction.values.tiltX
+          if (tiltAction.values?.tiltY !== undefined) currentTiltY = tiltAction.values.tiltY
+        }
       }
 
       // Session start transform (end of previous steps)
@@ -1484,7 +1528,10 @@ function EditorPage() {
         opacity: currentOpacity,
         blur: currentBlur,
         cornerRadius: currentCornerRadius,
-        color: currentColor
+        color: currentColor,
+        // [TILT] Accumulated per-step tilt values
+        tiltX: currentTiltX,
+        tiltY: currentTiltY,
       }
 
       // Apply any existing crop action values from previous steps
@@ -1518,6 +1565,9 @@ function EditorPage() {
         color: currentColor,
         // Accumulated flip state from previous steps (accounts for all prior flip actions)
         showingFront: currentShowingFront,
+        // [TILT] Accumulated tilt from previous steps
+        tiltX: currentTiltX,
+        tiltY: currentTiltY,
         interactionType: null,
         didMove: false,
         didBlur: false,
@@ -1527,7 +1577,8 @@ function EditorPage() {
         didFade: false,
         didCrop: false,
         didColor: false,
-        didFlip: false
+        didFlip: false,
+        didTilt: false,
       })
     })
 
@@ -1580,6 +1631,19 @@ function EditorPage() {
             entry.opacity = transform.alpha !== undefined ? transform.alpha : entry.opacity
             entry.blur = transform.blur !== undefined ? transform.blur : (transform._blurFilter ? transform._blurFilter.strength : entry.blur)
 
+            // [TILT] Preserve the live tilt angles produced by the fast-play
+            // preview so that the freshly opened capture step starts from the
+            // exact visual tilt — otherwise the layer would jump back to the
+            // initial tilt the moment the user touches anything.
+            if (transform.tiltX !== undefined) {
+              entry.tiltX = transform.tiltX
+              entry.initialTransform.tiltX = transform.tiltX
+            }
+            if (transform.tiltY !== undefined) {
+              entry.tiltY = transform.tiltY
+              entry.initialTransform.tiltY = transform.tiltY
+            }
+
             // Sync color from PIXI object (post fast-preview)
             if (transform.color !== undefined && transform.color !== null) {
               entry.color = transform.color
@@ -1602,6 +1666,18 @@ function EditorPage() {
 
       // 8. Set motion capture mode (this will be picked up by MotionPanel via onMotionEditingChange)
       captureActionIdsRef.current.clear()
+
+      // [CRITICAL FIX] Ensure we track existing actions so onInteractionEnd UPDATES them instead of duplicating!
+      if (currentSceneMotionFlow?.steps) {
+        const step = currentSceneMotionFlow.steps.find((s) => s.id === newStepId)
+        if (step && step.layerActions) {
+          Object.entries(step.layerActions).forEach(([layerIdStr, actions]) => {
+            actions.forEach((action) => {
+              captureActionIdsRef.current.set(`${layerIdStr}:${action.type}`, action.id)
+            })
+          })
+        }
+      }
       setMotionCaptureMode({
         isActive: true,
         isTransitioning: false,
@@ -1840,6 +1916,45 @@ function EditorPage() {
             }
           }
 
+          // Tilt
+          const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
+          const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
+          const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
+          const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
+          const shouldCreateTiltAction = tiltXChanged || tiltYChanged
+
+          if (shouldCreateTiltAction) {
+            const key = `${layerId}:tilt`
+            const existingId = captureActionIdsRef.current.get(key)
+            const tiltValues = {
+              tiltX: tracked.tiltX ?? initialTiltX,
+              tiltY: tracked.tiltY ?? initialTiltY,
+              easing: 'power4.out'
+            }
+            console.log(`[TILT DEBUG] onInteractionEnd update for layer ${layerId}:`, tiltValues, existingId ? 'UPDATING' : 'ADDING')
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId, layerId, actionId: existingId,
+                values: tiltValues
+              }))
+              captureActionIdsRef.current.set(key, existingId)
+            } else {
+              const actionId = `action-${Date.now()}-tilt-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId, layerId, actionId,
+                type: 'tilt', values: tiltValues
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:tilt`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+
           // Color Change
           const colorChanged = tracked.color !== undefined && tracked.color !== init.color
           const shouldCreateColorAction = colorChanged || tracked.didColor
@@ -1945,6 +2060,14 @@ function EditorPage() {
           if (data.didFlip) {
             nextEntry.didFlip = true
           }
+          if (data.tiltX !== undefined) {
+            nextEntry.tiltX = data.tiltX
+            nextEntry.didTilt = true
+          }
+          if (data.tiltY !== undefined) {
+            nextEntry.tiltY = data.tiltY
+            nextEntry.didTilt = true
+          }
           if (data.cropX !== undefined) {
             nextEntry.cropX = data.cropX
             nextEntry.didCrop = true
@@ -2041,7 +2164,7 @@ function EditorPage() {
     // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
     const hasAnyInteraction = motionCaptureMode.trackedLayers
       ? Array.from(motionCaptureMode.trackedLayers.values()).some(
-        l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip
+        l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
       )
       : false
 
@@ -2303,6 +2426,34 @@ function EditorPage() {
               }
             }
             if (radiusIdx !== -1) actions[radiusIdx] = action; else actions.push(action)
+          }
+
+          // Tilt action
+          const tiltX = layerData.tiltX
+          const tiltY = layerData.tiltY
+          const initialTiltX = initialTransform?.tiltX !== undefined ? initialTransform.tiltX : 0
+          const initialTiltY = initialTransform?.tiltY !== undefined ? initialTransform.tiltY : 0
+          const tiltXDiff = tiltX !== undefined && Math.abs(tiltX - initialTiltX) > 0.01
+          const tiltYDiff = tiltY !== undefined && Math.abs(tiltY - initialTiltY) > 0.01
+          if (tiltXDiff || tiltYDiff) {
+            const tiltIdx = actions.findIndex(a => a.type === 'tilt')
+            const action = {
+              type: 'tilt',
+              values: {
+                tiltX: tiltX ?? initialTiltX,
+                tiltY: tiltY ?? initialTiltY,
+                duration: effectiveDuration,
+                easing: 'power4.out'
+              }
+            }
+            console.log(`[TILT DEBUG] handleApplyMotion target layer ${layerId}:`, action.values)
+            if (tiltIdx !== -1) actions[tiltIdx] = action; else actions.push(action)
+          } else {
+            const tiltIdx = actions.findIndex(a => a.type === 'tilt')
+            if (tiltIdx !== -1) {
+               console.log(`[TILT DEBUG] handleApplyMotion removing tilt for layer ${layerId}`)
+               actions.splice(tiltIdx, 1)
+            }
           }
 
           // [COLOR FIX] Add colorChange action to optimistic flow
@@ -2649,6 +2800,8 @@ function EditorPage() {
       const layerObject = motionControls?.layerObjects?.get?.(layerId)
       let currentMediaWidth = layer.mediaWidth || layerObject?._mediaWidth || layerObject?._originalWidth || layer.width || 100
       let currentMediaHeight = layer.mediaHeight || layerObject?._mediaHeight || layerObject?._originalHeight || layer.height || 100
+      let currentTiltX = layer.tiltX !== undefined ? layer.tiltX : 0
+      let currentTiltY = layer.tiltY !== undefined ? layer.tiltY : 0
 
       // Accumulate transforms from previous steps using RELATIVE values
       for (let i = 0; i < stepIndex; i++) {
@@ -2711,6 +2864,13 @@ function EditorPage() {
         if (flipAction) {
           currentShowingFront = !currentShowingFront
         }
+
+        // Tilt: absolute per step
+        const tiltAction = actions.find(a => a.type === 'tilt')
+        if (tiltAction) {
+          currentTiltX = tiltAction.values?.tiltX !== undefined ? tiltAction.values.tiltX : currentTiltX
+          currentTiltY = tiltAction.values?.tiltY !== undefined ? tiltAction.values.tiltY : currentTiltY
+        }
       }
 
       const sessionStartTransform = {
@@ -2731,6 +2891,8 @@ function EditorPage() {
         blur: currentBlur,
         cornerRadius: currentCornerRadius,
         color: currentColor,
+        tiltX: currentTiltX,
+        tiltY: currentTiltY,
       }
 
       const currentStepActions = step?.layerActions?.[layerId] || []
@@ -2765,6 +2927,8 @@ function EditorPage() {
         mediaWidth: currentCrop?.values?.mediaWidth ?? sessionStartTransform.mediaWidth,
         mediaHeight: currentCrop?.values?.mediaHeight ?? sessionStartTransform.mediaHeight,
         opacity: currentFade?.values?.opacity ?? sessionStartTransform.opacity,
+        tiltX: currentStepActions.find(a => a.type === 'tilt')?.values?.tiltX ?? sessionStartTransform.tiltX,
+        tiltY: currentStepActions.find(a => a.type === 'tilt')?.values?.tiltY ?? sessionStartTransform.tiltY,
         blur: currentBlurAction?.values?.blur ?? sessionStartTransform.blur,
         cornerRadius: currentStepActions.find(a => a.type === 'cornerRadius')?.values?.cornerRadius ?? sessionStartTransform.cornerRadius,
         color: currentColorAction?.values?.color ?? sessionStartTransform.color,
@@ -2776,7 +2940,13 @@ function EditorPage() {
         didCornerRadius: !!currentStepActions.find(a => a.type === 'cornerRadius'),
         // Pre-set didFlip if the step already has a flip action (re-editing)
         didFlip: !!currentStepActions.find(a => a.type === 'flip'),
+        didTilt: !!currentStepActions.find(a => a.type === 'tilt'),
         interactionType: null
+      })
+      console.log(`[TILT DEBUG] handleEditStep initialized layer ${layerId}:`, {
+        initialTiltX: sessionStartTransform.tiltX,
+        currentTiltX: initialTrackedLayers.get(layerId).tiltX,
+        didTilt: initialTrackedLayers.get(layerId).didTilt
       })
     })
 
@@ -2815,6 +2985,9 @@ function EditorPage() {
             if (transform.mediaHeight !== undefined) entry.mediaHeight = transform.mediaHeight
             if (transform.alpha !== undefined) entry.opacity = transform.alpha
             if (transform.blur !== undefined) entry.blur = transform.blur
+            // [TILT SYNC] Explicitly sync tilt from visual skew property
+            if (transform.tiltX !== undefined) entry.tiltX = transform.tiltX
+            if (transform.tiltY !== undefined) entry.tiltY = transform.tiltY
             // Sync color from PIXI object (post fast-preview)
             if (transform.color !== undefined && transform.color !== null) {
               entry.color = transform.color
@@ -2985,6 +3158,44 @@ function EditorPage() {
           } else {
             // [REVEAL BUG FIX] If crop returned to base, clean up the action
             const key = `${layerId}:crop`
+            const existingId = captureActionIdsRef.current.get(key)
+            if (existingId) {
+              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+              captureActionIdsRef.current.delete(key)
+            }
+          }
+          
+          // Tilt
+          const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
+          const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
+          const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
+          const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
+          const shouldCreateTiltAction = tiltXChanged || tiltYChanged
+
+          if (shouldCreateTiltAction) {
+            const key = `${layerId}:tilt`
+            const existingId = captureActionIdsRef.current.get(key)
+            const tiltValues = {
+              tiltX: tracked.tiltX ?? initialTiltX,
+              tiltY: tracked.tiltY ?? initialTiltY,
+              easing: 'power4.out'
+            }
+            console.log(`[TILT DEBUG] onInteractionEnd (Edit) update for layer ${layerId}:`, tiltValues, existingId ? 'UPDATING' : 'ADDING')
+            if (existingId) {
+              dispatch(updateSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                values: tiltValues
+              }))
+            } else {
+              const actionId = `action-${Date.now()}-tilt-${layerId}`
+              dispatch(addSceneMotionAction({
+                sceneId, stepId: captureStepId, layerId, actionId,
+                type: 'tilt', values: { ...tiltValues, easing: 'power4.out' }
+              }))
+              captureActionIdsRef.current.set(key, actionId)
+            }
+          } else {
+            const key = `${layerId}:tilt`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
               dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
@@ -3917,6 +4128,7 @@ function EditorPage() {
           lastSaved={lastSaved}
           onProjectNameChange={(newName) => dispatch(setProjectName(newName))}
           onExport={handleExport}
+          onRequestGifOptions={() => setGifExportModalOpen(true)}
           hideExport={tutorialActive && tutorialStep === 7}
           onCanvasSizeChange={handleCanvasSizeChange}
           onToggleSidebar={() => handleSidebarItemClick('Elements')}
@@ -4362,6 +4574,24 @@ function EditorPage() {
                       effectiveMotionCaptureMode.onInteractionEnd(layerId)
                     }
 
+                    // [TILT] Handle tiltX/tiltY slider updates during capture
+                    if (updates.tiltX !== undefined || updates.tiltY !== undefined) {
+                      const capture = motionCaptureRef.current
+                      if (capture && capture.trackedLayers.has(layerId)) {
+                        const tracked = capture.trackedLayers.get(layerId)
+                        tracked.didTilt = true
+                        if (updates.tiltX !== undefined) tracked.tiltX = updates.tiltX
+                        if (updates.tiltY !== undefined) tracked.tiltY = updates.tiltY
+                      }
+                      effectiveMotionCaptureMode.onPositionUpdate({ 
+                        layerId, 
+                        tiltX: updates.tiltX, 
+                        tiltY: updates.tiltY 
+                      })
+                      // Trigger immediate action update
+                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                    }
+
                     // [BUG FIX] Corner radius update from slider (nested in data)
                     const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
                     if (radiusUpdate !== undefined) {
@@ -4723,6 +4953,8 @@ function EditorPage() {
               {exportState.status === 'initializing' && 'Preparing Export...'}
               {exportState.status === 'rendering' && 'Rendering Frames...'}
               {exportState.status === 'encoding' && 'Finalizing Video...'}
+              {exportState.status === 'encoding_palette' && 'Analyzing Colors...'}
+              {exportState.status === 'encoding_gif' && 'Encoding GIF...'}
               {exportState.status === 'completed' && 'Export Successful!'}
               {exportState.status === 'error' && 'Export Failed'}
             </h3>
@@ -4731,10 +4963,12 @@ function EditorPage() {
               <p>
                 {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
                 {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
+                {exportState.status === 'encoding_palette' && 'Building the optimal color palette for your GIF.'}
+                {exportState.status === 'encoding_gif' && 'Applying palette and writing the final GIF.'}
                 {exportState.status === 'completed' && 'Your download has started automatically.'}
                 {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
               </p>
-              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'initializing') && (
+              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
                 <div className={`mt-4 px-4 py-2 border rounded-lg ${isLight ? 'bg-yellow-500/5 border-yellow-500/10' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
                   <p className="text-yellow-600 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
                   <p className={`text-[12px] ${isLight ? 'text-gray-600' : 'text-white/60'}`}>
@@ -4830,6 +5064,15 @@ function EditorPage() {
         onExport={(res) => {
           handleExport(res);
           dispatch(nextStep()); // Finish tutorial
+        }}
+      />
+      <TutorialExportModal
+        isOpen={gifExportModalOpen}
+        initialFormat="gif"
+        onClose={() => setGifExportModalOpen(false)}
+        onExport={(res) => {
+          setGifExportModalOpen(false);
+          handleExport(res);
         }}
       />
     </div>

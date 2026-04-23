@@ -51,6 +51,7 @@ import { getGlobalMotionEngine } from '../../engine/motion'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
+import { syncTiltMesh } from '../../engine/pixi/perspectiveTilt'
 
 
 // Polyfill for requestIdleCallback (needed for Safari/iOS)
@@ -1559,6 +1560,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               const anchorY = layerObject.anchorY ?? 0.5
               layerObject.pivot.set(cropW * anchorX, cropH * anchorY)
             }
+          }
+
+          if (layerObject._tiltMesh) {
+            const reduxLayer = latestLayersRef.current?.[layerId]
+            syncTiltMesh(layerObject, reduxLayer)
           }
         }
       })
@@ -3617,8 +3623,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             targetObject.x = newX
             targetObject.y = newY
 
+            if (targetObject._tiltMesh) {
+              syncTiltMesh(targetObject, layer)
+            }
+
             // [BIDIRECTIONAL FIX] Trigger real-time wrap refresh during drag.
-            // Even if Redux hasn't updated yet, we want the PIXI object to re-layout 
+            // Even if Redux hasn't updated yet, we want the PIXI object to re-layout
             // as it moves through world-space obstacles.
             if (layerObject.isFlowText) {
               layerObject.refresh(layerObject._lastObstacles || [])
@@ -3960,8 +3970,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         targetObject.x = newX
         targetObject.y = newY
 
+        if (targetObject._tiltMesh) {
+          syncTiltMesh(targetObject, layer)
+        }
+
         // [BIDIRECTIONAL FIX] Trigger real-time wrap refresh during drag.
-        // FlowTextContainer._getObstaclesHash now includes its own world position, 
+        // FlowTextContainer._getObstaclesHash now includes its own world position,
         // so moving it will invalidate the cache and trigger a re-layout.
         if (layerObject.isFlowText) {
           layerObject.refresh(layerObject._lastObstacles || [])

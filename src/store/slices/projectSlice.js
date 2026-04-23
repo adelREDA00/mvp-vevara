@@ -601,6 +601,8 @@ const projectSlice = createSlice({
         blur: layerData.blur !== undefined ? layerData.blur : 0,
         scaleX: layerData.scaleX !== undefined ? layerData.scaleX : 1,
         scaleY: layerData.scaleY !== undefined ? layerData.scaleY : 1,
+        tiltX: layerData.tiltX !== undefined ? layerData.tiltX : 0,
+        tiltY: layerData.tiltY !== undefined ? layerData.tiltY : 0,
         // Text layers should use top-left anchor (0,0) for consistent positioning
         // Shape layers use center anchor (0.5, 0.5) by default
         anchorX: layerData.anchorX !== undefined ? layerData.anchorX : (type === 'text' ? 0 : 0.5),

@@ -28,6 +28,7 @@ function TopToolbar({
   projectName = 'Untitled Project',
   onShare,
   onExport,
+  onRequestGifOptions,
   onPreview,
   onProjectNameChange,
   onSave,
@@ -83,6 +84,11 @@ function TopToolbar({
   }
 
   const handleExportOption = (res) => {
+    if (res === 'gif') {
+      setIsExportModalOpen(false)
+      if (onRequestGifOptions) onRequestGifOptions()
+      return
+    }
     if (onExport) onExport(res)
     setIsExportModalOpen(false)
   }
@@ -293,6 +299,12 @@ function TopToolbar({
                 <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
                   4K (Ultra HD) (slightly slow)
                 </DropdownMenuItem>
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1 mt-1">
+                  Animation
+                </div>
+                <DropdownMenuItem onClick={() => onRequestGifOptions && onRequestGifOptions()}>
+                  GIF...
+                </DropdownMenuItem>
               </DropdownMenu>
             </div>
           )}
@@ -370,8 +382,9 @@ function TopToolbar({
           {[
             { label: '720p (HD) (fast)', id: '720p' },
             { label: '1080p (Full HD) (fast)', id: '1080p' },
-            { label: '2K (QHD) (medium)', id: '2k' },
-            { label: '4K (Ultra HD) (slightly slow)', id: '4k' },
+            { label: '2K (QHD) (medium)', id: '1440p' },
+            { label: '4K (Ultra HD) (slightly slow)', id: '2160p' },
+            { label: 'GIF (480p, 15fps)', id: 'gif' },
           ].map((opt, i) => (
             <button
               key={i}

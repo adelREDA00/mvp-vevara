@@ -10,37 +10,53 @@ import {
     attachAssetToFrame as attachAssetToFramePixi,
     attachBackAssetToFrame
 } from '../../engine/pixi/createLayer.js';
+import { syncTiltedDisplay } from '../../engine/pixi/perspectiveTilt.js';
 
 let ffmpeg = null;
+
+const _canUseMT = () => {
+    try {
+        return typeof self !== 'undefined'
+            && self.crossOriginIsolated === true
+            && typeof SharedArrayBuffer !== 'undefined'
+            && (navigator.hardwareConcurrency || 0) >= 4
+            && (navigator.deviceMemory || 4) >= 4;
+    } catch (e) {
+        return false;
+    }
+};
 
 export const initFFmpeg = async (onLog = null) => {
     if (ffmpeg) return ffmpeg;
     ffmpeg = new FFmpeg();
-    if (onLog) {
-        ffmpeg.on('log', ({ message }) => {
-            onLog(message);
-        });
-    }
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    ffmpeg.on('log', ({ message }) => {
+        if (onLog) onLog(message);
+    });
+    const useMT = _canUseMT();
+    const baseURL = useMT
+        ? 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm'
+        : 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
     try {
-        const loadPromise = ffmpeg.load({
+        const loadArgs = {
             coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
             wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        });
+        };
+        if (useMT) {
+            loadArgs.workerURL = await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript');
+        }
+        ffmpeg._isMultiThread = useMT;
+        const loadPromise = ffmpeg.load(loadArgs);
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('FFmpeg load timeout')), 15000)
+            setTimeout(() => reject(new Error('FFmpeg load timeout')), 20000)
         );
         await Promise.race([loadPromise, timeoutPromise]);
     } catch (error) {
+        ffmpeg = null;
         throw error;
     }
     return ffmpeg;
 };
 
-/**
- * Creates an HTMLVideoElement completely isolated from the editor's video cache.
- * This prevents the export from interfering with editor playback state.
- */
 async function createExportVideoElement(videoUrl) {
     const video = document.createElement('video');
     video.src = videoUrl;
@@ -95,10 +111,6 @@ async function createExportVideoElement(videoUrl) {
     return video;
 }
 
-/**
- * Builds a PIXI Container with video sprite using an ISOLATED video element.
- * Mirrors the structure of createVideoLayer but bypasses the shared cache.
- */
 async function createExportVideoLayer(layer) {
     const url = layer.data?.url || layer.data?.src;
     if (!url) throw new Error('Video layer requires data.url or data.src');
@@ -144,6 +156,8 @@ async function createExportVideoLayer(layer) {
     container.addChild(mask);
     container.mask = mask;
     container._cropMask = mask;
+    container._storedCropWidth = cropW;
+    container._storedCropHeight = cropH;
 
     const ax = layer.anchorX ?? 0.5;
     const ay = layer.anchorY ?? 0.5;
@@ -161,12 +175,6 @@ async function createExportVideoLayer(layer) {
     return container;
 }
 
-/**
- * Seeks a video element to an exact time and waits for the decoded frame.
- * [PERF] For sequential frames (natural playback order), uses requestVideoFrameCallback
- * which leverages the browser's hardware-accelerated decode pipeline instead of
- * expensive random-access I-frame seeking.
- */
 const _hasRVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
 function seekVideoToTime(video, targetTime, fps) {
@@ -176,9 +184,6 @@ function seekVideoToTime(video, targetTime, fps) {
             return;
         }
 
-        // [PERF] Check if this is a sequential frame (natural playback order)
-        // If the target is roughly one frame ahead, let the video play naturally
-        // and use requestVideoFrameCallback for much faster decoding.
         if (_hasRVFC && fps) {
             const frameDelta = 1 / fps;
             const delta = targetTime - video.currentTime;
@@ -192,7 +197,6 @@ function seekVideoToTime(video, targetTime, fps) {
                 });
                 timeoutId = setTimeout(() => {
                     video.cancelVideoFrameCallback(callbackId);
-                    // Fallback to seek if natural playback didn't deliver in time
                     video.currentTime = targetTime;
                     const onSeeked = () => {
                         video.removeEventListener('seeked', onSeeked);
@@ -222,15 +226,12 @@ function seekVideoToTime(video, targetTime, fps) {
     });
 }
 
-/**
- * Captures the current canvas contents as JPEG bytes.
- * Uses toBlob for better performance, with toDataURL fallback.
- */
-function captureFrame(canvas) {
+function captureFrame(canvas, isGif = false) {
     return new Promise(resolve => {
+        const format = isGif ? 'image/png' : 'image/jpeg';
         canvas.toBlob(blob => {
             if (!blob) {
-                const b64 = canvas.toDataURL('image/jpeg', 0.95);
+                const b64 = canvas.toDataURL(format, isGif ? undefined : 0.95);
                 const bin = atob(b64.split(',')[1]);
                 const arr = new Uint8Array(bin.length);
                 for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -238,14 +239,10 @@ function captureFrame(canvas) {
                 return;
             }
             blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf)));
-        }, 'image/jpeg', 0.95);
+        }, format, isGif ? undefined : 0.95);
     });
 }
 
-/**
- * Collects all unmuted video layers in the project with their timing info.
- * Used to extract and mix audio tracks from original video files.
- */
 function collectAudioSources(scenes, layers, timelineInfo) {
     const sources = [];
     for (const scene of scenes) {
@@ -272,16 +269,10 @@ function collectAudioSources(scenes, layers, timelineInfo) {
     return sources;
 }
 
-/**
- * Mixes audio from unmuted video sources into the rendered video.
- * Falls back to the silent video if audio mixing fails.
- */
 async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
     try {
         onProgress?.({ status: 'encoding', progress: 96 });
 
-        // [MEMORY OPTIMIZATION] Deduplicate audio source files.
-        // Multiple layers may use the same source video. Writing it once saves MEMFS.
         const writtenSources = new Map();
 
         for (let i = 0; i < audioSources.length; i++) {
@@ -339,7 +330,6 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
 
         try { await ffmpegInst.deleteFile(videoOnlyFile); } catch (e) { /* ignore */ }
         
-        // Cleanup only unique file names
         const uniqueFiles = new Set(audioSources.map(s => s.fsName));
         for (const fileName of uniqueFiles) {
             try { await ffmpegInst.deleteFile(fileName); } catch (e) { /* ignore */ }
@@ -347,7 +337,6 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
 
         return true;
     } catch (audioError) {
-        console.warn('Export: Audio mixing failed, falling back to silent video:', audioError);
         const sessionId = ffmpegInst._session_id || 'v1';
         const videoOnlyFile = `${sessionId}_video_only.mp4`;
         const outputFile = `${sessionId}_output.mp4`;
@@ -365,31 +354,12 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
     }
 }
 
-/**
- * Safely cleans up all export-specific resources without affecting the editor.
- * Designed to be idempotent — safe to call multiple times or on partially-initialized state.
- *
- * CRITICAL — WHY WE NEVER CALL app.destroy() OR renderer.destroy():
- * PIXI v8 has global shared state for batch geometry (BatcherPipe), buffer systems,
- * and GPU program caches. Calling renderer.destroy() triggers runners.destroy.emit()
- * which tears down these global pools. The editor's renderer still depends on them,
- * so the editor crashes with "Cannot read properties of null (reading 'geometry')"
- * in BatcherPipe.execute on the next frame.
- *
- * Instead we:
- *   1. Stop the export ticker (no more render calls)
- *   2. Detach all children from the stage (removes references)
- *   3. Release the WebGL context via WEBGL_lose_context extension
- *   4. Remove the offscreen canvas from the DOM
- *   5. Null out all references and let GC handle the rest
- */
 let _cleanupInProgress = false;
 function cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects) {
     if (_cleanupInProgress) return;
     _cleanupInProgress = true;
 
     try {
-        // --- Export motion engine ---
         if (exportEngine && !exportEngine._destroyed) {
             try {
                 exportEngine.destroy();
@@ -398,7 +368,6 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
         }
     } catch (e) { /* ignore */ }
 
-    // --- Export-isolated video elements (NOT shared with the editor) ---
     if (exportVideoElements && exportVideoElements.length > 0) {
         for (const video of exportVideoElements) {
             try {
@@ -416,7 +385,6 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
         if (app && !app._exportDestroyed) {
             app._exportDestroyed = true;
 
-            // 1. Stop the ticker so no more render frames are scheduled
             try {
                 if (app.ticker) {
                     app.ticker.stop();
@@ -424,10 +392,6 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
                 }
             } catch (e) { /* ignore */ }
 
-            // 2. Detach all layer objects from the render tree.
-            //    We only removeChild — we do NOT call .destroy() on any PIXI
-            //    objects because that can cascade into destroying shared GPU
-            //    resources (geometry, buffers, programs) used by the editor.
             if (layerObjects && layerObjects.size > 0) {
                 layerObjects.forEach((obj) => {
                     try {
@@ -440,16 +404,12 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
                 layerObjects.clear();
             }
 
-            // 3. Clear the stage's children
             try {
                 if (app.stage) {
                     app.stage.removeChildren();
                 }
             } catch (e) { /* ignore */ }
 
-            // 4. Release the WebGL context directly.
-            //    This frees GPU memory without going through PIXI's destroy
-            //    pipeline which would corrupt the editor's shared state.
             try {
                 if (app.canvas) {
                     const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
@@ -460,19 +420,22 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
                 }
             } catch (e) { /* ignore */ }
 
-            // 5. Remove the offscreen canvas from the DOM
             try {
                 if (app.canvas?.parentNode) {
                     app.canvas.parentNode.removeChild(app.canvas);
                 }
             } catch (e) { /* ignore */ }
 
-            // DO NOT call app.destroy() or app.renderer.destroy()
-            // — that triggers PIXI's internal system runners which
-            // destroy global BatcherPipe geometry shared with the editor.
+            try {
+                const host = app._exportCanvasHost;
+                if (host && host.parentNode) {
+                    host.parentNode.removeChild(host);
+                }
+                app._exportCanvasHost = null;
+            } catch (e) { /* ignore */ }
         }
     } catch (e) {
-        console.error('Export: Cleanup error', e);
+        /* ignore */
     } finally {
         _cleanupInProgress = false;
     }
@@ -480,14 +443,19 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
 
 async function cleanupTempFiles(ffmpegInst, totalFramesNum, audioSourceCount, sessionId) {
     if (totalFramesNum > 0) {
-        // We chunk in ~3 sec batches, max 180 frames per batch. Loop 200 just to be safe if aborted inside batch.
         const batchPromises = [];
-        for (let i = 0; i <= 200; i++) {
-            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_${String(i).padStart(5, '0')}.jpg`).catch(() => { }));
+        for (let i = 0; i <= 300; i++) {
+            const padded = String(i).padStart(5, '0');
+            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_${padded}.jpg`).catch(() => { }));
+            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_A_${padded}.jpg`).catch(() => { }));
+            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_B_${padded}.jpg`).catch(() => { }));
+        }
+        const gifFrameLimit = Math.min(totalFramesNum + 5, 100000);
+        for (let i = 0; i < gifFrameLimit; i++) {
+            batchPromises.push(ffmpegInst.deleteFile(`${sessionId}_frame_${String(i).padStart(5, '0')}.png`).catch(() => { }));
         }
         await Promise.all(batchPromises);
 
-        // Cleanup chunk.ts files in case of aborts before concatenation
         const maxChunks = Math.ceil(totalFramesNum / 10);
         const chunkPromises = [];
         for (let i = 0; i < maxChunks; i++) {
@@ -500,6 +468,8 @@ async function cleanupTempFiles(ffmpegInst, totalFramesNum, audioSourceCount, se
         try { await ffmpegInst.deleteFile(`${sessionId}_concat.txt`); } catch (e) { /* ignore */ }
     }
     try { await ffmpegInst.deleteFile(`${sessionId}_output.mp4`); } catch (e) { /* ignore */ }
+    try { await ffmpegInst.deleteFile(`${sessionId}_output.gif`); } catch (e) { /* ignore */ }
+    try { await ffmpegInst.deleteFile(`${sessionId}_palette.png`); } catch (e) { /* ignore */ }
     try { await ffmpegInst.deleteFile(`${sessionId}_video_only.mp4`); } catch (e) { /* ignore */ }
     for (let i = 0; i < audioSourceCount; i++) {
         try { await ffmpegInst.deleteFile(`${sessionId}_audio_src_${i}.mp4`); } catch (e) { /* ignore */ }
@@ -514,6 +484,8 @@ export const exportVideo = async ({
     aspectRatio = '16:9',
     resolution = '1080p',
     fps = 30,
+    format = 'mp4',
+    gifOptions = { width: 480, fps: 15, loop: 0 },
     onProgress = null,
     signal = null,
     editorMotionControls = null
@@ -522,9 +494,25 @@ export const exportVideo = async ({
         try { editorMotionControls.pauseAll(); } catch (e) { /* ignore */ }
     }
 
+    const isGif = format === 'gif';
+
+    if (isGif) {
+        fps = gifOptions?.fps || 15;
+    }
+
     const sessionId = `exp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const ffmpegInst = await initFFmpeg();
-    ffmpegInst._session_id = sessionId; // Temporary stash for helper functions
+    const ffmpegInst = await initFFmpeg(null);
+    ffmpegInst._session_id = sessionId;
+
+    const abortHandler = () => {
+        try {
+            if (ffmpegInst) ffmpegInst.terminate();
+        } catch (e) { /* ignore */ }
+        if (ffmpeg === ffmpegInst) ffmpeg = null;
+    };
+    if (signal) {
+        signal.addEventListener('abort', abortHandler);
+    }
 
     const [widthRatio, heightRatio] = aspectRatio.split(':').map(Number);
     const projectAspect = widthRatio / heightRatio;
@@ -539,27 +527,35 @@ export const exportVideo = async ({
     }
 
     let targetHeight = 1080;
-    if (resolution === '720p') targetHeight = 720;
-    else if (resolution === '1440p') targetHeight = 1440;
-    else if (resolution === '2160p') targetHeight = 2160;
+    let targetWidth;
+    if (isGif) {
+        const gifW = Math.max(120, Math.min(1920, gifOptions?.width || 480));
+        targetWidth = gifW % 2 === 0 ? gifW : gifW - 1;
+        targetHeight = Math.round(targetWidth / projectAspect);
+        targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
+    } else {
+        if (resolution === '720p') targetHeight = 720;
+        else if (resolution === '1440p') targetHeight = 1440;
+        else if (resolution === '2160p') targetHeight = 2160;
+        targetWidth = Math.round(targetHeight * projectAspect);
+        targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+        targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
+    }
 
-    let targetWidth = Math.round(targetHeight * projectAspect);
-    targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-    targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
-
-    const audioSources = collectAudioSources(scenes, layers, timelineInfo);
+    const audioSources = isGif ? [] : collectAudioSources(scenes, layers, timelineInfo);
     const hasAudio = audioSources.length > 0;
 
     let app = null;
     let exportEngine = null;
     let totalFramesNum = 0;
+    let pendingEncode = Promise.resolve();
+    let pendingWrites = [];
     const layerObjects = new Map();
     const exportVideoElements = [];
 
     try {
         if (signal?.aborted) throw new Error('cancelled');
 
-        // Set global text resolution for export renderer
         PIXI.TextStyle.defaultTextStyle.resolution = 1;
 
         app = new PIXI.Application();
@@ -567,16 +563,27 @@ export const exportVideo = async ({
             width: targetWidth,
             height: targetHeight,
             backgroundColor: 0x000000,
+            backgroundAlpha: 1,
             antialias: true,
             preserveDrawingBuffer: true,
-            roundPixels: true,
+            roundPixels: !isGif,
             resolution: 1,
-            // [STABILITY] Force WebGL for exports as well to avoid WebGPU instability
             preference: 'webgl',
             hello: true
         });
 
-        console.log(`[PIXI-EXPORT] Init successful: ${app.renderer.name}`);
+        app.renderer._isExportRenderer = true;
+
+        try {
+            if (typeof document !== 'undefined' && app.canvas && !app.canvas.parentNode) {
+                const host = document.createElement('div');
+                host.setAttribute('data-pixi-export-host', '1');
+                host.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
+                host.appendChild(app.canvas);
+                document.body.appendChild(host);
+                app._exportCanvasHost = host;
+            }
+        } catch (e) { /* non-browser/SSR: ignore */ }
 
         app.ticker.stop();
 
@@ -587,10 +594,6 @@ export const exportVideo = async ({
         stageContainer.scale.set(scaleX, scaleY);
 
         exportEngine = new MotionEngine();
-        // [EXPORT FIX] Disable internal media sync in the engine.
-        // The export loop manually seeks each video frame-by-frame (see loop below).
-        // If the engine also tries to sync, it creates a "double-seek" overhead that
-        // overwhelms the decoder, causing the 33% hang.
         exportEngine.syncMedia = () => { };
 
         onProgress?.({ status: 'initializing', progress: 0 });
@@ -619,7 +622,6 @@ export const exportVideo = async ({
                     } else if (layer.type === 'frame') {
                         pixiObject = createFrameLayer(layer);
                         
-                        // Helper to load and attach an asset to a frame side
                         const setupFrameSide = async (url, side) => {
                             if (!url) return;
                             try {
@@ -632,7 +634,6 @@ export const exportVideo = async ({
                                 
                                 if (side === 'front') {
                                     attachAssetToFramePixi(pixiObject, texture, fw, fh);
-                                    // Apply stored crop state from Redux for the front side
                                     const sprite = pixiObject._imageSprite;
                                     if (sprite) {
                                         sprite.width = layer.mediaWidth ?? fw;
@@ -642,8 +643,6 @@ export const exportVideo = async ({
                                     }
                                 } else {
                                     attachBackAssetToFrame(pixiObject, texture, fw, fh);
-                                    // Back side currently uses default cover-fit from attachBackAssetToFrame.
-                                    // If we ever store back-specific crops in Redux, we'd apply them here.
                                 }
                                 
                                 if (pixiObject._cropMask) {
@@ -653,7 +652,6 @@ export const exportVideo = async ({
                                     mask.fill(0xffffff);
                                 }
 
-                                // If it's a video, track it for seeking
                                 const source = texture.source;
                                 if (source && source.resource instanceof HTMLVideoElement) {
                                     const video = source.resource;
@@ -661,13 +659,12 @@ export const exportVideo = async ({
                                         exportVideoElements.push(video);
                                     }
                                     
-                                    // Store metadata for the manual seek loop
                                     video._layerSourceStartTime = layer.data?.sourceStartTime || 0;
                                     video._layerSourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0);
                                     video._parentLayer = pixiObject;
                                 }
                             } catch (e) {
-                                console.warn(`Export: Failed to load frame ${side} asset`, e);
+                                /* ignore */
                             }
                         };
                         
@@ -680,7 +677,6 @@ export const exportVideo = async ({
                         pixiObject = graphics;
                         pixiObject.isBackground = true;
 
-                        // [COLOR FIX] Store background metadata for redrawing during colorChange actions in export
                         pixiObject._storedWidth = worldWidth;
                         pixiObject._storedHeight = worldHeight;
                         pixiObject._storedAnchorX = 0;
@@ -695,7 +691,6 @@ export const exportVideo = async ({
                                     const bgContainer = new PIXI.Container();
                                     bgContainer.addChild(graphics);
 
-                                    // [COLOR FIX] Link the container to its background graphics for the color action
                                     bgContainer._backgroundGraphics = graphics;
                                     bgContainer._storedWidth = worldWidth;
                                     bgContainer._storedHeight = worldHeight;
@@ -709,32 +704,39 @@ export const exportVideo = async ({
                                     pixiObject = bgContainer;
                                 }
                             } catch (e) {
-                                console.warn('Export: Failed to load background image', e);
+                                /* ignore */
                             }
                         }
                     }
 
                     if (pixiObject) {
-                        // [EXPORT FIX] Apply base transform properties (rotation, scale) from the layer config.
-                        // Most creation functions in createLayer.js only handle (x, y, alpha), 
-                        // so we must explicitly apply rotation and scale here to ensure Frame 0 is correct.
                         pixiObject.rotation = (layer.rotation || 0) * (Math.PI / 180);
                         if (pixiObject.scale) {
                             pixiObject.scale.set(layer.scaleX ?? 1, layer.scaleY ?? 1);
                         }
+                        
+                        pixiObject._pixiRenderer = app.renderer;
 
                         stageContainer.addChild(pixiObject);
                         layerObjects.set(layerId, pixiObject);
                         exportEngine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId });
                     }
                 } catch (e) {
-                    console.warn(`Export: Failed to load layer ${layerId}:`, e);
+                    /* ignore */
                 }
             }
         }
 
         const exportScale = targetWidth / worldWidth;
-        exportEngine.loadProjectMotionFlow(timelineInfo, sceneMotionFlows, layerObjects, { 
+
+        if (app && !app._exportDestroyed && app.renderer && !app.renderer.destroyed) {
+            try {
+                app.renderer.clear();
+                app.render();
+            } catch (_e) { /* ignore warm-up failures */ }
+        }
+
+        exportEngine.loadProjectMotionFlow(timelineInfo, sceneMotionFlows, layerObjects, {
             allLayers: layers,
             isExport: true,
             exportScale: exportScale
@@ -745,9 +747,6 @@ export const exportVideo = async ({
 
         onProgress?.({ status: 'rendering', progress: 0 });
 
-        // [PERF] Start all export videos playing (muted) so sequential frame
-        // capture via requestVideoFrameCallback can use hardware-accelerated decoding
-        // instead of expensive random-access seeks for every frame.
         for (const video of exportVideoElements) {
             if (video) {
                 video.muted = true;
@@ -757,9 +756,6 @@ export const exportVideo = async ({
             }
         }
 
-        // [PERF] Build video lookup indexes once before the loop instead of per-frame.
-        // videoToLayerObj: video element -> PIXI container (reverse lookup)
-        // sceneVideoMap: sceneId -> [{ video, obj }] (scene-grouped for fast iteration)
         const videoToLayerObj = new Map();
         const sceneVideoMap = new Map();
         for (const video of exportVideoElements) {
@@ -774,13 +770,27 @@ export const exportVideo = async ({
             }
         }
 
-        // =====================================================================
-        // CHUNKED FRAME-BY-FRAME RENDER LOOP
-        // =====================================================================
-        const batchSize = fps * 3; // 3 seconds per batch
+        const _mem = (typeof navigator !== 'undefined' && navigator.deviceMemory) || 4;
+        const _cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+        const _secondsPerBatch = _mem <= 2 ? 1 : _mem <= 4 ? 2 : _cores >= 8 ? 5 : 3;
+        const batchSize = fps * _secondsPerBatch;
         let currentBatchIndex = 0;
         let framesInCurrentBatch = 0;
         const chunkFiles = [];
+
+        pendingEncode = Promise.resolve();
+        pendingWrites = [];
+        let generation = 'A';
+
+        let gifFrameIndex = 0;
+        let gifOffscreenCtx = null;
+        const gifFrames = [];
+        if (isGif) {
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = targetWidth;
+            offscreenCanvas.height = targetHeight;
+            gifOffscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+        }
 
         for (let frame = 0; frame <= totalFramesNum; frame++) {
             if (signal?.aborted) throw new Error('cancelled');
@@ -792,9 +802,6 @@ export const exportVideo = async ({
                 const sceneId = obj._sceneId;
                 const range = exportEngine?.sceneRanges?.get(sceneId);
                 if (range) {
-                    // [VISIBILITY FIX] Add epsilon to endTime check to ensure the last frame
-                    // of a scene (and the last frame of the project) is included.
-                    // This prevents the "black frame" flicker at scene transitions.
                     obj.visible = (time >= range.startTime - 0.001 && time < range.endTime + 0.001);
                 } else {
                     obj.visible = false;
@@ -804,11 +811,10 @@ export const exportVideo = async ({
             if (exportEngine && !exportEngine._destroyed) {
                 exportEngine.seek(time);
             }
-            // [BLUR EXPORT FIX] Force blur filter padding recalculation after seek.
-            // [BLUR EXPORT FIX] Force blur filter padding recalculation after seek.
+            
             layerObjects.forEach((obj, id) => {
                 if (!obj || obj.destroyed || !obj.visible) return;
-                
+
                 try {
                     if (obj._blurFilter && obj.filters && Array.isArray(obj.filters) && obj.filters.includes(obj._blurFilter)) {
                         if (typeof obj._applyAnimatedBlur === 'function') {
@@ -819,17 +825,26 @@ export const exportVideo = async ({
                         }
                     }
                 } catch (e) {
-                    console.error(`[videoExport] Error syncing blur for object ${id}:`, e);
+                    /* ignore */
                 }
             });
 
-            // [PERF] Only iterate videos in active scenes (using pre-built scene index)
-            // instead of all exportVideoElements. Seek in parallel.
+            layerObjects.forEach((obj, id) => {
+                if (!obj || obj.destroyed || !obj.visible) return;
+                if (!obj._tiltMesh) return;
+                try {
+                    if (typeof obj._applyAnimatedColor === 'function') {
+                        obj._applyAnimatedColor();
+                    }
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+
             const seekPromises = [];
             sceneVideoMap.forEach((entries, sceneId) => {
                 const range = exportEngine?.sceneRanges?.get(sceneId);
                 if (!range) return;
-                // Skip entire scene's videos if time is outside range
                 if (time < range.startTime - 0.001 || time >= range.endTime + 0.001) return;
 
                 for (const { video, obj } of entries) {
@@ -858,73 +873,198 @@ export const exportVideo = async ({
                 await Promise.all(seekPromises);
             }
 
+            layerObjects.forEach((obj, id) => {
+                if (!obj || obj.destroyed || !obj.visible) return;
+                try {
+                    if (obj._tiltMesh && !obj._tiltMesh.destroyed) {
+                        const isVideo = !!(obj._videoElement || obj._videoSprite);
+                        if (isVideo) {
+                            obj._tiltTextureDirty = true;
+                        }
+                        
+                        if (syncTiltedDisplay) syncTiltedDisplay(obj);
+                    }
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+
             if (app && !app._exportDestroyed && app.renderer && !app.renderer.destroyed) {
-                // [GHOSTING FIX] Explicitly clear the framebuffer before rendering each frame.
-                // With preserveDrawingBuffer:true, some WebGL implementations retain previous
-                // frame data in semi-transparent/anti-aliased edge regions, causing ghost trails.
                 app.renderer.clear();
                 app.render();
             }
 
-            const frameData = await captureFrame(app.canvas);
-            await ffmpegInst.writeFile(`${sessionId}_batch_${String(framesInCurrentBatch).padStart(5, '0')}.jpg`, frameData);
-            framesInCurrentBatch++;
+            if (isGif) {
+                gifOffscreenCtx.clearRect(0, 0, targetWidth, targetHeight);
+                gifOffscreenCtx.drawImage(app.canvas, 0, 0);
+                const pixels = gifOffscreenCtx.getImageData(0, 0, targetWidth, targetHeight).data;
+                gifFrames.push(pixels);
+                gifFrameIndex++;
+            } else {
+                const frameData = await captureFrame(app.canvas, isGif);
+                const writeP = ffmpegInst.writeFile(
+                    `${sessionId}_batch_${generation}_${String(framesInCurrentBatch).padStart(5, '0')}.jpg`,
+                    frameData
+                ).catch(e => { throw e; });
+                pendingWrites.push(writeP);
+                framesInCurrentBatch++;
+            }
 
             if (frame % 5 === 0) {
+                const progress = Math.round((frame / totalFramesNum) * 90);
                 onProgress?.({
                     status: 'rendering',
-                    progress: Math.round((frame / totalFramesNum) * 90)
+                    progress
                 });
+
                 await new Promise(r => setTimeout(r, 0));
             }
 
             if (signal?.aborted) throw new Error('cancelled');
 
-            // If we reached batch size, or we are at the last frame
-            if (framesInCurrentBatch === batchSize || frame === totalFramesNum) {
+            if (!isGif && (framesInCurrentBatch === batchSize || frame === totalFramesNum)) {
+                const capturedGen = generation;
+                const capturedFrames = framesInCurrentBatch;
                 const chunkName = `${sessionId}_chunk_${String(currentBatchIndex).padStart(3, '0')}.mp4`;
-                
-                // Encode this batch
-                await ffmpegInst.exec([
+
+                const writesForThisBatch = pendingWrites;
+                pendingWrites = [];
+                await Promise.all(writesForThisBatch);
+                if (signal?.aborted) throw new Error('cancelled');
+
+                await pendingEncode;
+                if (signal?.aborted) throw new Error('cancelled');
+
+                pendingEncode = ffmpegInst.exec([
+                    '-y',
                     '-framerate', fps.toString(),
-                    '-i', `${sessionId}_batch_%05d.jpg`,
+                    '-i', `${sessionId}_batch_${capturedGen}_%05d.jpg`,
                     '-c:v', 'libx264',
                     '-preset', 'ultrafast',
                     '-pix_fmt', 'yuv420p',
                     chunkName
-                ]);
+                ]).then(async () => {
+                    const deletes = [];
+                    for (let i = 0; i < capturedFrames; i++) {
+                        deletes.push(
+                            ffmpegInst.deleteFile(
+                                `${sessionId}_batch_${capturedGen}_${String(i).padStart(5, '0')}.jpg`
+                            ).catch(() => { })
+                        );
+                    }
+                    await Promise.all(deletes);
+                });
 
                 chunkFiles.push(chunkName);
-
-                // Delete the batch frames from MEMFS immediately to free memory
-                const deletePromises = [];
-                for (let i = 0; i < framesInCurrentBatch; i++) {
-                    deletePromises.push(ffmpegInst.deleteFile(`${sessionId}_batch_${String(i).padStart(5, '0')}.jpg`).catch(() => { }));
-                }
-                await Promise.all(deletePromises);
-
                 currentBatchIndex++;
                 framesInCurrentBatch = 0;
+                generation = generation === 'A' ? 'B' : 'A';
             }
         }
 
-        // =====================================================================
-        // ENCODING PHASE
-        // =====================================================================
+        if (!isGif) {
+            try { await pendingEncode; }
+            catch (e) { if (signal?.aborted) throw new Error('cancelled'); throw e; }
+        }
+
         if (signal?.aborted) throw new Error('cancelled');
+
+        if (isGif) {
+            onProgress?.({ status: 'encoding', progress: 92 });
+
+            const { GIFEncoder, quantize } = await import('gifenc');
+            const encoder = GIFEncoder();
+            const delayMs = Math.max(20, Math.round(1000 / fps));
+            const loopValue = Number.isFinite(gifOptions?.loop) ? gifOptions.loop : 0;
+            const repeat = loopValue === 0 ? 0 : -1;
+
+            const MAX_SAMPLES = 100;
+            const step = Math.max(1, Math.floor(gifFrames.length / MAX_SAMPLES));
+            const sampledFrames = [];
+            for (let i = 0; i < gifFrames.length; i += step) {
+                sampledFrames.push(gifFrames[i]);
+                if (sampledFrames.length >= MAX_SAMPLES) break;
+            }
+            const bytesPerFrame = gifFrames[0].length;
+            const combined = new Uint8ClampedArray(sampledFrames.length * bytesPerFrame);
+            for (let i = 0; i < sampledFrames.length; i++) {
+                combined.set(sampledFrames[i], i * bytesPerFrame);
+            }
+            const globalPalette = quantize(combined, 256, { format: 'rgb565' });
+
+            const colorCache = new Int16Array(16777216);
+            colorCache.fill(-1);
+
+            const applyPaletteStable = (rgba, palette) => {
+                const data = new Uint32Array(rgba.buffer, rgba.byteOffset, rgba.byteLength / 4);
+                const length = data.length;
+                const index = new Uint8Array(length);
+                
+                for (let j = 0; j < length; j++) {
+                    const color = data[j];
+                    const r = color & 0xff;
+                    const g = (color >> 8) & 0xff;
+                    const b = (color >> 16) & 0xff;
+
+                    const key = (r << 16) | (g << 8) | b;
+                    
+                    let idx = colorCache[key];
+                    if (idx === -1) {
+                        let mindist = 1e100;
+                        let k = 0;
+                        for (let p = 0; p < palette.length; p++) {
+                            const px = palette[p];
+                            const curdist = (px[0] - r) ** 2 + (px[1] - g) ** 2 + (px[2] - b) ** 2;
+                            if (curdist < mindist) {
+                                mindist = curdist;
+                                k = p;
+                            }
+                        }
+                        idx = k;
+                        colorCache[key] = idx;
+                    }
+                    index[j] = idx;
+                }
+                return index;
+            };
+
+            for (let i = 0; i < gifFrames.length; i++) {
+                if (signal?.aborted) throw new Error('cancelled');
+
+                const index = applyPaletteStable(gifFrames[i], globalPalette, targetWidth);
+
+                encoder.writeFrame(index, targetWidth, targetHeight, {
+                    palette: globalPalette,
+                    delay: delayMs,
+                    first: i === 0,
+                    repeat,
+                    dispose: 1,
+                });
+
+                if (i % 4 === 0) {
+                    const pct = Math.min(99, 92 + Math.round(((i + 1) / gifFrames.length) * 7));
+                    onProgress?.({ status: 'encoding', progress: pct });
+                    await new Promise(r => setTimeout(r, 0));
+                }
+            }
+            encoder.finish();
+
+            onProgress?.({ status: 'encoding', progress: 100 });
+            return new Blob([encoder.bytes()], { type: 'image/gif' });
+        }
+
         onProgress?.({ status: 'encoding', progress: 95 });
 
         const videoFileName = hasAudio ? `${sessionId}_video_only.mp4` : `${sessionId}_output.mp4`;
-        
-        // Build a concat list for FFmpeg
+
         let concatText = '';
         for (const chunk of chunkFiles) {
             concatText += `file '${chunk}'\n`;
         }
         await ffmpegInst.writeFile(`${sessionId}_concat.txt`, new TextEncoder().encode(concatText));
 
-        // Use the concat demuxer to instantly merge the chunks
         await ffmpegInst.exec([
+            '-y',
             '-f', 'concat',
             '-safe', '0',
             '-i', `${sessionId}_concat.txt`,
@@ -933,16 +1073,12 @@ export const exportVideo = async ({
             videoFileName
         ]);
 
-        // Clean up intermediate chunks + concat.txt (main video is saved)
         const cleanupPromises = chunkFiles.map(chunk => ffmpegInst.deleteFile(chunk).catch(() => { }));
         cleanupPromises.push(ffmpegInst.deleteFile(`${sessionId}_concat.txt`).catch(() => { }));
         await Promise.all(cleanupPromises);
 
         if (signal?.aborted) throw new Error('cancelled');
 
-        // =====================================================================
-        // AUDIO MIXING PHASE (only for unmuted video layers)
-        // =====================================================================
         if (hasAudio) {
             await mixAudioIntoVideo(ffmpegInst, audioSources, onProgress);
         }
@@ -954,15 +1090,19 @@ export const exportVideo = async ({
         return new Blob([data.buffer], { type: 'video/mp4' });
 
     } catch (error) {
-        // Re-throw cancellation as-is, wrap other errors for context
         if (error.message === 'cancelled') throw error;
         throw error;
     } finally {
+        if (signal) {
+            signal.removeEventListener('abort', abortHandler);
+        }
+        try { if (pendingWrites.length) await Promise.all(pendingWrites); } catch (e) { /* ignore */ }
+        try { await pendingEncode; } catch (e) { /* ignore */ }
         cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects);
         try {
             await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length, sessionId);
         } catch (e) {
-            console.warn('Export: Temp file cleanup warning', e);
+            /* ignore */
         }
     }
 };

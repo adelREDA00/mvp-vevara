@@ -2,6 +2,7 @@ import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { MotionTimeline } from './MotionTimeline.js'
 import { getActionHandler } from './actions/index.js'
+import { syncTiltedDisplay } from '../pixi/perspectiveTilt.js'
 
 /**
  * MotionEngine is the main coordinator for all layer animations.
@@ -48,6 +49,12 @@ export class MotionEngine {
           this.refreshFlows()
           this._lastFlowRefresh = now
         }
+        // [TILT] Per-frame sync for any tilted layers, even when no tilt
+        // tween is running (e.g. Move/Fade/Scale on a base-tilted layer).
+        // Mirrors the original's transform onto the perspective mesh and
+        // re-asserts the alpha=0 hide so other tweens don't unmask the
+        // original.  Cheap: short-circuits for non-tilted objects.
+        this._syncTiltedLayers()
         this._handleUpdate()
       }
     })
@@ -93,6 +100,22 @@ export class MotionEngine {
    * Refresh all Liquid Flow text layers by harvesting current world-space 
    * coordinates of all potential obstacles.
    */
+  /**
+   * Per-frame sync of all tilted layers. Mirrors transforms onto each
+   * perspective mesh and re-asserts the tilt-hide invariant so GSAP-touched
+   * alphas don't reveal the original underneath the mesh. Iterating
+   * registeredObjects is O(n) but the early-exit in syncTiltedDisplay (no
+   * mesh / not hidden) keeps the per-frame cost negligible.
+   */
+  _syncTiltedLayers() {
+    if (!this.registeredObjects || this.registeredObjects.size === 0) return
+    this.registeredObjects.forEach((obj) => {
+      if (!obj || obj.destroyed) return
+      if (!obj._tiltMesh || obj._tiltMesh.destroyed) return
+      syncTiltedDisplay(obj)
+    })
+  }
+
   refreshFlows() {
     // 1. Gather all potential obstacles (non-text layers in the current screen)
     const obstacles = []
@@ -539,7 +562,10 @@ export class MotionEngine {
           // Card frame flip state — defaults to true (front) if not explicitly set
           showingFront: baseLayer?.data?.showingFront !== false,
           // [TYPEWRITER] Track reveal progress across steps
-          revealProgress: baseLayer?.revealProgress ?? (obj.revealProgress !== undefined ? obj.revealProgress : 1)
+          revealProgress: baseLayer?.revealProgress ?? (obj.revealProgress !== undefined ? obj.revealProgress : 1),
+          // [TILT] Track perspective tilt across steps (degrees)
+          tiltX: baseLayer?.tiltX ?? (obj._tiltXDeg ?? 0),
+          tiltY: baseLayer?.tiltY ?? (obj._tiltYDeg ?? 0),
         })
       })
     }
@@ -595,11 +621,22 @@ export class MotionEngine {
           // perfectly represents the layer's predicted origin state at the beginning of the scene.
           if (startState) {
             timeline.add((gsapTimeline) => {
+              // [TILT] If the layer is tilted at scene start, alpha is owned
+              // by the perspective tilt system (original held at 0, mesh
+              // shows the displayed opacity).  Including alpha in this
+              // baseline `set` would clobber the hide and render the
+              // un-tilted original on top of the tilted mesh — the
+              // "duplicate visual" bug.  We capture the intended opacity
+              // onto _intendedAlpha so syncTiltMesh forwards it to the mesh.
+              const willStartTilted = (
+                Math.abs(startState.tiltX || 0) > 0.01 ||
+                Math.abs(startState.tiltY || 0) > 0.01
+              )
+
               const baseline = {
                 x: startState.x,
                 y: startState.y,
                 rotation: startState.rotation * (Math.PI / 180),
-                alpha: startState.opacity !== undefined ? startState.opacity : 1,
                 cropX: startState.cropX !== undefined ? startState.cropX : 0,
                 cropY: startState.cropY !== undefined ? startState.cropY : 0,
                 cropWidth: startState.cropWidth,
@@ -607,6 +644,13 @@ export class MotionEngine {
                 mediaWidth: startState.mediaWidth,
                 mediaHeight: startState.mediaHeight,
                 showingFront: startState.showingFront !== false
+              }
+
+              const startOpacity = startState.opacity !== undefined ? startState.opacity : 1
+              if (willStartTilted) {
+                pixiObject._intendedAlpha = startOpacity
+              } else {
+                baseline.alpha = startOpacity
               }
 
               // [TYPEWRITER] Only apply revealProgress if the object supports it
@@ -623,6 +667,26 @@ export class MotionEngine {
                   y: startState.scaleY,
                 }, startTimeOffset)
               }
+
+              // [TILT] Anchor perspective tilt baseline so backward scrubs restore correct tilt.
+              // Tween a plain JS proxy object (not the PIXI object) to avoid GSAP
+              // "Invalid property _tiltXDeg / Missing plugin?" warnings, then mirror
+              // proxy values onto the degree props that syncTiltMesh reads.
+              pixiObject._tiltXDeg = startState.tiltX ?? 0
+              pixiObject._tiltYDeg = startState.tiltY ?? 0
+              if (!pixiObject._tiltProxy) pixiObject._tiltProxy = { tiltX: 0, tiltY: 0 }
+              pixiObject._tiltProxy.tiltX = pixiObject._tiltXDeg
+              pixiObject._tiltProxy.tiltY = pixiObject._tiltYDeg
+
+              gsapTimeline.set(pixiObject._tiltProxy, {
+                tiltX: pixiObject._tiltXDeg,
+                tiltY: pixiObject._tiltYDeg,
+                onUpdate: () => {
+                  pixiObject._tiltXDeg = pixiObject._tiltProxy.tiltX
+                  pixiObject._tiltYDeg = pixiObject._tiltProxy.tiltY
+                  if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
+                },
+              }, startTimeOffset)
             })
           }
         }
@@ -752,6 +816,10 @@ export class MotionEngine {
             if (action.values?.color !== undefined) {
               state.color = action.values.color
             }
+          } else if (action.type === 'tilt') {
+            // Update predicted tilt state so the next step knows the correct start values
+            if (action.values?.tiltX !== undefined) state.tiltX = action.values.tiltX
+            if (action.values?.tiltY !== undefined) state.tiltY = action.values.tiltY
           } else if (action.type === 'flip') {
             // Store flip metadata on the PIXI object for deterministic seek evaluation.
             // GSAP nested timeline onUpdate callbacks don't reliably fire during
@@ -1078,8 +1146,17 @@ export class MotionEngine {
           if (obj) {
             const sprite = obj._videoSprite
             if (sprite && sprite.texture && sprite.texture.source) {
-              sprite.texture.source.update()
-              videoElement._lastTextureUpdateTime = currentVideoTime
+              try {
+                sprite.texture.source.update()
+                videoElement._lastTextureUpdateTime = currentVideoTime
+              } catch (securityError) {
+                // [SECURITY GUARD] Handle CORS / Tainted Canvas issues without crashing the app.
+                // We only log this once per unique error to avoid console flooding.
+                if (!videoElement._hasReportedSecurityError) {
+                  console.warn(`⚠️ [MotionEngine] WebGL Security Policy blocked texture update for video: ${videoElement.src}. Ensure the server permits CORS.`, securityError)
+                  videoElement._hasReportedSecurityError = true
+                }
+              }
             }
           }
         }
@@ -1118,6 +1195,12 @@ export class MotionEngine {
       delete obj._animatedColorState
       delete obj._applyAnimatedColor
       delete obj._lastAppliedColor
+
+      // [TILT] Only clear the animation hook. The PerspectiveMesh represents the
+      // base tilt state (owned by applyTransformInline via Redux) and must survive
+      // engine rebuilds. Mesh lifecycle is handled by applyTilt/removeTilt when
+      // Redux tiltX/tiltY transitions to/from zero.
+      delete obj._applyAnimatedTilt
     }
   }
 
@@ -1143,11 +1226,18 @@ export class MotionEngine {
     // Clear flip metadata from registered objects before clearing timelines
     this.registeredObjects.forEach((obj) => {
       if (obj._flipActions) delete obj._flipActions
-      
+
       // [COLOR SYNC FIX] Clear persistent animated state handlers on full engine restart
       delete obj._animatedColorState
       delete obj._applyAnimatedColor
       delete obj._lastAppliedColor
+
+      // [TILT] Only clear the animation hook — do NOT destroy the PerspectiveMesh.
+      // The mesh represents Redux base state and applyTransformInline (called by
+      // prepareEngine right after unload) will re-sync / tear it down if base tilt
+      // has become zero. Destroying here caused visible tilt loss on every slider
+      // update because layersBaseStateHash includes tiltX/tiltY.
+      delete obj._applyAnimatedTilt
     })
     this.masterTimeline.clear()
     this.activeTimelines.forEach(tl => tl.destroy())
@@ -1242,6 +1332,18 @@ export class MotionEngine {
       if (obj._applyAnimatedColor) obj._applyAnimatedColor()
       if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
       if (obj._applyAnimatedCornerRadius) obj._applyAnimatedCornerRadius()
+      // [TILT] Mirror the tilt proxy that GSAP advances onto the degree
+      // fields BEFORE _applyAnimatedTilt reads them. masterTimeline.pause(t)
+      // updates the tween targets but does NOT reliably fire onUpdate for
+      // every nested set()/fromTo combo, so _tiltXDeg/Y can otherwise lag
+      // behind the actual scrubbed/seeked playhead, leaving the mesh stuck
+      // at the previous tilt (the "snaps back to initial" / "scrub shows
+      // wrong tilt" bugs).
+      if (obj._tiltProxy) {
+        if (typeof obj._tiltProxy.tiltX === 'number') obj._tiltXDeg = obj._tiltProxy.tiltX
+        if (typeof obj._tiltProxy.tiltY === 'number') obj._tiltYDeg = obj._tiltProxy.tiltY
+      }
+      if (obj._applyAnimatedTilt) obj._applyAnimatedTilt()
     })
 
     // [FIX] Evaluate flip visibility deterministically based on time position.
@@ -1251,6 +1353,20 @@ export class MotionEngine {
 
     // Force immediate media sync during seek
     this.syncMedia(time, true)
+
+    // [TILT VIDEO SEEK] Re-run the tilted-layer sync now that syncMedia has
+    // advanced every video element's currentTime and forced its GPU texture
+    // to refresh.  Without this, the earlier syncTiltedDisplay pass (which
+    // fires from masterTimeline.pause(time) BEFORE syncMedia touched the
+    // videos) captured the pre-seek frame into each tilted layer's RTT — so
+    // scrubbing a tilted video froze the mesh on the previous frame even
+    // though the underlying <video> had jumped to the new time.  The second
+    // pass, running AFTER syncMedia, re-reads the now-updated currentTime,
+    // flags the texture dirty, and recaptures with the fresh frame.
+    // (requestVideoFrameCallback in perspectiveTilt.js also catches this,
+    // but only on browsers that support it — this call covers every browser
+    // and also handles the sub-16ms window before rVFC fires.)
+    this._syncTiltedLayers()
 
     // [FLOW TEXT FIX] Ensure word wrapping calculates the latest layout synchronously
     this.refreshFlows()
@@ -1289,6 +1405,13 @@ export class MotionEngine {
       if (obj._applyAnimatedColor) obj._applyAnimatedColor()
       if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
       if (obj._applyAnimatedCornerRadius) obj._applyAnimatedCornerRadius()
+      // [TILT] Mirror proxy → degrees so the mesh follows the scrubbed
+      // playhead (see seek() for the same reasoning).
+      if (obj._tiltProxy) {
+        if (typeof obj._tiltProxy.tiltX === 'number') obj._tiltXDeg = obj._tiltProxy.tiltX
+        if (typeof obj._tiltProxy.tiltY === 'number') obj._tiltYDeg = obj._tiltProxy.tiltY
+      }
+      if (obj._applyAnimatedTilt) obj._applyAnimatedTilt()
     })
 
     // [PERF] Throttle flip state evaluation during scrubbing (~100ms)
@@ -1301,6 +1424,13 @@ export class MotionEngine {
     // [PERF] Use non-forced sync: allows 40ms tolerance for paused videos,
     // avoiding redundant seeks that stall the video decoder.
     this.syncMedia(time, false)
+
+    // [TILT VIDEO SCRUB] See seek() for a full explanation.  The tilted
+    // layer RTT must be refreshed AFTER syncMedia has moved each video's
+    // currentTime and forced a texture upload, otherwise the mesh shows the
+    // pre-scrub frame.  This is the cross-browser complement to the
+    // requestVideoFrameCallback hook in perspectiveTilt.js.
+    this._syncTiltedLayers()
 
     // [PERF] Throttle text reflow during scrubbing (~150ms)
     if (!this._lastScrubFlowRefresh || now - this._lastScrubFlowRefresh > 150) {

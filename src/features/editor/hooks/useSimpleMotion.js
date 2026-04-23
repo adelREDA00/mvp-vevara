@@ -101,26 +101,39 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         layersRef.current = layersRef.current || layers
 
-        // Create a signature of the project-wide data
-        const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
-            const l = layersRef.current[layerId]
-            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.data?.fill || l.data?.color || ''},${l.opacity},${l.data?.showingFront ?? ''},${l.data?.content || ''}` : ''
-        }).join('|')
+    // [TILT/PERF] During motion capture, every slider tick fires a Redux
+    // dispatch which would otherwise unload+rebuild every scene's timeline
+    // here — that's the slider lag the user sees ("layer jumps to final
+    // value instead of updating smoothly").  Visual feedback during capture
+    // is already provided by trackedLayers → applyTransformInline.  We
+    // defer engine rebuilds until capture exits (handled by a dedicated
+    // effect below).  Force=true callers (capture exit, options.flow) still
+    // run through.
+    const captureNow = motionCaptureModeRef.current
+    if (!force && (captureNow?.isActive || captureNow?.isTransitioning)) {
+      return
+    }
 
-        const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
+    // Create a signature of the project-wide data
+    const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
+      const l = layersRef.current[layerId]
+      return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
+    }).join('|')
 
-        const currentDataSignature = JSON.stringify({
-            sceneCount: timeline.length,
-            layerCount: objects.size,
-            totalDuration: totalProjectDuration,
-            layerPositionsHash,
-            sceneTimingsHash,
-            flowsHash: JSON.stringify(flowsMap)
-        })
+    const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
 
-        if (!force && lastPreparedDataRef.current === currentDataSignature) {
-            return
-        }
+    const currentDataSignature = JSON.stringify({
+      sceneCount: timeline.length,
+      layerCount: objects.size,
+      totalDuration: totalProjectDuration,
+      layerPositionsHash,
+      sceneTimingsHash,
+      flowsHash: JSON.stringify(flowsMap)
+    })
+
+    if (!force && lastPreparedDataRef.current === currentDataSignature) {
+      return
+    }
 
         const currentPlayheadTime = motionEngine.masterTimeline?.time() || 0
         motionEngine.unloadAllMotions()
@@ -133,10 +146,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             objects.forEach((pixiObject, layerId) => {
                 const baseLayerData = currentLayers[layerId]
                 if (baseLayerData) {
-                    const sceneId = baseLayerData.sceneId
-                    const sceneInfo = timeline?.find(s => s.id === sceneId)
-                    const startTimeOffset = sceneInfo?.startTime || 0
-                    applyTransformInline(pixiObject, baseLayerData, null, layerId, capture, true, null, null, startTimeOffset)
+                    applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true)
                 }
             })
         }
@@ -168,7 +178,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // Create hash matching prepareEngine's format: only scene layers, same property order
         return timelineInfo?.flatMap(s => s.layers || []).map(layerId => {
             const l = layers[layerId]
-            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.data?.fill || l.data?.color || ''},${l.opacity},${l.data?.showingFront ?? ''},${l.data?.content || ''}` : ''
+            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY}` : ''
         }).join('|')
     }, [layers, timelineInfo])
 
@@ -181,20 +191,30 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             return
         }
 
-        // [FIX] Skip engine rebuild during active motion capture to prevent snap-back.
-        // onInteractionEnd dispatches Redux actions that change flowsJson, triggering this effect.
-        // Rebuilding the engine resets PIXI positions via GSAP tween initialization and seek,
-        // causing a visible flicker before the ticker can re-enforce captured positions.
-        // The engine will be properly rebuilt when capture mode ends (via tweenTo or cancel).
-        const capture = motionCaptureModeRef.current
-        if (capture?.isActive) return
+    // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
+    // This is critical because prepareEngine uses layersRef.current for hash calculation
+    layersRef.current = layers
 
-        // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
-        // This is critical because prepareEngine uses layersRef.current for hash calculation
-        layersRef.current = layers
+    prepareEngine(false)
+  }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers])
 
-        prepareEngine(false)
-    }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers])
+  // [TILT/PERF] When motion capture exits, run the deferred engine rebuild
+  // so the freshly captured tilt/blur/etc. actions get loaded into GSAP
+  // before the user previews or scrubs.  We track previous state in a ref
+  // so this only fires on the active→inactive transition, not on every
+  // unrelated motionCaptureMode prop change.
+  const wasInCaptureRef = useRef(false)
+  useEffect(() => {
+    const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
+    if (wasInCaptureRef.current && !isInCapture) {
+      // Force a full rebuild — signature compare can't see the deferred
+      // dispatches, and the Redux flow may have advanced multiple times
+      // since the last prepare.
+      layersRef.current = layers
+      prepareEngine(true)
+    }
+    wasInCaptureRef.current = isInCapture
+  }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, prepareEngine, layers])
 
     // ... (Listen for engine events and sync isPlaying state - no changes needed)
     useEffect(() => {
@@ -205,9 +225,6 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         // Use a single frame delay (16ms) instead of 100ms to ensure faster sync after splits
         const timer = setTimeout(() => {
-            // [FIX] Skip rebuild during active motion capture (same reason as above effect)
-            const capture = motionCaptureModeRef.current
-            if (capture?.isActive) return
             prepareEngine()
         }, 16)
         return () => clearTimeout(timer)
@@ -247,37 +264,24 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         return () => clearInterval(interval)
     }, [motionEngine, isPlayingInternal])
 
-    // [PERF] Pre-warm video layers only for current scene + next scene (N+1 lookahead).
-    // Previously pre-warmed ALL scenes upfront, which created too many HTMLVideoElement decoders
-    // (each consuming 30-80MB on mobile). The engine's 0.8s pre-seek lookahead in syncMedia()
-    // handles near-future scenes, so we only need the immediate neighborhood.
+    // [PROJECT-WIDE SYNC] Pre-warm and register all video layers in the project 
+    // This allows the engine to pre-seek videos in upcoming scenes even before they are mounted on stage.
     useEffect(() => {
         if (!timelineInfo || !allMotionFlows || !layers) return
 
-        // Find current scene index
-        const currentIndex = timelineInfo.findIndex(s => s.id === currentSceneId)
-        if (currentIndex === -1) return
-
-        // Only pre-warm current scene and next scene
-        const scenesToWarm = new Set()
-        scenesToWarm.add(currentIndex)
-        if (currentIndex + 1 < timelineInfo.length) {
-            scenesToWarm.add(currentIndex + 1)
-        }
-
-        // Track which layers we've warmed so we can unregister distant ones
-        const warmedLayerIds = new Set()
-
-        scenesToWarm.forEach(idx => {
-            const sceneInfo = timelineInfo[idx]
+        // Scan all scenes for video layers
+        timelineInfo.forEach(sceneInfo => {
             const sceneLayers = sceneInfo.layers || []
             sceneLayers.forEach(layerId => {
                 const layer = layers[layerId]
                 if (layer && layer.type === 'video' && layer.data?.url) {
-                    warmedLayerIds.add(layerId)
+                    // Pre-warm the video element (gets it into createLayer's cache)
+                    // We call createVideoLayer but don't add the result to anything.
+                    // It will ensure the HTMLVideoElement is created and stored in videoElementCache.
                     createVideoLayer(layer, { id: layerId }).then(container => {
                         const videoElement = container?._videoElement
                         if (videoElement) {
+                            // Register with engine for background syncing
                             motionEngine.registerBackgroundMedia(layerId, videoElement, {
                                 sceneId: sceneInfo.id,
                                 sourceStartTime: layer.data.sourceStartTime,
@@ -290,19 +294,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                 }
             })
         })
-
-        // Unregister background media for distant scenes to free decoders
-        timelineInfo.forEach((sceneInfo, idx) => {
-            if (scenesToWarm.has(idx)) return
-            const sceneLayers = sceneInfo.layers || []
-            sceneLayers.forEach(layerId => {
-                const layer = layers[layerId]
-                if (layer && layer.type === 'video' && !warmedLayerIds.has(layerId)) {
-                    motionEngine.unregisterBackgroundMedia(layerId)
-                }
-            })
-        })
-    }, [timelineInfo, allMotionFlows, layers, motionEngine, currentSceneId])
+    }, [timelineInfo, allMotionFlows, layers, motionEngine])
 
     // Track project-wide buffering state from MotionEngine
     useEffect(() => {
@@ -376,34 +368,22 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }
     }, [motionEngine])
 
-    // Seek to specific time.
-    // [PERF] Uses lightweight scrub() for continuous playhead dragging (detected via
-    // rapid successive calls), and full seek() for discrete jumps (scene clicks, etc).
-    const lastSeekTimeRef = useRef(0)
+    // Seek to specific time
     const seek = useCallback((time) => {
-        // [PERF] Detect continuous scrubbing: if last seek was < 80ms ago, use
-        // lightweight scrub path that skips prepareEngine and uses relaxed video sync.
-        const now = performance.now()
-        const isContinuousScrub = now - lastSeekTimeRef.current < 80
-        lastSeekTimeRef.current = now
+        // [SEEK OPTIMIZATION] Use signature-based preparation (prepareEngine(false)) 
+        // to avoid heavy rebuilding during rapid scrubbing if state hasn't changed.
+        prepareEngine(false)
 
-        if (isContinuousScrub) {
-            // Fast path: skip prepareEngine, use lightweight scrub
-            motionEngine.scrub(time)
-        } else {
-            // Full path: ensure engine is up to date, force exact sync
-            prepareEngine(false)
-            motionEngine.seek(time)
-        }
+        // Seek immediately - prepareEngine is synchronous and timelines are ready
+        motionEngine.seek(time)
         setPlayheadTime(time)
     }, [motionEngine, prepareEngine])
 
+    // Tween to specific time (fast-play)
     const tweenTo = useCallback((time, options = {}) => {
         const objects = layerObjectsRef.current
         const flowsMap = sceneMotionFlowsRef.current
         const timeline = timelineInfoRef.current
-
-
 
         // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine 
         // but with the OVERRIDDEN flow for the specific scene.
@@ -411,19 +391,17 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
             // Force engine state to playing EARLY so applyTransformInline knows to stop overrides
             motionEngine.isPlaying = true
-            motionEngine.unloadAllMotions()
             const currentLayers = layersRef.current
             if (objects && currentLayers) {
                 objects.forEach((pixiObject, layerId) => {
                     const baseLayerData = currentLayers[layerId]
                     if (baseLayerData) {
-                        const sceneId = baseLayerData.sceneId
-                        const sceneInfo = timeline?.find(s => s.id === sceneId)
-                        const startTimeOffset = sceneInfo?.startTime || 0
-                        applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset) // force=true!
+                        applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true) // force=true!
                     }
                 })
             }
+
+            motionEngine.unloadAllMotions()
             // Object registration handled by useCanvasLayers
 
             const sharedContext = {
@@ -483,12 +461,6 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         return motionEngine.tweenTo(time, wrappedOptions)
     }, [motionEngine, prepareEngine, setIsPlaying, totalProjectDuration])
-    
-    // [COLOR SYNC FIX] Helper to convert RGB components to hex string
-    const rgbToHex = (r, g, b) => {
-        const toHex = (n) => Math.round(n).toString(16).padStart(2, '0')
-        return `#${toHex(r)}${toHex(g)}${toHex(b)}`
-    }
 
     /**
      * Get current visual transforms for all registered layers.
@@ -499,31 +471,20 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         if (layerObjects) {
             layerObjects.forEach((obj, id) => {
                 if (obj && !obj.destroyed) {
-                    // [COLOR SYNC FIX] Capture color from GSAP animated state or visual style
-                    // Prioritize _animatedColorState if it exists (numeric) or _color (FlowText string)
-                    const numericColor = obj._animatedColorState?.numeric ?? obj._storedColor
-                    const hexColor = obj._color ?? (numericColor !== undefined ? (typeof numericColor === 'string' ? numericColor : '#' + numericColor.toString(16).padStart(6, '0')) : null)
-                    
                     transforms.set(id, {
-                        ...obj._lastCapturedTransform, // Fallback for specialized properties
-                        id: id,
                         x: obj.x,
                         y: obj.y,
                         rotation: (obj.rotation * 180) / Math.PI,
                         scaleX: obj.scale.x,
                         scaleY: obj.scale.y,
-                        opacity: obj.alpha,
-                        blur: obj._blurLogicalStrength ?? 0,
-                        color: obj._animatedColorState ? rgbToHex(obj._animatedColorState.r, obj._animatedColorState.g, obj._animatedColorState.b) : (hexColor ?? (obj.style?.fill)),
-                        width: obj.isFlowText ? (obj.wordWrapWidth || 100) : (obj.width || 100),
-                        height: obj.isFlowText ? (obj._actualHeight || 40) : (obj.height || 100),
+                        blur: obj._blurFilter ? obj._blurFilter.strength : 0,
+                        // Visual crop properties (reactive)
                         cropX: obj.cropX,
                         cropY: obj.cropY,
                         cropWidth: obj.cropWidth,
                         cropHeight: obj.cropHeight,
                         mediaWidth: obj._mediaWidth ?? obj.mediaWidth,
-                        mediaHeight: obj._mediaHeight ?? obj.mediaHeight,
-                        cornerRadius: obj.cornerRadius ?? (obj._storedShapeData?.cornerRadius ?? 0)
+                        mediaHeight: obj._mediaHeight ?? obj.mediaHeight
                     })
                 }
             })

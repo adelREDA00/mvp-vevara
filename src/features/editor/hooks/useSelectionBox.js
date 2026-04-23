@@ -26,6 +26,7 @@ import { getGlobalMotionEngine } from '../../engine/motion'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { drawShapePath, redrawFramePlaceholder } from '../../engine/pixi/createLayer'
 import { getRotatedCursor, calculateAdaptedScale } from '../utils/handleUtils'
+import { syncTiltMesh, markTiltTextureDirty } from '../../engine/pixi/perspectiveTilt'
 import {
   removeDimensionsBadge,
   createDimensionsBadge,
@@ -1197,6 +1198,16 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
       textObject.updateText?.(true)
     }
+
+    // [TILT] If this text is currently tilted, the perspective mesh shows a
+    // captured RTT of the text. Resizing changes the visible glyphs, but the
+    // useCanvasLayers text-style sync only marks the texture dirty when it
+    // detects a Redux delta — and here we update the LIVE PIXI style first.
+    // Mark the tilt texture dirty explicitly so the next syncTiltMesh tick
+    // re-captures and the user actually sees the scale change while dragging.
+    if (textObject._tiltMesh && !textObject._tiltMesh.destroyed) {
+      markTiltTextureDirty(textObject)
+    }
   }, [])
 
 
@@ -1548,8 +1559,17 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             if (isCaptureMode) {
               targetObject.scale.set(sx * state.scaleX, sy * state.scaleY)
             } else {
-              // In normal mode, we simply update Redux state via the 'updates' object
-              // container and sprite will sync automatically without double-scaling
+              // [DESIGN-MODE SELECTION] In normal mode the container is left
+              // alone (sprite/cropMask are mutated later in the media block),
+              // but syncBoxVisuals() runs RIGHT AFTER this section and reads
+              // dimensions via getEffectiveLayerDimensions, which (with the
+              // updated priority in geometry.js) prefers `_storedCropWidth`.
+              // Stamp the live cropped size NOW so the selection box updates
+              // on the very same frame instead of lagging until the throttled
+              // Redux dispatch lands a few frames later — that lag was the
+              // "selection box keeps the original size" bug for image / video.
+              targetObject._storedCropWidth = newWidth
+              targetObject._storedCropHeight = newHeight
             }
           }
         }
@@ -1753,6 +1773,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             sprite.x = -newCropX
             sprite.y = -newCropY
             currentLayerObject.pivot.set(newCropWidth * state.anchorX, newCropHeight * state.anchorY)
+            currentLayerObject._storedCropWidth = newCropWidth
+            currentLayerObject._storedCropHeight = newCropHeight
+            if (currentLayerObject._tiltMesh) markTiltTextureDirty(currentLayerObject)
 
             if (isCaptureMode) {
               const liveLayer = latestMotionCaptureModeRef.current?.trackedLayers?.get(currentLayer.id)
@@ -1790,6 +1813,17 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             sprite.y = -(state.startCropY * scaleRatio)
             if (cropMask) cropMask.clear().rect(0, 0, state.startCropWidth * scaleRatio, state.startCropHeight * scaleRatio).fill(0xffffff)
             currentLayerObject.pivot.set(state.startCropWidth * scaleRatio * state.anchorX, state.startCropHeight * scaleRatio * state.anchorY)
+            // [TILT/SELECTION] Stamp the live cropped dimensions onto the
+            // container so getEffectiveLayerDimensions (selection box, hover
+            // outline, snapping) and the perspective mesh capture pick them
+            // up immediately — without waiting a frame for Redux to
+            // propagate the throttled update.  Otherwise the selection
+            // rectangle keeps the original size while the user drags.
+            currentLayerObject._storedCropWidth = state.startCropWidth * scaleRatio
+            currentLayerObject._storedCropHeight = state.startCropHeight * scaleRatio
+            currentLayerObject._storedMediaWidth = state.startMediaWidth * scaleRatio
+            currentLayerObject._storedMediaHeight = state.startMediaHeight * scaleRatio
+            if (currentLayerObject._tiltMesh) markTiltTextureDirty(currentLayerObject)
             // Also scale back sprite for card frames (proportional cover-fit)
             const backSprite = currentLayerObject._backSprite
             if (backSprite && currentLayerObject._frameHasBackAsset && state.startBackMediaWidth != null) {
@@ -1847,6 +1881,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           }
           currentLayerObject.x = newX
           currentLayerObject.y = newY
+
+          // Keep the captured texture used by the tilt mesh in sync with the
+          // new crop / sprite layout so the perspective view shows the actual
+          // cropped pixels instead of the previous capture.
+          if (currentLayerObject._tiltMesh) {
+            currentLayerObject._storedCropWidth = updates.cropWidth ?? currentLayerObject._storedCropWidth
+            currentLayerObject._storedCropHeight = updates.cropHeight ?? currentLayerObject._storedCropHeight
+            markTiltTextureDirty(currentLayerObject)
+          }
         }
       } else if (!isCaptureMode && currentLayerObject instanceof PIXI.Graphics && currentLayerObject._storedWidth !== undefined) {
         if (currentLayer?.data) {
@@ -1886,6 +1929,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           }
           currentLayerObject._storedWidth = newWidth; currentLayerObject._storedHeight = newHeight
           currentLayerObject.hitArea = fill === null ? (isCircle ? new PIXI.Ellipse(centerX, centerY, newWidth / 2, newHeight / 2) : new PIXI.Rectangle(anchorOffsetX, anchorOffsetY, newWidth, newHeight)) : null
+          // The shape geometry just changed — flag the tilt mesh's texture as
+          // stale so the next syncTiltMesh re-captures the RTT at the new size.
+          if (currentLayerObject._tiltMesh) markTiltTextureDirty(currentLayerObject)
         }
       }
 
@@ -1916,6 +1962,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         updateDimensionsBadge(badge, { width: newWidth, height: hoverBoxHeight, zoomScale, viewportScale: latestViewportRef.current.scale.x })
       }
       if (!isCaptureMode) throttledUpdate(updates)
+
+      // Per-tick mesh slave: transforms + corners only. Mesh creation / teardown
+      // lives in useCanvasLayers' applyTransformInline.
+      if (currentLayerObject._tiltMesh) {
+        syncTiltMesh(currentLayerObject, latestLayerRef.current)
+      }
     }
   }, [syncBoxVisuals, immediateTextUpdate, calculateTextDimensions, updateHoverBox, throttledUpdate, resolveAnchors, getCurrentLayerScale, updateSnappingGuides, latestViewportRef])
 
@@ -2442,6 +2494,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       latestObj.rotation = newRotationRad
       if (selectionBoxRef.current) selectionBoxRef.current.rotation = newRotationRad
 
+      if (latestObj._tiltMesh) {
+        syncTiltMesh(latestObj, latestL)
+      }
+
       const isCapture = latestMotionCaptureModeRef.current?.isActive
       const captured = isCapture && latestMotionCaptureModeRef.current.trackedLayers?.get(latestL.id)
 
@@ -2916,17 +2972,31 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
     } else {
-      // For shapes, use actual visual bounds from PIXI object
-      let actualBounds
+      // For shapes (Graphics): when a tilt mesh is masking the original at
+      // alpha=0, getLocalBounds may return stale or zero-sized bounds in some
+      // PIXI states (e.g. right after clear()+redraw inside renderToTexture).
+      // Use the stored width/height from layer data as a stable source so the
+      // selection box stays glued to the actual drawn dimensions.
+      const hasStored = typeof layerObject._storedWidth === 'number' && typeof layerObject._storedHeight === 'number'
+      const fallbackW = hasStored ? layerObject._storedWidth : (layer.width || 100)
+      const fallbackH = hasStored ? layerObject._storedHeight : (layer.height || 100)
+
+      let actualBounds = null
       try {
-        actualBounds = layerObject.getLocalBounds()
+        const lb = layerObject.getLocalBounds()
+        if (lb && lb.width > 0 && lb.height > 0) actualBounds = lb
       } catch (e) {
-        // Fallback to layer data if getLocalBounds fails
+        actualBounds = null
+      }
+
+      if (!actualBounds || layerObject._tiltMesh) {
+        // When tilt is active, use the stored shape dimensions to stay aligned
+        // with the (untilted) source rectangle the user is editing.
         actualBounds = {
-          x: -(layer.width || 100) * anchorX,
-          y: -(layer.height || 100) * anchorY,
-          width: layer.width || 100,
-          height: layer.height || 100
+          x: -fallbackW * anchorX,
+          y: -fallbackH * anchorY,
+          width: fallbackW,
+          height: fallbackH
         }
       }
 

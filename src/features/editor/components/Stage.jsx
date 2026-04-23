@@ -319,7 +319,7 @@ function Stage({
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, pixiApp?.renderer)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -329,13 +329,25 @@ function Stage({
     layerObjects.forEach((obj, id) => {
       // Prioritize checking if there's a cached sprite or similar structure
       // but usually obj is the Container or Sprite directly
+      // [TILT] When a layer is tilted, the original PIXI object is forced to
+      // alpha=0 and the visible opacity lives on the perspective mesh /
+      // _intendedAlpha sentinel. Returning obj.alpha=0 here would make capture
+      // mode initialise the layer at opacity 0 and immediately hide it on
+      // selection. Prefer the intended alpha when the layer is tilt-hidden.
+      const reportedAlpha = obj._tiltHidden && typeof obj._intendedAlpha === 'number'
+        ? obj._intendedAlpha
+        : obj.alpha
       transforms.set(id, {
         x: obj.x,
         y: obj.y,
         scaleX: obj.scale?.x ?? 1,
         scaleY: obj.scale?.y ?? 1,
         rotation: (obj.rotation * 180) / Math.PI, // Convert rad to deg for consistent logic
-        alpha: obj.alpha,
+        alpha: reportedAlpha,
+        // Expose the current tilt angles so capture-mode can preserve them
+        // when synchronising from PIXI to Redux.
+        tiltX: typeof obj._tiltXDeg === 'number' ? obj._tiltXDeg : 0,
+        tiltY: typeof obj._tiltYDeg === 'number' ? obj._tiltYDeg : 0,
         blur: (obj.filters && obj._blurFilter && obj.filters.includes(obj._blurFilter)) ? obj._blurFilter.strength : 0,
         color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
         mediaWidth: obj.mediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,

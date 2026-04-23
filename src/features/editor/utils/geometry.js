@@ -103,16 +103,33 @@ export function getEffectiveLayerDimensions(layer, layerObject, motionCaptureMod
   const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
 
   if (isMedia) {
+    // [DESIGN-MODE RESIZE] Priority order for the visible media size:
+    //   1. capturedLayer.cropWidth        — MotionCapture wins.
+    //   2. layerObject.cropWidth          — only when CropAction has installed
+    //      reactive properties (animated crop); otherwise this getter just
+    //      returns the stale `_cropWidth` MotionEngine seeded at registration.
+    //   3. _storedCropWidth               — live value the resize handler
+    //      stamps every frame BEFORE the throttled Redux dispatch lands.
+    //      Without this the selection box stays at the original size while
+    //      the user is dragging in Design Mode.
+    //   4. layer.cropWidth                — Redux truth.
+    //   5. _cropWidth / layer.width / DEFAULT — last-ditch fallbacks.
+    const storedW = (layerObject._storedCropWidth !== undefined && layerObject._storedCropWidth !== null)
+      ? layerObject._storedCropWidth
+      : null
+    const storedH = (layerObject._storedCropHeight !== undefined && layerObject._storedCropHeight !== null)
+      ? layerObject._storedCropHeight
+      : null
     const w =
       capturedLayer?.cropWidth ??
       (layerObject._hasReactiveCropProperties
         ? layerObject.cropWidth
-        : (layerObject._cropWidth ?? layer.cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
+        : (storedW ?? layer.cropWidth ?? layerObject._cropWidth ?? layer.width ?? DEFAULT_DIMENSION))
     const h =
       capturedLayer?.cropHeight ??
       (layerObject._hasReactiveCropProperties
         ? layerObject.cropHeight
-        : (layerObject._cropHeight ?? layer.cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
+        : (storedH ?? layer.cropHeight ?? layerObject._cropHeight ?? layer.height ?? DEFAULT_DIMENSION))
     return { width: w, height: h }
   }
 

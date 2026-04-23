@@ -7,6 +7,7 @@ import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { CustomEase } from "gsap/CustomEase";
 import { redrawFramePlaceholder } from '../../pixi/createLayer'
+import { markTiltTextureDirty, syncTiltMesh } from '../../pixi/perspectiveTilt'
 
 // Register the plugin
 gsap.registerPlugin(CustomEase);
@@ -205,5 +206,15 @@ export class CropAction {
           cropMask.fill(0xffffff)
         }
 
+        // Keep perspective-tilt stamps in sync so captureToTexture sizes the
+        // RTT to the current crop — otherwise the mesh keeps its last-captured
+        // dimensions and a crop animation appears as a pure translation.
+        pixiObject._storedCropWidth = cropW
+        pixiObject._storedCropHeight = cropH
+
+        if (pixiObject._tiltMesh && !pixiObject._tiltMesh.destroyed) {
+            markTiltTextureDirty(pixiObject)
+            syncTiltMesh(pixiObject, null)
+        }
     }
 }

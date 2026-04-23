@@ -20,6 +20,7 @@ import {
   Film,
   Type,
   Pencil,
+  Rotate3d,
 } from 'lucide-react'
 
 // Custom Corner Radius Icon representing a rounded corner path
@@ -55,28 +56,29 @@ const actionTypes = [
   { id: 'blur', label: 'Blur', icon: Droplets, color: 'bg-cyan-500/80' },
   { id: 'cornerRadius', label: 'Radius', icon: CornerRadiusIcon, color: 'bg-orange-500/80' },
   { id: 'typewriter', label: 'Typewriter', icon: Type, color: 'bg-emerald-500/80' },
+  { id: 'tilt', label: '3D Tilt', icon: Rotate3d, color: 'bg-rose-500/80' },
 ]
 
 // Which actions are available per layer type (HOLD excluded entirely)
 const ACTION_AVAILABILITY = {
-  [LAYER_TYPES.SHAPE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius'],
-  [LAYER_TYPES.TEXT]:   ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'typewriter'],
-  [LAYER_TYPES.IMAGE]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
-  [LAYER_TYPES.VIDEO]:  ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
-  [LAYER_TYPES.GROUP]:  ['move', 'rotate', 'scale', 'fade', 'blur'],
-  frame_normal:         ['move', 'rotate', 'scale', 'fade', 'blur', 'crop'],
-  frame_card:           ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip'],
+  [LAYER_TYPES.SHAPE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius', 'tilt'],
+  [LAYER_TYPES.TEXT]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'typewriter', 'tilt'],
+  [LAYER_TYPES.IMAGE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.VIDEO]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.GROUP]: ['move', 'rotate', 'scale', 'fade', 'blur', 'tilt'],
+  frame_normal: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  frame_card: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip', 'tilt'],
   [LAYER_TYPES.BACKGROUND]: ['colorChange'],
 }
 
 function getLayerDisplayName(layer) {
   if (!layer) return 'Unknown Element'
   switch (layer.type) {
-    case LAYER_TYPES.IMAGE:      return 'Image Element'
-    case LAYER_TYPES.VIDEO:      return 'Video Element'
-    case LAYER_TYPES.SHAPE:      return 'Shape Element'
-    case LAYER_TYPES.TEXT:        return 'Text Element'
-    case LAYER_TYPES.GROUP:      return 'Group Element'
+    case LAYER_TYPES.IMAGE: return 'Image Element'
+    case LAYER_TYPES.VIDEO: return 'Video Element'
+    case LAYER_TYPES.SHAPE: return 'Shape Element'
+    case LAYER_TYPES.TEXT: return 'Text Element'
+    case LAYER_TYPES.GROUP: return 'Group Element'
     case LAYER_TYPES.BACKGROUND: return 'Canvas Background'
     case LAYER_TYPES.FRAME:
       return layer.data?.isCardFrame ? 'Card Frame Element' : 'Frame Element'
@@ -326,9 +328,8 @@ function MotionPanel({
   const renderActionRow = (action, stepId, layerId, readOnly) => (
     <div
       key={action.id}
-      className={`flex items-center gap-2 p-1.5 rounded-lg border text-[11px] group/action ${
-        isLight ? 'bg-white border-slate-100/10 shadow-sm' : 'bg-zinc-900/60 border-zinc-800/20 shadow-none'
-      }`}
+      className={`flex items-center gap-2 p-1.5 rounded-lg border text-[11px] group/action ${isLight ? 'bg-white border-slate-100/10 shadow-sm' : 'bg-zinc-900/60 border-zinc-800/20 shadow-none'
+        }`}
     >
       <div className={`${isLight ? 'text-slate-400 opacity-80' : 'text-zinc-400 opacity-60'}`}>
         {renderActionIcon(action.type)}
@@ -379,11 +380,10 @@ function MotionPanel({
       <div
         key={layerId}
         data-layer-id={layerId}
-        className={`rounded-xl p-2.5 border transition-all ${
-          isSelected 
-            ? (isLight ? 'border-purple-200 bg-purple-50/50 shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03]') 
+        className={`rounded-xl p-2.5 border transition-all ${isSelected
+            ? (isLight ? 'border-purple-200 bg-purple-50/50 shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03]')
             : (isLight ? 'border-slate-100 bg-white shadow-sm hover:border-slate-200' : 'border-zinc-800/10 bg-zinc-800/20 hover:border-zinc-800/30')
-        }`}
+          }`}
       >
         {/* Layer Header */}
         <div
@@ -433,11 +433,10 @@ function MotionPanel({
                       setAddAnimMenuLayerId(layerId)
                     }
                   }}
-                  className={`flex items-center gap-1.5 text-[10px] transition-colors px-1.5 py-1 rounded-md ${
-                    isLight 
-                      ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50' 
+                  className={`flex items-center gap-1.5 text-[10px] transition-colors px-1.5 py-1 rounded-md ${isLight
+                      ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'
                       : 'text-zinc-500 hover:text-purple-400 hover:bg-white/[0.03]'
-                  }`}
+                    }`}
                 >
                   <Plus className="h-3 w-3" />
                   Add Animation
@@ -445,9 +444,8 @@ function MotionPanel({
 
                 {/* Context Menu */}
                 {addAnimMenuLayerId === layerId && (
-                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 border rounded-lg shadow-xl py-1 min-w-[140px] ${
-                    isLight ? 'bg-white border-gray-200' : 'bg-zinc-900 border-zinc-700/60'
-                  }`}>
+                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 border rounded-lg shadow-xl py-1 min-w-[140px] ${isLight ? 'bg-white border-gray-200' : 'bg-zinc-900 border-zinc-700/60'
+                    }`}>
                     {available.map((actionType) => {
                       const meta = getActionMeta(actionType)
                       if (!meta) return null
@@ -459,9 +457,8 @@ function MotionPanel({
                             setAddAnimMenuLayerId(null)
                             onAddAnimation?.(layerId, actionType)
                           }}
-                          className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] transition-colors ${
-                            isLight ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-50' : 'text-zinc-300 hover:text-white hover:bg-white/[0.06]'
-                          }`}
+                          className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] transition-colors ${isLight ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-50' : 'text-zinc-300 hover:text-white hover:bg-white/[0.06]'
+                            }`}
                         >
                           <Icon className={`h-3.5 w-3.5 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
                           {meta.label}
@@ -485,11 +482,10 @@ function MotionPanel({
   const renderActiveStep = (step, stepIndex) => (
     <div
       key={step.id}
-      className={`border rounded-xl p-3 transition-all duration-300 ${
-        isLight 
-          ? 'border-purple-200 bg-white shadow-[0_4px_12px_rgba(124,74,240,0.08)]' 
+      className={`border rounded-xl p-3 transition-all duration-300 ${isLight
+          ? 'border-purple-200 bg-white shadow-[0_4px_12px_rgba(124,74,240,0.08)]'
           : 'border-[#7c4af0]/40 bg-[#7c4af0]/5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
-      }`}
+        }`}
     >
       {/* Step Header */}
       <div className="flex items-center justify-between">
@@ -507,9 +503,8 @@ function MotionPanel({
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => onCancelMotion?.()}
-            className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${
-              isLight ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'
-            }`}
+            className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${isLight ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'
+              }`}
             title="Cancel Step"
           >
             <X className="h-3 w-3" />
@@ -517,9 +512,8 @@ function MotionPanel({
           </button>
           <button
             onClick={() => handleDeleteStep(step.id)}
-            className={`p-1.5 rounded-md transition-all ${
-              isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
-            }`}
+            className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
+              }`}
             title="Delete step"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -549,13 +543,12 @@ function MotionPanel({
       <div className={`mt-3 pt-3 border-t ${isLight ? 'border-slate-100' : 'border-white/[0.06]'}`}>
         <button
           onClick={() => onApplyMotion?.()}
-          className={`w-full py-2 text-[11px] font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-sm rounded-lg ${
-            getStepSummary(step).actionCount > 0
+          className={`w-full py-2 text-[11px] font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-sm rounded-lg ${getStepSummary(step).actionCount > 0
               ? 'text-white bg-[#7c4af0] hover:bg-[#8b5cf6]'
-              : (isLight 
-                  ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-default' 
-                  : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80')
-          }`}
+              : (isLight
+                ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-default'
+                : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80')
+            }`}
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
           Save Step
@@ -576,11 +569,10 @@ function MotionPanel({
     return (
       <div
         key={step.id}
-        className={`border rounded-xl p-3 transition-all duration-300 ${
-          isSelected 
-            ? (isLight ? 'border-purple-200 bg-white shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]') 
+        className={`border rounded-xl p-3 transition-all duration-300 ${isSelected
+            ? (isLight ? 'border-purple-200 bg-white shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]')
             : (isLight ? 'border-slate-100 bg-slate-50 hover:bg-white hover:border-slate-200' : 'border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60')
-        }`}
+          }`}
       >
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -589,11 +581,10 @@ function MotionPanel({
             onClick={() => toggleStepExpand(step.id)}
           >
             <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isExpanded ? '' : '-rotate-90'}`} />
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              isSelected 
-                ? 'bg-purple-500 text-white' 
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isSelected
+                ? 'bg-purple-500 text-white'
                 : (isLight ? 'bg-slate-200 text-slate-500' : 'bg-zinc-800 text-zinc-400')
-            }`}>
+              }`}>
               {stepIndex + 1}
             </div>
             <span className={`text-xs font-semibold ${isSelected ? (isLight ? 'text-slate-900' : 'text-white') : (isLight ? 'text-slate-600' : 'text-zinc-100')}`}>
@@ -608,20 +599,18 @@ function MotionPanel({
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => handleEditStep(step.id)}
-              className={`p-2 rounded-lg transition-all ${
-                isSelected 
-                  ? (isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-400 bg-purple-500/10') 
+              className={`p-2 rounded-lg transition-all ${isSelected
+                  ? (isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-400 bg-purple-500/10')
                   : (isLight ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50' : 'text-zinc-500 hover:text-purple-400 hover:bg-purple-500/10')
-              }`}
+                }`}
               title="Update Step"
             >
               <Pencil className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleDeleteStep(step.id)}
-              className={`p-1.5 rounded-md transition-all ${
-                isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
-              }`}
+              className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
+                }`}
               title="Delete step"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -765,11 +754,10 @@ function MotionPanel({
               {!isMotionCaptureActive && motionFlow.length > 0 && (
                 <button
                   onClick={() => onStartMotionCapture?.()}
-                  className={`w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold rounded-xl transition-all border border-dashed ${
-                    isLight 
-                      ? 'text-slate-400 hover:text-purple-600 border-slate-200 hover:border-purple-300 hover:bg-purple-50/50' 
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold rounded-xl transition-all border border-dashed ${isLight
+                      ? 'text-slate-400 hover:text-purple-600 border-slate-200 hover:border-purple-300 hover:bg-purple-50/50'
                       : 'text-zinc-400 hover:text-purple-400 border-zinc-800/60 hover:border-purple-500/30 hover:bg-white/[0.02]'
-                  }`}
+                    }`}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Step

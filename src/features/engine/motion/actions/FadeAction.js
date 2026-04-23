@@ -1,4 +1,8 @@
 import { gsap } from 'gsap'
+import { CustomEase } from "gsap/CustomEase";
+
+// Register the plugin
+gsap.registerPlugin(CustomEase);
 
 export class FadeAction {
     constructor() {
@@ -8,7 +12,9 @@ export class FadeAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = values.duration || 2000
-        const easing = values.easing || 'power4.out'
+        CustomEase.create("myEase", "0.5,0,0,1");
+
+        const easing = "myEase"
 
         const startOpacity = options.startState?.opacity ?? pixiObject.alpha
         const targetOpacity = values.opacity !== undefined ? values.opacity : 1

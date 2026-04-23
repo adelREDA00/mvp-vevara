@@ -15,6 +15,7 @@ export const ACTION_TYPES = {
   FLIP: 'flip',
   CORNER_RADIUS: 'cornerRadius',
   TYPEWRITER: 'typewriter',
+  TILT: 'tilt',
 }
 
 /**

@@ -4,8 +4,9 @@ import {
   Minus, ChevronDown,
   Settings, Zap, X, MoreVertical, Layers,
   Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
-  Plus, Check, Eye, EyeOff, Waves,
-  AlignLeft, AlignCenter, AlignRight
+  Plus, Rotate3d, Check, Eye, EyeOff, Waves,
+  AlignLeft, AlignCenter, AlignRight, RotateCcw,
+  ArrowLeftRight, ArrowUpDown
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -40,6 +41,7 @@ function CanvasControls({
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)
   const [showCornerRadiusSlider, setShowCornerRadiusSlider] = useState(false)
+  const [showTiltPanel, setShowTiltPanel] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
   const scrollContainerRef = useRef(null)
   const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
@@ -55,6 +57,7 @@ function CanvasControls({
     setShowOpacitySlider(false)
     setShowBlurSlider(false)
     setShowCornerRadiusSlider(false)
+    setShowTiltPanel(false)
   }, [selectedLayer?.id, selectedCanvas])
 
   // Open opacity/blur slider when requested by parent (e.g. from MotionPanel)
@@ -63,14 +66,22 @@ function CanvasControls({
       setShowOpacitySlider(true)
       setShowBlurSlider(false)
       setShowCornerRadiusSlider(false)
+      setShowTiltPanel(false)
     } else if (requestOpenControl === 'blur') {
       setShowBlurSlider(true)
       setShowOpacitySlider(false)
       setShowCornerRadiusSlider(false)
+      setShowTiltPanel(false)
     } else if (requestOpenControl === 'cornerRadius') {
       setShowCornerRadiusSlider(true)
       setShowOpacitySlider(false)
       setShowBlurSlider(false)
+      setShowTiltPanel(false)
+    } else if (requestOpenControl === 'tilt') {
+      setShowTiltPanel(true)
+      setShowOpacitySlider(false)
+      setShowBlurSlider(false)
+      setShowCornerRadiusSlider(false)
     }
   }, [requestOpenControl])
 
@@ -238,7 +249,7 @@ function CanvasControls({
                 }
               }}
               className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all hover:ring-2 ${theme === 'light' ? 'border-gray-300 hover:ring-gray-300' : 'border-zinc-600 hover:ring-zinc-500'}`}
-              style={{ 
+              style={{
                 backgroundColor: getCanvasBackgroundColor(),
                 backgroundImage: (getCanvasBackgroundColor() === '#ffffff' || getCanvasBackgroundColor() === '#FFFFFF') ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)' : undefined
               }}
@@ -281,8 +292,8 @@ function CanvasControls({
                   ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)'
                   : (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && !isTransparent() && (getColor() === '#ffffff' || getColor() === '#FFFFFF'))
                     ? 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)'
-                    : (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) 
-                      ? 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)' 
+                    : (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent())
+                      ? 'linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666), linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%, #666)'
                       : undefined,
                 backgroundSize: (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) ? '6px 6px' : undefined,
                 backgroundPosition: (selectedLayer?.type !== LAYER_TYPES.BACKGROUND && isTransparent()) ? '0 0, 3px 3px' : undefined,
@@ -617,6 +628,25 @@ function CanvasControls({
           </button>
         )}
 
+        {/* 3D Tilt Control — available for all non-background layers */}
+        {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
+          <button
+            onClick={() => {
+              setShowTiltPanel(!showTiltPanel)
+              setShowOpacitySlider(false)
+              setShowBlurSlider(false)
+              setShowCornerRadiusSlider(false)
+            }}
+            className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
+              ? (showTiltPanel ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
+              : (showTiltPanel ? 'bg-white/20 border-white/20 text-white' : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')}`}
+            title="3D Tilt (Perspective)"
+          >
+            {/* Perspective / tilt cube icon */}
+            <Rotate3d className="h-4 w-4 flex-shrink-0 opacity-70" />
+          </button>
+        )}
+
         {/* Card Frame flip button */}
         {selectedLayer?.data?.isCardFrame && (
           <button
@@ -830,7 +860,6 @@ function CanvasControls({
           }}
         >
           <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Radius</span>
-          {console.log('[DEBUG] CanvasControls cornerRadius render:', selectedLayer.data?.cornerRadius)}
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
             value={[selectedLayer.data?.cornerRadius ?? 0]}
@@ -858,6 +887,109 @@ function CanvasControls({
           </span>
         </div>
       )}
+
+      {/* 3D Tilt Sub-panel — compact stacked-slider layout, consistent with
+          the Blur / Radius panels above.  Two short rows (H + V) keep the
+          popover small so it never covers the canvas.  Each track paints a
+          subtle safe-zone band in the centre (±45°) so the user can see at
+          a glance when they're pushing the tilt past the recommended range;
+          the degree readout turns amber beyond that point.  Range is
+          clamped to ±60° — matches TiltAction.clampTilt, the ceiling where
+          PIXI's PerspectiveMesh stays numerically stable on every GPU. */}
+      {showTiltPanel && selectedLayer && (() => {
+        const TILT_MAX = 60           // hard limit, matches TiltAction.clampTilt
+        const TILT_SAFE = 45          // recommended upper bound
+        const tiltX = selectedLayer.tiltX ?? 0
+        const tiltY = selectedLayer.tiltY ?? 0
+        const isUnsafeX = Math.abs(tiltX) > TILT_SAFE
+        const isUnsafeY = Math.abs(tiltY) > TILT_SAFE
+        // Centre-safe zone covers (TILT_SAFE / TILT_MAX) of each half of the
+        // track.  Painted as a centred band so the user sees the "stay inside
+        // here" region without any extra chrome.
+        const safeHalfPct = (TILT_SAFE / TILT_MAX) * 50
+        const trackBase  = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
+        const safeBand   = theme === 'light' ? 'bg-emerald-300/60' : 'bg-emerald-400/25'
+        const rangeFill  = theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'
+        const labelCol   = theme === 'light' ? 'text-gray-500' : 'text-white/60'
+        const valCol     = theme === 'light' ? 'text-gray-700' : 'text-white'
+        const warnCol    = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
+        const thumbCls   = `block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+          ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
+          : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`
+
+        const renderRow = (axis, value, onChange, ariaLabel, isUnsafe, Icon) => (
+          <div className="flex items-center gap-2 w-full">
+            <div className="flex items-center gap-1 shrink-0 w-[24px]">
+              <Icon className={`h-2.5 w-2.5 ${labelCol}`} />
+              <span className={`text-[10px] uppercase font-bold tracking-wider select-none text-center ${labelCol}`}>
+                {axis}
+              </span>
+            </div>
+            <Slider.Root
+              className="relative flex items-center select-none touch-none grow h-5"
+              value={[value]}
+              onValueChange={(v) => {
+                let val = v[0] ?? 0
+                // Snap to 0 if within +/- 2 degrees for easier resetting
+                if (Math.abs(val) < 2) {
+                  val = 0
+                }
+                const clamped = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
+                onChange(clamped)
+              }}
+              min={-TILT_MAX}
+              max={TILT_MAX}
+              step={0.5}
+            >
+              <Slider.Track className={`${trackBase} relative grow rounded-full h-1 overflow-hidden`}>
+                <span
+                  aria-hidden
+                  className={`absolute top-0 bottom-0 ${safeBand}`}
+                  style={{ left: `${50 - safeHalfPct}%`, width: `${safeHalfPct * 2}%` }}
+                />
+                <Slider.Range className={`absolute ${rangeFill} rounded-full h-full`} />
+              </Slider.Track>
+              <Slider.Thumb className={thumbCls} aria-label={ariaLabel} />
+            </Slider.Root>
+            <span className={`text-xs font-mono min-w-[44px] text-right tabular-nums ${isUnsafe ? warnCol : valCol}`}>
+              {value.toFixed(1)}°
+            </span>
+          </div>
+        )
+
+        return (
+          <div
+            className="absolute top-full mt-2 left-1/2 -translate-x-1/2 flex flex-col gap-0.5 px-4 py-2 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+            style={{
+              backgroundColor: 'var(--editor-panel-bg)',
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+              border: '1px solid var(--editor-panel-border)',
+              boxShadow: 'var(--editor-panel-shadow)',
+              minWidth: '270px',
+              pointerEvents: 'auto'
+            }}
+          >
+            {/* Absolute Reset Icon at top-right */}
+            {(tiltX !== 0 || tiltY !== 0) && (
+              <div className="absolute top-1 right-1 z-10">
+                <button
+                  onClick={() => handleLayerUpdate({ tiltX: 0, tiltY: 0 })}
+                  className={`p-1.5 rounded-md transition-all ${theme === 'light' ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
+                  title="Reset Tilt"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
+            <div className="pr-6">
+              {renderRow('H', tiltX, (v) => handleLayerUpdate({ tiltX: v }), 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
+              {renderRow('V', tiltY, (v) => handleLayerUpdate({ tiltY: v }), 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Add Step Hint Modal */}
       {showAddStepHint && (

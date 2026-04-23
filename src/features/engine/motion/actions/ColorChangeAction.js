@@ -1,7 +1,12 @@
 import { gsap } from 'gsap'
+import { CustomEase } from "gsap/CustomEase";
 import * as PIXI from 'pixi.js'
 import { drawShapePath } from '../../pixi/createLayer'
 import { drawDashedRect } from '../../pixi/dashUtils'
+import { markTiltTextureDirty, syncTiltMesh } from '../../pixi/perspectiveTilt'
+
+// Register the plugin
+gsap.registerPlugin(CustomEase);
 
 /**
  * Decompose a hex color (string "#RRGGBB" or numeric 0xRRGGBB) to { r, g, b }.
@@ -55,6 +60,10 @@ function applyColor(pixiObject, numericColor) {
     // Early exit: skip if color hasn't changed since last apply
     if (pixiObject._lastAppliedColor === numericColor) return
     pixiObject._lastAppliedColor = numericColor
+
+    // Any color mutation invalidates the tilt mesh's cached RenderTexture.
+    // The next syncTiltMesh tick (fired below or by TiltAction onUpdate) re-captures.
+    if (pixiObject._tiltMesh) markTiltTextureDirty(pixiObject)
 
     // Text layer: PIXI.Text has a `style` property with `fill`
     if (pixiObject instanceof PIXI.Text) {
@@ -158,7 +167,9 @@ export class ColorChangeAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = (values.duration || 2000) / 1000
-        const easing = values.easing || 'power1.out'
+        CustomEase.create("myEase", "0.5,0,0,1");
+
+        const easing = "myEase"
 
         // Determine start color from state tracker or current object
         let startColorRaw = options.startState?.color
@@ -209,6 +220,7 @@ export class ColorChangeAction {
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
+                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             }
         }
 
@@ -225,18 +237,21 @@ export class ColorChangeAction {
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
+                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             onComplete: () => {
                 if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
+                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             onReverseComplete: () => {
                 if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(startRgb.r, startRgb.g, startRgb.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
+                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             ...options.gsapOptions
         }

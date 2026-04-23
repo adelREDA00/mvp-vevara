@@ -1,6 +1,10 @@
 import { gsap } from 'gsap'
+import { CustomEase } from "gsap/CustomEase";
 import * as PIXI from 'pixi.js'
 import { BLUR_MAX, BLUR_QUALITY } from '../blurConstants.js'
+
+// Register the plugin
+gsap.registerPlugin(CustomEase);
 
 function clampBlur(v) {
   return Math.max(0, Math.min(Number(v) || 0, BLUR_MAX))
@@ -14,7 +18,9 @@ export class BlurAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = (values.duration || 2000) / 1000
-        const easing = values.easing || 'power1.out'
+        CustomEase.create("myEase", "0.5,0,0,1");
+
+        const easing = "myEase"
 
         // [EXPORT SYNC] Cache export scale for the applier
         const exportScale = options.exportScale || 1

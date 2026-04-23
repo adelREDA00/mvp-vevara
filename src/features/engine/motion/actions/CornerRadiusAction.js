@@ -1,5 +1,9 @@
 import { gsap } from 'gsap'
+import { CustomEase } from "gsap/CustomEase";
 import * as PIXI from 'pixi.js'
+
+// Register the plugin
+gsap.registerPlugin(CustomEase);
 import { drawShapePath } from '../../pixi/createLayer'
 import { drawDashedRect } from '../../pixi/dashUtils'
 import { CORNER_RADIUS_MAX } from '../cornerRadiusConstants.js'
@@ -97,7 +101,9 @@ export class CornerRadiusAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = (values.duration || 2000) / 1000
-        const easing = values.easing || 'power4.out'
+        CustomEase.create("myEase", "0.5,0,0,1");
+
+        const easing = "myEase"
 
         // Resolve start radius
         const startRadius = clampRadius(

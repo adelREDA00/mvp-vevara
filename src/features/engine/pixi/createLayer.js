@@ -407,6 +407,8 @@ export function createShapeLayer(config) {
   graphics._storedStrokeStyle = strokeStyle
   graphics._storedWidth = width
   graphics._storedHeight = height
+  graphics._storedAnchorX = effectiveAnchorX
+  graphics._storedAnchorY = effectiveAnchorY
 
   // Position the graphics object
   graphics.x = x
@@ -527,6 +529,8 @@ export async function createImageLayer(config) {
   container.addChild(cropMask)
   container.mask = cropMask
   container._cropMask = cropMask
+  container._storedCropWidth = cropWidth
+  container._storedCropHeight = cropHeight
 
   // Container anchor: offset so (x, y) represents the center of the crop box
   container.anchorX = anchorX
@@ -632,6 +636,8 @@ export function createFrameLayer(config) {
   container.addChild(cropMask)
   container.mask = cropMask
   container._cropMask = cropMask
+  container._storedCropWidth = cropWidth
+  container._storedCropHeight = cropHeight
 
   // Pivot for anchor-based positioning
   container.anchorX = anchorX
@@ -960,10 +966,12 @@ export async function createVideoLayer(config) {
     if (videoUrl && !currentSrc.includes(videoUrl)) {
       console.log(`[createVideoLayer] URL changed for layer ${cacheKey}, updating src`)
       videoElement.pause()
+      // [CORS FIX] Always re-enforce crossOrigin BEFORE setting src on reuse
+      videoElement.crossOrigin = 'anonymous' 
       videoElement.src = videoUrl
       videoElement.load()
     } else {
-      videoElement.pause() // Safeguard: ensure it's not playing when pulled from cache
+      videoElement.pause() 
     }
   }
 
@@ -1005,23 +1013,36 @@ export async function createVideoLayer(config) {
         const targetReadyState = isMobile ? 4 : 3 // HAVE_ENOUGH_DATA for mobile, HAVE_FUTURE_DATA for desktop
         const timeoutMs = isMobile ? 20000 : 10000 // Higher timeout for mobile network/decoding
 
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
           let timeoutId
+          const cleanup = () => {
+            videoElement.removeEventListener('loadedmetadata', onMetadata)
+            videoElement.removeEventListener('canplay', onCanPlay)
+            videoElement.removeEventListener('canplaythrough', onCanPlay)
+            videoElement.removeEventListener('error', onError)
+            if (timeoutId) clearTimeout(timeoutId)
+          }
           const onMetadata = () => {
             if (videoElement.readyState >= targetReadyState) {
-              videoElement.removeEventListener('loadedmetadata', onMetadata)
-              if (timeoutId) clearTimeout(timeoutId)
+              cleanup()
               resolve()
             }
           }
 
           const onCanPlay = () => {
             if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
-              videoElement.removeEventListener('canplay', onCanPlay)
-              videoElement.removeEventListener('canplaythrough', onCanPlay)
-              if (timeoutId) clearTimeout(timeoutId)
+              cleanup()
               resolve()
             }
+          }
+
+          // [404 FIX] Reject immediately if the video element fires an error
+          // (e.g. 404 Not Found). Without this, the promise hangs until the
+          // timeout — keeping asyncLoadCounterRef > 0 and freezing the loader.
+          const onError = (e) => {
+            cleanup()
+            const code = videoElement.error?.code
+            reject(new Error(`Video load error (code ${code}) for: ${videoUrl}`))
           }
 
           if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
@@ -1030,8 +1051,10 @@ export async function createVideoLayer(config) {
             videoElement.addEventListener('loadedmetadata', onMetadata)
             videoElement.addEventListener('canplay', onCanPlay)
             videoElement.addEventListener('canplaythrough', onCanPlay)
+            videoElement.addEventListener('error', onError)
             timeoutId = setTimeout(() => {
               console.warn(`[createVideoLayer] readiness timeout (${timeoutMs / 1000}s) for: ${videoUrl}`)
+              cleanup()
               resolve()
             }, timeoutMs)
           }
@@ -1147,6 +1170,8 @@ export async function createVideoLayer(config) {
   container.addChild(cropMask)
   container.mask = cropMask
   container._cropMask = cropMask
+  container._storedCropWidth = cropWidth
+  container._storedCropHeight = cropHeight
 
   // Pivot for anchor-based positioning
   container.anchorX = anchorX

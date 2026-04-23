@@ -14,6 +14,7 @@ export { ColorChangeAction } from './ColorChangeAction.js'
 export { FlipAction } from './FlipAction.js'
 export { CornerRadiusAction } from './CornerRadiusAction.js'
 export { TypewriterAction } from './TypewriterAction.js'
+export { TiltAction } from './TiltAction.js'
 
 import { MoveAction } from './MoveAction.js'
 import { ScaleAction } from './ScaleAction.js'
@@ -26,6 +27,7 @@ import { ColorChangeAction } from './ColorChangeAction.js'
 import { FlipAction } from './FlipAction.js'
 import { CornerRadiusAction } from './CornerRadiusAction.js'
 import { TypewriterAction } from './TypewriterAction.js'
+import { TiltAction } from './TiltAction.js'
 import { ACTION_TYPES } from '../types/actionTypes.js'
 
 /**
@@ -43,6 +45,7 @@ export const ACTION_HANDLERS = {
   [ACTION_TYPES.FLIP]: FlipAction,
   [ACTION_TYPES.CORNER_RADIUS]: CornerRadiusAction,
   [ACTION_TYPES.TYPEWRITER]: TypewriterAction,
+  [ACTION_TYPES.TILT]: TiltAction,
 }
 
 /**
