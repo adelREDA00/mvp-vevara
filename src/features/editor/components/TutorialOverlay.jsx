@@ -147,11 +147,11 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
   const getHintText = () => {
     switch (step) {
       case 1: return "Press Play to see the animation.";
-      case 2: return "This scene has 2 Steps. Each Step is a moment in your animation.";
-      case 3: return "It's your turn! Click 'Animate' to create Step 3.";
-      case 4: return "Move the Blue iPhone to the middle and rotate & scale it do  whatever you want.";
-      case 5: return "When you're done, click 'save step' again to save Step 3.";
-      case 6: return "Nice! You added a new step. Click Play to see your full animation.";
+      case 2: return "This scene has 2 Steps. Each step changes the scene.";
+      case 3: return "Click 'Animate' to create Step 3.";
+      case 4: return "Scale the Apple Logo.";
+      case 5: return "Click 'Save Step' to save Step 3.";
+      case 6: return "Nice. Click Play to see your animation.";
       default: return "";
     }
   }
@@ -183,7 +183,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
   return (
     <div className="fixed inset-0 z-[10000] pointer-events-none overflow-hidden">
       {/* Dark Overlay with Holes */}
-      {step < 5 && !(step === 4 && typeof window !== 'undefined' && window.innerWidth < 1024) && (
+      {step < 4 && (
         <div
           className="absolute inset-0 bg-black/40 pointer-events-auto transition-[clip-path] duration-300"
           style={{
@@ -194,7 +194,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
       )}
 
       {/* Target Highlight (Visual only) */}
-      {targetRect && step < 5 && !(step === 4 && typeof window !== 'undefined' && window.innerWidth < 1024) && (
+      {targetRect && step < 4 && (
         <div
           className="absolute border-2 border-[#6940c9] rounded-xl transition-all duration-300 shadow-[0_0_20px_rgba(105,64,201,0.6)] pointer-events-none"
           style={{

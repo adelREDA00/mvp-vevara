@@ -87,7 +87,7 @@ function getVideoDimensions(file) {
 
 export const uploadFile = createAsyncThunk(
   'uploads/upload',
-  async ({ tempId, file }, { dispatch, rejectWithValue }) => {
+  async ({ tempId, file, isPublic = true, assetType = 'image' }, { dispatch, rejectWithValue }) => {
     try {
       // Create a new AbortController for this upload
       if (abortControllers[tempId]) abortControllers[tempId].abort();
@@ -96,6 +96,8 @@ export const uploadFile = createAsyncThunk(
 
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('isPublic', isPublic)
+      formData.append('assetType', assetType)
 
       // Extract media dimensions before upload
       let dimensions = { width: 0, height: 0, duration: 0 }
@@ -144,7 +146,7 @@ export const uploadFile = createAsyncThunk(
  */
 export const startBatchUpload = createAsyncThunk(
   'uploads/startBatch',
-  async (files, { dispatch }) => {
+  async ({ files, isPublic = true, assetType = 'image' }, { dispatch }) => {
     const fileArray = Array.from(files)
     const uploads = fileArray.map(file => ({
       tempId: crypto.randomUUID(),
@@ -176,7 +178,12 @@ export const startBatchUpload = createAsyncThunk(
       active++
       
       try {
-        await dispatch(uploadFile({ tempId: current.tempId, file: current.file })).unwrap()
+        await dispatch(uploadFile({ 
+          tempId: current.tempId, 
+          file: current.file,
+          isPublic,
+          assetType
+        })).unwrap()
       } catch (err) {
         // Error handled by uploadFile.rejected
       } finally {
@@ -232,6 +239,8 @@ function normalizeAsset(item) {
     name: item.name,
     // Use relative URL directly — Vite proxy handles /uploads in dev
     url: item.url,
+    isPublic: item.isPublic,
+    assetType: item.assetType,
     metadata: {
       ...item.metadata,
       type: mimeType,
@@ -400,12 +409,17 @@ export { setUploadProgress }
 
 export const selectImageCount = createSelector(
   [selectUploadedImagesArray],
-  (images) => images.filter(img => img.metadata?.type?.startsWith('image/')).length
+  (images) => images.filter(img => (img.metadata?.type?.startsWith('image/') || img.type === 'image') && img.assetType === 'image').length
+)
+
+export const selectIconCount = createSelector(
+  [selectUploadedImagesArray],
+  (images) => images.filter(img => (img.metadata?.type?.startsWith('image/') || img.type === 'image') && img.assetType === 'icon').length
 )
 
 export const selectVideoCount = createSelector(
   [selectUploadedImagesArray],
-  (images) => images.filter(img => img.metadata?.type?.startsWith('video/')).length
+  (images) => images.filter(img => img.metadata?.type?.startsWith('video/') || img.type === 'video').length
 )
 
 export const selectTotalCount = createSelector(

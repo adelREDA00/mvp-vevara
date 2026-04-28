@@ -202,7 +202,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
     // drawDashedRect signature: (graphics, x, y, width, height, cornerRadius, strokeColor, strokeWidth, dashLength, gapLength)
     const zoomScale = 1 / (viewport?.scale?.x || 1)
     const baseScale = calculateAdaptedScale(zoomScale)
-    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.5 * baseScale, 10, 5)
+    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.2 * baseScale, 10, 5)
 
     graphics.alpha = isLocked ? 0.4 : 1.0
 
@@ -383,8 +383,8 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       if (!resizeStateRef.current && !rotateStateRef.current) {
         const zoomScale = 1 / (viewport?.scale?.x || 1)
         const baseScale = calculateAdaptedScale(zoomScale)
-        const rotateRadius = 18 * baseScale
-        const rotationYPosition = height + rotateRadius + (45 * baseScale)
+        const rotateRadius = 22 * baseScale
+        const rotationYPosition = height + rotateRadius + (30 * baseScale)
 
         // Check if we need to recreate the handle (if missing, destroyed, or zoom changed)
         let rotateHandle = pooledObjectsRef.current.rotateHandle

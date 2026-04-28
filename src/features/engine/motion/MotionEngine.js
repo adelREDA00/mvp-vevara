@@ -2,7 +2,7 @@ import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { MotionTimeline } from './MotionTimeline.js'
 import { getActionHandler } from './actions/index.js'
-import { syncTiltedDisplay } from '../pixi/perspectiveTilt.js'
+import { syncTiltedDisplay, markTiltTextureDirty, syncTiltMesh } from '../pixi/perspectiveTilt.js'
 
 /**
  * MotionEngine is the main coordinator for all layer animations.
@@ -254,11 +254,10 @@ export class MotionEngine {
   _ensureGSAPProperties(pixiObject) {
     if (!pixiObject || pixiObject.destroyed || pixiObject._hasGSAPProperties) return
 
-    // List of custom properties we want to track/animate via GSAP
     const properties = [
       'cropX', 'cropY', 'cropWidth', 'cropHeight', 
       'mediaWidth', 'mediaHeight', 'showingFront', 
-      'cornerRadius'
+      'cornerRadius', 'blur'
     ]
 
     properties.forEach(prop => {
@@ -288,8 +287,21 @@ export class MotionEngine {
                 this._updateCropVisuals()
               }
               
-              if (this._updateShapeRadiusVisuals) {
-                this._updateShapeRadiusVisuals()
+              if (this._applyAnimatedCornerRadius) {
+                this._applyAnimatedCornerRadius()
+              }
+
+              if (prop === 'blur') {
+                this._blurLogicalStrength = val
+                if (this._applyAnimatedBlur) this._applyAnimatedBlur()
+              }
+
+              // [TILT SYNC] Any change to these custom properties (crop, radius, flip) 
+              // must invalidate the tilt mesh's cached texture so it re-captures 
+              // the updated visual state of the original layer.
+              if (this._tiltMesh && !this._tiltMesh.destroyed) {
+                markTiltTextureDirty(this)
+                syncTiltMesh(this, null)
               }
               
               // Special case for card frames - toggle visibility when showingFront changes
@@ -643,7 +655,9 @@ export class MotionEngine {
                 cropHeight: startState.cropHeight,
                 mediaWidth: startState.mediaWidth,
                 mediaHeight: startState.mediaHeight,
-                showingFront: startState.showingFront !== false
+                showingFront: startState.showingFront !== false,
+                cornerRadius: startState.cornerRadius !== undefined ? startState.cornerRadius : 0,
+                blur: startState.blur !== undefined ? startState.blur : 0,
               }
 
               const startOpacity = startState.opacity !== undefined ? startState.opacity : 1

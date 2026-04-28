@@ -50,29 +50,29 @@ import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
 
 const GUEST_TEMPLATE = {
   "_id": {
-    "$oid": "69b207cca3561e58b8d41b65"
+    "$oid": "69f08fecef54587ef230286d"
   },
   "name": "Practice Project",
   "data": {
     "scenes": [
       {
-        "id": "1773275084285-llzfb33zs",
+        "id": "1777373164687-ecqgrefh8",
         "name": "Scene 1",
-        "duration": 6.7,
+        "duration": 5,
         "transition": "None",
         "backgroundColor": 16777215,
         "layers": [
-          "1773275084285-8743ocm8q",
-          "1773275115933-4qvfswnih",
-          "1773275104029-lyea26644",
-          "1773275934580-xdl3ye76k"
+          "1777373164687-cov3n8kle",
+          "1777373326863-2cyb676aw",
+          "1777373237682-8gmica6fv",
+          "1777373353502-yg9n4un0c"
         ]
       }
     ],
     "layers": {
-      "1773275084285-8743ocm8q": {
-        "id": "1773275084285-8743ocm8q",
-        "sceneId": "1773275084285-llzfb33zs",
+      "1777373164687-cov3n8kle": {
+        "id": "1777373164687-cov3n8kle",
+        "sceneId": "1777373164687-ecqgrefh8",
         "type": "background",
         "name": "Background",
         "visible": true,
@@ -90,218 +90,186 @@ const GUEST_TEMPLATE = {
         "data": {
           "color": 16777215
         },
-        "createdAt": 1773275084285,
-        "updatedAt": 1773275084285
+        "createdAt": 1777373164687,
+        "updatedAt": 1777373164687
       },
-      "1773275104029-lyea26644": {
-        "id": "1773275104029-lyea26644",
-        "sceneId": "1773275084285-llzfb33zs",
+      "1777373237682-8gmica6fv": {
+        "id": "1777373237682-8gmica6fv",
+        "sceneId": "1777373164687-ecqgrefh8",
         "type": "image",
-        "name": "img2.png",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 959.3750062403474,
-        "y": 739.863565962716,
-        "width": 223.75001248069486,
-        "height": 397.7777999656798,
-        "rotation": 90,
-        "scaleX": 1,
-        "scaleY": 1,
-        "anchorX": 0.5,
-        "anchorY": 0.5,
-        "data": {
-          "url": "/img2.png",
-          "src": "/img2.png",
-          "width": 1080,
-          "height": 1920,
-          "duration": 0,
-          "mimeType": "image/png",
-          "size": 7248471
-        },
-        "createdAt": 1773275104029,
-        "updatedAt": 1773276607596,
-        "cropX": 0,
-        "cropY": 0,
-        "cropWidth": 223.75001248069486,
-        "cropHeight": 397.7777999656798,
-        "mediaWidth": 223.75001248069486,
-        "mediaHeight": 397.7777999656798
-      },
-      "1773275115933-4qvfswnih": {
-        "id": "1773275115933-4qvfswnih",
-        "sceneId": "1773275084285-llzfb33zs",
-        "type": "text",
-        "name": "text Layer",
+        "name": "Apple Logo",
         "visible": true,
         "locked": false,
         "opacity": 1,
         "x": 960,
-        "y": 552.0797948585858,
-        "width": 550.471772757446,
-        "height": 57,
+        "y": 540,
+        "width": 141.52010952101497,
+        "height": 152.2100586215986,
         "rotation": 0,
+        "blur": 0,
         "scaleX": 1,
         "scaleY": 1,
-        "anchorX": 0,
-        "anchorY": 0,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
         "data": {
-          "content": "making animation chill",
-          "fontSize": 44.81946001248375,
-          "color": "#000000",
-          "fontFamily": "Poppins",
-          "fontWeight": "bold",
-          "textAlign": "center"
+          "url": "/apple.webp",
+          "src": "/apple.webp",
+          "width": 3840,
+          "height": 2160,
+          "duration": 0,
+          "mimeType": "image/webp",
+          "size": 39742,
+          "type": "image/webp"
         },
-        "createdAt": 1773275115933,
-        "updatedAt": 1773276725209
+        "createdAt": 1777373237683,
+        "updatedAt": 1777374236051,
+        "cropX": 61.93310660460103,
+        "cropY": 0,
+        "cropWidth": 141.52010952101497,
+        "cropHeight": 152.2100586215986,
+        "mediaWidth": 270.5956597717308,
+        "mediaHeight": 152.2100586215986
       },
-      "1773275934580-xdl3ye76k": {
-        "id": "1773275934580-xdl3ye76k",
-        "sceneId": "1773275084285-llzfb33zs",
-        "type": "image",
-        "name": "img1.png",
+      "1777373326863-2cyb676aw": {
+        "id": "1777373326863-2cyb676aw",
+        "sceneId": "1777373164687-ecqgrefh8",
+        "type": "shape",
+        "name": "shape Layer",
         "visible": true,
         "locked": false,
         "opacity": 1,
         "x": 960,
-        "y": 372.08578221001176,
-        "width": 225,
-        "height": 400,
-        "rotation": 90,
+        "y": 540,
+        "width": 262.4933268746523,
+        "height": 262.4933268746523,
+        "rotation": 0,
+        "blur": 0,
         "scaleX": 1,
         "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
         "anchorX": 0.5,
         "anchorY": 0.5,
         "data": {
-          "url": "/img1.png",
-          "src": "/img1.png",
-          "width": 1080,
-          "height": 1920,
-          "duration": 0,
-          "mimeType": "image/png",
-          "size": 7248473
+          "shapeType": "rect",
+          "fill": "#EEEEEE",
+          "stroke": "",
+          "strokeWidth": 0
         },
-        "createdAt": 1773275934580,
-        "updatedAt": 1773276606230
+        "createdAt": 1777373326863,
+        "updatedAt": 1777374238987
+      },
+      "1777373353502-yg9n4un0c": {
+        "id": "1777373353502-yg9n4un0c",
+        "sceneId": "1777373164687-ecqgrefh8",
+        "type": "shape",
+        "name": "shape Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 2045.9236926129706,
+        "y": 843.2510783699869,
+        "width": 108.99024309438768,
+        "height": 109.6099800681689,
+        "rotation": -113.30681136419732,
+        "blur": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "data": {
+          "shapeType": "arrowhead",
+          "fill": "#000000",
+          "stroke": "",
+          "strokeWidth": 0
+        },
+        "createdAt": 1777373353503,
+        "updatedAt": 1777373876981
       }
     },
     "sceneMotionFlows": {
-      "1773275084285-llzfb33zs": {
+      "1777373164687-ecqgrefh8": {
         "steps": [
           {
-            "id": "step-1773276709178",
+            "id": "step-1777374338141",
             "layerActions": {
-              "1773275104029-lyea26644": [
+              "1777373353502-yg9n4un0c": [
                 {
-                  "id": "action-1773276726025-move-1773275104029-lyea26644",
+                  "id": "action-1777374342475-move-1777373353502-yg9n4un0c",
                   "type": "move",
-                  "duration": 3350,
+                  "duration": 2500,
                   "values": {
-                    "dx": -726.6665988498264,
-                    "dy": 4.44437646379788,
-                    "controlPoints": [],
+                    "dx": -1254.2567221461263,
+                    "dy": -462.68389429105946,
+                    "controlPoints": [
+                      {
+                        "x": -1186.1256634936526,
+                        "y": -807.7362821108923
+                      },
+                      {
+                        "x": -1475.418617447251,
+                        "y": -680.0595869567421
+                      }
+                    ],
                     "easing": "power4.out",
-                    "duration": 3350
+                    "duration": 2500
                   }
                 },
                 {
-                  "id": "action-1773276726025-rotate-1773275104029-lyea26644",
+                  "id": "action-1777374346203-rotate-1777373353502-yg9n4un0c",
                   "type": "rotate",
-                  "duration": 3350,
+                  "duration": 2500,
                   "values": {
-                    "dangle": -90,
+                    "dangle": 153.27977282057344,
                     "easing": "power4.out",
-                    "duration": 3350
-                  }
-                }
-              ],
-              "1773275115933-4qvfswnih": [
-                {
-                  "id": "action-1773276726025-scale-1773275115933-4qvfswnih",
-                  "type": "scale",
-                  "duration": 3350,
-                  "values": {
-                    "dsx": 2.1695906001672753,
-                    "dsy": 2.1695906001672753,
-                    "easing": "power4.out",
-                    "duration": 3350
-                  }
-                }
-              ],
-              "1773275934580-xdl3ye76k": [
-                {
-                  "id": "action-1773276726025-move-1773275934580-xdl3ye76k",
-                  "type": "move",
-                  "duration": 3350,
-                  "values": {
-                    "dx": 764.4444783528645,
-                    "dy": 0.00012715657078388176,
-                    "controlPoints": [],
-                    "easing": "power4.out",
-                    "duration": 3350
-                  }
-                },
-                {
-                  "id": "action-1773276726025-rotate-1773275934580-xdl3ye76k",
-                  "type": "rotate",
-                  "duration": 3350,
-                  "values": {
-                    "dangle": -90,
-                    "easing": "power4.out",
-                    "duration": 3350
-                  }
-                },
-                {
-                  "id": "action-1773276726025-scale-1773275934580-xdl3ye76k",
-                  "type": "scale",
-                  "duration": 3350,
-                  "values": {
-                    "dsx": 1.630849723057734,
-                    "dsy": 1.630849723057734,
-                    "easing": "power4.out",
-                    "duration": 3350
+                    "duration": 2500
                   }
                 }
               ]
             },
-            "duration": 3350,
+            "duration": 2500,
             "startTime": 0
           },
           {
-            "id": "step-1773276728282",
+            "id": "step-1777374374452",
             "layerActions": {
-              "1773275104029-lyea26644": [
+              "1777373326863-2cyb676aw": [
                 {
-                  "id": "action-1773276738777-move-1773275104029-lyea26644",
-                  "type": "move",
-                  "duration": 3350,
+                  "id": "action-1777374378370-scale-1777373326863-2cyb676aw",
+                  "type": "scale",
+                  "duration": 2500,
                   "values": {
-                    "dx": -4.882389993363432,
-                    "dy": -690.307417,
+                    "dsx": 5.318719744336486,
+                    "dsy": 1,
+                    "easing": "power4.out",
+                    "duration": 2500
+                  }
+                }
+              ],
+              "1777373353502-yg9n4un0c": [
+                {
+                  "id": "action-1777374383443-move-1777373353502-yg9n4un0c",
+                  "type": "move",
+                  "duration": 2500,
+                  "values": {
+                    "dx": -569.2462978755264,
+                    "dy": -4.621620393206683,
                     "controlPoints": [],
                     "easing": "power4.out",
-                    "duration": 3350
-                  }
-                },
-                {
-                  "id": "action-1773276738777-scale-1773275104029-lyea26644",
-                  "type": "scale",
-                  "duration": 3350,
-                  "values": {
-                    "dsx": 2.330849723057734,
-                    "dsy": 2.330849723057734,
-                    "easing": "power4.out",
-                    "duration": 3350
+                    "duration": 2500
                   }
                 }
               ]
             },
-            "duration": 3350,
-            "startTime": 3350
+            "duration": 2500,
+            "startTime": 2500
           }
         ],
-        "pageDuration": 6700,
+        "pageDuration": 5000,
         "sceneStartOffset": 0
       }
     },
@@ -951,7 +919,7 @@ function EditorPage() {
   useEffect(() => {
     if (tutorialActive && tutorialStep === 4) {
       const updateRect = () => {
-        const layerId = "1773275934580-xdl3ye76k"; // Blue iPhone
+        const layerId = "1777373237682-8gmica6fv"; // Apple Logo
         const transforms = motionControls?.getLayerCurrentTransforms();
         const t = transforms?.get(layerId);
 
@@ -1004,15 +972,19 @@ function EditorPage() {
     prevIsPlaying.current = isPlaying;
   }, [isPlaying, tutorialActive, tutorialStep, dispatch]);
 
-  // Ensure target layer is selected for Step 4
+  // Select target layer once when entering Step 4
+  const hasSelectedTargetRef = useRef(false);
   useEffect(() => {
     if (tutorialActive && tutorialStep === 4) {
-      const layerId = "1773275934580-xdl3ye76k"; // Switched to img1.svg (Blue iPhone)
-      if (!selectedLayerIds.includes(layerId)) {
+      if (!hasSelectedTargetRef.current) {
+        const layerId = "1777373237682-8gmica6fv"; // Apple Logo
         dispatch(setSelectedLayer(layerId));
+        hasSelectedTargetRef.current = true;
       }
+    } else {
+      hasSelectedTargetRef.current = false;
     }
-  }, [tutorialActive, tutorialStep, selectedLayerIds, dispatch]);
+  }, [tutorialActive, tutorialStep, dispatch]);
 
   // Handle Step 3 -> 4 transition (Entering capture mode)
   useEffect(() => {
@@ -1029,7 +1001,7 @@ function EditorPage() {
     if (tutorialActive && tutorialStep === 4 && motionCaptureMode?.isActive) {
       // Capture initial state
       const transforms = motionControls?.getLayerCurrentTransforms();
-      const target = transforms?.get("1773275934580-xdl3ye76k");
+      const target = transforms?.get("1777373237682-8gmica6fv");
       if (target && !initialTransformRef.current) {
         initialTransformRef.current = { x: target.x, y: target.y, scaleX: target.scaleX };
       }
@@ -1037,7 +1009,7 @@ function EditorPage() {
       // Start polling for change
       interval = setInterval(() => {
         const currentTransforms = motionControls?.getLayerCurrentTransforms();
-        const current = currentTransforms?.get("1773275934580-xdl3ye76k");
+        const current = currentTransforms?.get("1777373237682-8gmica6fv");
         const initial = initialTransformRef.current;
 
         if (current && initial) {
@@ -1359,7 +1331,7 @@ function EditorPage() {
     dispatch(clearLayerSelection())
 
     // [NEW] Auto-open motion panel on desktop when adding a step
-    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+    if (typeof window !== 'undefined' && window.innerWidth >= 1024 && isAuthenticated) {
       setIsMotionPanelOpen(true)
     }
 

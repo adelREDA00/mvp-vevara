@@ -699,7 +699,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
     const baseScale = calculateAdaptedScale(zoomScale)
-    outline.stroke({ color: 0x8B5CF6, width: 1.5 * baseScale })
+    outline.stroke({ color: 0x8B5CF6, width: 1.2 * baseScale })
     hoverBox.visible = true
   }, [layersContainer, isPlaying])
 
@@ -761,26 +761,26 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     if (isCorner) {
       // Corner handles: larger white circles with purple border
-      const cornerRadius = 12 * scaledBase
+      const cornerRadius = 8 * scaledBase
       handle.circle(0, 0, cornerRadius)
       handle.fill({ color: 0xffffff })
-      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * scaledBase) })
+      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
     } else if (isSide) {
       // Side handles: badge/pill shape (rounded rectangle)
-      const sideWidth = 32 * scaledBase
-      const sideHeight = 12 * scaledBase
-      const sideWidthVertical = 12 * scaledBase
-      const sideHeightVertical = 32 * scaledBase
+      const sideWidth = 20 * scaledBase
+      const sideHeight = 7 * scaledBase
+      const sideWidthVertical = 7 * scaledBase
+      const sideHeightVertical = 20 * scaledBase
 
       if (handleType === 'n' || handleType === 's') {
         // Horizontal badge for top/bottom
-        handle.roundRect(-sideWidth / 2, -sideHeight / 2, sideWidth, sideHeight, 5 * scaledBase)
+        handle.roundRect(-sideWidth / 2, -sideHeight / 2, sideWidth, sideHeight, 3 * scaledBase)
       } else {
         // Vertical badge for left/right
-        handle.roundRect(-sideWidthVertical / 2, -sideHeightVertical / 2, sideWidthVertical, sideHeightVertical, 5 * scaledBase)
+        handle.roundRect(-sideWidthVertical / 2, -sideHeightVertical / 2, sideWidthVertical, sideHeightVertical, 3 * scaledBase)
       }
       handle.fill({ color: 0xffffff })
-      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * scaledBase) })
+      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
     }
 
     // No need to scale the handle itself since we calculated the size already
@@ -818,24 +818,24 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       if (isCorner) {
         // Larger on hover
-        const hoverCornerRadius = 16 * scaledBase
+        const hoverCornerRadius = 12 * scaledBase
         handle.circle(0, 0, hoverCornerRadius)
         handle.fill({ color: 0x8B5CF6 })
-        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.5 * scaledBase) })
+        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.2 * scaledBase) })
       } else if (isSide) {
-        const hoverExtra = 6 * scaledBase
-        const hoverSideWidth = 32 * scaledBase
-        const hoverSideHeight = 12 * scaledBase
-        const hoverSideWidthVertical = 12 * scaledBase
-        const hoverSideHeightVertical = 32 * scaledBase
+        const hoverExtra = 3 * scaledBase
+        const hoverSideWidth = 20 * scaledBase
+        const hoverSideHeight = 7 * scaledBase
+        const hoverSideWidthVertical = 7 * scaledBase
+        const hoverSideHeightVertical = 20 * scaledBase
 
         if (handleType === 'n' || handleType === 's') {
-          handle.roundRect(-(hoverSideWidth + hoverExtra) / 2, -(hoverSideHeight + hoverExtra) / 2, hoverSideWidth + hoverExtra, hoverSideHeight + hoverExtra, 5 * scaledBase)
+          handle.roundRect(-(hoverSideWidth + hoverExtra) / 2, -(hoverSideHeight + hoverExtra) / 2, hoverSideWidth + hoverExtra, hoverSideHeight + hoverExtra, 3 * scaledBase)
         } else {
-          handle.roundRect(-(hoverSideWidthVertical + hoverExtra) / 2, -(hoverSideHeightVertical + hoverExtra) / 2, hoverSideWidthVertical + hoverExtra, hoverSideHeightVertical + hoverExtra, 5 * scaledBase)
+          handle.roundRect(-(hoverSideWidthVertical + hoverExtra) / 2, -(hoverSideHeightVertical + hoverExtra) / 2, hoverSideWidthVertical + hoverExtra, hoverSideHeightVertical + hoverExtra, 3 * scaledBase)
         }
         handle.fill({ color: 0x8B5CF6 })
-        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.5 * scaledBase) })
+        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.2 * scaledBase) })
       }
 
       const canvasEl = canvasRef.current
@@ -848,23 +848,23 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       handle.clear()
 
       if (isCorner) {
-        const normalCornerRadius = 12 * scaledBase
+        const normalCornerRadius = 8 * scaledBase
         handle.circle(0, 0, normalCornerRadius)
         handle.fill({ color: 0xffffff })
-        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * scaledBase) })
+        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
       } else if (isSide) {
-        const normalSideWidth = 32 * scaledBase
-        const normalSideHeight = 12 * scaledBase
-        const normalSideWidthVertical = 12 * scaledBase
-        const normalSideHeightVertical = 32 * scaledBase
+        const normalSideWidth = 20 * scaledBase
+        const normalSideHeight = 7 * scaledBase
+        const normalSideWidthVertical = 7 * scaledBase
+        const normalSideHeightVertical = 20 * scaledBase
 
         if (handleType === 'n' || handleType === 's') {
-          handle.roundRect(-normalSideWidth / 2, -normalSideHeight / 2, normalSideWidth, normalSideHeight, 5 * scaledBase)
+          handle.roundRect(-normalSideWidth / 2, -normalSideHeight / 2, normalSideWidth, normalSideHeight, 3 * scaledBase)
         } else {
-          handle.roundRect(-normalSideWidthVertical / 2, -normalSideHeightVertical / 2, normalSideWidthVertical, normalSideHeightVertical, 5 * scaledBase)
+          handle.roundRect(-normalSideWidthVertical / 2, -normalSideHeightVertical / 2, normalSideWidthVertical, normalSideHeightVertical, 3 * scaledBase)
         }
         handle.fill({ color: 0xffffff })
-        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * scaledBase) })
+        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
       }
 
       const canvasEl = canvasRef.current
@@ -999,16 +999,16 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // Draw white circle background at calculated size
     const baseScale = calculateAdaptedScale(zoomScale)
     const scaledBase = baseScale * smallLayerScale
-    const radius = Math.max(10, 18 * scaledBase)
+    const radius = Math.max(14, 22 * scaledBase)
 
-    const distanceFromBottom = radius + (45 * scaledBase)
+    const distanceFromBottom = radius + (30 * scaledBase)
     const rotationX = localBoundsX + scaledWidth / 2
     const rotationY = localBoundsY + scaledHeight + distanceFromBottom
 
     const background = new PIXI.Graphics()
     background.circle(0, 0, radius)
     background.fill({ color: 0xffffff })
-    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * scaledBase) })
+    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
     rotationHandle.addChild(background)
 
     // Create icon container
@@ -1072,7 +1072,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       graphics.stroke({ color, width: 2, cap: 'round' })
     }
 
-    const iconSize = Math.max(14, 20 * baseScale)
+    const iconSize = Math.max(16, 24 * baseScale)
     drawArrows(icon, 0x000000, iconSize)
 
     rotationHandle.x = rotationX
@@ -1091,7 +1091,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       background.clear()
       background.circle(0, 0, radius)
       background.fill({ color: 0xffffff })
-      background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * baseScale) })
+      background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
 
       drawArrows(icon, 0xffffff, iconSize)
 
@@ -1326,7 +1326,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
         // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
         const baseScale = calculateAdaptedScale(zoomScale)
-        outline.stroke({ color: 0x8B5CF6, width: 1.5 * baseScale })
+        outline.stroke({ color: 0x8B5CF6, width: 1.2 * baseScale })
       }
 
       // Update handle positions and rotation handle
@@ -1356,10 +1356,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           // Use the same small layer logic as creation for perfect sync
           const layerSizeRef = Math.min(scaledWidth, scaledHeight)
           const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
-          const radius = Math.max(10, 18 * baseScale * smallLayerScale)
+          const radius = Math.max(14, 22 * baseScale * smallLayerScale)
 
           child.x = localBoundsX + scaledWidth / 2
-          child.y = localBoundsY + scaledHeight + radius + (45 * baseScale)
+          child.y = localBoundsY + scaledHeight + radius + (30 * baseScale)
         }
       })
     }

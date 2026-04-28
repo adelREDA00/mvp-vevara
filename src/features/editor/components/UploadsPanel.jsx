@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2 } from 'lucide-react'
+import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2, Globe, Lock, Smile } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import { AssetCard } from './AssetCard'
 import {
@@ -11,6 +11,7 @@ import {
   selectUploadError,
   selectFetchError,
   selectImageCount,
+  selectIconCount,
   selectVideoCount,
   selectTotalCount,
   uploadFile,
@@ -76,6 +77,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const [isDragOver, setIsDragOver] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null })
+  const [isPublic, setIsPublic] = useState(true)
+  const [assetType, setAssetType] = useState('image')
   const fileInputRef = useRef(null)
 
   const uploadedImages = useSelector(selectUploadedImagesArray)
@@ -86,13 +89,17 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const lastUploadedId = useSelector(selectLastUploadedId)
   const totalCount = useSelector(selectTotalCount)
   const imageCount = useSelector(selectImageCount)
+  const iconCount = useSelector(selectIconCount)
   const videoCount = useSelector(selectVideoCount)
   const hasLargeUpload = useSelector(selectHasLargeUpload)
   const uploadProgress = useSelector(selectUploadProgress)
   const uploadQueue = useSelector(selectUploadQueueArray)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const allLayers = useSelector(selectLayers)
-  const { theme } = useContext(ThemeContext)
+  const { theme, user } = useContext(ThemeContext)
+  // Get user from state if not in context
+  const authUser = useSelector((state) => state.auth.user)
+  const isDesigner = authUser?.isDesigner
   const isLight = theme === 'light'
 
   const getCurrentAspectRatio = () => aspectRatio || '16:9'
@@ -123,7 +130,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
     if (!uploadedImages.length) return []
     return uploadedImages.filter(image => {
       const matchesTab = activeTab === 'All' ||
-        (activeTab === 'Images' && image.metadata?.type?.startsWith('image/')) ||
+        (activeTab === 'Images' && (image.assetType === 'image' || !image.assetType)) ||
+        (activeTab === 'Icons' && image.assetType === 'icon') ||
         (activeTab === 'Videos' && image.metadata?.type?.startsWith('video/'))
       return matchesTab
     })
@@ -133,7 +141,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
     // Filter queue items based on tab
     const filteredQueue = uploadQueue.filter(item => {
       const matchesTab = activeTab === 'All' ||
-        (activeTab === 'Images' && item.type?.startsWith('image/')) ||
+        (activeTab === 'Images' && item.type?.startsWith('image/')) || // Note: queue items don't have assetType yet, default to image
+        (activeTab === 'Icons' && false) || // Queue doesn't support icon filtering yet as it's set on startBatch
         (activeTab === 'Videos' && item.type?.startsWith('video/'))
       return matchesTab
     })
@@ -142,8 +151,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
   const handleFileSelect = useCallback((files) => {
     if (!files || files.length === 0) return
-    dispatch(startBatchUpload(files))
-  }, [dispatch])
+    dispatch(startBatchUpload({ files, isPublic, assetType }))
+  }, [dispatch, isPublic, assetType])
 
   const handleFileInputChange = useCallback((e) => {
     handleFileSelect(e.target.files)
@@ -296,6 +305,46 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
         {isAuthenticated ? (
           <div className="flex flex-col gap-2.5">
+            {isDesigner && (
+              <div className={`p-3 rounded-[16px] border mb-1 flex flex-col gap-3 ${isLight ? 'bg-white border-black/5' : 'bg-white/5 border-white/5'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-[12px] font-semibold ${isLight ? 'text-gray-500' : 'text-zinc-500'}`}>Visibility</span>
+                  <div className="flex bg-black/5 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setIsPublic(true)}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${isPublic ? 'bg-white shadow-sm text-[#7c4af0]' : 'text-zinc-500 hover:text-zinc-400'}`}
+                    >
+                      <Globe className="h-3 w-3" /> Public
+                    </button>
+                    <button
+                      onClick={() => setIsPublic(false)}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${!isPublic ? 'bg-white shadow-sm text-red-500' : 'text-zinc-500 hover:text-zinc-400'}`}
+                    >
+                      <Lock className="h-3 w-3" /> Private
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className={`text-[12px] font-semibold ${isLight ? 'text-gray-500' : 'text-zinc-500'}`}>Asset Type</span>
+                  <div className="flex bg-black/5 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setAssetType('image')}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${assetType === 'image' ? 'bg-white shadow-sm text-[#7c4af0]' : 'text-zinc-500 hover:text-zinc-400'}`}
+                    >
+                      <Image className="h-3 w-3" /> Image
+                    </button>
+                    <button
+                      onClick={() => setAssetType('icon')}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-bold transition-all ${assetType === 'icon' ? 'bg-white shadow-sm text-[#7c4af0]' : 'text-zinc-500 hover:text-zinc-400'}`}
+                    >
+                      <Smile className="h-3 w-3" /> Icon
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
                 onClick={handleUploadClick}
                 disabled={isUploading}
@@ -373,13 +422,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
           )}
 
           <div className={`flex border-b px-6 ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-            {['All', 'Images', 'Videos'].map(tab => (
+            {['All', 'Images', 'Icons', 'Videos'].map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
               >
-                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount}</span>
+                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : videoCount}</span>
                 {activeTab === tab && (
                   <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
                 )}
@@ -403,12 +452,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
                   </span>
                   <button
                     onClick={() => dispatch(cancelUpload())}
-                    className="text-[10px] font-bold uppercase tracking-widest text-white/30 hover:text-red-400 transition-colors"
+                    className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${isLight ? 'text-black/30 hover:text-red-500' : 'text-white/30 hover:text-red-400'}`}
                   >
                     Cancel All
                   </button>
                 </div>
-                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden mb-3">
+                <div className={`w-full h-1.5 rounded-full overflow-hidden mb-3 ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
                   <div
                     className={`h-full bg-[#7c4af0] transition-all duration-300 shadow-[0_0_8px_rgba(124,74,240,0.4)] ${uploadProgress === 0 ? 'animate-[progress_2s_ease-in-out_infinite]' : ''}`}
                     style={{ 

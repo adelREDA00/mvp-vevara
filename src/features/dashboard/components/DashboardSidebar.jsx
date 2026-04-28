@@ -11,15 +11,15 @@ import {
 const SidebarItem = ({ icon: Icon, label, to, active }) => (
   <Link
     to={to}
-    className={`flex flex-col items-center justify-center gap-1.5 w-full py-4 transition-all duration-200 group relative ${
+    className={`flex flex-col items-center justify-center gap-1 w-full py-3.5 transition-all duration-200 group relative ${
       active 
         ? 'text-[var(--dashboard-accent)]' 
         : 'text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
     }`}
   >
-    {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 bg-[var(--dashboard-accent)] rounded-r-full" />}
-    <Icon size={20} strokeWidth={active ? 2 : 1.5} className="transition-transform group-hover:scale-110" />
-    <span className={`text-[10px] tracking-tight text-center ${active ? 'font-semibold' : 'font-medium opacity-80'}`}>{label}</span>
+    {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-[var(--dashboard-accent)] rounded-r-full" />}
+    <Icon size={18} strokeWidth={active ? 2 : 1.5} className="transition-transform group-hover:scale-110" />
+    <span className={`text-[9px] tracking-tight text-center ${active ? 'font-semibold' : 'font-medium opacity-80'}`}>{label}</span>
   </Link>
 );
 
@@ -27,9 +27,9 @@ const DashboardSidebar = ({ onCreateProject, isOpen, onClose }) => {
   const location = useLocation();
   
   const navItems = [
-    { icon: Folder, label: 'Projects', to: '/dashboard#projects' },
     { icon: Layout, label: 'Templates', to: '/dashboard#templates' },
-    { icon: Play, label: 'Learn', to: '/dashboard#learn' }
+    { icon: Folder, label: 'Projects', to: '/dashboard#projects' },
+    { icon: Play, label: 'How it works', to: '/dashboard#learn' }
   ];
 
   return (
@@ -46,7 +46,7 @@ const DashboardSidebar = ({ onCreateProject, isOpen, onClose }) => {
         isOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
         <div className="flex flex-col items-center gap-6 w-full mb-6">
-          <Link to="/" className="w-10 h-10 bg-[var(--dashboard-accent)] rounded-xl flex items-center justify-center shadow-lg shadow-[#8b5cf6]/20 hover:scale-105 transition-transform">
+          <Link to="/" className="w-10 h-10 bg-[var(--dashboard-accent)] rounded-xl flex items-center justify-center hover:scale-105 transition-transform">
             <span className="text-white font-bold text-2xl group-hover:rotate-12 transition-transform">v</span>
           </Link>
           

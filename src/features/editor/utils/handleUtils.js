@@ -22,10 +22,15 @@ import * as PIXI from 'pixi.js'
  * Ensures handles remain visible but don't become overwhelmingly large.
  */
 export function calculateAdaptedScale(zoomScale) {
-  // If zooming out (zoomScale > 1), dampen the growth
-  const scale = zoomScale > 1 ? 1 + (zoomScale - 1) * 0.45 : zoomScale
-  // Clamp to reasonable range for extreme zoom levels
-  return Math.min(4.0, Math.max(0.5, scale))
+  // zoomScale = 1 / canvasZoom
+  // If zooming out (zoomScale > 1), dampen the growth so handles don't become massive
+  // If zooming in (zoomScale < 1), let them shrink but keep a minimum size for usability
+  const scale = zoomScale > 1 
+    ? 1 + (zoomScale - 1) * 0.35 
+    : Math.max(0.3, zoomScale)
+  
+  // Clamp to reasonable range
+  return Math.min(3.0, scale)
 }
 
 /**
@@ -51,11 +56,11 @@ export function createResizeHandle({
   handle.alpha = isLocked ? 0.4 : 1.0
   const baseScale = calculateAdaptedScale(zoomScale)
   const dims = {
-    cornerRadius: 12 * baseScale,
-    sideWidth: 32 * baseScale,
-    sideHeight: 12 * baseScale,
-    sideWidthVertical: 12 * baseScale,
-    sideHeightVertical: 32 * baseScale
+    cornerRadius: 8 * baseScale,
+    sideWidth: 20 * baseScale,
+    sideHeight: 7 * baseScale,
+    sideWidthVertical: 7 * baseScale,
+    sideHeightVertical: 20 * baseScale
   }
   const isCorner = ['nw', 'ne', 'sw', 'se'].includes(handleType)
 
@@ -121,24 +126,24 @@ function drawHandle(handle, handleType, dims, isHovered, zoomScale = 1) {
   const isSide = ['n', 's', 'e', 'w'].includes(handleType)
 
   // Calculate baseScale locally for stroke width
-  const baseScale = Math.min(1.8, Math.max(0.5, zoomScale))
+  const baseScale = Math.min(1.5, Math.max(0.4, zoomScale))
 
   handle.clear()
 
   if (isCorner) {
-    const radius = isHovered ? dims.cornerRadius + 4 * baseScale : dims.cornerRadius
+    const radius = isHovered ? dims.cornerRadius + 2 * baseScale : dims.cornerRadius
     handle.circle(0, 0, radius)
     handle.fill({ color: isHovered ? 0x9370db : 0xffffff })
-    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 1.5 * baseScale) })
+    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 1.2 * baseScale) })
   } else if (isSide) {
     const isHorizontal = handleType === 'n' || handleType === 's'
     const w = isHorizontal ? dims.sideWidth : dims.sideWidthVertical
     const h = isHorizontal ? dims.sideHeight : dims.sideHeightVertical
-    const extra = isHovered ? 6 * baseScale : 0
+    const extra = isHovered ? 3 * baseScale : 0
 
-    handle.roundRect(-(w + extra) / 2, -(h + extra) / 2, w + extra, h + extra, 5 * (zoomScale < 1 ? zoomScale : 1))
+    handle.roundRect(-(w + extra) / 2, -(h + extra) / 2, w + extra, h + extra, 3 * (zoomScale < 1 ? zoomScale : 1))
     handle.fill({ color: isHovered ? 0x9370db : 0xffffff })
-    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 2 * baseScale) })
+    handle.stroke({ color: isHovered ? 0xffffff : 0x9370db, width: Math.max(1, 1.2 * baseScale) })
   }
 }
 
@@ -204,13 +209,13 @@ export function createRotateHandle({
   const handle = new PIXI.Container()
   handle.alpha = isLocked ? 0.4 : 1.0
   const baseScale = calculateAdaptedScale(zoomScale)
-  const radius = 18 * baseScale
+  const radius = 22 * baseScale
 
   // Draw white circle background
   const background = new PIXI.Graphics()
   background.circle(0, 0, radius)
   background.fill({ color: 0xffffff })
-  background.stroke({ color: 0x8B5CF6, width: Math.max(1, 2 * baseScale) })
+  background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
   handle.addChild(background)
 
   // Create icon container
@@ -268,7 +273,7 @@ export function createRotateHandle({
     graphics.stroke({ color, width: 2, cap: 'round' })
   }
 
-  const iconSize = 20 * baseScale
+  const iconSize = 24 * baseScale
   drawArrows(icon, 0x000000, iconSize)
 
   handle.x = x
@@ -289,7 +294,7 @@ export function createRotateHandle({
     background.clear()
     background.circle(0, 0, radius + 2 * baseScale)
     background.fill({ color: 0x8B5CF6 })
-    background.stroke({ color: 0xffffff, width: Math.max(1, 2 * baseScale) })
+    background.stroke({ color: 0xffffff, width: Math.max(1, 1.2 * baseScale) })
     drawArrows(icon, 0xffffff, iconSize)
     handle.cursor = 'grab'
   })
@@ -299,7 +304,7 @@ export function createRotateHandle({
     background.clear()
     background.circle(0, 0, radius)
     background.fill({ color: 0xffffff })
-    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 2 * baseScale) })
+    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
     drawArrows(icon, 0x000000, iconSize)
     handle.cursor = 'grab'
   })

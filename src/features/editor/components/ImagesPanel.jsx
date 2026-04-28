@@ -89,10 +89,12 @@ function ImagesPanel({ onClose, aspectRatio }) {
 
             // ROBUST TYPE DETECTION: Shared assets might have type at top level or in metadata
             const isVideo = image.type === 'video' || image.metadata?.type?.startsWith('video/')
-            const isImage = image.type === 'image' || image.metadata?.type?.startsWith('image/')
+            const isImage = (image.type === 'image' || image.metadata?.type?.startsWith('image/')) && (!image.assetType || image.assetType === 'image')
+            const isIcon = (image.type === 'image' || image.metadata?.type?.startsWith('image/')) && image.assetType === 'icon'
 
             const matchesTab = activeTab === 'All' ||
                 (activeTab === 'Images' && isImage) ||
+                (activeTab === 'Icons' && isIcon) ||
                 (activeTab === 'Videos' && isVideo)
             return matchesSearch && matchesTab
         })
@@ -138,7 +140,8 @@ function ImagesPanel({ onClose, aspectRatio }) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024
 
     const totalCount = sharedAssets.length
-    const imageCount = sharedAssets.filter(img => img.type === 'image' || img.metadata?.type?.startsWith('image/')).length
+    const imageCount = sharedAssets.filter(img => (img.type === 'image' || img.metadata?.type?.startsWith('image/')) && (!img.assetType || img.assetType === 'image')).length
+    const iconCount = sharedAssets.filter(img => (img.type === 'image' || img.metadata?.type?.startsWith('image/')) && img.assetType === 'icon').length
     const videoCount = sharedAssets.filter(img => img.type === 'video' || img.metadata?.type?.startsWith('video/')).length
 
     return (
@@ -191,13 +194,13 @@ function ImagesPanel({ onClose, aspectRatio }) {
             )}
 
             <div className={`flex border-b px-6 ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-                {['All', 'Images', 'Videos'].map(tab => (
+                {['All', 'Images', 'Icons', 'Videos'].map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
                         className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
                     >
-                        {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : videoCount}</span>
+                        {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : videoCount}</span>
                         {activeTab === tab && (
                             <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
                         )}

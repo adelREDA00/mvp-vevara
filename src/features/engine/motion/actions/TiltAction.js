@@ -89,7 +89,7 @@ export class TiltAction {
       }
     }
 
-    pixiObject._applyAnimatedTilt()
+    // pixiObject._applyAnimatedTilt() - Removed immediate call to prevent premature hiding
 
     return gsap.fromTo(pixiObject._tiltProxy,
       { tiltX: startTiltX, tiltY: startTiltY },

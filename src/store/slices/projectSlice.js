@@ -1729,8 +1729,20 @@ const projectSlice = createSlice({
           backAssetUrl: assetUrl,
           backAssetWidth: assetWidth,
           backAssetHeight: assetHeight,
+          // [VIDEO-IN-FRAME FIX] Preserve back-side video metadata
+          ...(assetIsVideo ? {
+            backAssetIsVideo: true,
+            backMuted: muted ?? true,
+            backDuration: duration ?? 0,
+            backSourceStartTime: sourceStartTime ?? 0,
+            backSourceEndTime: sourceEndTime ?? (duration ?? 0),
+          } : {
+            backAssetIsVideo: false
+          })
         }
         layer.updatedAt = Date.now()
+        state.isDirty = true
+        state.version++
         return
       }
 
@@ -1834,7 +1846,15 @@ const projectSlice = createSlice({
         delete layer.data.backAssetUrl
         delete layer.data.backAssetWidth
         delete layer.data.backAssetHeight
+        // [VIDEO-IN-FRAME FIX] Clean up back-side video metadata
+        delete layer.data.backAssetIsVideo
+        delete layer.data.backMuted
+        delete layer.data.backDuration
+        delete layer.data.backSourceStartTime
+        delete layer.data.backSourceEndTime
         layer.updatedAt = Date.now()
+        state.isDirty = true
+        state.version++
         return
       }
 

@@ -30,7 +30,7 @@ const GIF_LOOP_OPTIONS = [
 ];
 
 const DEFAULT_GIF = { width: 720, fps: 24, loop: 0 };
-const DEFAULT_RES = '720p';
+const DEFAULT_RES = '1080p';
 
 const TutorialExportModal = ({ isOpen, onClose, onExport, initialFormat = 'mp4' }) => {
   const [format, setFormat] = useState(initialFormat);

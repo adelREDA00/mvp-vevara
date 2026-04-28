@@ -1194,7 +1194,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       // -------------------------------------------------------------------
 
       const startTimeOffset = layer.sceneStartOffset ?? 0
-      const isAtSceneStart = Math.abs(currentTime - startTimeOffset) < 0.01
+      const hasMotion = engine.activeTimelines?.has(layerId)
+      const isAtSceneStart = !hasMotion || Math.abs(currentTime - startTimeOffset) < 0.1
 
       // [FIX] Anti-Jitter: Skip Redux updates if the layer is being actively transformed by the user
       // This prevents the "tug-of-war" between immediate mouse updates and delayed Redux state
@@ -1525,6 +1526,21 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const currentStroke = layer.data?.stroke || null
             const currentStrokeWidth = layer.data?.strokeWidth || 0
             const currentStrokeStyle = layer.data?.strokeStyle || 'solid'
+            const currentCornerRadius = capturedLayer?.cornerRadius !== undefined
+              ? capturedLayer.cornerRadius
+              : (layer.data?.cornerRadius || 0)
+
+            // [PREVIEW-PRESERVE] Corner Radius update logic
+            const reduxBaseCornerRadius = layer.data?.cornerRadius || 0
+            const reduxRadiusChanged = pixiObject._lastReduxRadiusApplied !== reduxBaseCornerRadius
+            // Only allow Redux to overwrite the radius if we are at the start, 
+            // capturing, Redux value changed, or no motion exists.
+            const allowRadiusUpdate = isAtSceneStart || isLayerCaptured || reduxRadiusChanged
+            
+            let effectiveCornerRadius = currentCornerRadius
+            if (!allowRadiusUpdate && pixiObject.cornerRadius !== undefined) {
+               effectiveCornerRadius = pixiObject.cornerRadius
+            }
 
             // [PREVIEW-PRESERVE] See the matching block in TEXT updates: after
             // a fast preview, ColorChangeAction has overwritten _storedFill with
@@ -1568,9 +1584,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
                 effectiveFill = '#' + pixiObject._animatedFillColor.toString(16).padStart(6, '0')
               }
 
-              const liveShapeData = effectiveFill !== layer.data?.fill
-                ? { ...layer.data, fill: effectiveFill }
-                : layer.data
+              const liveShapeData = { 
+                ...layer.data, 
+                fill: effectiveFill,
+                cornerRadius: effectiveCornerRadius 
+              }
+
               redrawShapeWithColors(pixiObject, liveShapeData, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
               markTiltTextureDirty(pixiObject)
 
@@ -1580,8 +1599,17 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               pixiObject._storedStroke = currentStroke
               pixiObject._storedStrokeWidth = currentStrokeWidth
               pixiObject._storedStrokeStyle = currentStrokeStyle
+
+              // [SYNC FIX] Keep the reactive property in sync without triggering a second redraw
+              if (pixiObject._hasReactiveRadiusProperties) {
+                pixiObject._cornerRadius = effectiveCornerRadius
+              }
+            } else if (pixiObject.cornerRadius !== effectiveCornerRadius && allowRadiusUpdate) {
+              // [SYNC FIX] Trigger instant redraw via reactive setter
+              pixiObject.cornerRadius = effectiveCornerRadius
             }
             pixiObject._lastReduxFillApplied = reduxBaseFill
+            pixiObject._lastReduxRadiusApplied = reduxBaseCornerRadius
           }
         }
 

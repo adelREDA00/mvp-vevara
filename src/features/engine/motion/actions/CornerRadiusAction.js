@@ -7,6 +7,7 @@ gsap.registerPlugin(CustomEase);
 import { drawShapePath } from '../../pixi/createLayer'
 import { drawDashedRect } from '../../pixi/dashUtils'
 import { CORNER_RADIUS_MAX } from '../cornerRadiusConstants.js'
+import { markTiltTextureDirty, syncTiltMesh } from '../../pixi/perspectiveTilt'
 
 function clampRadius(value) {
     return Math.max(0, Math.min(CORNER_RADIUS_MAX, Number(value) || 0))
@@ -57,8 +58,9 @@ function redrawShapeWithCornerRadius(pixiObject, cornerRadius) {
     const isDashed = strokeStyle === 'dashed' && stroke !== null && strokeWidth > 0
     const isDotted = strokeStyle === 'dotted' && stroke !== null && strokeWidth > 0
 
-    // Update stored shape data so concurrent animations (color) see the new radius
-    shapeData.cornerRadius = cornerRadius
+    // [LEAK FIX] Do NOT mutate shapeData.cornerRadius here. 
+    // Other actions (like ColorChangeAction) should read the live .cornerRadius 
+    // property from the pixiObject instead of relying on this stored metadata.
     shapeData.shapeCenterX = shapeCenterX
     shapeData.shapeCenterY = shapeCenterY
 
@@ -93,6 +95,53 @@ function redrawShapeWithCornerRadius(pixiObject, cornerRadius) {
     }
 }
 
+/**
+ * Define getters/setters for corner radius on the PIXI object.
+ * This ensures that any change (GSAP, manual, or during seek) 
+ * immediately triggers a visual redraw.
+ */
+export function installReactiveCornerRadius(pixiObject) {
+    if (!pixiObject._applyAnimatedCornerRadius) {
+        pixiObject._applyAnimatedCornerRadius = function () {
+            const radius = this.cornerRadius ?? 0
+            redrawShapeWithCornerRadius(this, radius)
+            
+            // [TILT SYNC] If the layer is currently tilted, any visual change 
+            // (like corner radius) must mark the tilt texture dirty so the 
+            // mesh re-captures the updated original.
+            if (this._tiltMesh && !this._tiltMesh.destroyed) {
+                markTiltTextureDirty(this)
+                syncTiltMesh(this, null)
+            }
+        }
+    }
+
+    if (pixiObject._hasReactiveRadiusProperties) return
+
+    const privateProp = '_cornerRadius'
+    
+    // Initial value from stored data if available
+    if (pixiObject[privateProp] === undefined) {
+        pixiObject[privateProp] = pixiObject.cornerRadius ?? pixiObject._storedShapeData?.cornerRadius ?? 0
+    }
+
+    // If MotionEngine already initialized it, we ensure it's reactive
+    if (pixiObject.cornerRadius === undefined || Object.getOwnPropertyDescriptor(pixiObject, 'cornerRadius')?.configurable) {
+        Object.defineProperty(pixiObject, 'cornerRadius', {
+            get() { return this[privateProp] },
+            set(value) {
+                if (this[privateProp] !== value) {
+                    this[privateProp] = value
+                    this._applyAnimatedCornerRadius()
+                }
+            },
+            configurable: true
+        })
+    }
+
+    pixiObject._hasReactiveRadiusProperties = true
+}
+
 export class CornerRadiusAction {
     constructor() {
         this.type = 'cornerRadius'
@@ -114,7 +163,7 @@ export class CornerRadiusAction {
         )
 
         // Ensure reactive properties and visual applier are attached
-        this._ensureReactiveRadiusProperties(pixiObject)
+        installReactiveCornerRadius(pixiObject)
 
         // No-op if values are the same
         if (Math.abs(startRadius - targetRadius) < 0.1) {
@@ -134,44 +183,5 @@ export class CornerRadiusAction {
             { cornerRadius: startRadius },
             toVars
         )
-    }
-
-    /**
-     * Define getters/setters for corner radius on the PIXI object.
-     * This ensures that any change (GSAP, manual, or during seek) 
-     * immediately triggers a visual redraw.
-     */
-    _ensureReactiveRadiusProperties(pixiObject) {
-        if (!pixiObject._updateShapeRadiusVisuals) {
-            pixiObject._updateShapeRadiusVisuals = function () {
-                const radius = this.cornerRadius ?? 0
-                redrawShapeWithCornerRadius(this, radius)
-            }
-        }
-
-        if (pixiObject._hasReactiveRadiusProperties) return
-
-        // If MotionEngine already initialized it, we ensure it's reactive
-        if (pixiObject.cornerRadius === undefined || Object.getOwnPropertyDescriptor(pixiObject, 'cornerRadius')?.configurable) {
-            const privateProp = '_cornerRadius'
-            
-            // Initial value from stored data if available
-            if (pixiObject[privateProp] === undefined) {
-                pixiObject[privateProp] = pixiObject._storedShapeData?.cornerRadius ?? 0
-            }
-
-            Object.defineProperty(pixiObject, 'cornerRadius', {
-                get() { return this[privateProp] },
-                set(value) {
-                    if (this[privateProp] !== value) {
-                        this[privateProp] = value
-                        this._updateShapeRadiusVisuals()
-                    }
-                },
-                configurable: true
-            })
-        }
-
-        pixiObject._hasReactiveRadiusProperties = true
     }
 }

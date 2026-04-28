@@ -9,6 +9,7 @@ import * as PIXI from 'pixi.js'
 import { drawDashedRect } from './dashUtils'
 import { loadTextureRobust } from './textureUtils'
 import { getGlobalMotionEngine } from '../motion/index'
+import { installReactiveCornerRadius } from '../motion/actions/CornerRadiusAction'
 import { FlowTextContainer } from '../text/FlowTextContainer'
 
 // [MOBILE FIX] Detect mobile devices to conditionally disable GPU-heavy features
@@ -399,6 +400,10 @@ export function createShapeLayer(config) {
   
   // [METADATA] Store shape info for the Liquid Flow engine
   graphics.shapeType = shapeType
+  
+  // [CORNER RADIUS] Install reactive property so setting .cornerRadius = X 
+  // immediately triggers a redraw via redrawShapeWithCornerRadius.
+  installReactiveCornerRadius(graphics)
   graphics.cornerRadius = data.cornerRadius || 0
   
   graphics._storedFill = data.fill || null

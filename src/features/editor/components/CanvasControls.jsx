@@ -643,7 +643,9 @@ function CanvasControls({
             title="3D Tilt (Perspective)"
           >
             {/* Perspective / tilt cube icon */}
+
             <Rotate3d className="h-4 w-4 flex-shrink-0 opacity-70" />
+            <span className="text-xs font-medium">3D Tilt</span>
           </button>
         )}
 
@@ -907,13 +909,13 @@ function CanvasControls({
         // track.  Painted as a centred band so the user sees the "stay inside
         // here" region without any extra chrome.
         const safeHalfPct = (TILT_SAFE / TILT_MAX) * 50
-        const trackBase  = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
-        const safeBand   = theme === 'light' ? 'bg-emerald-300/60' : 'bg-emerald-400/25'
-        const rangeFill  = theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'
-        const labelCol   = theme === 'light' ? 'text-gray-500' : 'text-white/60'
-        const valCol     = theme === 'light' ? 'text-gray-700' : 'text-white'
-        const warnCol    = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
-        const thumbCls   = `block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+        const trackBase = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
+        const safeBand = theme === 'light' ? 'bg-emerald-300/60' : 'bg-emerald-400/25'
+        const rangeFill = theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'
+        const labelCol = theme === 'light' ? 'text-gray-500' : 'text-white/60'
+        const valCol = theme === 'light' ? 'text-gray-700' : 'text-white'
+        const warnCol = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
+        const thumbCls = `block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
           ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
           : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`
 

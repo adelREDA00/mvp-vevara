@@ -22,11 +22,9 @@ const TUTORIAL_VIDEO_URL = "/first.mp4"
 
 const CATEGORY_STYLES = {
     'All': { icon: Layers, color: '#8b5cf6' },
-    'Featured': { icon: Sparkles, color: '#f43f5e' },
-    'Logo': { icon: Box, color: '#f59e0b' },
-    'Ads': { icon: Presentation, color: '#10b981' },
-    'Social': { icon: Share2, color: '#ec4899' },
-    'Website': { icon: Layout, color: '#06b6d4' },
+    'Ads & Marketing': { icon: Presentation, color: '#10b981' },
+    'Product Demos': { icon: Play, color: '#f59e0b' },
+    'Animated Elements': { icon: Wand2, color: '#7c4af0' },
 }
 
 const CategoryCircle = ({ label, active, onClick, isStuck }) => {
@@ -95,12 +93,9 @@ const DashboardPage = () => {
 
     const CATEGORIES = [
         'All',
-        'Featured',
-        'Logo',
-        'Ads',
-        'Social',
-        'Website',
-        // 'YouTube & Podcast Intros/Outros'
+        'Ads & Marketing',
+        'Product Demos',
+        'Animated Elements'
     ]
 
     useEffect(() => {
@@ -370,18 +365,109 @@ const DashboardPage = () => {
 
                         <DashboardHero userName={user?.firstName} />
 
+                        {/* Categories - Vibing Circular Filters (Sticky) */}
+                        <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
+                        <section
+                            className="sticky top-2 md:top-6 z-30 mb-8 md:mb-20 flex justify-center pointer-events-none"
+                        >
+                            <div
+                                className={`transition-all duration-500 ease-in-out pointer-events-auto flex items-center relative ${isFilterStuck
+                                    ? 'bg-[var(--dashboard-bg)]/90 backdrop-blur-2xl shadow-xl py-0.5 md:py-1 px-2 md:px-8 border border-[var(--dashboard-border)] rounded-full w-fit max-w-[98%] md:max-w-[95%] ring-1 ring-white/5'
+                                    : 'bg-transparent py-2 md:py-4 w-full border-none rounded-none justify-center'
+                                    }`}
+                            >
+                                {/* Pinned Mobile Hamburger - Corrected Baseline to Match Circles */}
+                                <div
+                                    className={`lg:hidden shrink-0 flex items-center justify-center transition-all duration-500 overflow-hidden ${isFilterStuck ? 'w-10 opacity-100 mr-2 ml-1 grow-0' : 'w-0 opacity-0'
+                                        }`}
+                                >
+                                    <button
+                                        onClick={() => setIsSidebarOpen(true)}
+                                        className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/20 text-[var(--dashboard-accent)] shadow-sm transform transition-transform hover:scale-105"
+                                    >
+                                        <Menu size={16} />
+                                    </button>
+                                </div>
+
+                                <div className={`relative max-w-full overflow-hidden rounded-full ${!isFilterStuck ? 'flex-1' : ''}`}>
+                                    {/* Left Fade Indicator - More Subtle */}
+                                    <div className={`absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`} />
+
+                                    <div
+                                        ref={categoriesScrollRef}
+                                        onScroll={checkScroll}
+                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck 
+                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6' 
+                                            : 'py-2 md:py-4 px-2 gap-4 md:gap-8'
+                                            }`}
+                                    >
+                                        {CATEGORIES.map(cat => (
+                                            <CategoryCircle
+                                                key={cat}
+                                                label={cat}
+                                                active={selectedCategory === cat}
+                                                onClick={() => {
+                                                    setSelectedCategory(cat)
+                                                    // Scroll to top of templates section when category is changed
+                                                    const element = document.getElementById('templates')
+                                                    if (element && scrollContainerRef.current) {
+                                                        element.scrollIntoView({ behavior: 'smooth' })
+                                                    }
+                                                }}
+                                                isStuck={isFilterStuck}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    {/* Right Fade Indicator - More Subtle */}
+                                    <div className={`absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollRight ? 'opacity-100' : 'opacity-0'}`} />
+                                </div>
+                            </div>
+                        </section>
+
+
+                        {/* Templates Section */}
+                        {templateProjects.length > 0 && (
+                            <section id="templates" className="scroll-mt-24 mb-24">
+                                <div className="flex items-center justify-between mb-8">
+                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Try a Template</h2>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
+                                    {templateProjects
+                                        .filter(project => {
+                                            const projectCat = project.category || ''
+                                            const isFeatured = projectCat.toLowerCase() === 'featured'
+
+                                            if (selectedCategory === 'All') {
+                                                return !isFeatured
+                                            }
+
+                                            return projectCat === selectedCategory
+                                        })
+                                        .map((project) => (
+                                            <div
+                                                key={project._id}
+                                                className="group cursor-pointer"
+                                                onClick={() => handleDuplicateTemplate(project._id)}
+                                            >
+                                                <TemplateThumbnail project={project} />
+                                                <div className="px-0.5">
+                                                    <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                    <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
+                                                        {project.category && project.category !== 'none' ? project.category : 'Template'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                </div>
+                            </section>
+                        )}
+
                         {/* Recent Projects Section */}
                         <section id="projects" className="scroll-mt-24 mb-16">
                             <div className="flex items-center justify-between mb-8">
                                 <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Recent Designs</h2>
-                                {/* <div className="flex items-center gap-3">
-                                    <button className="text-[12px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5 border border-[var(--dashboard-border)] rounded-lg px-3 py-1.5 transition-all">
-                                        Owner <ChevronDown size={12} />
-                                    </button>
-                                    <button className="text-[12px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5 border border-[var(--dashboard-border)] rounded-lg px-3 py-1.5 transition-all">
-                                        Any type <ChevronDown size={12} />
-                                    </button>
-                                </div> */}
                             </div>
 
                             {loading ? (
@@ -446,108 +532,14 @@ const DashboardPage = () => {
                             )}
                         </section>
 
-                        {/* Categories - Vibing Circular Filters (Sticky) */}
-                        <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
-                        <section
-                            className="sticky top-2 md:top-6 z-30 mb-8 md:mb-20 flex justify-center pointer-events-none"
-                        >
-                            <div
-                                className={`transition-all duration-500 ease-in-out pointer-events-auto flex items-center relative ${isFilterStuck
-                                    ? 'bg-[var(--dashboard-bg)]/90 backdrop-blur-2xl shadow-xl py-0.5 md:py-1 px-2 md:px-8 border border-[var(--dashboard-border)] rounded-full w-fit max-w-[98%] md:max-w-[95%] ring-1 ring-white/5'
-                                    : 'bg-transparent py-2 md:py-4 w-full border-none rounded-none justify-center'
-                                    }`}
-                            >
-                                {/* Pinned Mobile Hamburger - Corrected Baseline to Match Circles */}
-                                <div
-                                    className={`lg:hidden shrink-0 flex items-center justify-center transition-all duration-500 overflow-hidden ${isFilterStuck ? 'w-10 opacity-100 mr-2 ml-1 grow-0' : 'w-0 opacity-0'
-                                        }`}
-                                >
-                                    <button
-                                        onClick={() => setIsSidebarOpen(true)}
-                                        className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/20 text-[var(--dashboard-accent)] shadow-sm transform transition-transform hover:scale-105"
-                                    >
-                                        <Menu size={16} />
-                                    </button>
-                                </div>
-
-                                <div className={`relative max-w-full overflow-hidden rounded-full ${!isFilterStuck ? 'flex-1' : ''}`}>
-                                    {/* Left Fade Indicator - More Subtle */}
-                                    <div className={`absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`} />
-
-                                    <div
-                                        ref={categoriesScrollRef}
-                                        onScroll={checkScroll}
-                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck 
-                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6' 
-                                            : 'py-2 md:py-4 px-2 gap-4 md:gap-8'
-                                            }`}
-                                    >
-                                        {CATEGORIES.map(cat => (
-                                            <CategoryCircle
-                                                key={cat}
-                                                label={cat}
-                                                active={selectedCategory === cat}
-                                                onClick={() => {
-                                                    setSelectedCategory(cat)
-                                                    // Scroll to top of templates section when category is changed
-                                                    const element = document.getElementById('templates')
-                                                    if (element && scrollContainerRef.current) {
-                                                        element.scrollIntoView({ behavior: 'smooth' })
-                                                    }
-                                                }}
-                                                isStuck={isFilterStuck}
-                                            />
-                                        ))}
-                                    </div>
-
-                                    {/* Right Fade Indicator - More Subtle */}
-                                    <div className={`absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollRight ? 'opacity-100' : 'opacity-0'}`} />
-                                </div>
-                            </div>
-                        </section>
-
-
-                        {/* Templates Section */}
-                        {templateProjects.length > 0 && (
-                            <section id="templates" className="scroll-mt-24">
-                                <div className="flex items-center justify-between mb-8">
-                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Try a Template</h2>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
-                                    {templateProjects
-                                        .filter(project => {
-                                            if (selectedCategory === 'All') return true
-                                            const projectCat = project.category || 'none'
-                                            return projectCat === selectedCategory
-                                        })
-                                        .map((project) => (
-                                            <div
-                                                key={project._id}
-                                                className="group cursor-pointer"
-                                                onClick={() => handleDuplicateTemplate(project._id)}
-                                            >
-                                                <TemplateThumbnail project={project} />
-                                                <div className="px-0.5">
-                                                    <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
-                                                    <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
-                                                        {project.category && project.category !== 'none' ? project.category : 'Template'}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        ))}
-                                </div>
-                            </section>
-                        )}
-
-                        {/* Learn & Updates Section */}
-                        <section id="learn" className="scroll-mt-24 mb-16 pt-16">
+                        {/* How it works Section */}
+                        <section id="learn" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
                             <div className="flex items-center justify-between mb-8">
-                                <h2 className="text-[20px] font-clean tracking-tight flex items-center gap-3">
+                                <h2 className="text-[20px] font-clean tracking-tight flex items-center gap-3 text-[var(--dashboard-text)]">
                                     <div className="w-8 h-8 rounded-lg bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
                                         <Play size={18} fill="currentColor" />
                                     </div>
-                                    Learn & Updates
+                                    How it works
                                 </h2>
                             </div>
 

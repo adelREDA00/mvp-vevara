@@ -29,7 +29,7 @@ export const ThemeProvider = ({ children }) => {
     
     if (lastSyncRef.current !== currentSyncKey) {
       if (!isAuthenticated) {
-        setTheme('dark');
+        setTheme('light');
       } else if (user?.theme) {
         setTheme(user.theme);
       }

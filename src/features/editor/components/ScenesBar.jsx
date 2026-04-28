@@ -421,7 +421,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       }}
     >
       {/* ── Base Block ── */}
-      <button
+      {/* <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onStepClick?.('base') }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onStepContextMenu?.(e, 'base') }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -458,7 +458,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
         <div className="hidden group-hover:block absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[9px] px-2 py-1 rounded-md shadow-lg whitespace-nowrap pointer-events-none z-50 border border-white/10">
           Base pose
         </div>
-      </button>
+      </button> */}
 
       {/* ── Step Blocks ── */}
       <div className="absolute inset-0 overflow-visible">

@@ -118,7 +118,8 @@ function applyColor(pixiObject, numericColor) {
 
             pixiObject.clear()
 
-            drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, shapeData.cornerRadius || 0)
+            const currentRadius = pixiObject.cornerRadius !== undefined ? pixiObject.cornerRadius : (shapeData.cornerRadius || 0)
+            drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, currentRadius)
             pixiObject.fill(numericColor)
 
             if (stroke !== null && strokeWidth > 0) {
@@ -129,10 +130,12 @@ function applyColor(pixiObject, numericColor) {
                     } else {
                         const dashLen = isDotted ? 0 : strokeWidth * 4
                         const gapLen = strokeWidth * 2
-                        drawDashedRect(pixiObject, shapeCenterX - halfWidth, shapeCenterY - halfHeight, w, h, shapeData.cornerRadius || 0, stroke, strokeWidth, dashLen, gapLen)
+                        const currentRadius = pixiObject.cornerRadius !== undefined ? pixiObject.cornerRadius : (shapeData.cornerRadius || 0)
+                        drawDashedRect(pixiObject, shapeCenterX - halfWidth, shapeCenterY - halfHeight, w, h, currentRadius, stroke, strokeWidth, dashLen, gapLen)
                     }
                 } else {
-                    drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, shapeData.cornerRadius || 0)
+                    const currentRadius = pixiObject.cornerRadius !== undefined ? pixiObject.cornerRadius : (shapeData.cornerRadius || 0)
+                    drawShapePath(pixiObject, shapeType, shapeCenterX, shapeCenterY, w, h, currentRadius)
                     pixiObject.stroke({ color: stroke, width: strokeWidth, alignment: 0.5 })
                 }
             }
