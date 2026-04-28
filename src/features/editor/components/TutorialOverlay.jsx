@@ -16,12 +16,29 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     // If Step 4 and manualTargetRect provided, use it
     if (step === 4 && manualTargetRect) {
       setTargetRect(manualTargetRect);
-      // Position to the LEFT of the target with enough gap
-      setHintPos({
-        top: manualTargetRect.y + manualTargetRect.height / 2,
-        left: Math.max(margin, manualTargetRect.x - 40),
-        position: 'left'
-      });
+
+      const modalWidth = 400;
+      const margin = 16;
+      const offset = 40;
+
+      // Check if it fits on the left
+      // We need at least modalWidth + margin + offset space on the left of target
+      const fitsLeft = manualTargetRect.x > (modalWidth + margin + offset);
+
+      if (fitsLeft) {
+        setHintPos({
+          top: manualTargetRect.y + manualTargetRect.height / 2,
+          left: manualTargetRect.x - offset,
+          position: 'left'
+        });
+      } else {
+        // Position to the RIGHT of the target
+        setHintPos({
+          top: manualTargetRect.y + manualTargetRect.height / 2,
+          left: manualTargetRect.x + manualTargetRect.width + offset,
+          position: 'right'
+        });
+      }
       return;
     }
 
@@ -165,6 +182,13 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
         transform: 'translate(-100%, -50%)',
       };
     }
+    if (hintPos.position === 'right') {
+      return {
+        top: `${hintPos.top}px`,
+        left: `${hintPos.left}px`,
+        transform: 'translate(0, -50%)',
+      };
+    }
     return {
       top: `${hintPos.top}px`,
       left: `${hintPos.left}px`,
@@ -177,6 +201,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     if (hintPos.position === 'bottom') return `${base} -top-2 left-1/2 -translateX-1/2 border-l border-t`;
     if (hintPos.position === 'top') return `${base} -bottom-2 left-1/2 -translateX-1/2 border-r border-b`;
     if (hintPos.position === 'left') return `${base} -right-2 top-1/2 -translateY-1/2 border-r border-t`;
+    if (hintPos.position === 'right') return `${base} -left-2 top-1/2 -translateY-1/2 border-l border-b`;
     return base;
   };
 
