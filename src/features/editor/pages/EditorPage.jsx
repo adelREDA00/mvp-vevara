@@ -250,6 +250,19 @@ const GUEST_TEMPLATE = {
                   }
                 }
               ],
+              "1777373237682-8gmica6fv": [
+                {
+                  "id": "action-1777374378370-scale-1777373237682-8gmica6fv",
+                  "type": "scale",
+                  "duration": 2500,
+                  "values": {
+                    "dsx": 2,
+                    "dsy": 2,
+                    "easing": "power4.out",
+                    "duration": 2500
+                  }
+                }
+              ],
               "1777373353502-yg9n4un0c": [
                 {
                   "id": "action-1777374383443-move-1777373353502-yg9n4un0c",
@@ -370,7 +383,7 @@ function EditorPage() {
     if (!layers) return false
     return Object.values(layers).some(l => l && (l.type === 'image' || l.type === 'video'))
   }, [layers])
-  
+
   const FullScreenLoading = ({ progress, isPreloading, isStageReady, projectStatus, minTimeElapsed, hasAsyncAssets, error }) => {
     // [STRICT] Loading gate must be the bridge to total readiness.
     // However, if there is a fatal Pixi error, we MUST yield visibility to the Stage's error recovery UI.
@@ -637,7 +650,7 @@ function EditorPage() {
       }
 
       await dispatch(saveProject({ thumbnail })).unwrap()
-      
+
       // Also sync theme on save to ensure persistence
       if (isAuthenticated) {
         dispatch(setLocalTheme(theme))
@@ -2423,8 +2436,8 @@ function EditorPage() {
           } else {
             const tiltIdx = actions.findIndex(a => a.type === 'tilt')
             if (tiltIdx !== -1) {
-               console.log(`[TILT DEBUG] handleApplyMotion removing tilt for layer ${layerId}`)
-               actions.splice(tiltIdx, 1)
+              console.log(`[TILT DEBUG] handleApplyMotion removing tilt for layer ${layerId}`)
+              actions.splice(tiltIdx, 1)
             }
           }
 
@@ -3136,7 +3149,7 @@ function EditorPage() {
               captureActionIdsRef.current.delete(key)
             }
           }
-          
+
           // Tilt
           const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
           const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
@@ -3923,7 +3936,7 @@ function EditorPage() {
         if (pixiObj && typeof pixiObj.revealProgress !== 'undefined') {
           // Kill any lingering Tweens on revealProgress to prevent conflicts
           gsap.killTweensOf(pixiObj, "revealProgress")
-          
+
           // Reset to 0 visually and animate to 1 smoothly
           pixiObj.revealProgress = 0
           gsap.to(pixiObj, {
@@ -4033,1021 +4046,1020 @@ function EditorPage() {
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
-    <div
-      className={`h-dvh flex flex-col overflow-hidden relative select-none ${theme === 'light' ? 'theme-light text-gray-900 bg-[#f3f4f7]' : 'theme-dark text-white bg-[#090a0d]'}`}
-      data-editor-container
-      style={{
-        touchAction: 'none',
-        backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d'
-      }}
-      onDragStart={(e) => {
-        // Prevent drag operations that might trigger text selection
-        e.preventDefault()
-      }}
-    >
-      {/* Guest Save/Import Modal */}
-      {showGuestModal && (
-        <Modal
-          isOpen={showGuestModal}
-          onClose={() => setShowGuestModal(false)}
-          maxWidth="max-w-xs"
-          showCloseButton={true}
-        >
-          <div className="flex flex-col items-center text-center">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isLight ? 'bg-purple-100' : 'bg-purple-500/20'}`}>
-              <FileText className={`h-6 w-6 ${isLight ? 'text-purple-600' : 'text-purple-400'}`} />
-            </div>
-            <h3 className={`text-lg font-bold mb-2 ${isLight ? 'text-gray-900' : 'text-white'}`}>Open account to save</h3>
-            <p className={`text-sm mb-6 leading-relaxed ${isLight ? 'text-gray-500' : 'text-zinc-400'}`}>
-              Create a free account to save your projects and access professional templates.
-            </p>
-            <div className="flex flex-col w-full gap-2">
-              <button
-                onClick={() => window.location.href = '/login'}
-                className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-purple-500/20"
-              >
-                Sign up for free
-              </button>
-              <button
-                onClick={() => setShowGuestModal(false)}
-                className={`w-full py-2 text-xs font-medium transition-all ${isLight ? 'text-gray-400 hover:text-gray-600' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                Not now
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Loading Overlay */}
-      {projectStatus === 'loading' && (
-        <div className={`absolute inset-0 z-[100] flex items-center justify-center backdrop-blur-sm ${isLight ? 'bg-white/60' : 'bg-[#090a0d]/60'}`}>
-          <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
-        </div>
-      )}
-
-      {/* Top Toolbar */}
       <div
-        ref={topToolbarRef}
-        className="absolute top-0 left-0 right-0 z-50 transition-all duration-300"
-      >
-        <TopToolbar
-          projectName={projectName}
-          onSave={handleSave}
-          onNavigate={handleNavigate}
-          isSaving={isSaving || isSavingRedux}
-          isDirty={isDirty}
-          lastSaved={lastSaved}
-          onProjectNameChange={(newName) => dispatch(setProjectName(newName))}
-          onExport={handleExport}
-          onRequestGifOptions={() => setGifExportModalOpen(true)}
-          hideExport={tutorialActive && tutorialStep === 7}
-          onCanvasSizeChange={handleCanvasSizeChange}
-          onToggleSidebar={() => handleSidebarItemClick('Elements')}
-          onUndo={() => {
-            if (isMotionCaptureActive) captureUndoSyncRef.current = true
-            dispatch(undo())
-          }}
-          onRedo={() => {
-            if (isMotionCaptureActive) captureUndoSyncRef.current = true
-            dispatch(redo())
-          }}
-          sidebarWidth={typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth}
-        />
-      </div>
-
-      <div
-        className="hidden lg:block absolute left-0 z-50"
+        className={`h-dvh flex flex-col overflow-hidden relative select-none ${theme === 'light' ? 'theme-light text-gray-900 bg-[#f3f4f7]' : 'theme-dark text-white bg-[#090a0d]'}`}
+        data-editor-container
         style={{
-          top: `${topToolbarHeight}px`,
-          height: `calc(100vh - ${topToolbarHeight}px)`,
-          transition: isResizingBottom ? 'none' : 'height 0.3s ease',
+          touchAction: 'none',
+          backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d'
+        }}
+        onDragStart={(e) => {
+          // Prevent drag operations that might trigger text selection
+          e.preventDefault()
         }}
       >
-        <LeftSidebar
-          activeItem={activeSidebarItem}
-          isMotionOpen={isMotionPanelOpen}
-          onItemClick={(item) => {
-            if (item === 'Motion') {
-              setIsMotionPanelOpen(prev => !prev)
-            } else {
-              handleSidebarItemClick(item)
-            }
+        {/* Guest Save/Import Modal */}
+        {showGuestModal && (
+          <Modal
+            isOpen={showGuestModal}
+            onClose={() => setShowGuestModal(false)}
+            maxWidth="max-w-xs"
+            showCloseButton={true}
+          >
+            <div className="flex flex-col items-center text-center">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isLight ? 'bg-purple-100' : 'bg-purple-500/20'}`}>
+                <FileText className={`h-6 w-6 ${isLight ? 'text-purple-600' : 'text-purple-400'}`} />
+              </div>
+              <h3 className={`text-lg font-bold mb-2 ${isLight ? 'text-gray-900' : 'text-white'}`}>Open account to save</h3>
+              <p className={`text-sm mb-6 leading-relaxed ${isLight ? 'text-gray-500' : 'text-zinc-400'}`}>
+                Create a free account to save your projects and access professional templates.
+              </p>
+              <div className="flex flex-col w-full gap-2">
+                <button
+                  onClick={() => window.location.href = '/login'}
+                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold transition-all shadow-lg shadow-purple-500/20"
+                >
+                  Sign up for free
+                </button>
+                <button
+                  onClick={() => setShowGuestModal(false)}
+                  className={`w-full py-2 text-xs font-medium transition-all ${isLight ? 'text-gray-400 hover:text-gray-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* Loading Overlay */}
+        {projectStatus === 'loading' && (
+          <div className={`absolute inset-0 z-[100] flex items-center justify-center backdrop-blur-sm ${isLight ? 'bg-white/60' : 'bg-[#090a0d]/60'}`}>
+            <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+          </div>
+        )}
+
+        {/* Top Toolbar */}
+        <div
+          ref={topToolbarRef}
+          className="absolute top-0 left-0 right-0 z-50 transition-all duration-300"
+        >
+          <TopToolbar
+            projectName={projectName}
+            onSave={handleSave}
+            onNavigate={handleNavigate}
+            isSaving={isSaving || isSavingRedux}
+            isDirty={isDirty}
+            lastSaved={lastSaved}
+            onProjectNameChange={(newName) => dispatch(setProjectName(newName))}
+            onExport={handleExport}
+            onRequestGifOptions={() => setGifExportModalOpen(true)}
+            hideExport={tutorialActive && tutorialStep === 7}
+            onCanvasSizeChange={handleCanvasSizeChange}
+            onToggleSidebar={() => handleSidebarItemClick('Elements')}
+            onUndo={() => {
+              if (isMotionCaptureActive) captureUndoSyncRef.current = true
+              dispatch(undo())
+            }}
+            onRedo={() => {
+              if (isMotionCaptureActive) captureUndoSyncRef.current = true
+              dispatch(redo())
+            }}
+            sidebarWidth={typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth}
+          />
+        </div>
+
+        <div
+          className="hidden lg:block absolute left-0 z-50"
+          style={{
+            top: `${topToolbarHeight}px`,
+            height: `calc(100vh - ${topToolbarHeight}px)`,
+            transition: isResizingBottom ? 'none' : 'height 0.3s ease',
           }}
-        />
-      </div>
+        >
+          <LeftSidebar
+            activeItem={activeSidebarItem}
+            isMotionOpen={isMotionPanelOpen}
+            onItemClick={(item) => {
+              if (item === 'Motion') {
+                setIsMotionPanelOpen(prev => !prev)
+              } else {
+                handleSidebarItemClick(item)
+              }
+            }}
+          />
+        </div>
 
-      {/* Main Content Area */}
-      <div className="flex flex-1 min-h-0 overflow-hidden relative z-40">
+        {/* Main Content Area */}
+        <div className="flex flex-1 min-h-0 overflow-hidden relative z-40">
 
-        {/* Side Panels - Desktop: normal, Mobile: full overlay */}
-        <div className="relative">
-          {/* Desktop Panels */}
-          {activeSidebarItem && (
-            <div className="hidden lg:block absolute left-20 z-40 shadow-2xl transition-all duration-300" style={{
-              top: `${topToolbarHeight}px`,
-              height: `calc(100vh - ${topToolbarHeight}px)`,
-              borderRight: `1px solid ${theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`
-            }}>
-              {activeSidebarItem === 'Design' && (
-                <DesignPanel onClose={handleClosePanel} />
-              )}
-              {activeSidebarItem === 'Elements' && (
-                <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-              )}
-              {activeSidebarItem === 'Frames' && (
-                <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-              )}
-              {activeSidebarItem === 'Text' && (
-                <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-              )}
-              {activeSidebarItem === 'Uploads' && (
-                <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-              )}
-              {activeSidebarItem === 'Media' && (
-                <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-              )}
-              {/* {activeSidebarItem === 'Tools' && (
+          {/* Side Panels - Desktop: normal, Mobile: full overlay */}
+          <div className="relative">
+            {/* Desktop Panels */}
+            {activeSidebarItem && (
+              <div className="hidden lg:block absolute left-20 z-40 shadow-2xl transition-all duration-300" style={{
+                top: `${topToolbarHeight}px`,
+                height: `calc(100vh - ${topToolbarHeight}px)`,
+                borderRight: `1px solid ${theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`
+              }}>
+                {activeSidebarItem === 'Design' && (
+                  <DesignPanel onClose={handleClosePanel} />
+                )}
+                {activeSidebarItem === 'Elements' && (
+                  <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Frames' && (
+                  <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Text' && (
+                  <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Uploads' && (
+                  <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Media' && (
+                  <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {/* {activeSidebarItem === 'Tools' && (
                 <ToolsPanel onClose={handleClosePanel} />
               )} */}
-              {activeSidebarItem === 'Position' && (
-                <PositionPanel
-                  onClose={handleClosePanel}
-                  layers={sceneLayersOrdered}
-                  selectedLayerId={selectedLayerIds[0]}
-                  onSelectLayer={handleSelectFromPositionPanel}
-                  onReorder={handlePositionReorder}
-                />
-              )}
-              {activeSidebarItem === 'Color' && (
-                <ColorPickerPanel
-                  onClose={handleClosePanel}
-                  selectedColor={
-                    colorPickerType === 'canvas'
-                      ? (currentSceneData?.backgroundColor !== undefined
-                        ? (typeof currentSceneData.backgroundColor === 'number'
-                          ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
-                          : currentSceneData.backgroundColor)
-                        : '#ffffff')
-                      : selectedLayerIds[0] && layers[selectedLayerIds[0]]
-                        ? (layers[selectedLayerIds[0]].type === 'background'
-                          ? (layers[selectedLayerIds[0]].data?.color !== undefined
-                            ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
-                              ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
-                              : layers[selectedLayerIds[0]].data.color)
-                            : '#ffffff')
-                          : colorPickerType === 'fill'
-                            ? (layers[selectedLayerIds[0]].type === 'shape'
-                              ? layers[selectedLayerIds[0]].data?.fill
-                              : layers[selectedLayerIds[0]].data?.color)
-                            : colorPickerType === 'text'
-                              ? layers[selectedLayerIds[0]].data?.color
-                              : layers[selectedLayerIds[0]].data?.stroke)
-                        : '#ffffff'
-                  }
-                  onColorSelect={(color) => {
-                    // Motion capture interception for color changes
-                    // Do NOT dispatch updateLayer during capture — that would pollute the base layer state
-                    // and make start === target, resulting in no animation.
-                    if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
-                      // For canvas background color, find the background layer
-                      let captureLayerId = null
-                      if (colorPickerType === 'canvas') {
-                        captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
-                      } else if (selectedLayerIds?.length === 1) {
-                        captureLayerId = selectedLayerIds[0]
-                      }
-
-                      if (captureLayerId) {
-                        const capture = motionCaptureRef.current
-                        if (capture && capture.trackedLayers.has(captureLayerId)) {
-                          const colorValue = color === 'transparent' ? null : color
-                          effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
-                          effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
-                          return
-                        }
-                      }
+                {activeSidebarItem === 'Position' && (
+                  <PositionPanel
+                    onClose={handleClosePanel}
+                    layers={sceneLayersOrdered}
+                    selectedLayerId={selectedLayerIds[0]}
+                    onSelectLayer={handleSelectFromPositionPanel}
+                    onReorder={handlePositionReorder}
+                  />
+                )}
+                {activeSidebarItem === 'Color' && (
+                  <ColorPickerPanel
+                    onClose={handleClosePanel}
+                    selectedColor={
+                      colorPickerType === 'canvas'
+                        ? (currentSceneData?.backgroundColor !== undefined
+                          ? (typeof currentSceneData.backgroundColor === 'number'
+                            ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
+                            : currentSceneData.backgroundColor)
+                          : '#ffffff')
+                        : selectedLayerIds[0] && layers[selectedLayerIds[0]]
+                          ? (layers[selectedLayerIds[0]].type === 'background'
+                            ? (layers[selectedLayerIds[0]].data?.color !== undefined
+                              ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
+                                ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
+                                : layers[selectedLayerIds[0]].data.color)
+                              : '#ffffff')
+                            : colorPickerType === 'fill'
+                              ? (layers[selectedLayerIds[0]].type === 'shape'
+                                ? layers[selectedLayerIds[0]].data?.fill
+                                : layers[selectedLayerIds[0]].data?.color)
+                              : colorPickerType === 'text'
+                                ? layers[selectedLayerIds[0]].data?.color
+                                : layers[selectedLayerIds[0]].data?.stroke)
+                          : '#ffffff'
                     }
-
-                    if (colorPickerType === 'canvas' && currentSceneId) {
-                      if (color === 'transparent') return // Canvas background cannot be transparent
-
-                      // Convert hex string to number for canvas background
-                      const bgColor = color.startsWith('#')
-                        ? parseInt(color.slice(1), 16)
-                        : parseInt(color, 16)
-                      dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
-                    } else if (selectedLayerIds && selectedLayerIds.length > 1) {
-                      // Update all selected layers (multi-select)
-                      selectedLayerIds.forEach((layerId) => {
-                        const layer = layers[layerId]
-                        if (!layer) return
-
-                        const updates = { data: { ...layer.data } }
-
-                        if (colorPickerType === 'fill' && layer.type === 'shape') {
-                          updates.data.fill = color === 'transparent' ? null : color
-                        } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
-                          updates.data.color = color === 'transparent' ? '#ffffff' : color
-                        } else if (colorPickerType === 'stroke') {
-                          updates.data.stroke = color === 'transparent' ? null : color
+                    onColorSelect={(color) => {
+                      // Motion capture interception for color changes
+                      // Do NOT dispatch updateLayer during capture — that would pollute the base layer state
+                      // and make start === target, resulting in no animation.
+                      if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
+                        // For canvas background color, find the background layer
+                        let captureLayerId = null
+                        if (colorPickerType === 'canvas') {
+                          captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
+                        } else if (selectedLayerIds?.length === 1) {
+                          captureLayerId = selectedLayerIds[0]
                         }
 
-                        dispatch(updateLayer({ id: layerId, ...updates }))
-                      })
-                    } else if (selectedLayerIds && selectedLayerIds.length === 1) {
-                      const layerId = selectedLayerIds[0]
-                      const layer = layers[layerId]
-                      if (!layer) return
+                        if (captureLayerId) {
+                          const capture = motionCaptureRef.current
+                          if (capture && capture.trackedLayers.has(captureLayerId)) {
+                            const colorValue = color === 'transparent' ? null : color
+                            effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                            effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                            return
+                          }
+                        }
+                      }
 
-                      // Handle background layer color changes
-                      if (layer.type === 'background' && currentSceneId) {
-                        if (color === 'transparent') return // Background layer cannot be transparent
+                      if (colorPickerType === 'canvas' && currentSceneId) {
+                        if (color === 'transparent') return // Canvas background cannot be transparent
 
-                        // Convert hex string to number for background layer
+                        // Convert hex string to number for canvas background
                         const bgColor = color.startsWith('#')
                           ? parseInt(color.slice(1), 16)
                           : parseInt(color, 16)
                         dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
-                      } else {
-                        // Handle regular layer color changes
-                        const updates = { data: { ...layer.data } }
+                      } else if (selectedLayerIds && selectedLayerIds.length > 1) {
+                        // Update all selected layers (multi-select)
+                        selectedLayerIds.forEach((layerId) => {
+                          const layer = layers[layerId]
+                          if (!layer) return
 
-                        if (colorPickerType === 'fill' && layer.type === 'shape') {
-                          updates.data.fill = color === 'transparent' ? null : color
-                        } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
-                          updates.data.color = color === 'transparent' ? '#ffffff' : color
-                        } else if (colorPickerType === 'stroke') {
-                          updates.data.stroke = color === 'transparent' ? null : color
+                          const updates = { data: { ...layer.data } }
+
+                          if (colorPickerType === 'fill' && layer.type === 'shape') {
+                            updates.data.fill = color === 'transparent' ? null : color
+                          } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
+                            updates.data.color = color === 'transparent' ? '#ffffff' : color
+                          } else if (colorPickerType === 'stroke') {
+                            updates.data.stroke = color === 'transparent' ? null : color
+                          }
+
+                          dispatch(updateLayer({ id: layerId, ...updates }))
+                        })
+                      } else if (selectedLayerIds && selectedLayerIds.length === 1) {
+                        const layerId = selectedLayerIds[0]
+                        const layer = layers[layerId]
+                        if (!layer) return
+
+                        // Handle background layer color changes
+                        if (layer.type === 'background' && currentSceneId) {
+                          if (color === 'transparent') return // Background layer cannot be transparent
+
+                          // Convert hex string to number for background layer
+                          const bgColor = color.startsWith('#')
+                            ? parseInt(color.slice(1), 16)
+                            : parseInt(color, 16)
+                          dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
+                        } else {
+                          // Handle regular layer color changes
+                          const updates = { data: { ...layer.data } }
+
+                          if (colorPickerType === 'fill' && layer.type === 'shape') {
+                            updates.data.fill = color === 'transparent' ? null : color
+                          } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
+                            updates.data.color = color === 'transparent' ? '#ffffff' : color
+                          } else if (colorPickerType === 'stroke') {
+                            updates.data.stroke = color === 'transparent' ? null : color
+                          }
+
+                          dispatch(updateLayer({ id: layerId, ...updates }))
                         }
-
-                        dispatch(updateLayer({ id: layerId, ...updates }))
                       }
-                    }
-                  }}
-                  colorType={colorPickerType}
-                />
-              )}
-              {activeSidebarItem === 'Projects' && (
-                <ProjectsPanel onClose={handleClosePanel} />
-              )}
-              {activeSidebarItem === 'Apps' && (
-                <AppsPanel onClose={handleClosePanel} />
-              )}
-              {activeSidebarItem === 'Advanced' && (
-                <MotionInspector
-                  onClose={handleClosePanel}
-                  segments={segments}
-                  onAddSegment={handleAddSegment}
-                  onUpdateSegment={handleUpdateSegment}
-                  onDeleteSegment={handleDeleteSegment}
-                  onDuplicateSegment={handleDuplicateSegment}
-                  onToggleSegmentBypass={handleToggleSegmentBypass}
-                  onLayerUpdate={(updates) => {
-                    if (selectedLayerIds[0]) {
-                      dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
-                    }
-                  }}
-                />
-              )}
-            </div>
-          )}
+                    }}
+                    colorType={colorPickerType}
+                  />
+                )}
+                {activeSidebarItem === 'Projects' && (
+                  <ProjectsPanel onClose={handleClosePanel} />
+                )}
+                {activeSidebarItem === 'Apps' && (
+                  <AppsPanel onClose={handleClosePanel} />
+                )}
+                {activeSidebarItem === 'Advanced' && (
+                  <MotionInspector
+                    onClose={handleClosePanel}
+                    segments={segments}
+                    onAddSegment={handleAddSegment}
+                    onUpdateSegment={handleUpdateSegment}
+                    onDeleteSegment={handleDeleteSegment}
+                    onDuplicateSegment={handleDuplicateSegment}
+                    onToggleSegmentBypass={handleToggleSegmentBypass}
+                    onLayerUpdate={(updates) => {
+                      if (selectedLayerIds[0]) {
+                        dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            )}
 
-          {/* Mobile: bottom sheet (~40% height) with horizontal nav at bottom */}
-          {activeSidebarItem && (
-            <>
-              <div
-                className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
-                style={{ top: 0 }}
-                onClick={() => setActiveSidebarItem(null)}
-                aria-hidden
-              />
-              <div
-                className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t shadow-2xl mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
-                style={{
-                  height: '80vh',
-                  minHeight: '360px',
-                  maxHeight: '90vh',
-                  backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
-                  paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Drag handle */}
-                <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
-                  <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-black/10' : 'bg-white/20'}`} aria-hidden />
-                </div>
-                {/* Panel content - scrollable, same bg as sheet */}
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}>
-                  {activeSidebarItem === 'Design' && (
-                    <DesignPanel onClose={handleClosePanel} />
-                  )}
-                  {activeSidebarItem === 'Elements' && (
-                    <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                  )}
-                  {activeSidebarItem === 'Frames' && (
-                    <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                  )}
-                  {activeSidebarItem === 'Text' && (
-                    <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                  )}
-                  {activeSidebarItem === 'Uploads' && (
-                    <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                  )}
-                  {activeSidebarItem === 'Media' && (
-                    <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
-                  )}
-                  {/* {activeSidebarItem === 'Tools' && (
+            {/* Mobile: bottom sheet (~40% height) with horizontal nav at bottom */}
+            {activeSidebarItem && (
+              <>
+                <div
+                  className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
+                  style={{ top: 0 }}
+                  onClick={() => setActiveSidebarItem(null)}
+                  aria-hidden
+                />
+                <div
+                  className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t shadow-2xl mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
+                  style={{
+                    height: '80vh',
+                    minHeight: '360px',
+                    maxHeight: '90vh',
+                    backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+                    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Drag handle */}
+                  <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+                    <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-black/10' : 'bg-white/20'}`} aria-hidden />
+                  </div>
+                  {/* Panel content - scrollable, same bg as sheet */}
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}>
+                    {activeSidebarItem === 'Design' && (
+                      <DesignPanel onClose={handleClosePanel} />
+                    )}
+                    {activeSidebarItem === 'Elements' && (
+                      <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Frames' && (
+                      <FramesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Text' && (
+                      <TextPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Uploads' && (
+                      <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Media' && (
+                      <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {/* {activeSidebarItem === 'Tools' && (
                     <ToolsPanel onClose={handleClosePanel} />
                   )} */}
-                  {activeSidebarItem === 'Position' && (
-                    <PositionPanel
-                      onClose={handleClosePanel}
-                      layers={sceneLayersOrdered}
-                      selectedLayerId={selectedLayerIds[0]}
-                      onSelectLayer={handleSelectFromPositionPanel}
-                      onReorder={handlePositionReorder}
-                    />
-                  )}
-                  {activeSidebarItem === 'Color' && (
-                    <ColorPickerPanel
-                      onClose={handleClosePanel}
-                      selectedColor={
-                        colorPickerType === 'canvas'
-                          ? (currentSceneData?.backgroundColor !== undefined
-                            ? (typeof currentSceneData.backgroundColor === 'number'
-                              ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
-                              : currentSceneData.backgroundColor)
-                            : '#ffffff')
-                          : selectedLayerIds[0] && layers[selectedLayerIds[0]]
-                            ? (layers[selectedLayerIds[0]].type === 'background'
-                              ? (layers[selectedLayerIds[0]].data?.color !== undefined
-                                ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
-                                  ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
-                                  : layers[selectedLayerIds[0]].data.color)
-                                : '#ffffff')
-                              : colorPickerType === 'fill'
-                                ? (layers[selectedLayerIds[0]].type === 'shape'
-                                  ? layers[selectedLayerIds[0]].data?.fill
-                                  : layers[selectedLayerIds[0]].data?.color)
-                                : colorPickerType === 'text'
-                                  ? layers[selectedLayerIds[0]].data?.color
-                                  : layers[selectedLayerIds[0]].data?.stroke)
-                            : '#ffffff'
-                      }
-                      onColorSelect={(color) => {
-                        // Motion capture interception
-                        if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
-                          let captureLayerId = null
-                          if (colorPickerType === 'canvas') {
-                            captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
-                          } else if (selectedLayerIds?.length === 1) {
-                            captureLayerId = selectedLayerIds[0]
-                          }
-                          if (captureLayerId) {
-                            const capture = motionCaptureRef.current
-                            if (capture && capture.trackedLayers.has(captureLayerId)) {
-                              const colorValue = color === 'transparent' ? null : color
-                              effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
-                              effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
-                              return
+                    {activeSidebarItem === 'Position' && (
+                      <PositionPanel
+                        onClose={handleClosePanel}
+                        layers={sceneLayersOrdered}
+                        selectedLayerId={selectedLayerIds[0]}
+                        onSelectLayer={handleSelectFromPositionPanel}
+                        onReorder={handlePositionReorder}
+                      />
+                    )}
+                    {activeSidebarItem === 'Color' && (
+                      <ColorPickerPanel
+                        onClose={handleClosePanel}
+                        selectedColor={
+                          colorPickerType === 'canvas'
+                            ? (currentSceneData?.backgroundColor !== undefined
+                              ? (typeof currentSceneData.backgroundColor === 'number'
+                                ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
+                                : currentSceneData.backgroundColor)
+                              : '#ffffff')
+                            : selectedLayerIds[0] && layers[selectedLayerIds[0]]
+                              ? (layers[selectedLayerIds[0]].type === 'background'
+                                ? (layers[selectedLayerIds[0]].data?.color !== undefined
+                                  ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
+                                    ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
+                                    : layers[selectedLayerIds[0]].data.color)
+                                  : '#ffffff')
+                                : colorPickerType === 'fill'
+                                  ? (layers[selectedLayerIds[0]].type === 'shape'
+                                    ? layers[selectedLayerIds[0]].data?.fill
+                                    : layers[selectedLayerIds[0]].data?.color)
+                                  : colorPickerType === 'text'
+                                    ? layers[selectedLayerIds[0]].data?.color
+                                    : layers[selectedLayerIds[0]].data?.stroke)
+                              : '#ffffff'
+                        }
+                        onColorSelect={(color) => {
+                          // Motion capture interception
+                          if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
+                            let captureLayerId = null
+                            if (colorPickerType === 'canvas') {
+                              captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
+                            } else if (selectedLayerIds?.length === 1) {
+                              captureLayerId = selectedLayerIds[0]
+                            }
+                            if (captureLayerId) {
+                              const capture = motionCaptureRef.current
+                              if (capture && capture.trackedLayers.has(captureLayerId)) {
+                                const colorValue = color === 'transparent' ? null : color
+                                effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                                effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                                return
+                              }
                             }
                           }
-                        }
 
-                        if (colorPickerType === 'canvas' && currentSceneId) {
-                          const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
-                          dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
-                        } else if (selectedLayerIds && selectedLayerIds.length > 0) {
-                          selectedLayerIds.forEach((layerId) => {
-                            const layer = layers[layerId]
-                            if (!layer) return
-                            const updates = { data: { ...layer.data } }
-                            if (colorPickerType === 'fill' && layer.type === 'shape') {
-                              updates.data.fill = color === 'transparent' ? null : color
-                            } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
-                              updates.data.color = color === 'transparent' ? '#ffffff' : color
-                            } else if (colorPickerType === 'stroke') {
-                              updates.data.stroke = color === 'transparent' ? null : color
-                            }
-                            dispatch(updateLayer({ id: layerId, ...updates }))
-                          })
-                        }
-                      }}
-                      colorType={colorPickerType}
-                    />
-                  )}
-                  {activeSidebarItem === 'Projects' && (
-                    <ProjectsPanel onClose={handleClosePanel} />
-                  )}
-                  {activeSidebarItem === 'Apps' && (
-                    <AppsPanel onClose={handleClosePanel} />
-                  )}
-                  {activeSidebarItem === 'Advanced' && (
-                    <MotionInspector
-                      onClose={handleClosePanel}
-                      segments={segments}
-                      onAddSegment={handleAddSegment}
-                      onUpdateSegment={handleUpdateSegment}
-                      onDeleteSegment={handleDeleteSegment}
-                      onDuplicateSegment={handleDuplicateSegment}
-                      onToggleSegmentBypass={handleToggleSegmentBypass}
-                      onLayerUpdate={(updates) => {
-                        if (selectedLayerIds[0]) {
-                          dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
-                        }
-                      }}
-                    />
-                  )}
+                          if (colorPickerType === 'canvas' && currentSceneId) {
+                            const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
+                            dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
+                          } else if (selectedLayerIds && selectedLayerIds.length > 0) {
+                            selectedLayerIds.forEach((layerId) => {
+                              const layer = layers[layerId]
+                              if (!layer) return
+                              const updates = { data: { ...layer.data } }
+                              if (colorPickerType === 'fill' && layer.type === 'shape') {
+                                updates.data.fill = color === 'transparent' ? null : color
+                              } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
+                                updates.data.color = color === 'transparent' ? '#ffffff' : color
+                              } else if (colorPickerType === 'stroke') {
+                                updates.data.stroke = color === 'transparent' ? null : color
+                              }
+                              dispatch(updateLayer({ id: layerId, ...updates }))
+                            })
+                          }
+                        }}
+                        colorType={colorPickerType}
+                      />
+                    )}
+                    {activeSidebarItem === 'Projects' && (
+                      <ProjectsPanel onClose={handleClosePanel} />
+                    )}
+                    {activeSidebarItem === 'Apps' && (
+                      <AppsPanel onClose={handleClosePanel} />
+                    )}
+                    {activeSidebarItem === 'Advanced' && (
+                      <MotionInspector
+                        onClose={handleClosePanel}
+                        segments={segments}
+                        onAddSegment={handleAddSegment}
+                        onUpdateSegment={handleUpdateSegment}
+                        onDeleteSegment={handleDeleteSegment}
+                        onDuplicateSegment={handleDuplicateSegment}
+                        onToggleSegmentBypass={handleToggleSegmentBypass}
+                        onLayerUpdate={(updates) => {
+                          if (selectedLayerIds[0]) {
+                            dispatch(updateLayer({ id: selectedLayerIds[0], ...updates }))
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
+                  {/* Horizontal minimal nav at bottom of sheet */}
+                  <div
+                    className={`flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
+                    style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+                  >
+                    {SIDEBAR_ITEMS.map((item) => {
+                      const Icon = item.icon
+                      const isActive = activeSidebarItem === item.label
+                      return (
+                        <button
+                          key={item.label}
+                          onClick={() => handleSidebarItemClick(item.label)}
+                          className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${isActive
+                              ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white')
+                              : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
+                            }`}
+                        >
+                          <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />
+                          <span className="text-[10px] font-medium">{item.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-                {/* Horizontal minimal nav at bottom of sheet */}
-                <div
-                  className={`flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
-                  style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
-                >
-                  {SIDEBAR_ITEMS.map((item) => {
-                    const Icon = item.icon
-                    const isActive = activeSidebarItem === item.label
-                    return (
-                      <button
-                        key={item.label}
-                        onClick={() => handleSidebarItemClick(item.label)}
-                        className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${
-                          isActive 
-                            ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white') 
-                            : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
-                        }`}
-                      >
-                        <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />
-                        <span className="text-[10px] font-medium">{item.label}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
 
 
-        {/* Canvas and Bottom Sections */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-          {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
-          <div 
-            ref={topControlsRef} 
-            className="absolute z-30 pointer-events-none flex justify-center" 
-            style={{ 
-              top: `${topToolbarHeight + 8}px`,
-              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-              right: 0
-            }}
-          >
-            <CanvasControls
-              duration={`${totalTime.toFixed(1)}s`}
-              selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
-              selectedCanvas={selectedCanvas}
-              currentScene={currentSceneData}
-              editingStepActionCount={editingStepActionCount}
-              onLayerUpdate={(updates) => {
-                if (selectedLayerIds[0]) {
-                  const layerId = selectedLayerIds[0]
+          {/* Canvas and Bottom Sections */}
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+            {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
+            <div
+              ref={topControlsRef}
+              className="absolute z-30 pointer-events-none flex justify-center"
+              style={{
+                top: `${topToolbarHeight + 8}px`,
+                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                right: 0
+              }}
+            >
+              <CanvasControls
+                duration={`${totalTime.toFixed(1)}s`}
+                selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
+                selectedCanvas={selectedCanvas}
+                currentScene={currentSceneData}
+                editingStepActionCount={editingStepActionCount}
+                onLayerUpdate={(updates) => {
+                  if (selectedLayerIds[0]) {
+                    const layerId = selectedLayerIds[0]
 
-                  // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
-                  // We do NOT dispatch updateLayer here because that pollutes the base layer state
-                  // which the MotionEngine uses as its starting point for Step 0.
-                  if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate) {
-                    if (updates.opacity !== undefined) {
-                      const capture = motionCaptureRef.current
-                      if (capture && capture.trackedLayers.has(layerId)) {
-                        capture.trackedLayers.get(layerId).didFade = true
-                      }
-                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, opacity: updates.opacity })
-                      // For slider adjustments, we trigger an immediate interaction end 
-                      // to generate/update the motion action in Redux.
-                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
-                    }
-                    // Handle other properties if Slider UI ever supports them (rotate, x, y etc)
-                    if (updates.rotation !== undefined) {
-                      const capture = motionCaptureRef.current
-                      if (capture && capture.trackedLayers.has(layerId)) {
-                        capture.trackedLayers.get(layerId).didRotate = true
-                      }
-                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, rotation: updates.rotation })
-                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
-                    }
-                    if (updates.blur !== undefined) {
-                      const clampedBlur = Math.max(0, Math.min(BLUR_MAX, updates.blur))
-                      const capture = motionCaptureRef.current
-                      if (capture && capture.trackedLayers.has(layerId)) {
-                        const tracked = capture.trackedLayers.get(layerId)
-                        tracked.didBlur = true
-                      }
-                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
-                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
-                    }
-
-                    // [TILT] Handle tiltX/tiltY slider updates during capture
-                    if (updates.tiltX !== undefined || updates.tiltY !== undefined) {
-                      const capture = motionCaptureRef.current
-                      if (capture && capture.trackedLayers.has(layerId)) {
-                        const tracked = capture.trackedLayers.get(layerId)
-                        tracked.didTilt = true
-                        if (updates.tiltX !== undefined) tracked.tiltX = updates.tiltX
-                        if (updates.tiltY !== undefined) tracked.tiltY = updates.tiltY
-                      }
-                      effectiveMotionCaptureMode.onPositionUpdate({ 
-                        layerId, 
-                        tiltX: updates.tiltX, 
-                        tiltY: updates.tiltY 
-                      })
-                      // Trigger immediate action update
-                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
-                    }
-
-                    // [BUG FIX] Corner radius update from slider (nested in data)
-                    const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
-                    if (radiusUpdate !== undefined) {
-                      const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusUpdate))
-                      effectiveMotionCaptureMode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
-                      effectiveMotionCaptureMode.onInteractionEnd(layerId)
-                    }
-
-
-                    // [BUG FIX] Only trigger color change if the value actually changed
-                    // (prevents ghost actions when sliders spread entire data object)
-                    const newColor = updates.data?.fill || updates.data?.color
-                    if (newColor !== undefined) {
-                      const capture = motionCaptureRef.current
-                      const tracked = capture?.trackedLayers.get(layerId)
-                      if (tracked && tracked.color !== newColor) {
-                        tracked.didColor = true
-                        tracked.color = newColor
-                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: newColor })
+                    // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
+                    // We do NOT dispatch updateLayer here because that pollutes the base layer state
+                    // which the MotionEngine uses as its starting point for Step 0.
+                    if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate) {
+                      if (updates.opacity !== undefined) {
+                        const capture = motionCaptureRef.current
+                        if (capture && capture.trackedLayers.has(layerId)) {
+                          capture.trackedLayers.get(layerId).didFade = true
+                        }
+                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, opacity: updates.opacity })
+                        // For slider adjustments, we trigger an immediate interaction end 
+                        // to generate/update the motion action in Redux.
                         effectiveMotionCaptureMode.onInteractionEnd(layerId)
                       }
-                    }
-                  } else {
-                    // Normal editor behavior: update base layer properties
-                    dispatch(updateLayer({ id: layerId, ...updates }))
-                  }
-                }
-              }}
-              onCanvasUpdate={(updates) => {
-                if (currentSceneId) {
-                  dispatch(updateScene({ id: currentSceneId, ...updates }))
-                }
-              }}
-              onToggleAdvanced={() => {
-                if (activeSidebarItem === 'Advanced') {
-                  setActiveSidebarItem(null)
-                } else {
-                  setActiveSidebarItem('Advanced')
-                }
-              }}
-              onOpenColorPicker={(type = 'fill') => {
-                setColorPickerType(type)
-                setActiveSidebarItem('Color') // Open color panel in sidebar
-              }}
-              onOpenPositionPanel={() => {
-                setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
-              }}
-              onToggleMotionPanel={() => {
-                setIsMotionPanelOpen(prev => !prev)
-              }}
-              isMotionCaptureActive={isMotionCaptureActive}
-              onStartMotionCapture={handleStartMotionCapture}
-              onApplyMotion={handleApplyMotion}
-              onCancelMotion={handleCancelMotion}
-              onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
-              requestOpenControl={requestOpenControl}
-              stepsCount={currentSceneMotionFlow?.steps?.length || 0}
-              showPasteboard={showPasteboard}
-              onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
-            />
-          </div>
-
-          {/* Canvas - Takes all available space */}
-          <div
-            ref={canvasContainerRef}
-            data-tutorial="canvas-area"
-            className="absolute flex-1 overflow-hidden select-none"
-            style={{
-              top: 'var(--header-height)',
-              bottom: initialBottomHeight || 0,
-              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-              right: 0,
-              backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
-              zIndex: 10,
-            }}
-          >
-            <Stage
-              ref={stageRef}
-              aspectRatio={aspectRatio}
-              showGrid={showGrid}
-              showSafeArea={showSafeArea}
-              showMotionPaths={showMotionPaths}
-              setShowGrid={setShowGrid}
-              setShowSafeArea={setShowSafeArea}
-              setShowMotionPaths={setShowMotionPaths}
-              activeTool={activeTool}
-              onToolChange={setActiveTool}
-              onSetCameraStart={() => { }}
-              onSetCameraEnd={() => { }}
-              zoom={zoom}
-              onZoomChange={setZoom}
-              onViewportChange={handleViewportChange}
-              onError={setPixiError} // Propagate error from Stage to EditorPage
-              topToolbarHeight={topToolbarHeight}
-              isResizingBottom={isResizingBottom}
-              onReady={() => {
-                setIsPixiReady(true)
-                setPixiError(null) // Clear error on successful re-init
-                const app = stageRef.current?.getApp?.()
-                if (app) setPixiApp(app)
-              }}
-              setStageReady={setIsStageReady} // Pass the setter
-              motionCaptureMode={effectiveMotionCaptureMode}
-              captureVersion={captureVersion}
-              onMotionStateChange={setMotionControls}
-              editingStepId={editingStepId}
-              editingTextLayerId={editingTextLayerId}
-              onTextChange={handleTextChange}
-              onFinishEditing={handleFinishEditing}
-              onStartTextEditing={startTextEditing}
-              totalTime={totalTime}
-              showPasteboard={showPasteboard}
-            />
-
-            {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
-            <FullScreenLoading
-              progress={progress}
-              isPreloading={isPreloading}
-              isStageReady={isStageReady}
-              projectStatus={projectStatus}
-              minTimeElapsed={minTimeElapsed}
-              hasAsyncAssets={hasAsyncAssets}
-              error={pixiError}
-            />
-
-
-
-            {/* Vertical Scrollbar Container */}
-            <div
-              ref={vTrackRef}
-              className="absolute right-1.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
-              style={{
-                top: 8,
-                bottom: 15, // Clear vertical overlap even more
-                width: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                display: 'none',
-                pointerEvents: 'none'
-              }}
-            >
-              <div
-                ref={vThumbRef}
-                className="w-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
-                style={{ pointerEvents: 'auto', left: 0 }}
-                onMouseDown={(e) => {
-                  handleScrollbarMouseDown(e, 'vertical')
-                  document.body.style.userSelect = 'none'
-                }}
-              />
-            </div>
-
-            {/* Horizontal Scrollbar Container */}
-            <div
-              ref={hTrackRef}
-              className="absolute bottom-2.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
-              style={{
-                left: 8,
-                right: 15, // Clear horizontal overlap even more
-                height: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                display: 'none',
-                pointerEvents: 'none',
-              }}
-            >
-              <div
-                ref={hThumbRef}
-                className="h-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
-                style={{ pointerEvents: 'auto', top: 0 }}
-                onMouseDown={(e) => {
-                  handleScrollbarMouseDown(e, 'horizontal')
-                  document.body.style.userSelect = 'none'
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Removed floating mobile menu button */}
-        </div>
-
-        {/* Bottom Sections - Overlay at bottom with glass effect */}
-        <div
-          ref={bottomSectionRef}
-          className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
-          style={{
-            left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-            backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            borderTop: 'none',
-            paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-            ...(customBottomHeight !== null ? {
-              height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
-              maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
-            } : {})
-          }}
-        >
-          {/* Height Resize Handle */}
-          <div
-            className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
-            onMouseDown={handleBottomResizeMouseDown}
-            style={{ top: '-1px' }}
-          >
-            <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
-          </div>
-          {/* Content Container - Scrollable if content overflows */}
-          <div className="flex flex-col flex-1" style={{
-            minHeight: 0, // Allow flex item to shrink
-            position: 'relative',
-            paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
-          }}>
-            {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
-            <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-auto" style={{
-              minHeight: 0
-            }}>
-              {/* Playback Controls - Top Section */}
-              <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
-                <PlaybackControls
-                  isPlaying={isPlaying}
-                  isBuffering={motionControls?.isBuffering || false}
-                  currentTime={playheadTime}
-                  totalTime={totalTime}
-                  onPlayPause={() => {
-                    if (motionControls) {
-                      if (isPlaying) {
-                        motionControls.pauseAll()
-                        setIsPlaying(false)
-                      } else {
-                        motionControls.playAll()
-                        setIsPlaying(true)
+                      // Handle other properties if Slider UI ever supports them (rotate, x, y etc)
+                      if (updates.rotation !== undefined) {
+                        const capture = motionCaptureRef.current
+                        if (capture && capture.trackedLayers.has(layerId)) {
+                          capture.trackedLayers.get(layerId).didRotate = true
+                        }
+                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, rotation: updates.rotation })
+                        effectiveMotionCaptureMode.onInteractionEnd(layerId)
                       }
-                    }
-                  }}
-                  onSplit={handleSplitScene}
-                  playheadStepId={playheadStepId}
-                  onUpdateStep={handleEditStep}
-                  onDeleteStep={(stepId) => {
-                    if (currentSceneId && stepId) {
-                      dispatch(deleteSceneMotionStep({
-                        sceneId: currentSceneId,
-                        stepId: stepId
-                      }))
-                    }
-                  }}
-                />
-              </div>
+                      if (updates.blur !== undefined) {
+                        const clampedBlur = Math.max(0, Math.min(BLUR_MAX, updates.blur))
+                        const capture = motionCaptureRef.current
+                        if (capture && capture.trackedLayers.has(layerId)) {
+                          const tracked = capture.trackedLayers.get(layerId)
+                          tracked.didBlur = true
+                        }
+                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
+                        effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                      }
 
-              {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
+                      // [TILT] Handle tiltX/tiltY slider updates during capture
+                      if (updates.tiltX !== undefined || updates.tiltY !== undefined) {
+                        const capture = motionCaptureRef.current
+                        if (capture && capture.trackedLayers.has(layerId)) {
+                          const tracked = capture.trackedLayers.get(layerId)
+                          tracked.didTilt = true
+                          if (updates.tiltX !== undefined) tracked.tiltX = updates.tiltX
+                          if (updates.tiltY !== undefined) tracked.tiltY = updates.tiltY
+                        }
+                        effectiveMotionCaptureMode.onPositionUpdate({
+                          layerId,
+                          tiltX: updates.tiltX,
+                          tiltY: updates.tiltY
+                        })
+                        // Trigger immediate action update
+                        effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                      }
+
+                      // [BUG FIX] Corner radius update from slider (nested in data)
+                      const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
+                      if (radiusUpdate !== undefined) {
+                        const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusUpdate))
+                        effectiveMotionCaptureMode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
+                        effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                      }
+
+
+                      // [BUG FIX] Only trigger color change if the value actually changed
+                      // (prevents ghost actions when sliders spread entire data object)
+                      const newColor = updates.data?.fill || updates.data?.color
+                      if (newColor !== undefined) {
+                        const capture = motionCaptureRef.current
+                        const tracked = capture?.trackedLayers.get(layerId)
+                        if (tracked && tracked.color !== newColor) {
+                          tracked.didColor = true
+                          tracked.color = newColor
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: newColor })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                      }
+                    } else {
+                      // Normal editor behavior: update base layer properties
+                      dispatch(updateLayer({ id: layerId, ...updates }))
+                    }
+                  }
+                }}
+                onCanvasUpdate={(updates) => {
+                  if (currentSceneId) {
+                    dispatch(updateScene({ id: currentSceneId, ...updates }))
+                  }
+                }}
+                onToggleAdvanced={() => {
+                  if (activeSidebarItem === 'Advanced') {
+                    setActiveSidebarItem(null)
+                  } else {
+                    setActiveSidebarItem('Advanced')
+                  }
+                }}
+                onOpenColorPicker={(type = 'fill') => {
+                  setColorPickerType(type)
+                  setActiveSidebarItem('Color') // Open color panel in sidebar
+                }}
+                onOpenPositionPanel={() => {
+                  setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
+                }}
+                onToggleMotionPanel={() => {
+                  setIsMotionPanelOpen(prev => !prev)
+                }}
+                isMotionCaptureActive={isMotionCaptureActive}
+                onStartMotionCapture={handleStartMotionCapture}
+                onApplyMotion={handleApplyMotion}
+                onCancelMotion={handleCancelMotion}
+                onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
+                requestOpenControl={requestOpenControl}
+                stepsCount={currentSceneMotionFlow?.steps?.length || 0}
+                showPasteboard={showPasteboard}
+                onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
+              />
+            </div>
+
+            {/* Canvas - Takes all available space */}
+            <div
+              ref={canvasContainerRef}
+              data-tutorial="canvas-area"
+              className="absolute flex-1 overflow-hidden select-none"
+              style={{
+                top: 'var(--header-height)',
+                bottom: initialBottomHeight || 0,
+                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                right: 0,
+                backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+                zIndex: 10,
+              }}
+            >
+              <Stage
+                ref={stageRef}
+                aspectRatio={aspectRatio}
+                showGrid={showGrid}
+                showSafeArea={showSafeArea}
+                showMotionPaths={showMotionPaths}
+                setShowGrid={setShowGrid}
+                setShowSafeArea={setShowSafeArea}
+                setShowMotionPaths={setShowMotionPaths}
+                activeTool={activeTool}
+                onToolChange={setActiveTool}
+                onSetCameraStart={() => { }}
+                onSetCameraEnd={() => { }}
+                zoom={zoom}
+                onZoomChange={setZoom}
+                onViewportChange={handleViewportChange}
+                onError={setPixiError} // Propagate error from Stage to EditorPage
+                topToolbarHeight={topToolbarHeight}
+                isResizingBottom={isResizingBottom}
+                onReady={() => {
+                  setIsPixiReady(true)
+                  setPixiError(null) // Clear error on successful re-init
+                  const app = stageRef.current?.getApp?.()
+                  if (app) setPixiApp(app)
+                }}
+                setStageReady={setIsStageReady} // Pass the setter
+                motionCaptureMode={effectiveMotionCaptureMode}
+                captureVersion={captureVersion}
+                onMotionStateChange={setMotionControls}
+                editingStepId={editingStepId}
+                editingTextLayerId={editingTextLayerId}
+                onTextChange={handleTextChange}
+                onFinishEditing={handleFinishEditing}
+                onStartTextEditing={startTextEditing}
+                totalTime={totalTime}
+                showPasteboard={showPasteboard}
+              />
+
+              {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
+              <FullScreenLoading
+                progress={progress}
+                isPreloading={isPreloading}
+                isStageReady={isStageReady}
+                projectStatus={projectStatus}
+                minTimeElapsed={minTimeElapsed}
+                hasAsyncAssets={hasAsyncAssets}
+                error={pixiError}
+              />
+
+
+
+              {/* Vertical Scrollbar Container */}
               <div
-                ref={scenesBarRef}
-                className="pointer-events-auto flex-shrink-0"
+                ref={vTrackRef}
+                className="absolute right-1.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
                 style={{
-                  width: '100%',
-                  minWidth: 0,
-                  backgroundColor: 'transparent',
-                  overflowX: 'auto',
-                  overflowY: 'visible',
-                  WebkitOverflowScrolling: 'touch',
-                  paddingBottom: '8px',
-                  paddingTop: '0px',
-                  paddingLeft: '16px',
-                  paddingRight: '16px',
+                  top: 8,
+                  bottom: 15, // Clear vertical overlap even more
+                  width: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  display: 'none',
+                  pointerEvents: 'none'
                 }}
               >
-                <ScenesBar
-                  currentTime={Math.min(playheadTime, totalTime)}
-                  totalTime={totalTime}
-                  worldWidth={worldWidth}
-                  worldHeight={worldHeight}
-                  currentTimeStepId={editingStepId}
-                  isMotionCaptureActive={isMotionCaptureActive}
-                  onStepClick={handleSelectStep}
-                  onStepEdit={handleEditStep}
-                  bottomSectionHeight={customBottomHeight}
-                  onSeek={seek}
-                  onMotionStop={handleMotionStop}
+                <div
+                  ref={vThumbRef}
+                  className="w-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                  style={{ pointerEvents: 'auto', left: 0 }}
+                  onMouseDown={(e) => {
+                    handleScrollbarMouseDown(e, 'vertical')
+                    document.body.style.userSelect = 'none'
+                  }}
+                />
+              </div>
+
+              {/* Horizontal Scrollbar Container */}
+              <div
+                ref={hTrackRef}
+                className="absolute bottom-2.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
+                style={{
+                  left: 8,
+                  right: 15, // Clear horizontal overlap even more
+                  height: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  display: 'none',
+                  pointerEvents: 'none',
+                }}
+              >
+                <div
+                  ref={hThumbRef}
+                  className="h-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                  style={{ pointerEvents: 'auto', top: 0 }}
+                  onMouseDown={(e) => {
+                    handleScrollbarMouseDown(e, 'horizontal')
+                    document.body.style.userSelect = 'none'
+                  }}
                 />
               </div>
             </div>
 
-            {/* Zoom slider - fixed at bottom, outside scroll; minimal height, simple white */}
-            <div className="pointer-events-auto flex-shrink-0 flex justify-center lg:justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
-              <input
-                type="range"
-                min={10}
-                max={300}
-                value={zoom === -1 ? 100 : Math.min(300, Math.max(10, zoom))}
-                onChange={(e) => setZoom(Number(e.target.value))}
-                className={`w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`}
-              />
-              <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
-                {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
-              </span>
-            </div>
+            {/* Removed floating mobile menu button */}
           </div>
 
-        </div>
-      </div>
-
-      {/* Motion Panel - Right side overlay */}
-      <MotionPanel
-        isOpen={isMotionPanelOpen}
-        onClose={() => setIsMotionPanelOpen(false)}
-        topToolbarHeight={topToolbarHeight}
-        motionControls={motionControls}
-        onStepEdit={handleEditStep}
-        onApplyMotion={handleApplyMotion}
-        onCancelMotion={handleCancelMotion}
-        onStartMotionCapture={handleStartMotionCapture}
-        onAddAnimation={handleAddAnimation}
-        onDeleteCaptureAction={handleDeleteCaptureAction}
-        sceneLayers={sceneLayersForMotion}
-        selectedLayerIds={selectedLayerIds}
-        isMotionCaptureActive={isMotionCaptureActive}
-        editingStepId={editingStepId}
-      />
-
-      {/* Export Progress Overlay */}
-      <Modal
-        isOpen={exportState.isActive}
-        onClose={() => {
-          if (exportState.status !== 'completed' && exportState.status !== 'error') {
-            handleCancelExport()
-          } else {
-            setExportState(prev => ({ ...prev, isActive: false }))
-          }
-        }}
-        showCloseButton={exportState.status === 'completed' || exportState.status === 'error'}
-        maxWidth="max-w-md"
-      >
-        <div className="relative">
-          {/* Animated Background Pulse */}
-          <div className="absolute -inset-6 bg-purple-600/5 animate-pulse pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col items-center w-full">
-            {exportState.status !== 'error' && exportState.status !== 'completed' && (
-              <div className="mb-6 relative">
-                <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
-                <Loader2 className="h-10 w-10 text-purple-400 animate-spin relative z-10" />
-              </div>
-            )}
-
-            {exportState.status === 'completed' && (
-              <div className="h-10 w-10 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
-                <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            )}
-
-            {exportState.status === 'error' && (
-              <div className="h-10 w-10 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
-                <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </div>
-            )}
-
-            <h3 className={`text-lg font-bold mb-2 tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
-              {exportState.status === 'initializing' && 'Preparing Export...'}
-              {exportState.status === 'rendering' && 'Rendering Frames...'}
-              {exportState.status === 'encoding' && 'Finalizing Video...'}
-              {exportState.status === 'encoding_palette' && 'Analyzing Colors...'}
-              {exportState.status === 'encoding_gif' && 'Encoding GIF...'}
-              {exportState.status === 'completed' && 'Export Successful!'}
-              {exportState.status === 'error' && 'Export Failed'}
-            </h3>
-
-            <div className={`text-[13px] mb-8 text-center max-w-[320px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
-              <p>
-                {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
-                {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
-                {exportState.status === 'encoding_palette' && 'Building the optimal color palette for your GIF.'}
-                {exportState.status === 'encoding_gif' && 'Applying palette and writing the final GIF.'}
-                {exportState.status === 'completed' && 'Your download has started automatically.'}
-                {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
-              </p>
-              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
-                <div className={`mt-4 px-4 py-2 border rounded-lg ${isLight ? 'bg-yellow-500/5 border-yellow-500/10' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
-                  <p className="text-yellow-600 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
-                  <p className={`text-[12px] ${isLight ? 'text-gray-600' : 'text-white/60'}`}>
-                    4K and 2K exports with video elements take a long time.
-                    <span className={`block font-bold mt-1 ${isLight ? 'text-gray-900' : 'text-white/80'}`}>Please do not close this page.</span>
-                  </p>
-                </div>
-              )}
+          {/* Bottom Sections - Overlay at bottom with glass effect */}
+          <div
+            ref={bottomSectionRef}
+            className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+            style={{
+              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+              backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              borderTop: 'none',
+              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+              ...(customBottomHeight !== null ? {
+                height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
+                maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
+              } : {})
+            }}
+          >
+            {/* Height Resize Handle */}
+            <div
+              className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
+              onMouseDown={handleBottomResizeMouseDown}
+              style={{ top: '-1px' }}
+            >
+              <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
             </div>
-
-            {exportState.status !== 'error' && exportState.status !== 'completed' && (
-              <div className="w-full">
-                <div className="flex justify-between items-end mb-2">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]">Progress</span>
-                  <span className={`text-base font-mono font-medium ${isLight ? 'text-gray-900' : 'text-white/90'}`}>{exportState.progress}%</span>
+            {/* Content Container - Scrollable if content overflows */}
+            <div className="flex flex-col flex-1" style={{
+              minHeight: 0, // Allow flex item to shrink
+              position: 'relative',
+              paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
+            }}>
+              {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
+              <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-auto" style={{
+                minHeight: 0
+              }}>
+                {/* Playback Controls - Top Section */}
+                <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
+                  <PlaybackControls
+                    isPlaying={isPlaying}
+                    isBuffering={motionControls?.isBuffering || false}
+                    currentTime={playheadTime}
+                    totalTime={totalTime}
+                    onPlayPause={() => {
+                      if (motionControls) {
+                        if (isPlaying) {
+                          motionControls.pauseAll()
+                          setIsPlaying(false)
+                        } else {
+                          motionControls.playAll()
+                          setIsPlaying(true)
+                        }
+                      }
+                    }}
+                    onSplit={handleSplitScene}
+                    playheadStepId={playheadStepId}
+                    onUpdateStep={handleEditStep}
+                    onDeleteStep={(stepId) => {
+                      if (currentSceneId && stepId) {
+                        dispatch(deleteSceneMotionStep({
+                          sceneId: currentSceneId,
+                          stepId: stepId
+                        }))
+                      }
+                    }}
+                  />
                 </div>
-                <div className={`w-full h-1.5 rounded-full overflow-hidden border shadow-inner ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/5'}`}>
-                  <div
-                    className="h-full bg-gradient-to-r from-[#7c4af0] to-indigo-500 shadow-[0_0_15px_rgba(124,74,240,0.4)] transition-all duration-300 ease-out"
-                    style={{ width: `${exportState.progress}%` }}
+
+                {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
+                <div
+                  ref={scenesBarRef}
+                  className="pointer-events-auto flex-shrink-0"
+                  style={{
+                    width: '100%',
+                    minWidth: 0,
+                    backgroundColor: 'transparent',
+                    overflowX: 'auto',
+                    overflowY: 'visible',
+                    WebkitOverflowScrolling: 'touch',
+                    paddingBottom: '8px',
+                    paddingTop: '0px',
+                    paddingLeft: '16px',
+                    paddingRight: '16px',
+                  }}
+                >
+                  <ScenesBar
+                    currentTime={Math.min(playheadTime, totalTime)}
+                    totalTime={totalTime}
+                    worldWidth={worldWidth}
+                    worldHeight={worldHeight}
+                    currentTimeStepId={editingStepId}
+                    isMotionCaptureActive={isMotionCaptureActive}
+                    onStepClick={handleSelectStep}
+                    onStepEdit={handleEditStep}
+                    bottomSectionHeight={customBottomHeight}
+                    onSeek={seek}
+                    onMotionStop={handleMotionStop}
                   />
                 </div>
               </div>
-            )}
 
-            {exportState.status !== 'error' && exportState.status !== 'completed' && (
-              <button
-                onClick={handleCancelExport}
-                className={`mt-8 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
-              >
-                Cancel Export
-              </button>
-            )}
+              {/* Zoom slider - fixed at bottom, outside scroll; minimal height, simple white */}
+              <div className="pointer-events-auto flex-shrink-0 flex justify-center lg:justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
+                <input
+                  type="range"
+                  min={10}
+                  max={300}
+                  value={zoom === -1 ? 100 : Math.min(300, Math.max(10, zoom))}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className={`w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`}
+                />
+                <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
+                  {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
+                </span>
+              </div>
+            </div>
 
-            {exportState.status === 'completed' && (
-              <button
-                onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
-              >
-                Close Window
-              </button>
-            )}
+          </div>
+        </div>
 
-            {exportState.status === 'error' && (
-              <div className="w-full flex flex-col gap-3 mt-2">
+        {/* Motion Panel - Right side overlay */}
+        <MotionPanel
+          isOpen={isMotionPanelOpen}
+          onClose={() => setIsMotionPanelOpen(false)}
+          topToolbarHeight={topToolbarHeight}
+          motionControls={motionControls}
+          onStepEdit={handleEditStep}
+          onApplyMotion={handleApplyMotion}
+          onCancelMotion={handleCancelMotion}
+          onStartMotionCapture={handleStartMotionCapture}
+          onAddAnimation={handleAddAnimation}
+          onDeleteCaptureAction={handleDeleteCaptureAction}
+          sceneLayers={sceneLayersForMotion}
+          selectedLayerIds={selectedLayerIds}
+          isMotionCaptureActive={isMotionCaptureActive}
+          editingStepId={editingStepId}
+        />
+
+        {/* Export Progress Overlay */}
+        <Modal
+          isOpen={exportState.isActive}
+          onClose={() => {
+            if (exportState.status !== 'completed' && exportState.status !== 'error') {
+              handleCancelExport()
+            } else {
+              setExportState(prev => ({ ...prev, isActive: false }))
+            }
+          }}
+          showCloseButton={exportState.status === 'completed' || exportState.status === 'error'}
+          maxWidth="max-w-md"
+        >
+          <div className="relative">
+            {/* Animated Background Pulse */}
+            <div className="absolute -inset-6 bg-purple-600/5 animate-pulse pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col items-center w-full">
+              {exportState.status !== 'error' && exportState.status !== 'completed' && (
+                <div className="mb-6 relative">
+                  <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
+                  <Loader2 className="h-10 w-10 text-purple-400 animate-spin relative z-10" />
+                </div>
+              )}
+
+              {exportState.status === 'completed' && (
+                <div className="h-10 w-10 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
+                  <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              )}
+
+              {exportState.status === 'error' && (
+                <div className="h-10 w-10 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+                  <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+              )}
+
+              <h3 className={`text-lg font-bold mb-2 tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                {exportState.status === 'initializing' && 'Preparing Export...'}
+                {exportState.status === 'rendering' && 'Rendering Frames...'}
+                {exportState.status === 'encoding' && 'Finalizing Video...'}
+                {exportState.status === 'encoding_palette' && 'Analyzing Colors...'}
+                {exportState.status === 'encoding_gif' && 'Encoding GIF...'}
+                {exportState.status === 'completed' && 'Export Successful!'}
+                {exportState.status === 'error' && 'Export Failed'}
+              </h3>
+
+              <div className={`text-[13px] mb-8 text-center max-w-[320px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
+                <p>
+                  {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
+                  {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
+                  {exportState.status === 'encoding_palette' && 'Building the optimal color palette for your GIF.'}
+                  {exportState.status === 'encoding_gif' && 'Applying palette and writing the final GIF.'}
+                  {exportState.status === 'completed' && 'Your download has started automatically.'}
+                  {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
+                </p>
+                {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
+                  <div className={`mt-4 px-4 py-2 border rounded-lg ${isLight ? 'bg-yellow-500/5 border-yellow-500/10' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
+                    <p className="text-yellow-600 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
+                    <p className={`text-[12px] ${isLight ? 'text-gray-600' : 'text-white/60'}`}>
+                      4K and 2K exports with video elements take a long time.
+                      <span className={`block font-bold mt-1 ${isLight ? 'text-gray-900' : 'text-white/80'}`}>Please do not close this page.</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {exportState.status !== 'error' && exportState.status !== 'completed' && (
+                <div className="w-full">
+                  <div className="flex justify-between items-end mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]">Progress</span>
+                    <span className={`text-base font-mono font-medium ${isLight ? 'text-gray-900' : 'text-white/90'}`}>{exportState.progress}%</span>
+                  </div>
+                  <div className={`w-full h-1.5 rounded-full overflow-hidden border shadow-inner ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/5'}`}>
+                    <div
+                      className="h-full bg-gradient-to-r from-[#7c4af0] to-indigo-500 shadow-[0_0_15px_rgba(124,74,240,0.4)] transition-all duration-300 ease-out"
+                      style={{ width: `${exportState.progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {exportState.status !== 'error' && exportState.status !== 'completed' && (
                 <button
-                  onClick={() => handleExport('1080p')}
-                  className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#8d61f2] text-white rounded-xl text-[12px] font-bold transition-all shadow-lg shadow-purple-500/20"
+                  onClick={handleCancelExport}
+                  className={`mt-8 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
                 >
-                  Try Again
+                  Cancel Export
                 </button>
+              )}
+
+              {exportState.status === 'completed' && (
                 <button
                   onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
                   className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
                 >
-                  Cancel
+                  Close Window
                 </button>
-              </div>
-            )}
+              )}
+
+              {exportState.status === 'error' && (
+                <div className="w-full flex flex-col gap-3 mt-2">
+                  <button
+                    onClick={() => handleExport('1080p')}
+                    className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#8d61f2] text-white rounded-xl text-[12px] font-bold transition-all shadow-lg shadow-purple-500/20"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
+                    className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </Modal>
-      {/* Project Status Loading Modal */}
-      <Modal
-        isOpen={isSaving || isNavigating}
-        showCloseButton={false}
-        maxWidth="max-w-[280px]"
-        className={`${isLight ? 'border-black/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.1)]' : 'border-white/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]'}`}
-      >
-        <div className="flex flex-col items-center justify-center py-4 gap-4">
-          <div className="relative">
-            <div className={`absolute inset-0 blur-xl rounded-full scale-150 animate-pulse ${isLight ? 'bg-blue-500/10' : 'bg-blue-500/20'}`} />
-            <Loader2 className="w-10 h-10 text-blue-400 animate-spin relative z-10" strokeWidth={1.5} />
+        </Modal>
+        {/* Project Status Loading Modal */}
+        <Modal
+          isOpen={isSaving || isNavigating}
+          showCloseButton={false}
+          maxWidth="max-w-[280px]"
+          className={`${isLight ? 'border-black/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.1)]' : 'border-white/5 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]'}`}
+        >
+          <div className="flex flex-col items-center justify-center py-4 gap-4">
+            <div className="relative">
+              <div className={`absolute inset-0 blur-xl rounded-full scale-150 animate-pulse ${isLight ? 'bg-blue-500/10' : 'bg-blue-500/20'}`} />
+              <Loader2 className="w-10 h-10 text-blue-400 animate-spin relative z-10" strokeWidth={1.5} />
+            </div>
+            <div className="flex flex-col items-center gap-1 text-center">
+              <h3 className={`font-medium text-[15px] tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                {isNavigating ? 'Returning to Dashboard' : 'Saving Project'}
+              </h3>
+              <p className={`${isLight ? 'text-gray-500' : 'text-white/40'} text-[12px]`}>
+                {isNavigating ? 'Finalizing your profile sync...' : 'Please wait a moment...'}
+              </p>
+            </div>
           </div>
-          <div className="flex flex-col items-center gap-1 text-center">
-            <h3 className={`font-medium text-[15px] tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
-              {isNavigating ? 'Returning to Dashboard' : 'Saving Project'}
-            </h3>
-            <p className={`${isLight ? 'text-gray-500' : 'text-white/40'} text-[12px]`}>
-              {isNavigating ? 'Finalizing your profile sync...' : 'Please wait a moment...'}
-            </p>
-          </div>
-        </div>
-      </Modal>
-      <TutorialOverlay
-        isPlaying={isPlaying}
-        manualTargetRect={manualTutorialRect}
-        onNext={() => dispatch(nextStep())}
-      />
-      <TutorialExportModal
-        isOpen={tutorialActive && tutorialStep === 7}
-        onClose={() => dispatch(endTutorial())}
-        onExport={(res) => {
-          handleExport(res);
-          dispatch(nextStep()); // Finish tutorial
-        }}
-      />
-      <TutorialExportModal
-        isOpen={gifExportModalOpen}
-        initialFormat="gif"
-        onClose={() => setGifExportModalOpen(false)}
-        onExport={(res) => {
-          setGifExportModalOpen(false);
-          handleExport(res);
-        }}
-      />
-    </div>
+        </Modal>
+        <TutorialOverlay
+          isPlaying={isPlaying}
+          manualTargetRect={manualTutorialRect}
+          onNext={() => dispatch(nextStep())}
+        />
+        <TutorialExportModal
+          isOpen={tutorialActive && tutorialStep === 7}
+          onClose={() => dispatch(endTutorial())}
+          onExport={(res) => {
+            handleExport(res);
+            dispatch(nextStep()); // Finish tutorial
+          }}
+        />
+        <TutorialExportModal
+          isOpen={gifExportModalOpen}
+          initialFormat="gif"
+          onClose={() => setGifExportModalOpen(false)}
+          onExport={(res) => {
+            setGifExportModalOpen(false);
+            handleExport(res);
+          }}
+        />
+      </div>
     </ThemeContext.Provider>
   )
 }

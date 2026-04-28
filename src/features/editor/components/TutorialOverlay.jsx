@@ -149,7 +149,7 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
       case 1: return "Press Play to see the animation.";
       case 2: return "This scene has 2 Steps. Each step changes the scene.";
       case 3: return "Click 'Animate' to create Step 3.";
-      case 4: return "Scale the Apple Logo.";
+      case 4: return "Scale it and move it down.";
       case 5: return "Click 'Save Step' to save Step 3.";
       case 6: return "Nice. Click Play to see your animation.";
       default: return "";
