@@ -200,8 +200,9 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
     const isLocked = !motionCaptureMode?.isActive && isPastBaseStep && anyLayerAnimated
 
     // drawDashedRect signature: (graphics, x, y, width, height, cornerRadius, strokeColor, strokeWidth, dashLength, gapLength)
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
     const zoomScale = 1 / (viewport?.scale?.x || 1)
-    const baseScale = calculateAdaptedScale(zoomScale)
+    const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
     drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.2 * baseScale, 10, 5)
 
     graphics.alpha = isLocked ? 0.4 : 1.0
@@ -381,8 +382,9 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       }
 
       if (!resizeStateRef.current && !rotateStateRef.current) {
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
         const zoomScale = 1 / (viewport?.scale?.x || 1)
-        const baseScale = calculateAdaptedScale(zoomScale)
+        const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
         const rotateRadius = 22 * baseScale
         const rotationYPosition = height + rotateRadius + (30 * baseScale)
 

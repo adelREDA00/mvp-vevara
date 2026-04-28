@@ -755,8 +755,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // smallLayerScale applies to BOTH visuals and hit area logic
     const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
 
-    // [FIX] Use unified adapted scale helper
-    const baseScale = calculateAdaptedScale(zoomScale)
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+    // [FIX] MOBILE OPTIMIZATION: Use larger base scale for touch devices to make handles easier to see and grab
+    const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
     const scaledBase = baseScale * smallLayerScale
 
     if (isCorner) {
@@ -793,7 +794,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     handle.eventMode = 'static'
     handle.cursor = rotatedCursor
 
-    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
     // Much larger hit area for easier interaction, but scaled appropriately
     // Small layer optimization: reduce hit area if layer is very small to prevent overlap
     if (isCorner) {
@@ -907,8 +907,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // Small layer optimization: reduce thickness for small layers to prevent side overlap
     const layerSizeRef = Math.min(scaledWidth, scaledHeight)
     const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
-    const baseScale = calculateAdaptedScale(zoomScale)
-    const scaledHitAreaThickness = Math.max(4, 12 * baseScale * smallLayerScale)
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+    const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
+    const scaledHitAreaThickness = Math.max(isTouch ? 20 : 8, 16 * baseScale * smallLayerScale)
 
     // Create invisible hit area that spans the entire side
     if (handleType === 'n' || handleType === 's') {
@@ -996,8 +997,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const layerSizeRef = Math.min(scaledWidth, scaledHeight)
     const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
 
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
     // Draw white circle background at calculated size
-    const baseScale = calculateAdaptedScale(zoomScale)
+    const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
     const scaledBase = baseScale * smallLayerScale
     const radius = Math.max(14, 22 * scaledBase)
 
@@ -1310,8 +1312,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (lastKnownRotationRef) lastKnownRotationRef.current = rotation
 
       const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
       const viewportScale = latestViewportRef.current?.scale?.x || 1
       const zoomScale = 1 / viewportScale
+      const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
 
       const scaledWidth = currentWidth * scaleX
       const scaledHeight = currentHeight * scaleY

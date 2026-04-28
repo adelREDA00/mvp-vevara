@@ -365,6 +365,74 @@ const DashboardPage = () => {
 
                         <DashboardHero userName={user?.firstName} />
 
+                        {/* Recent Projects Section */}
+                        <section id="projects" className="scroll-mt-24 mb-16">
+                            <div className="flex items-center justify-between mb-8">
+                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Recent Designs</h2>
+                            </div>
+
+                            {loading ? (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {[1, 2, 3, 4, 5, 6].map(i => (
+                                        <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {/* Add New Project Card - Always visible */}
+                                    <div
+                                        onClick={() => setIsProjectStarterModalOpen(true)}
+                                        className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
+                                    >
+                                        <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
+                                            <Plus size={20} strokeWidth={2} />
+                                        </div>
+                                        <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Create new</p>
+                                    </div>
+
+                                    {/* Project List */}
+                                    {projects.map((project) => (
+                                        <div
+                                            key={project._id}
+                                            className="group cursor-pointer"
+                                            onClick={() => window.location.href = `/project/${project._id}`}
+                                        >
+                                            <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
+                                                {project.thumbnail ? (
+                                                    <img
+                                                        src={project.thumbnail}
+                                                        alt={`${project.name} thumbnail`}
+                                                        className="w-full h-full object-contain"
+                                                    />
+                                                ) : (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
+                                                        <Layers size={28} strokeWidth={1.5} />
+                                                    </div>
+                                                )}
+
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] duration-300">
+                                                    <button className="h-8 px-4 bg-white text-black text-[11px] font-bold rounded-lg shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 uppercase">Open</button>
+                                                </div>
+                                                <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md rounded-md px-1.5 py-0.5 text-[8px] font-bold text-white uppercase tracking-widest flex items-center gap-1">
+                                                    <X size={8} className="rotate-45" /> Private
+                                                </div>
+                                                <button
+                                                    onClick={(e) => handleDeleteProject(e, project._id)}
+                                                    className="absolute bottom-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+                                                >
+                                                    <Trash2 size={14} strokeWidth={2} />
+                                                </button>
+                                            </div>
+                                            <div className="px-0.5">
+                                                <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
                         {/* Categories - Vibing Circular Filters (Sticky) */}
                         <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
                         <section
@@ -425,7 +493,6 @@ const DashboardPage = () => {
                             </div>
                         </section>
 
-
                         {/* Templates Section */}
                         {templateProjects.length > 0 && (
                             <section id="templates" className="scroll-mt-24 mb-24">
@@ -463,74 +530,6 @@ const DashboardPage = () => {
                                 </div>
                             </section>
                         )}
-
-                        {/* Recent Projects Section */}
-                        <section id="projects" className="scroll-mt-24 mb-16">
-                            <div className="flex items-center justify-between mb-8">
-                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Recent Designs</h2>
-                            </div>
-
-                            {loading ? (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                    {[1, 2, 3, 4, 5, 6].map(i => (
-                                        <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
-                                    ))}
-                                </div>
-                            ) : projects.length === 0 ? (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                    <div
-                                        onClick={() => setIsProjectStarterModalOpen(true)}
-                                        className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
-                                    >
-                                        <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
-                                            <Plus size={20} strokeWidth={2} />
-                                        </div>
-                                        <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Start your first project</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                    {projects.slice(0, 12).map((project) => (
-                                        <div
-                                            key={project._id}
-                                            className="group cursor-pointer"
-                                            onClick={() => window.location.href = `/project/${project._id}`}
-                                        >
-                                            <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
-                                                {project.thumbnail ? (
-                                                    <img
-                                                        src={project.thumbnail}
-                                                        alt={`${project.name} thumbnail`}
-                                                        className="w-full h-full object-contain"
-                                                    />
-                                                ) : (
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
-                                                        <Layers size={28} strokeWidth={1.5} />
-                                                    </div>
-                                                )}
-
-                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] duration-300">
-                                                    <button className="h-8 px-4 bg-white text-black text-[11px] font-bold rounded-lg shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 uppercase">Open</button>
-                                                </div>
-                                                <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md rounded-md px-1.5 py-0.5 text-[8px] font-bold text-white uppercase tracking-widest flex items-center gap-1">
-                                                    <X size={8} className="rotate-45" /> Private
-                                                </div>
-                                                <button
-                                                    onClick={(e) => handleDeleteProject(e, project._id)}
-                                                    className="absolute bottom-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
-                                                >
-                                                    <Trash2 size={14} strokeWidth={2} />
-                                                </button>
-                                            </div>
-                                            <div className="px-0.5">
-                                                <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
-                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </section>
 
                         {/* How it works Section */}
                         <section id="learn" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
