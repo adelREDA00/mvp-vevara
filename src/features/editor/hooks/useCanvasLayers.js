@@ -13,7 +13,13 @@ import { updateLayerZOrder } from '../utils/layerUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { BLUR_MAX, BLUR_QUALITY } from '../../engine/motion/blurConstants.js'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
-import { applyTiltToObject, removeTiltFromObject, syncTiltMesh, markTiltTextureDirty } from '../../engine/pixi/perspectiveTilt'
+import { 
+  applyTiltToObject, 
+  removeTiltFromObject, 
+  syncTiltMesh, 
+  markTiltTextureDirty,
+  TILT_HIDE_SENTINEL 
+} from '../../engine/pixi/perspectiveTilt'
 
 // [MOBILE FIX] Detect mobile for sequential asset loading
 const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
@@ -504,15 +510,10 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   } else {
     // Tilted: route the intended opacity to the tilt system instead of
     // pixiObject.alpha so the mesh's alpha follows the user's slider /
-    // captured value while the original stays at alpha=0.
+    // captured value while the original stays at alpha=TILT_HIDE_SENTINEL.
     //
     // Gating MUST mirror the non-tilted branch above — otherwise we'd
-    // clobber a FadeAction's tweened alpha during animation playback
-    // (the tween writes to pixiObject.alpha → syncTiltMesh captures it
-    // into _intendedAlpha; if we then unconditionally re-write
-    // _intendedAlpha = layer.opacity here, the fade reverts every
-    // React re-render).  Apply only when force, capture, or
-    // shouldApplyBaseState while not playing.
+    // clobber a FadeAction's tweened alpha during animation playback.
     if (force) {
       if (layer.opacity !== undefined) displayObject._intendedAlpha = layer.opacity
     } else if (!isActuallyPlaying) {
@@ -521,6 +522,13 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       } else if (shouldApplyBaseState && layer.opacity !== undefined) {
         displayObject._intendedAlpha = layer.opacity
       }
+    }
+
+    // [SENTINEL FIX] Ensure the original layer is at the sentinel value.
+    // This prevents stale alpha values (from prepareEngine/force resets)
+    // from being captured as "intended" in the next ticker tick.
+    if (displayObject.alpha !== TILT_HIDE_SENTINEL) {
+      displayObject.alpha = TILT_HIDE_SENTINEL
     }
   }
 
@@ -565,11 +573,12 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     // editing-text-hide, and other visibility toggles propagate.
     displayObject._tiltOwnerVisible = displayObject.visible !== false
     syncTiltMesh(displayObject, layer)
-  } else if (!displayObject._tiltHidden && displayObject.alpha === 0 && (layer.opacity ?? 1) > 0) {
+  } else if (!displayObject._tiltHidden && displayObject.alpha === 0 && (capturedLayer?.opacity ?? layer.opacity ?? 1) > 0) {
     // Guard for the frame after tilt is removed: step 6 may have been gated by
     // _tiltHidden earlier, so the alpha=0 left over from the hide mechanism would
     // otherwise persist. Restore here once mesh is gone.
-    displayObject.alpha = layer.opacity ?? 1
+    // [FIX] Use capturedLayer.opacity if available, otherwise fallback to base layer.opacity.
+    displayObject.alpha = capturedLayer?.opacity ?? layer.opacity ?? 1
   }
 }
 

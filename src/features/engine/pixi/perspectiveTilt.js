@@ -20,6 +20,10 @@ import * as PIXI from 'pixi.js'
 //     hit-testing keeps working — the user can still click and drag the
 //     tilted layer.  applyTransformInline checks `_tiltHidden` before writing
 //     opacity, so the alpha=0 sentinel survives Redux re-syncs.
+// [SENTINEL FIX] We now use 1e-6 as the hide sentinel instead of 0. This
+// allows us to distinguish between "hidden for tilt" and "user-intended 
+// invisible (0)".
+export const TILT_HIDE_SENTINEL = 0.000001
 //   - Anything that changes the layer's appearance (color, text, image swap,
 //     resize, crop, frame placeholder, etc.) calls `markTiltTextureDirty` so
 //     the next sync re-captures the RTT.
@@ -1271,14 +1275,16 @@ export function applyTiltToObject(pixiObject, tiltXDeg, tiltYDeg, renderer, opti
 
   // Capture the current "intended" alpha BEFORE we zero the original.
   // syncTiltMesh applies it to mesh.alpha so the displayed opacity is
-  // preserved when transitioning from non-tilted → tilted.
-  if (pixiObject.alpha !== 0 || pixiObject._intendedAlpha === undefined) {
+  // preserved when transitioning from non-tilted -> tilted.
+  // [SENTINEL FIX] Only capture if we aren't currently using the sentinel.
+  if (Math.abs(pixiObject.alpha - TILT_HIDE_SENTINEL) > 1e-7 || pixiObject._intendedAlpha === undefined) {
     pixiObject._intendedAlpha = pixiObject.alpha
   }
 
-  // alpha=0 instead of visible=false so PIXI hit-testing still works.
+  // alpha=TILT_HIDE_SENTINEL instead of visible=false so PIXI hit-testing still works.
+  // [SENTINEL FIX] 1e-6 allows us to distinguish from user-set alpha=0.
   pixiObject._tiltHidden = true
-  pixiObject.alpha = 0
+  pixiObject.alpha = TILT_HIDE_SENTINEL
 
   syncTiltMesh(pixiObject, null)
 
@@ -1364,11 +1370,12 @@ export function syncTiltMesh(pixiObject, layer) {
   // alpha GSAP tried to write as the "intended" displayed opacity, which
   // we forward to mesh.alpha so fades still look right on the mesh.
   if (pixiObject._tiltHidden) {
-    if (pixiObject.alpha !== 0) {
-      // Some other tween (FadeAction) wrote to the original's alpha.
-      // Capture that as the intended displayed alpha then re-hide.
+    if (Math.abs(pixiObject.alpha - TILT_HIDE_SENTINEL) > 1e-7) {
+      // Some other tween (FadeAction) or direct write (useCanvasLayers) 
+      // wrote to the original's alpha. Capture that as the intended 
+      // displayed alpha then re-hide.
       pixiObject._intendedAlpha = pixiObject.alpha
-      pixiObject.alpha = 0
+      pixiObject.alpha = TILT_HIDE_SENTINEL
     }
     // _intendedAlpha is the single source of truth for displayed opacity
     // when tilted — interactive code (useCanvasLayers step 6) writes the
@@ -1488,6 +1495,7 @@ export function removeTiltFromObject(pixiObject) {
 
   if (!pixiObject.destroyed && pixiObject._tiltHidden) {
     // Restore the displayed opacity that the tilt system was hiding.
+    // [SENTINEL FIX] Re-assert the intended alpha once the sentinel is gone.
     const restoreAlpha = (typeof pixiObject._intendedAlpha === 'number') ? pixiObject._intendedAlpha : 1
     pixiObject.alpha = restoreAlpha
     delete pixiObject._tiltHidden
