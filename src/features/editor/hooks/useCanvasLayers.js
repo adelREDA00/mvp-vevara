@@ -342,6 +342,19 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // Allow base state updates ONLY if at scene start (even if editing base)
   const shouldApplyBaseState = isAtSceneStart
 
+  // 4. Metadata & Muted State Synchronization (CRITICAL for Video playback)
+  // This must happen even during playback to ensure scene switches and mute toggles are reactive.
+  if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
+    // [FIX] Always sync video timing metadata — this is read by syncMedia, not a visual transform.
+    // This ensures the video element knows its correct offset even if a scene switch happens mid-playback.
+    displayObject._sourceStartTime = layer.data?.sourceStartTime || 0
+    displayObject._sourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0)
+
+    // Sync muted state dynamically.
+    const isMuted = layer.data?.muted !== false;
+    displayObject._layerMuted = isMuted; // [BUG FIX] Pass flag to MotionEngine for playback sync
+  }
+
   // Skip updates during playback unless forced (GSAP is in control)
   if (isActuallyPlaying && !force) {
     return
@@ -418,23 +431,6 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
       if (displayObject.anchor.x !== anchorX) displayObject.anchor.set(anchorX, 0)
       displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
-    } else if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
-      // [FIX] Always sync video timing metadata — this is read by syncMedia, not a visual transform.
-      // This ensures the video element knows its correct offset even if a scene switch happens mid-playback.
-      displayObject._sourceStartTime = layer.data?.sourceStartTime || 0
-      displayObject._sourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0)
-
-      // Sync muted state dynamically.
-      // Muting is always safe, but unmuting requires prior user interaction
-      // (browser autoplay policy). Only unmute when the engine is actively
-      // playing, which guarantees the user clicked "play" first.
-      if (displayObject._videoElement) {
-        const isMuted = layer.data?.muted !== false;
-        if (displayObject._videoElement.muted !== isMuted) {
-          displayObject._videoElement.muted = isMuted;
-        }
-      }
-
       if (force || capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)) {
         const sprite = displayObject._imageSprite || displayObject._videoSprite
         const cropMask = displayObject._cropMask
@@ -784,6 +780,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
   const projectStatus = useSelector(state => state?.project?.status || 'idle')
 
   // Build a project-wide layer order (concatenating all scenes)
+  // We need a stable reference to all project layers, not just the current scene,
+  // to properly manage assets like backgrounds that might persist across scenes,
+  // and so MotionEngine can toggle their visibility during continuous project playback.
   const layerOrder = useMemo(() => {
     return scenes.reduce((acc, scene) => [...acc, ...scene.layers], [])
   }, [scenes])
@@ -899,6 +898,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             }
 
             adoptedObject = oldObj
+
+            // [ENGINE CLEANUP] Unregister the old ID from the engine immediately 
+            // so it doesn't continue syncing stale range/muted state for the same object.
+            try {
+              engine.unregisterLayerObject(oldId)
+            } catch (e) {}
+
             layerObjects.delete(oldId)
             createdLayers.delete(oldId)
             break
@@ -1182,6 +1188,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     // visual stacking. Tracked across the loop.
     let placedMeshOffset = 0
 
+    // console.time(`[useCanvasLayers] update-loop-${currentScene?.id}`)
+    // console.time(`[useCanvasLayers] update-loop-${currentScene?.id}`)
     layerOrder.forEach((layerId, desiredIndex) => {
       const layer = layers?.[layerId]
       const pixiObject = layerObjects.get(layerId)
@@ -1189,7 +1197,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
       // UPDATE [Sync]: Ensure MotionEngine always has the latest metadata (especially sceneId)
       // This handles cases where a layer is moved between scenes or updated.
-      engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
+      if (!engine.registeredObjects.has(layerId) || pixiObject._sceneId !== layer.sceneId) {
+        if (layer.type === LAYER_TYPES.VIDEO || (layer.type === LAYER_TYPES.FRAME && layer.data?.assetIsVideo)) {
+          // console.log(`[useCanvasLayers] Syncing video layer ${layerId} to scene ${layer.sceneId}`)
+        }
+        engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
+      }
 
       const isLayerCaptured = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.has(layerId)
       // [TILT/CAPTURE] Live capture state for this layer.  Color picker writes
@@ -1691,9 +1704,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             pixiObject._sourceStartTime = layer.data?.sourceStartTime ?? 0
             pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
 
-            if (oldStart !== pixiObject._sourceStartTime) {
-              console.log(`[useCanvasLayers] Video time range updated: ${layerId}, sourceStartTime=${pixiObject._sourceStartTime}, sourceEndTime=${pixiObject._sourceEndTime}`)
-            }
+
 
             if (!isActuallyPlaying && (isLayerCaptured || isAtSceneStart)) {
               const mediaW = layer.mediaWidth ?? layer.width ?? 100
@@ -1834,6 +1845,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         placedMeshOffset += 1
       }
     })
+    // console.timeEnd(`[useCanvasLayers] update-loop-${currentScene?.id}`)
 
     // 3. LAYER REMOVAL
     const currentLayerIds = new Set(layerOrder)
@@ -1856,6 +1868,11 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         } else {
           pixiObject.destroy()
         }
+
+        // [ENGINE CLEANUP] Properly unregister from MotionEngine to stop playback/sync
+        try {
+          engine.unregisterLayerObject(layerId)
+        } catch (e) {}
 
         layerObjects.delete(layerId)
         createdLayers.delete(layerId)

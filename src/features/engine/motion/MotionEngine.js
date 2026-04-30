@@ -351,19 +351,40 @@ export class MotionEngine {
   unregisterLayerObject(layerId) {
     // [PERF] Clean up video indexes
     const obj = this.registeredObjects.get(layerId)
-    if (obj?._videoElement) {
-      this._videoObjects.delete(layerId)
-      // Only remove from tracked videos if not also in backgroundMedia
-      let stillTracked = false
-      this.backgroundMedia.forEach((data) => {
-        if (data._videoElement === obj._videoElement) stillTracked = true
-      })
-      if (!stillTracked) {
-        this._allTrackedVideos.delete(obj._videoElement)
+    if (obj) {
+      if (obj._videoElement) {
+        
+        // [SCENE CUT FIX] Explicitly check if this video element is still being used 
+        // by another registered layer before pausing it. If it's shared (e.g. split segments),
+        // let the other layer manage its playback and muted state to avoid audio glitches.
+        let isShared = false
+        this.registeredObjects.forEach((otherObj, otherId) => {
+          if (otherId !== layerId && otherObj._videoElement === obj._videoElement) {
+            isShared = true
+          }
+        })
+
+        if (!isShared) {
+          try {
+            obj._videoElement.pause()
+            obj._videoElement.muted = true
+            this._activeVideoElements.delete(obj._videoElement)
+          } catch (e) {}
+        }
+
+        this._videoObjects.delete(layerId)
+        // Only remove from tracked videos if not also in backgroundMedia
+        let stillTracked = false
+        this.backgroundMedia.forEach((data) => {
+          if (data._videoElement === obj._videoElement) stillTracked = true
+        })
+        if (!stillTracked) {
+          this._allTrackedVideos.delete(obj._videoElement)
+        }
       }
+      this.registeredObjects.delete(layerId)
+      this.unloadMotionFlow(layerId)
     }
-    this.registeredObjects.delete(layerId)
-    this.unloadMotionFlow(layerId)
   }
 
   /**
@@ -732,9 +753,7 @@ export class MotionEngine {
             ? action.values.duration / 1000
             : stepDuration
 
-          if (action.type === 'typewriter') {
-            console.log(`[DEBUG] MotionEngine: preparing typewriter action for ${layerId}`, { stepStartTime, actionDuration })
-          }
+
 
           // Clamp: never let a tween extend past the scene boundary
           const maxDuration = sceneEndTime - stepStartTime
@@ -762,9 +781,7 @@ export class MotionEngine {
           builder.timeline.add((gsapTimeline) => {
             const tween = handler.execute(pixiObject, action, actionOptions)
             if (tween) {
-              if (action.type === 'typewriter') {
-                console.log(`[DEBUG] MotionEngine: adding typewriter tween to timeline for ${layerId}`)
-              }
+
               gsapTimeline.add(tween, stepStartTime)
             }
           })
@@ -811,7 +828,6 @@ export class MotionEngine {
               if (dangle !== 0) updatedDeltas.add('rotation')
             }
           } else if (action.type === 'typewriter') {
-            console.log(`[DEBUG] MotionEngine: updating state tracker for typewriter ${layerId}`)
             state.revealProgress = 1
             state.opacity = 1
           } else if (action.type === 'fade') {
@@ -945,6 +961,11 @@ export class MotionEngine {
 
     // Logic to calculate intent for a given object/data
     const processObject = (obj, id) => {
+      if (!obj || obj.destroyed) {
+        // [PERF] Cleanup stale objects discovered during sync pass
+        if (id) this._videoObjects.delete(id)
+        return
+      }
       let videoElement = obj._videoElement
       if (!videoElement) {
         // [SYNC TARGET FIX] Search all possible sprite slots for an active video resource.
@@ -986,6 +1007,8 @@ export class MotionEngine {
         const startTime = range.startTime
         const endTime = range.endTime
         const inRange = currentTime >= startTime - 0.001 && currentTime < endTime
+        
+
 
         if (inRange) {
           const sourceStart = obj._sourceStartTime || 0
@@ -1011,7 +1034,13 @@ export class MotionEngine {
           // [VIDEO-IN-FRAME FIX] Carry the in-range layer's muted preference.
           // This ensures that after a scene split, the muted state comes from
           // the segment that is actually playing, not from a stale reference.
-          intent.layerMuted = obj._layerMuted !== undefined ? obj._layerMuted : true
+          // [ROBUSTNESS] If multiple objects for the same element are in range, 
+          // any UNMUTED preference takes precedence to prevent audio flickering.
+          const objMuted = obj._layerMuted !== undefined ? obj._layerMuted : true
+
+          if (intent.layerMuted !== false) {
+            intent.layerMuted = objMuted
+          }
         } else {
           // Pass 2: Pre-seek lookahead
           const timeUntilStart = startTime - currentTime
@@ -1027,7 +1056,11 @@ export class MotionEngine {
     }
 
     // 1. Process video-bearing PIXI objects only (skips text, shape, image layers)
-    // [PERF] Uses _videoObjects index instead of full registeredObjects iteration
+    const isActuallyPlaying = this.isPlaying && !this.isInternalPaused
+
+
+
+    // Pass 1: Harvest intents from all registered video objects
     this._videoObjects.forEach((obj, id) => processObject(obj, id))
 
     // 2. Process background media (not on stage but in project)
@@ -1111,9 +1144,28 @@ export class MotionEngine {
       if (this._muteVideosForFastPreview) {
         videoElement.muted = true
       } else if (intent.inAnyRange) {
-        // [VIDEO-IN-FRAME FIX] Apply per-layer muted state for the in-range segment.
-        // This is critical after scene splits where two segments share one HTMLVideoElement
-        // but need independent mute/unmute control.
+        // [SYNC] Resume if in range
+        if (intent.shouldPlay && videoElement.paused && !videoElement._playPending) {
+          videoElement._playPending = true
+          const playPromise = videoElement.play()
+          if (playPromise !== undefined) {
+            playPromise.then(() => {
+              videoElement._playPending = false
+            }).catch((err) => {
+              videoElement._playPending = false
+              // [AUTOPLAY POLICY FIX] If the browser blocks unmuted playback,
+              // it forcefully pauses the video. We must fallback to muted playback
+              // to prevent the engine from infinitely trying to play it and causing a stutter loop.
+              if (err.name === 'NotAllowedError') {
+                console.warn(`[MotionEngine] Autoplay blocked for ${intent.layerId}. Falling back to muted.`)
+                videoElement.muted = true
+                videoElement.play().catch(() => {}) // Try again muted
+              }
+            })
+          } else {
+             videoElement._playPending = false
+          }
+        }
         const shouldMute = intent.layerMuted !== false
         if (videoElement.muted !== shouldMute) {
           videoElement.muted = shouldMute

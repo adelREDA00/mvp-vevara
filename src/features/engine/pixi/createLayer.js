@@ -948,19 +948,19 @@ export async function createVideoLayer(config) {
     throw new Error('Video layer requires data.url or data.src')
   }
 
-  // [ROBUST FIX] Index cache by layerId to ensure instance stability.
-  // Using layerId ensures that as long as the layer exists in the project,
-  // it keeps its dedicated video element.
-  const cacheKey = config.id
+  // [ROBUST FIX] Index cache by sourceId to ensure instance stability across split segments.
+  // Using sourceId ensures that split segments of the same original video share the
+  // exact same HTMLVideoElement and hardware decoder, preventing audio stutter and
+  // buffer exhaustion when multiple segments are in the project.
+  const cacheKey = config.sourceId || config.id
   if (!cacheKey) {
-    throw new Error('Video layer requires a unique config.id for caching')
+    throw new Error('Video layer requires a unique config.id or config.sourceId for caching')
   }
 
   // [FIX] Cancel any pending release if the layer is re-requested
   if (releaseTimers.has(cacheKey)) {
     clearTimeout(releaseTimers.get(cacheKey))
     releaseTimers.delete(cacheKey)
-    // console.log(`[createVideoLayer] Cancelled deferred release for layer: ${cacheKey}`)
   }
 
   let texture
@@ -969,7 +969,6 @@ export async function createVideoLayer(config) {
     // If the URL has changed for the same layer ID, update the source
     const currentSrc = videoElement.src || ''
     if (videoUrl && !currentSrc.includes(videoUrl)) {
-      console.log(`[createVideoLayer] URL changed for layer ${cacheKey}, updating src`)
       videoElement.pause()
       // [CORS FIX] Always re-enforce crossOrigin BEFORE setting src on reuse
       videoElement.crossOrigin = 'anonymous' 
@@ -984,7 +983,6 @@ export async function createVideoLayer(config) {
     if (videoUrl.startsWith('blob:')) {
       // If NOT in cache, create and prepare
       if (!videoElement) {
-        console.log(`[createVideoLayer] Creating new video element for ${config.sceneId}: ${videoUrl}`)
         // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
         videoElement = document.createElement('video')
         videoElement.crossOrigin = 'anonymous'
@@ -1004,7 +1002,6 @@ export async function createVideoLayer(config) {
         videoElement.play = function () {
           const engine = getGlobalMotionEngine()
           if (engine && !engine.isPlaying) {
-            // console.log("🛑 [createVideoLayer] Blocking accidental video.play() because engine is paused")
             return Promise.resolve()
           }
           return originalPlay.apply(this, arguments)
