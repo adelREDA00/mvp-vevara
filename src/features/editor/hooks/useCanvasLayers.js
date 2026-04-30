@@ -431,6 +431,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
 
       if (displayObject.anchor.x !== anchorX) displayObject.anchor.set(anchorX, 0)
       displayObject.pivot.set((0.5 - anchorX) * currentWidth, actualHeight / 2)
+    } else if (displayObject._imageSprite || displayObject._videoSprite) {
       if (force || capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)) {
         const sprite = displayObject._imageSprite || displayObject._videoSprite
         const cropMask = displayObject._cropMask
