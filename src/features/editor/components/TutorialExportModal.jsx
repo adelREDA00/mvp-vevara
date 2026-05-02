@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import Modal from './Modal';
-import { Download, Film, Image as ImageIcon } from 'lucide-react';
+import { Download, Film, Image as ImageIcon, Award, X, ChevronDown } from 'lucide-react';
 import { ThemeContext } from '../../../app/context/ThemeContext';
 
 const VIDEO_OPTIONS = [
-  { id: '720p', label: '720p (HD)', description: 'Fast export, good for social media' },
-  { id: '1080p', label: '1080p (Full HD)', description: 'Recommended for best quality/speed' },
-  { id: '1440p', label: '2K (QHD)', description: 'High resolution for sharp displays' },
+  { id: '720p', label: '720p (HD)', description: 'Fast export' },
+  { id: '1080p', label: '1080p (Full HD)', description: 'Recommended ' },
+  { id: '1440p', label: '2K (QHD)', description: 'High resolution ' },
   { id: '2160p', label: '4K (Ultra HD)', description: 'Highest quality, takes more time' },
 ];
 
@@ -93,13 +93,39 @@ const TutorialExportModal = ({ isOpen, onClose, onExport, initialFormat = 'mp4' 
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Export Your Animation"
+      title={null}
+      showCloseButton={false}
       maxWidth="max-w-md"
     >
-      <div className="space-y-5">
-        <p className={`text-sm ${isLight ? 'text-gray-500' : 'text-white/60'}`}>
-          Pick an output format and quality, then export your work.
-        </p>
+      <div className="relative space-y-5 pt-2">
+        {/* Manual Close Button inside content */}
+        <button
+          onClick={onClose}
+          className={`absolute -top-4 -right-4 p-2 rounded-full transition-all ${isLight ? 'hover:bg-black/5 text-gray-400' : 'hover:bg-white/5 text-white/40'}`}
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className={`p-5 rounded-2xl border ${isLight ? 'bg-gray-50/50 border-gray-200' : 'bg-white/5 border-white/10'}`}>
+          <div className="flex items-start gap-4">
+            <div className={`mt-1 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${isLight ? 'bg-white shadow-black/5' : 'bg-black shadow-white/5'} overflow-hidden`}>
+              <img src="/apple.webp" className="w-6 h-6 object-contain" alt="Apple" />
+            </div>
+            <div className="space-y-2">
+              <h3 className={`font-bold text-lg leading-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
+                Congrats! You're ready.
+              </h3>
+              <p className={`text-[13px] leading-relaxed ${isLight ? 'text-gray-600' : 'text-white/70'}`}>
+                You are now ready to be a motion designer at <span className={`font-bold ${isLight ? 'text-gray-900' : 'text-white'}`}>Apple</span>.
+                Download your project, add it to your CV, and submit it.
+              </p>
+
+              <div className={`py-1 px-2.5 rounded-lg border ${isLight ? 'bg-amber-50 text-amber-700 border-amber-200/50' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'} text-[10px] font-bold inline-flex items-center gap-2`}>
+                <span className="opacity-90">If they say no, try again in 4K.</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className={`flex gap-2 p-1 rounded-xl ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
           <button type="button" className={tabClass(format === 'mp4')} onClick={() => setFormat('mp4')}>
@@ -111,130 +137,84 @@ const TutorialExportModal = ({ isOpen, onClose, onExport, initialFormat = 'mp4' 
         </div>
 
         {format === 'mp4' && (
-          <div className="grid gap-3">
-            {VIDEO_OPTIONS.map((option) => (
-              <label
-                key={option.id}
-                className={`flex items-start gap-3 p-4 rounded-xl border transition-all cursor-pointer group ${selectedResolution === option.id
-                  ? 'bg-[#7c4af0]/10 border-[#7c4af0] shadow-[0_0_20px_rgba(124,74,240,0.1)]'
-                  : (isLight ? 'bg-black/5 border-black/5 hover:bg-black/10 hover:border-black/10' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20')
+          <div className="space-y-1.5">
+            <label className={`text-[10px] font-bold uppercase tracking-widest ml-1 ${isLight ? 'text-gray-400' : 'text-white/40'}`}>
+              Resolution
+            </label>
+            <div className="relative">
+              <select
+                value={selectedResolution}
+                onChange={(e) => setSelectedResolution(e.target.value)}
+                className={`w-full appearance-none pl-4 pr-10 py-3 rounded-xl border text-[13px] font-bold transition-all outline-none cursor-pointer ${isLight
+                  ? 'bg-black/5 border-transparent hover:bg-black/10 text-gray-900'
+                  : 'bg-white/5 border-transparent hover:bg-white/10 text-white'
                   }`}
               >
-                <div className="pt-0.5">
-                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${selectedResolution === option.id
-                    ? 'border-[#7c4af0] bg-[#7c4af0]'
-                    : (isLight ? 'border-black/20 bg-transparent' : 'border-white/30 bg-transparent')
-                    }`}>
-                    {selectedResolution === option.id && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    )}
-                  </div>
-                </div>
-                <input
-                  type="radio"
-                  name="resolution"
-                  value={option.id}
-                  checked={selectedResolution === option.id}
-                  onChange={() => setSelectedResolution(option.id)}
-                  className="hidden"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[13px] font-bold ${selectedResolution === option.id
-                      ? (isLight ? 'text-gray-900' : 'text-white')
-                      : (isLight ? 'text-gray-700' : 'text-white/80')
-                      }`}>
-                      {option.label}
-                    </span>
-                  </div>
-                  <p className={`text-[11px] mt-0.5 group-hover:transition-colors ${isLight ? 'text-gray-400 group-hover:text-gray-600' : 'text-white/40 group-hover:text-white/50'}`}>
-                    {option.description}
-                  </p>
-                </div>
-              </label>
-            ))}
+                {VIDEO_OPTIONS.map(opt => (
+                  <option key={opt.id} value={opt.id}>{opt.label} — {opt.description}</option>
+                ))}
+              </select>
+              <div className={`absolute right-4 top-1/2 -translateY-1/2 pointer-events-none ${isLight ? 'text-gray-400' : 'text-white/40'}`}>
+                <ChevronDown className="w-4 h-4" />
+              </div>
+            </div>
           </div>
         )}
 
         {format === 'gif' && (
-          <div className="space-y-4">
-            <div>
-              <div className={`text-[11px] font-bold uppercase tracking-wide mb-2 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>Width</div>
-              <div className="flex gap-2">
-                {GIF_WIDTH_OPTIONS.map((opt) => {
-                  const disabled = restrictLargeGif && opt.value >= 720;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      disabled={disabled}
-                      title={disabled ? 'Not available on this device' : (opt.recommended ? `${opt.description} · Recommended` : opt.description)}
-                      onClick={() => !disabled && setGifWidth(opt.value)}
-                      className={`relative ${segmentClass(gifWidth === opt.value, disabled)}`}
-                    >
-                      {opt.recommended && !disabled && (
-                        <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#7c4af0]" aria-label="Recommended" />
-                      )}
-                      {opt.label}
-                      <span className={`block text-[10px] font-normal mt-0.5 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>
-                        {opt.description}
-                      </span>
-                    </button>
-                  );
-                })}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className={`text-[10px] font-bold uppercase tracking-widest ml-1 ${isLight ? 'text-gray-400' : 'text-white/40'}`}>Size</label>
+              <div className="relative">
+                <select
+                  value={gifWidth}
+                  onChange={(e) => setGifWidth(Number(e.target.value))}
+                  className={`w-full appearance-none pl-3 pr-8 py-2.5 rounded-xl border text-[12px] font-bold transition-all outline-none cursor-pointer ${isLight ? 'bg-black/5 border-transparent text-gray-900' : 'bg-white/5 border-transparent text-white'
+                    }`}
+                >
+                  {GIF_WIDTH_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value} disabled={restrictLargeGif && opt.value >= 720}>
+                      {opt.label} ({opt.description})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translateY-1/2 w-3.5 h-3.5 pointer-events-none opacity-40" />
               </div>
             </div>
 
-            <div>
-              <div className={`text-[11px] font-bold uppercase tracking-wide mb-2 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>Frame Rate</div>
-              <div className="flex gap-2">
-                {GIF_FPS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    title={opt.recommended ? `${opt.description} · Recommended` : opt.description}
-                    onClick={() => setGifFps(opt.value)}
-                    className={`relative ${segmentClass(gifFps === opt.value, false)}`}
-                  >
-                    {opt.recommended && (
-                      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#7c4af0]" aria-label="Recommended" />
-                    )}
-                    {opt.label}
-                    <span className={`block text-[10px] font-normal mt-0.5 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>
-                      {opt.description}
-                    </span>
-                  </button>
-                ))}
+            <div className="space-y-1.5">
+              <label className={`text-[10px] font-bold uppercase tracking-widest ml-1 ${isLight ? 'text-gray-400' : 'text-white/40'}`}>FPS</label>
+              <div className="relative">
+                <select
+                  value={gifFps}
+                  onChange={(e) => setGifFps(Number(e.target.value))}
+                  className={`w-full appearance-none pl-3 pr-8 py-2.5 rounded-xl border text-[12px] font-bold transition-all outline-none cursor-pointer ${isLight ? 'bg-black/5 border-transparent text-gray-900' : 'bg-white/5 border-transparent text-white'
+                    }`}
+                >
+                  {GIF_FPS_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translateY-1/2 w-3.5 h-3.5 pointer-events-none opacity-40" />
               </div>
             </div>
 
-            <div>
-              <div className={`text-[11px] font-bold uppercase tracking-wide mb-2 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>Loop</div>
-              <div className="flex gap-2">
-                {GIF_LOOP_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    title={opt.recommended ? `${opt.description} · Recommended` : opt.description}
-                    onClick={() => setGifLoop(opt.value)}
-                    className={`relative ${segmentClass(gifLoop === opt.value, false)}`}
-                  >
-                    {opt.recommended && (
-                      <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#7c4af0]" aria-label="Recommended" />
-                    )}
-                    {opt.label}
-                    <span className={`block text-[10px] font-normal mt-0.5 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>
-                      {opt.description}
-                    </span>
-                  </button>
-                ))}
+            <div className="col-span-2 space-y-1.5">
+              <label className={`text-[10px] font-bold uppercase tracking-widest ml-1 ${isLight ? 'text-gray-400' : 'text-white/40'}`}>Playback</label>
+              <div className="relative">
+                <select
+                  value={gifLoop}
+                  onChange={(e) => setGifLoop(Number(e.target.value))}
+                  className={`w-full appearance-none pl-3 pr-8 py-2.5 rounded-xl border text-[12px] font-bold transition-all outline-none cursor-pointer ${isLight ? 'bg-black/5 border-transparent text-gray-900' : 'bg-white/5 border-transparent text-white'
+                    }`}
+                >
+                  {GIF_LOOP_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label} Loop</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translateY-1/2 w-3.5 h-3.5 pointer-events-none opacity-40" />
               </div>
             </div>
-
-            <p className={`text-[11px] ${isLight ? 'text-gray-400' : 'text-white/40'}`}>
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#7c4af0] align-middle mr-1.5" />
-              Recommended for balanced quality and file size.
-            </p>
           </div>
         )}
 

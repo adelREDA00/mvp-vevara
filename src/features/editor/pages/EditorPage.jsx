@@ -50,29 +50,31 @@ import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
 
 const GUEST_TEMPLATE = {
   "_id": {
-    "$oid": "69f08fecef54587ef230286d"
+    "$oid": "69f5d34d1ddc8874b835c92e"
   },
-  "name": "Practice Project",
+  "name": "Neo ad",
   "data": {
     "scenes": [
       {
-        "id": "1777373164687-ecqgrefh8",
+        "id": "1777394115352-5p0okafwj",
         "name": "Scene 1",
         "duration": 5,
         "transition": "None",
-        "backgroundColor": 16777215,
+        "backgroundColor": 15856113,
         "layers": [
-          "1777373164687-cov3n8kle",
-          "1777373326863-2cyb676aw",
-          "1777373237682-8gmica6fv",
-          "1777373353502-yg9n4un0c"
+          "1777394115352-hlscwzswo",
+          "1777394171951-5iyfnybr5",
+          "1777394202967-rj4crwnek",
+          "1777394226479-1py7dlm45",
+          "1777394240295-9l2lwentt",
+          "1777718680408-qq66fh3mp"
         ]
       }
     ],
     "layers": {
-      "1777373164687-cov3n8kle": {
-        "id": "1777373164687-cov3n8kle",
-        "sceneId": "1777373164687-ecqgrefh8",
+      "1777394115352-hlscwzswo": {
+        "id": "1777394115352-hlscwzswo",
+        "sceneId": "1777394115352-5p0okafwj",
         "type": "background",
         "name": "Background",
         "visible": true,
@@ -80,31 +82,155 @@ const GUEST_TEMPLATE = {
         "opacity": 1,
         "x": 0,
         "y": 0,
-        "width": 1920,
-        "height": 1080,
+        "width": 1080,
+        "height": 1920,
         "rotation": 0,
         "scaleX": 1,
         "scaleY": 1,
         "anchorX": 0,
         "anchorY": 0,
         "data": {
-          "color": 16777215
+          "color": 15856113
         },
-        "createdAt": 1777373164687,
-        "updatedAt": 1777373164687
+        "createdAt": 1777394115352,
+        "updatedAt": 1777394126045
       },
-      "1777373237682-8gmica6fv": {
-        "id": "1777373237682-8gmica6fv",
-        "sceneId": "1777373164687-ecqgrefh8",
+      "1777394171951-5iyfnybr5": {
+        "id": "1777394171951-5iyfnybr5",
+        "sceneId": "1777394115352-5p0okafwj",
+        "type": "text",
+        "name": "text Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 540,
+        "y": 297.4940816331111,
+        "width": 819.0078006110506,
+        "height": 156,
+        "rotation": 0,
+        "blur": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "content": "Hello, Neo.",
+          "fontSize": 126.28506726296658,
+          "color": "#000000",
+          "fontFamily": "Montserrat",
+          "fontWeight": "bold",
+          "textAlign": "center"
+        },
+        "createdAt": 1777394171951,
+        "updatedAt": 1777718705841
+      },
+      "1777394202967-rj4crwnek": {
+        "id": "1777394202967-rj4crwnek",
+        "sceneId": "1777394115352-5p0okafwj",
+        "type": "text",
+        "name": "text Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 540,
+        "y": 410.96127951112385,
+        "width": 400.00006935813207,
+        "height": 51,
+        "rotation": 0,
+        "blur": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "content": "www.apple.com",
+          "fontSize": 40.93023481381029,
+          "color": "#000000",
+          "fontFamily": "Inter",
+          "fontWeight": "normal",
+          "textAlign": "center"
+        },
+        "createdAt": 1777394202967,
+        "updatedAt": 1777718714124
+      },
+      "1777394226479-1py7dlm45": {
+        "id": "1777394226479-1py7dlm45",
+        "sceneId": "1777394115352-5p0okafwj",
+        "type": "text",
+        "name": "text Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 540,
+        "y": 1522.154490301789,
+        "width": 677.3333062065974,
+        "height": 116.39999999999999,
+        "rotation": 0,
+        "blur": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "content": "Introducing MacBook Neo, an amazing Mac at a surprising price. With a durable design, beautiful colors, and powerful features, it’s a magical new way to fall head over heels with Mac, every day. Welcome to the family.",
+          "fontSize": 24,
+          "color": "#000000",
+          "fontFamily": "Inter",
+          "fontWeight": "normal",
+          "textAlign": "center"
+        },
+        "createdAt": 1777394226479,
+        "updatedAt": 1777718806964
+      },
+      "1777394240295-9l2lwentt": {
+        "id": "1777394240295-9l2lwentt",
+        "sceneId": "1777394115352-5p0okafwj",
+        "type": "text",
+        "name": "text Layer",
+        "visible": true,
+        "locked": false,
+        "opacity": 1,
+        "x": 540,
+        "y": 1670.0968271227346,
+        "width": 559.1111924913196,
+        "height": 79,
+        "rotation": 0,
+        "blur": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tiltX": 0,
+        "tiltY": 0,
+        "anchorX": 0,
+        "anchorY": 0,
+        "data": {
+          "content": "Love at first Mac.",
+          "fontSize": 64,
+          "color": "#000000",
+          "fontFamily": "Inter",
+          "fontWeight": "bold",
+          "textAlign": "center"
+        },
+        "createdAt": 1777394240295,
+        "updatedAt": 1777718813251
+      },
+      "1777718680408-qq66fh3mp": {
+        "id": "1777718680408-qq66fh3mp",
+        "sceneId": "1777394115352-5p0okafwj",
         "type": "image",
-        "name": "Apple Logo",
+        "name": "Mac Image",
         "visible": true,
         "locked": false,
         "opacity": 1,
-        "x": 960,
-        "y": 540,
-        "width": 141.52010952101497,
-        "height": 152.2100586215986,
+        "x": 540,
+        "y": 960,
+        "width": 482.64198461473245,
+        "height": 337.81594210733186,
         "rotation": 0,
         "blur": 0,
         "scaleX": 1,
@@ -114,117 +240,61 @@ const GUEST_TEMPLATE = {
         "anchorX": 0.5,
         "anchorY": 0.5,
         "data": {
-          "url": "/apple.webp",
-          "src": "/apple.webp",
-          "width": 3840,
-          "height": 2160,
+          "url": "/mac.png",
+          "src": "/mac.png",
+          "width": 1443,
+          "height": 1010,
           "duration": 0,
-          "mimeType": "image/webp",
-          "size": 39742,
-          "type": "image/webp"
+          "mimeType": "image/png",
+          "size": 1149597,
+          "type": "image/png"
         },
-        "createdAt": 1777373237683,
-        "updatedAt": 1777374236051,
-        "cropX": 61.93310660460103,
+        "createdAt": 1777718680408,
+        "updatedAt": 1777718830375,
+        "cropX": 0,
         "cropY": 0,
-        "cropWidth": 141.52010952101497,
-        "cropHeight": 152.2100586215986,
-        "mediaWidth": 270.5956597717308,
-        "mediaHeight": 152.2100586215986
-      },
-      "1777373326863-2cyb676aw": {
-        "id": "1777373326863-2cyb676aw",
-        "sceneId": "1777373164687-ecqgrefh8",
-        "type": "shape",
-        "name": "shape Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 960,
-        "y": 540,
-        "width": 262.4933268746523,
-        "height": 262.4933268746523,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0.5,
-        "anchorY": 0.5,
-        "data": {
-          "shapeType": "rect",
-          "fill": "#EEEEEE",
-          "stroke": "",
-          "strokeWidth": 0
-        },
-        "createdAt": 1777373326863,
-        "updatedAt": 1777374238987
-      },
-      "1777373353502-yg9n4un0c": {
-        "id": "1777373353502-yg9n4un0c",
-        "sceneId": "1777373164687-ecqgrefh8",
-        "type": "shape",
-        "name": "shape Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 2045.9236926129706,
-        "y": 843.2510783699869,
-        "width": 108.99024309438768,
-        "height": 109.6099800681689,
-        "rotation": -113.30681136419732,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0.5,
-        "anchorY": 0.5,
-        "data": {
-          "shapeType": "arrowhead",
-          "fill": "#000000",
-          "stroke": "",
-          "strokeWidth": 0
-        },
-        "createdAt": 1777373353503,
-        "updatedAt": 1777373876981
+        "cropWidth": 482.64198461473245,
+        "cropHeight": 337.81594210733186,
+        "mediaWidth": 482.64198461473245,
+        "mediaHeight": 337.81594210733186
       }
     },
     "sceneMotionFlows": {
-      "1777373164687-ecqgrefh8": {
+      "1777394115352-5p0okafwj": {
         "steps": [
           {
-            "id": "step-1777374338141",
+            "id": "step-1777718833232",
             "layerActions": {
-              "1777373353502-yg9n4un0c": [
+              "1777718680408-qq66fh3mp": [
                 {
-                  "id": "action-1777374342475-move-1777373353502-yg9n4un0c",
-                  "type": "move",
+                  "id": "action-1777718836472-rotate-1777718680408-qq66fh3mp",
+                  "type": "rotate",
                   "duration": 2500,
                   "values": {
-                    "dx": -1254.2567221461263,
-                    "dy": -462.68389429105946,
-                    "controlPoints": [
-                      {
-                        "x": -1186.1256634936526,
-                        "y": -807.7362821108923
-                      },
-                      {
-                        "x": -1475.418617447251,
-                        "y": -680.0595869567421
-                      }
-                    ],
+                    "dangle": 24.369309584483613,
                     "easing": "power4.out",
                     "duration": 2500
                   }
                 },
                 {
-                  "id": "action-1777374346203-rotate-1777373353502-yg9n4un0c",
-                  "type": "rotate",
+                  "id": "action-1777718837678-move-1777718680408-qq66fh3mp",
+                  "type": "move",
                   "duration": 2500,
                   "values": {
-                    "dangle": 153.27977282057344,
+                    "dx": -402.60595209911617,
+                    "dy": 329.3205818313045,
+                    "controlPoints": [],
+                    "easing": "power4.out",
+                    "duration": 2500
+                  }
+                },
+                {
+                  "id": "action-1777718839999-scale-1777718680408-qq66fh3mp",
+                  "type": "scale",
+                  "duration": 2500,
+                  "values": {
+                    "dsx": 2.1097539428534327,
+                    "dsy": 2.1097539428534327,
                     "easing": "power4.out",
                     "duration": 2500
                   }
@@ -235,43 +305,43 @@ const GUEST_TEMPLATE = {
             "startTime": 0
           },
           {
-            "id": "step-1777374374452",
+            "id": "step-1777718851031",
             "layerActions": {
-              "1777373326863-2cyb676aw": [
+              "1777718680408-qq66fh3mp": [
                 {
-                  "id": "action-1777374378370-scale-1777373326863-2cyb676aw",
-                  "type": "scale",
+                  "id": "action-1777718854080-rotate-1777718680408-qq66fh3mp",
+                  "type": "rotate",
                   "duration": 2500,
                   "values": {
-                    "dsx": 5.318719744336486,
-                    "dsy": 1,
+                    "dangle": -52.25191741835761,
                     "easing": "power4.out",
                     "duration": 2500
                   }
-                }
-              ],
-              "1777373237682-8gmica6fv": [
+                },
                 {
-                  "id": "action-1777374378370-scale-1777373237682-8gmica6fv",
-                  "type": "scale",
-                  "duration": 2500,
-                  "values": {
-                    "dsx": 2,
-                    "dsy": 2,
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                }
-              ],
-              "1777373353502-yg9n4un0c": [
-                {
-                  "id": "action-1777374383443-move-1777373353502-yg9n4un0c",
+                  "id": "action-1777718855975-move-1777718680408-qq66fh3mp",
                   "type": "move",
                   "duration": 2500,
                   "values": {
-                    "dx": -569.2462978755264,
-                    "dy": -4.621620393206683,
-                    "controlPoints": [],
+                    "dx": 803.2091026805556,
+                    "dy": -96.00002358846473,
+                    "controlPoints": [
+                      {
+                        "x": 363.4948952414775,
+                        "y": 123.56822253225073
+                      }
+                    ],
+                    "easing": "power4.out",
+                    "duration": 2500
+                  }
+                },
+                {
+                  "id": "action-1777718866535-scale-1777718680408-qq66fh3mp",
+                  "type": "scale",
+                  "duration": 2500,
+                  "values": {
+                    "dsx": 0.7291468243517021,
+                    "dsy": 0.729146824351702,
                     "easing": "power4.out",
                     "duration": 2500
                   }
@@ -286,8 +356,9 @@ const GUEST_TEMPLATE = {
         "sceneStartOffset": 0
       }
     },
-    "aspectRatio": "16:9"
-  }
+    "aspectRatio": "9:16"
+  },
+  "thumbnail": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
 }
 
 function EditorPage() {
@@ -921,7 +992,7 @@ function EditorPage() {
 
   useEffect(() => {
     if (!isAuthenticated && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed) {
-      const isGuestTemplate = projectName === "blomberg style video " || projectName === "Practice Project";
+      const isGuestTemplate = projectName === "Neo ad";
       if (isGuestTemplate) {
         dispatch(startTutorial());
       }
@@ -932,7 +1003,7 @@ function EditorPage() {
   useEffect(() => {
     if (tutorialActive && tutorialStep === 4) {
       const updateRect = () => {
-        const layerId = "1777373237682-8gmica6fv"; // Apple Logo
+        const layerId = "1777718680408-qq66fh3mp"; // Apple Logo
         const transforms = motionControls?.getLayerCurrentTransforms();
         const t = transforms?.get(layerId);
 
@@ -941,14 +1012,21 @@ function EditorPage() {
         const pixiCanvas = canvasEl?.querySelector('canvas');
         const canvasRect = pixiCanvas?.getBoundingClientRect() || canvasEl?.getBoundingClientRect();
 
-        if (t?.visualRect && canvasRect) {
-          // PIXI visualRect is already in pixels relative to the canvas origin
-          // We just add the canvas's absolute screen position to get perfect window-space coordinates
+        const vp = motionControls?.getViewportData();
+
+        if (t?.visualRect && canvasRect && vp) {
+          // PIXI visualRect is in world pixels. 
+          // We need to convert it to screen (window) pixels using the viewport scale and position.
+          const screenX = canvasRect.left + (t.visualRect.x - vp.left) * vp.scale;
+          const screenY = canvasRect.top + (t.visualRect.y - vp.top) * vp.scale;
+          const screenW = t.visualRect.width * vp.scale;
+          const screenH = t.visualRect.height * vp.scale;
+
           setManualTutorialRect({
-            x: canvasRect.left + t.visualRect.x,
-            y: canvasRect.top + t.visualRect.y,
-            width: t.visualRect.width,
-            height: t.visualRect.height
+            x: screenX,
+            y: screenY,
+            width: screenW,
+            height: screenH
           });
         }
       };
@@ -990,7 +1068,7 @@ function EditorPage() {
   useEffect(() => {
     if (tutorialActive && tutorialStep === 4) {
       if (!hasSelectedTargetRef.current) {
-        const layerId = "1777373237682-8gmica6fv"; // Apple Logo
+        const layerId = "1777718680408-qq66fh3mp"; // Apple Logo
         dispatch(setSelectedLayer(layerId));
         hasSelectedTargetRef.current = true;
       }
@@ -1014,7 +1092,7 @@ function EditorPage() {
     if (tutorialActive && tutorialStep === 4 && motionCaptureMode?.isActive) {
       // Capture initial state
       const transforms = motionControls?.getLayerCurrentTransforms();
-      const target = transforms?.get("1777373237682-8gmica6fv");
+      const target = transforms?.get("1777718680408-qq66fh3mp");
       if (target && !initialTransformRef.current) {
         initialTransformRef.current = { x: target.x, y: target.y, scaleX: target.scaleX };
       }
@@ -1022,7 +1100,7 @@ function EditorPage() {
       // Start polling for change
       interval = setInterval(() => {
         const currentTransforms = motionControls?.getLayerCurrentTransforms();
-        const current = currentTransforms?.get("1777373237682-8gmica6fv");
+        const current = currentTransforms?.get("1777718680408-qq66fh3mp");
         const initial = initialTransformRef.current;
 
         if (current && initial) {
@@ -4486,8 +4564,8 @@ function EditorPage() {
                           key={item.label}
                           onClick={() => handleSidebarItemClick(item.label)}
                           className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${isActive
-                              ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white')
-                              : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
+                            ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white')
+                            : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
                             }`}
                         >
                           <Icon className="h-5 w-5 flex-shrink-0" strokeWidth={1.5} />

@@ -1207,6 +1207,7 @@ const projectSlice = createSlice({
       state.layers = project.layers || {}
       state.sceneMotionFlows = project.sceneMotionFlows || {}
       state.projectName = project.name || 'Untitled Project'
+      state.aspectRatio = project.aspectRatio || '16:9'
       state.currentSceneId = project.currentSceneId || project.currentProjectId || (state.scenes[0]?.id || null)
       state.status = 'succeeded'
       state.isDirty = false

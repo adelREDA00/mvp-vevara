@@ -234,7 +234,7 @@ function Stage({
     }
   }, [error, onError])
 
-  const getViewportSyncData = useCallback(() => {
+  const getViewportData = useCallback(() => {
     if (!viewport) return null
     const vp = viewport
 
@@ -263,10 +263,10 @@ function Stage({
 
   const triggerViewportChange = useCallback(() => {
     if (onViewportChange && viewport) {
-      const data = getViewportSyncData()
+      const data = getViewportData()
       if (data) onViewportChange(data)
     }
-  }, [viewport, onViewportChange, getViewportSyncData])
+  }, [viewport, onViewportChange, getViewportData])
 
   // Fire onReady prop when Pixi canvas is initialized
   useEffect(() => {
@@ -291,12 +291,12 @@ function Stage({
       }
     },
     getViewportData: () => {
-      return getViewportSyncData()
+      return getViewportData()
     },
     // Expose PixiJS objects for thumbnail capture and external rendering
     getApp: () => pixiApp,
     getLayersContainer: () => layersContainer,
-  }), [viewport, worldWidth, worldHeight, onViewportChange, getViewportSyncData, triggerViewportChange, pixiApp, layersContainer])
+  }), [viewport, worldWidth, worldHeight, onViewportChange, getViewportData, triggerViewportChange, pixiApp, layersContainer])
 
   // Create shared drag state API for both canvas interactions and selection box
   const dragStateAPI = useDragState()
@@ -352,19 +352,22 @@ function Stage({
         color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
         mediaWidth: obj.mediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,
         mediaHeight: obj.mediaHeight ?? obj._mediaHeight ?? obj._originalWidth ?? obj.height ?? 100,
-        visualRect: obj.getBounds ? (() => {
+        visualRect: (obj.getBounds && viewport) ? (() => {
           const bounds = obj.getBounds();
+          // Convert global screen bounds to world coordinates so EditorPage can apply its own scaling
+          const topLeft = viewport.toWorld(bounds.x, bounds.y);
+          const bottomRight = viewport.toWorld(bounds.x + bounds.width, bounds.y + bounds.height);
           return {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height
+            x: topLeft.x,
+            y: topLeft.y,
+            width: bottomRight.x - topLeft.x,
+            height: bottomRight.y - topLeft.y
           };
         })() : null
       })
     })
     return transforms
-  }, [layerObjects])
+  }, [layerObjects, viewport])
 
   // Helper to handle locked interaction feedback
   const handleLockedInteraction = useCallback((e) => {
@@ -545,8 +548,9 @@ function Stage({
     isPlaying,
     isBuffering,
     getLayerCurrentTransforms,
+    getViewportData,
     layerObjects
-  }), [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, layerObjects])
+  }), [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, getViewportData, layerObjects, viewport])
 
   useEffect(() => {
     if (onMotionStateChange) {
@@ -1529,7 +1533,7 @@ function Stage({
     if (!viewport || !onViewportChange) return
 
     const handleViewportChange = () => {
-      onViewportChange(getViewportSyncData())
+      onViewportChange(getViewportData())
     }
 
     viewport.on('moved', handleViewportChange)
@@ -1542,7 +1546,7 @@ function Stage({
       viewport.off('moved', handleViewportChange)
       viewport.off('zoomed', handleViewportChange)
     }
-  }, [viewport, onViewportChange, getViewportSyncData])
+  }, [viewport, onViewportChange, getViewportData])
 
   // Sync on Resize: Ensure scrollbars update when container size changes
   useEffect(() => {

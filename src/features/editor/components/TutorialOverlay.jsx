@@ -17,26 +17,33 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     if (step === 4 && manualTargetRect) {
       setTargetRect(manualTargetRect);
 
-      const modalWidth = 400;
+      const modalWidth = 280; // Approximate width on mobile
       const margin = 16;
       const offset = 40;
 
-      // Check if it fits on the left
-      // We need at least modalWidth + margin + offset space on the left of target
-      const fitsLeft = manualTargetRect.x > (modalWidth + margin + offset);
+      // Check horizontal space
+      const hasSpaceLeft = manualTargetRect.x > (modalWidth + margin + offset);
+      const hasSpaceRight = viewWidth - (manualTargetRect.x + manualTargetRect.width) > (modalWidth + margin + offset);
 
-      if (fitsLeft) {
+      if (hasSpaceLeft) {
         setHintPos({
           top: manualTargetRect.y + manualTargetRect.height / 2,
           left: manualTargetRect.x - offset,
           position: 'left'
         });
-      } else {
-        // Position to the RIGHT of the target
+      } else if (hasSpaceRight) {
         setHintPos({
           top: manualTargetRect.y + manualTargetRect.height / 2,
           left: manualTargetRect.x + manualTargetRect.width + offset,
           position: 'right'
+        });
+      } else {
+        // Fallback to TOP or BOTTOM if horizontal space is tight (common on vertical canvases)
+        const hasSpaceTop = manualTargetRect.y > 150;
+        setHintPos({
+          top: hasSpaceTop ? (manualTargetRect.y - 80) : (manualTargetRect.y + manualTargetRect.height + 80),
+          left: Math.max(modalWidth / 2 + margin, Math.min(viewWidth - modalWidth / 2 - margin, manualTargetRect.x + manualTargetRect.width / 2)),
+          position: hasSpaceTop ? 'top' : 'bottom'
         });
       }
       return;
@@ -163,12 +170,12 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
 
   const getHintText = () => {
     switch (step) {
-      case 1: return "Press Play to see the animation.";
-      case 2: return "This scene has 2 Steps. Each step changes the scene.";
+      case 1: return "Press play. You are about to animate Mac ad";
+      case 2: return "This Page has 2 Steps. Each step builds your animation.";
       case 3: return "Click 'Animate' to create Step 3.";
-      case 4: return "Scale it and move it down.";
+      case 4: return "Drag to center, rotate it, scale down";
       case 5: return "Click 'Save Step' to save Step 3.";
-      case 6: return "Nice. Click Play to see your animation.";
+      case 6: return "Nice.Press play and watch your Mac ad";
       default: return "";
     }
   }
