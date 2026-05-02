@@ -415,8 +415,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       data-tutorial="steps-area"
       className="absolute left-0 right-0 z-[120]"
       style={{
-        top: '-36px',
-        height: '36px',
+        top: '-44px',
+        height: '40px',
         pointerEvents: 'auto',
       }}
     >
@@ -455,7 +455,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
         style={{ cursor: 'pointer', pointerEvents: steps.some(s => (s.startTime || 0) < 100) ? 'none' : 'auto' }}
       >
         <span className="text-[7px] font-bold leading-none opacity-80">B</span>
-        <div className="hidden group-hover:block absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[9px] px-2 py-1 rounded-md shadow-lg whitespace-nowrap pointer-events-none z-50 border border-white/10">
+        <div className="hidden group-hover:block absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
           Base pose
         </div>
       </button> */}
@@ -480,7 +480,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
               style={{
                 left: `${leftPct}%`,
                 width: `${widthPct}%`,
-                height: '24px',
+                height: '28px',
               }}
             >
               {/* Left resize handle */}
@@ -494,10 +494,10 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: `${Math.max(isTouchDevice() ? 16 : 8, Math.min(isTouchDevice() ? 20 : 14, Math.floor(blockPx * 0.25)))}px`,
+                  width: `${Math.max(isTouchDevice() ? 24 : 12, Math.min(isTouchDevice() ? 32 : 20, Math.floor(blockPx * 0.3)))}px`,
                 }}
               >
-                <div className={`w-[3px] h-[10px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
+                <div className={`w-[4px] h-[16px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
                   }`} />
               </div>
 
@@ -537,7 +537,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                   document.addEventListener('touchmove', onMove, { passive: true })
                   document.addEventListener('touchend', onEnd, { once: true })
                 }}
-                className={`w-full h-full text-[8px] font-semibold tracking-wider uppercase flex items-center justify-center rounded-[5px] select-none transition-all duration-100 relative overflow-hidden
+                className={`w-full h-full text-[11px] font-bold tracking-wider uppercase flex items-center justify-center rounded-[6px] select-none transition-all duration-100 relative overflow-hidden
                   ${isActive
                     ? 'text-white shadow-md z-10'
                     : 'text-purple-200 hover:text-white'
@@ -553,7 +553,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
               >
                 <span className="truncate px-1 relative z-10">
                   S{i + 1}
-                  {isManual && <span className="text-[6px] opacity-40 ml-0.5">*</span>}
+                  {isManual && <span className="text-[7px] opacity-40 ml-0.5">*</span>}
                 </span>
               </button>
 
@@ -571,7 +571,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                   width: `${Math.max(isTouchDevice() ? 16 : 8, Math.min(isTouchDevice() ? 20 : 14, Math.floor(blockPx * 0.25)))}px`,
                 }}
               >
-                <div className={`w-[3px] h-[10px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
+                <div className={`w-[3px] h-[14px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
                   }`} />
               </div>
             </div>
@@ -585,16 +585,18 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
 
 
 const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
   // Get responsive card dimensions
   const getCardDimensions = () => {
     if (typeof window === 'undefined') return { width: 120, height: 44 }
 
     if (window.innerWidth >= 1024) {
-      return { width: 120, height: 44 }
+      return { width: 180, height: 60 }
     } else if (window.innerWidth >= 640) {
-      return { width: 110, height: 40 }
+      return { width: 150, height: 52 }
     } else {
-      return { width: 100, height: 36 }
+      return { width: 130, height: 44 }
     }
   }
 
@@ -1142,10 +1144,10 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         <div
           className="absolute z-10 pointer-events-none"
           style={{
-            bottom: '2px',
-            left: '4px',
-            fontSize: '8px',
-            fontWeight: 500,
+            bottom: '4px',
+            left: '6px',
+            fontSize: '11px',
+            fontWeight: 600,
             color: '#000000',
             fontFamily: 'Inter, system-ui, sans-serif',
             letterSpacing: '0.02em',
@@ -1157,10 +1159,10 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         {hasMotionSteps && (
           <div
             className="absolute z-10 pointer-events-none"
-            style={{ bottom: '2px', right: '4px' }}
+            style={{ bottom: '4px', right: '6px' }}
             title={`${motionStepCount} animation step${motionStepCount !== 1 ? 's' : ''}`}
           >
-            <Zap className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-purple-400 fill-purple-400 opacity-80" />
+            <Zap className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-purple-400 fill-purple-400 opacity-80" />
           </div>
         )}
         {/* Motion Step Blocks */}
@@ -1306,10 +1308,10 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               }}
             >
               <div
-                className="text-white px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap"
+                className={`${isLight ? 'text-gray-900' : 'text-white'} px-2 py-1 rounded shadow-lg text-[11px] font-semibold whitespace-nowrap`}
                 style={{
-                  backgroundColor: 'rgba(15,16,21,0.95)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  backgroundColor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)',
+                  border: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid rgba(255,255,255,0.1)',
                   fontFamily: 'Inter, system-ui, sans-serif',
                 }}
               >
@@ -1322,7 +1324,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
                   height: '0',
                   borderLeft: '4px solid transparent',
                   borderRight: '4px solid transparent',
-                  borderTop: '4px solid rgba(15,16,21,0.95)',
+                  borderTop: `4px solid ${isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)'}`,
                 }}
               />
             </div>,
@@ -1378,10 +1380,10 @@ const ScenesBar = React.memo(({
 
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
-    if (typeof window === 'undefined') return 120
-    if (window.innerWidth >= 1024) return 120
-    if (window.innerWidth >= 640) return 110
-    return 100
+    if (typeof window === 'undefined') return 180
+    if (window.innerWidth >= 1024) return 180
+    if (window.innerWidth >= 640) return 150
+    return 130
   }, [])
 
   // Calculate duration from width (default width = 5 seconds)
@@ -1399,10 +1401,10 @@ const ScenesBar = React.memo(({
   }, [getDefaultCardWidth])
 
   const getDefaultCardHeight = useCallback(() => {
-    if (typeof window === 'undefined') return 44
-    if (window.innerWidth >= 1024) return 44
-    if (window.innerWidth >= 640) return 40
-    return 36
+    if (typeof window === 'undefined') return 60
+    if (window.innerWidth >= 1024) return 60
+    if (window.innerWidth >= 640) return 52
+    return 44
   }, [])
 
   // Utility Formatters
@@ -2160,7 +2162,7 @@ const ScenesBar = React.memo(({
         className="absolute top-0 left-0 z-20"
         ref={timelineRef}
         style={{
-          height: '16px',
+          height: '24px',
           pointerEvents: 'none',
           width: `${totalCardsWidth + 32}px`,
           minWidth: '100%',
@@ -2179,21 +2181,21 @@ const ScenesBar = React.memo(({
             <div
               className="whitespace-nowrap"
               style={{
-                color: isLight ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.45)',
-                fontSize: '9px',
-                fontWeight: 600,
+                color: isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)',
+                fontSize: '12px',
+                fontWeight: 700,
                 fontFamily: 'Inter, system-ui, sans-serif',
-                letterSpacing: '0.03em',
-                lineHeight: '12px',
+                letterSpacing: '0.04em',
+                lineHeight: '14px',
               }}
             >
               {marker.label}
             </div>
             <div style={{
               width: '1px',
-              height: '4px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.15)',
-              marginTop: '1px',
+              height: '6px',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)',
+              marginTop: '2px',
             }} />
           </div>
         ))}
@@ -2207,8 +2209,8 @@ const ScenesBar = React.memo(({
               transform: 'translateX(-50%)',
               bottom: '0',
               width: '1px',
-              height: '3px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)'
+              height: '4px',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.12)'
             }}
           />
         ))}
@@ -2225,7 +2227,7 @@ const ScenesBar = React.memo(({
             }}
             style={{
               zIndex: 10,
-              height: isTouchDevice() ? '18px' : '30px',
+              height: isTouchDevice() ? '24px' : '36px',
               pointerEvents: 'auto',
               touchAction: 'none',
             }}
@@ -2284,8 +2286,8 @@ const ScenesBar = React.memo(({
         }}
       >
         {/* Playhead diamond/triangle marker at top */}
-        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: '-2px' }}>
-          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: '-4px' }}>
+          <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
             <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#7c4af0' : '#ffffff'} />
           </svg>
         </div>
@@ -2295,8 +2297,8 @@ const ScenesBar = React.memo(({
           className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
           style={{
             backgroundColor: isLight ? '#7c4af0' : '#ffffff',
-            width: isDraggingPlayhead ? '2.5px' : '2px',
-            top: '6px',
+            width: isDraggingPlayhead ? '3px' : '2.5px',
+            top: '8px',
             borderRadius: '1px',
             boxShadow: isDraggingPlayhead 
               ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)') 
@@ -2315,8 +2317,8 @@ const ScenesBar = React.memo(({
         }}
         style={{
           gap: 0,
-          marginTop: bottomSectionHeight ? `${Math.max(56, 56 + (bottomSectionHeight - 170))}px` : '56px',
-          paddingBottom: '6px',
+          marginTop: '72px',
+          paddingBottom: '8px',
           minWidth: 'max-content',
           width: 'max-content',
         }}
@@ -2487,10 +2489,10 @@ const ScenesBar = React.memo(({
             }}
           >
             <div
-              className="text-white px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap"
+              className={`${isLight ? 'text-gray-900' : 'text-white'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
               style={{
-                backgroundColor: 'rgba(15,16,21,0.95)',
-                border: '1px solid rgba(255,255,255,0.1)',
+                backgroundColor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)',
+                border: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid rgba(255,255,255,0.1)',
                 fontFamily: 'Inter, system-ui, sans-serif',
               }}
             >
@@ -2503,7 +2505,7 @@ const ScenesBar = React.memo(({
                 height: '0',
                 borderLeft: '4px solid transparent',
                 borderRight: '4px solid transparent',
-                borderTop: '4px solid rgba(15,16,21,0.95)',
+                borderTop: `4px solid ${isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)'}`,
               }}
             />
           </div>,
@@ -2518,15 +2520,15 @@ const ScenesBar = React.memo(({
           style={{
             top: `${contextMenu.y}px`,
             left: `${contextMenu.x}px`,
-            backgroundColor: 'rgba(20, 20, 24, 0.92)',
+            backgroundColor: isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(20, 20, 24, 0.92)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            border: isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5"
+            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
             style={{ width: 'calc(100% - 4px)' }}
             onClick={handleCutPage}
           >
@@ -2534,10 +2536,10 @@ const ScenesBar = React.memo(({
             <span>Split at Playhead</span>
           </button>
 
-          <div className="h-px bg-white/5 my-0.5 mx-2.5" />
+          <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
 
           <button
-            className="w-full text-left px-3.5 py-2 text-[11px] text-red-400/90 hover:bg-red-500/15 hover:text-red-300 flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5"
+            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400/90 hover:bg-red-500/15 hover:text-red-300'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
             style={{ width: 'calc(100% - 4px)' }}
             onClick={() => {
               dispatch(deleteScene(contextMenu.sceneId))
@@ -2557,16 +2559,16 @@ const ScenesBar = React.memo(({
           style={{
             top: `${stepContextMenu.y}px`,
             left: `${stepContextMenu.x}px`,
-            backgroundColor: 'rgba(20, 20, 24, 0.92)',
+            backgroundColor: isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(20, 20, 24, 0.92)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            border: isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           {stepContextMenu.stepId !== 'base' && (
             <button
-              className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+              className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5`}
               style={{ width: 'calc(100% - 4px)' }}
               onClick={() => {
                 if (onStepEdit) onStepEdit(stepContextMenu.stepId)
@@ -2580,7 +2582,7 @@ const ScenesBar = React.memo(({
 
           {stepContextMenu.stepId === 'base' && (
             <button
-              className="w-full text-left px-3.5 py-2 text-[11px] text-white/85 hover:text-white hover:bg-white/8 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+              className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5`}
               style={{ width: 'calc(100% - 4px)' }}
               onClick={() => {
                 if (onStepClick) onStepClick('base')
@@ -2594,9 +2596,9 @@ const ScenesBar = React.memo(({
 
           {stepContextMenu.stepId !== 'base' && (
             <>
-              <div className="h-px bg-white/5 my-0.5 mx-2.5" />
+              <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
               <button
-                className="w-full text-left px-3.5 py-2 text-[11px] text-red-400/90 hover:bg-red-500/15 hover:text-red-300 flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5"
+                className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400/90 hover:bg-red-500/15 hover:text-red-300'} flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5`}
                 style={{ width: 'calc(100% - 4px)' }}
                 onClick={() => {
                   dispatch(deleteSceneMotionStep({

@@ -931,14 +931,17 @@ function Stage({
       zoomDebounceRef.current = setTimeout(() => {
         // Calculate new zoom level using current zoom from ref
         const currentZoom = zoomScaleRef.current * 100
-        const zoomFactor = e.deltaY > 0 ? CAMERA_CONTROLS.ZOOM_FACTOR_IN : CAMERA_CONTROLS.ZOOM_FACTOR_OUT
+        
+        // [UX FIX] Use dynamic zoom factor based on delta magnitude
+        // This provides smooth trackpad zooming while keeping mouse wheel jumps consistent
+        const zoomFactor = Math.pow(0.999, e.deltaY)
         const newZoom = Math.max(CAMERA_CONTROLS.MIN_ZOOM, Math.min(CAMERA_CONTROLS.MAX_ZOOM, currentZoom * zoomFactor))
 
         // Update the React state to reflect the zoom change
         if (onZoomChangeRef.current) {
           onZoomChangeRef.current(newZoom)
         }
-      }, 16) // ~60fps debounce
+      }, 20) // ~50fps debounce for improved stability during gestures
     } else {
       // Pan with mouse wheel using cached calculations
       const panSpeed = wheelPanSpeedRef.current

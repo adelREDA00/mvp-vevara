@@ -103,7 +103,7 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
   }, [customBottomHeight])
 
   useEffect(() => {
-    setMinBottomHeight(170)
+    setMinBottomHeight(200)
 
     const handleResize = () => {
       setTimeout(() => centerCanvas(), 150)
@@ -115,41 +115,6 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
     }
   }, [centerCanvas])
 
-  useEffect(() => {
-    if (!isResizingBottom) return
-
-    isResizingBottomRef.current = true
-
-    const handleMouseMove = (e) => {
-      if (!bottomSectionRef.current) return
-
-      const windowHeight = window.innerHeight
-      const mouseY = e.clientY
-      const newHeight = windowHeight - mouseY
-      const maxHeight = windowHeight * 0.7
-      const clampedHeight = Math.max(minBottomHeight, Math.min(newHeight, maxHeight))
-      setCustomBottomHeight(clampedHeight)
-    }
-
-    const handleMouseUp = () => {
-      setIsResizingBottom(false)
-      isResizingBottomRef.current = false
-    }
-
-    document.body.style.cursor = 'ns-resize'
-    document.body.style.userSelect = 'none'
-
-    document.addEventListener('mousemove', handleMouseMove, { passive: true })
-    document.addEventListener('mouseup', handleMouseUp)
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      isResizingBottomRef.current = false
-    }
-  }, [isResizingBottom, minBottomHeight])
 
   useEffect(() => {
     if (!topToolbarRef.current) {
@@ -202,10 +167,7 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
   }, [centerCanvas])
 
   const handleBottomResizeMouseDown = useCallback((event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    setIsResizingBottom(true)
-    isResizingBottomRef.current = true
+    // Resizing disabled as per user request
   }, [])
 
   return {

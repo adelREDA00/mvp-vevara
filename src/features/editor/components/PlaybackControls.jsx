@@ -66,11 +66,10 @@ function PlaybackControls({
           {canUpdateStep && (
             <span
               className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-purple-400"
-              style={{ boxShadow: '0 0 4px rgba(168,85,247,0.6)' }}
             />
           )}
           {/* Tooltip */}
-          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[9px] px-2 py-1 rounded shadow-lg whitespace-nowrap pointer-events-none z-50 border border-white/10">
+          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
             {canUpdateStep ? 'Update step' : 'No step at playhead'}
           </span>
         </button>
@@ -92,7 +91,7 @@ function PlaybackControls({
         >
           <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           {/* Tooltip */}
-          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[9px] px-2 py-1 rounded shadow-lg whitespace-nowrap pointer-events-none z-50 border border-white/10">
+          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
             {canUpdateStep ? 'Delete step' : 'No step at playhead'}
           </span>
         </button>
@@ -102,7 +101,7 @@ function PlaybackControls({
       <div className="flex items-center justify-center px-4 h-8 sm:h-9 md:h-10 flex-shrink-0 relative z-10">
         <div className="flex items-center justify-center gap-3 sm:gap-4 md:gap-5">
           <div
-            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-right tabular-nums`}
+            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[11px] sm:text-[12px] font-semibold flex-shrink-0 w-12 text-right tabular-nums`}
             style={{
               fontFamily: 'Inter, system-ui, sans-serif',
               whiteSpace: 'nowrap',
@@ -127,9 +126,6 @@ function PlaybackControls({
               }`}
             title={isBuffering ? 'Buffering...' : isPlaying ? 'Pause' : 'Play'}
             type="button"
-            style={{
-              boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
-            }}
           >
             {isBuffering ? (
               <Loader2 className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-gray-900 animate-spin" />
@@ -141,7 +137,7 @@ function PlaybackControls({
           </button>
 
           <div
-            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[9px] sm:text-[10px] font-medium flex-shrink-0 w-10 text-left tabular-nums`}
+            className={`${theme === 'light' ? 'text-gray-400' : 'text-white/45'} text-[11px] sm:text-[12px] font-semibold flex-shrink-0 w-12 text-left tabular-nums`}
             style={{
               fontFamily: 'Inter, system-ui, sans-serif',
               whiteSpace: 'nowrap',

@@ -116,7 +116,7 @@ function TopToolbar({
           {/* App Logo - Text "vevara" */}
           <button
             onClick={handleLogoClick}
-            className="flex items-center h-8 flex-shrink-0 hover:opacity-80 transition-opacity text-white text-[16px] md:text-[18px] font-semibold tracking-[-0.02em] pr-2"
+            className="flex items-center h-8 flex-shrink-0 hover:opacity-80 transition-opacity text-white text-[17px] md:text-[19px] font-semibold tracking-[-0.02em] pr-2"
           >
             vevara
           </button>
@@ -147,7 +147,7 @@ function TopToolbar({
             <button
               onClick={onSave}
               disabled={isSaving}
-              className="text-white hover:bg-white/10 active:bg-white/20 h-9 px-3.5 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap text-[13px] font-medium border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
+              className="text-white hover:bg-white/10 active:bg-white/20 h-9 px-4 rounded-[10px] transition-all flex items-center gap-2 touch-manipulation whitespace-nowrap text-sm font-semibold border border-white/10 shadow-sm disabled:opacity-50 bg-white/5"
               title={isDirty ? "Unsaved Changes" : "Project Saved"}
             >
               <div className="relative flex items-center justify-center">
@@ -164,7 +164,7 @@ function TopToolbar({
             {/* Resize Button with Dropdown */}
             <DropdownMenu
               trigger={
-                <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-9 px-3.5 rounded-[10px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-[13px] font-medium border border-white/5">
+                <button className="text-white/80 hover:text-white hover:bg-white/10 active:bg-white/20 h-9 px-4 rounded-[10px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-sm font-semibold border border-white/5">
                   <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
                   <span className="hidden sm:inline">Resize</span>
                   <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={2} />
@@ -209,7 +209,7 @@ function TopToolbar({
                   setIsEditingName(false)
                 }
               }}
-              className="bg-transparent text-white text-center font-medium outline-none max-w-[100px] xs:max-w-[120px] sm:max-w-xs md:max-w-md text-[14px] md:text-sm origin-center truncate border-none placeholder:text-white/40 focus:placeholder:opacity-0 transition-all"
+              className="bg-transparent text-white text-center font-semibold outline-none max-w-[100px] xs:max-w-[120px] sm:max-w-xs md:max-w-md text-[15px] md:text-[16px] origin-center truncate border-none placeholder:text-white/40 focus:placeholder:opacity-0 transition-all"
               placeholder="Untitled"
             />
           </div>
@@ -275,7 +275,7 @@ function TopToolbar({
               <DropdownMenu
                 trigger={
                   <button
-                    className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-medium gap-1.5 h-9 px-3.5 text-[13px] rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
+                    className="bg-white/10 text-white hover:bg-white/20 active:bg-white/30 font-semibold gap-1.5 h-9 px-4 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap border border-white/10 shadow-sm"
                     title="Export"
                   >
                     <Download className="h-3.5 w-3.5" strokeWidth={2} />
@@ -284,7 +284,7 @@ function TopToolbar({
                   </button>
                 }
               >
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1">
+                <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1">
                   Select Resolution
                 </div>
                 <DropdownMenuItem onClick={() => onExport && onExport('720p')}>
@@ -299,7 +299,7 @@ function TopToolbar({
                 <DropdownMenuItem onClick={() => onExport && onExport('2160p')}>
                   4K (Ultra HD) (slightly slow)
                 </DropdownMenuItem>
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1 mt-1">
+                <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-gray-400 font-bold border-b border-white/5 mb-1 mt-1">
                   Animation
                 </div>
                 <DropdownMenuItem onClick={() => onRequestGifOptions && onRequestGifOptions()}>

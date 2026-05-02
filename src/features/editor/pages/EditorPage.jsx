@@ -4848,20 +4848,13 @@ function EditorPage() {
               WebkitBackdropFilter: 'blur(20px)',
               borderTop: 'none',
               paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-              ...(customBottomHeight !== null ? {
-                height: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`,
-                maxHeight: `calc(${customBottomHeight}px + env(safe-area-inset-bottom, 0px))`
-              } : {})
+              height: 'auto',
+              maxHeight: '40vh'
             }}
           >
-            {/* Height Resize Handle */}
-            <div
-              className={`absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize z-50 group flex items-start justify-center`}
-              onMouseDown={handleBottomResizeMouseDown}
-              style={{ top: '-1px' }}
-            >
-              <div className={`w-full h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent transition-opacity duration-300 ${isResizingBottom ? 'opacity-100' : 'opacity-40 group-hover:opacity-100'}`} />
-            </div>
+            {/* Top border gradient line */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent opacity-40" style={{ top: '-1px' }} />
+
             {/* Content Container - Scrollable if content overflows */}
             <div className="flex flex-col flex-1" style={{
               minHeight: 0, // Allow flex item to shrink
@@ -4869,7 +4862,7 @@ function EditorPage() {
               paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
             }}>
               {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
-              <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-auto" style={{
+              <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible" style={{
                 minHeight: 0
               }}>
                 {/* Playback Controls - Top Section */}
@@ -4915,10 +4908,10 @@ function EditorPage() {
                     overflowX: 'auto',
                     overflowY: 'visible',
                     WebkitOverflowScrolling: 'touch',
-                    paddingBottom: '8px',
-                    paddingTop: '0px',
-                    paddingLeft: '16px',
-                    paddingRight: '16px',
+                    paddingBottom: '12px',
+                    paddingTop: '4px',
+                    paddingLeft: '20px',
+                    paddingRight: '20px',
                   }}
                 >
                   <ScenesBar
@@ -4938,7 +4931,7 @@ function EditorPage() {
               </div>
 
               {/* Zoom slider - fixed at bottom, outside scroll; minimal height, simple white */}
-              <div className="pointer-events-auto flex-shrink-0 flex justify-center lg:justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
+              <div className="pointer-events-auto flex-shrink-0 hidden lg:flex justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
                 <input
                   type="range"
                   min={10}

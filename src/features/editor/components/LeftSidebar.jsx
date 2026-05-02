@@ -38,9 +38,7 @@ function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
         WebkitBackdropFilter: 'blur(20px)',
       }}
     >
-      {/* Spacer to push nav items to vertical center */}
-      <div className="flex-1 min-h-0" aria-hidden />
-      <div className="flex flex-col items-center gap-3 py-6 flex-shrink-0 w-full px-2">
+      <div className="flex flex-col items-center gap-4 py-5 flex-shrink-0 w-full px-2">
         {SIDEBAR_ITEMS.map((item) => {
           const Icon = item.icon
           const isActive = item.label === 'Motion' ? isMotionOpen : activeItem === item.label
@@ -62,15 +60,14 @@ function LeftSidebar({ activeItem, isMotionOpen, onItemClick }) {
                 <div className="absolute left-0 w-1 h-6 bg-[#7c4af0] rounded-r-full" />
               )}
               <Icon 
-                className={`h-5 w-5 flex-shrink-0 transition-all duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} 
+                className={`h-[22px] w-[22px] flex-shrink-0 transition-all duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} 
                 strokeWidth={isActive ? 2 : 1.5} 
               />
-              <span className={`text-[10px] font-medium leading-tight text-center transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'}`}>{item.label}</span>
+              <span className={`text-[11px] font-medium leading-tight text-center transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'}`}>{item.label}</span>
             </button>
           )
         })}
       </div>
-      <div className="flex-1 min-h-0" aria-hidden />
     </div>
   )
 }
