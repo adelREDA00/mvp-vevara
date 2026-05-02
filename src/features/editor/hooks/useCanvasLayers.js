@@ -577,6 +577,21 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     // [FIX] Use capturedLayer.opacity if available, otherwise fallback to base layer.opacity.
     displayObject.alpha = capturedLayer?.opacity ?? layer.opacity ?? 1
   }
+
+  // 9. Card Frame (showingFront) Synchronization
+  if (displayObject._isCardFrame && displayObject.showingFront !== undefined) {
+    let targetShowingFront = layer.data?.showingFront !== false
+    const canApplyShowingFront = force || !!capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)
+    if (canApplyShowingFront) {
+      if (capturedLayer && capturedLayer.showingFront !== undefined) {
+        targetShowingFront = capturedLayer.showingFront
+      }
+      
+      if (!displayObject._isFlipping && displayObject.showingFront !== targetShowingFront) {
+        displayObject.showingFront = targetShowingFront
+      }
+    }
+  }
 }
 
 /**
@@ -1799,9 +1814,16 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               // Sync placeholder visibility and redraw at current dimensions
               // Skip redraw when frame is highlighted as a drop target (_isDropTarget)
               if (pixiObject._framePlaceholder) {
-                pixiObject._framePlaceholder.visible = !pixiObject._frameHasAsset
-                if (!pixiObject._frameHasAsset && !pixiObject._isDropTarget) {
-                  redrawFramePlaceholder(pixiObject, cropW, cropH)
+                const isShowingFront = pixiObject._showingFront !== undefined ? pixiObject._showingFront : true
+                const activeHasAsset = isShowingFront 
+                  ? !!(layer.data?.assetUrl || layer.data?.url || layer.data?.src)
+                  : !!(layer.data?.backAssetUrl)
+                
+                // [UX FIX] Keep placeholder visible if it is currently a drop target highlight
+                // OR if the active side is empty.
+                pixiObject._framePlaceholder.visible = !!pixiObject._isDropTarget || !activeHasAsset
+                if (!activeHasAsset && !pixiObject._isDropTarget) {
+                  redrawFramePlaceholder(pixiObject, cropW, cropH, layer.data)
                   markTiltTextureDirty(pixiObject)
                 }
               }

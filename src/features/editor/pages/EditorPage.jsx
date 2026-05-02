@@ -3971,6 +3971,10 @@ function EditorPage() {
         setRequestOpenControl('cornerRadius')
         setTimeout(() => setRequestOpenControl(null), 100)
         break
+      case 'tilt':
+        setRequestOpenControl('tilt')
+        setTimeout(() => setRequestOpenControl(null), 100)
+        break
       case 'crop': {
         if (!pixiObj || !tracked) break
         const layer = layers[layerId]

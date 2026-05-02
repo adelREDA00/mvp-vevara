@@ -4080,12 +4080,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             const isCardFrame = frameLayer.data?.isCardFrame
             const currentShowingFront = frameObj?._showingFront !== undefined
               ? frameObj._showingFront
-              : (frameLayer.data?.showingFront ?? true)
+              : (frameLayer.data?.showingFront !== false)
             const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
-            const isLocked = isCardFrame
+            const isLocked = !!(isCardFrame
               ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
-              : frameLayer.data?.isLockedDrop
+              : frameLayer.data?.isLockedDrop)
 
             if (!isLocked) {
               overlappingFrameId = frameId
@@ -4121,7 +4121,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           // [FIX] Self-healing highlight: if we are still over the same frame, 
           // ensure it's still highlighted (in case the engine/sync loop cleared it).
           const frameObj = layerObjectsMap.get(overlappingFrameId)
-          if (frameObj && !frameObj.destroyed && !frameObj._isDropTarget) {
+          if (frameObj && !frameObj.destroyed) {
             const frameLayer = latestLayersRef.current[overlappingFrameId]
             if (frameLayer) {
               const dims = getEffectiveLayerDimensions(frameLayer, frameObj)
@@ -4170,15 +4170,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             // Use PIXI visual state when timeline flip actions exist (scrubbing scenario),
             // otherwise use Redux base state (manual flip scenario).
             const frameObj = layerObjectsMap.get(frameId)
-            const currentShowingFront = frameObj?._flipActions?.length
-              ? (frameObj._showingFront ?? true)
-              : (frameLayer.data?.showingFront ?? true)
+            const currentShowingFront = frameObj?._showingFront !== undefined
+              ? frameObj._showingFront
+              : (frameLayer.data?.showingFront !== false)
             const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
 
             // [LOCK CHECK] Verify lock state before proceeding with internal drop
-            const isLocked = isCardFrame
+            const isLocked = !!(isCardFrame
               ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
-              : frameLayer.data?.isLockedDrop
+              : frameLayer.data?.isLockedDrop)
 
             if (isLocked) {
               highlightedFrameRef.current = null

@@ -355,19 +355,21 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
 }
 
 let _cleanupInProgress = false;
-function cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects) {
+function cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects, loadedUrls) {
     if (_cleanupInProgress) return;
     _cleanupInProgress = true;
 
+    console.log('[videoExport] Starting thorough resource cleanup...');
+
+    // 1. Cleanup Export Engine (MotionEngine)
     try {
         if (exportEngine && !exportEngine._destroyed) {
-            try {
-                exportEngine.destroy();
-                exportEngine._destroyed = true;
-            } catch (e) { /* ignore */ }
+            exportEngine.destroy();
+            exportEngine._destroyed = true;
         }
     } catch (e) { /* ignore */ }
 
+    // 2. Cleanup Video Elements
     if (exportVideoElements && exportVideoElements.length > 0) {
         for (const video of exportVideoElements) {
             try {
@@ -375,57 +377,76 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
                     video.pause();
                     video.removeAttribute('src');
                     video.load();
+                    // Explicitly remove from DOM if it was added for some reason
+                    if (video.parentNode) video.parentNode.removeChild(video);
                 }
             } catch (e) { /* ignore */ }
         }
         exportVideoElements.length = 0;
     }
 
+    // 3. Cleanup Layer Objects (Sprites, Graphics, etc.)
+    if (layerObjects && layerObjects.size > 0) {
+        layerObjects.forEach((obj) => {
+            try {
+                if (!obj || obj.destroyed) return;
+                // Destroy the object. We don't destroy textures here yet 
+                // because we'll handle them via Assets.unload or app.destroy
+                obj.destroy({ children: true, texture: false });
+            } catch (e) { /* ignore */ }
+        });
+        layerObjects.clear();
+    }
+
+    // 4. Unload Assets (Textures/Fonts) loaded specifically for this export
+    if (loadedUrls && loadedUrls.size > 0) {
+        const { Assets } = PIXI;
+        loadedUrls.forEach(url => {
+            try {
+                // Only unload if it's still in the cache to avoid errors
+                if (Assets.cache.has(url)) {
+                    Assets.unload(url);
+                }
+            } catch (e) { /* ignore */ }
+        });
+        loadedUrls.clear();
+    }
+
+    // 5. Cleanup PIXI Application and Renderer
     try {
         if (app && !app._exportDestroyed) {
             app._exportDestroyed = true;
 
-            try {
-                if (app.ticker) {
-                    app.ticker.stop();
-                    app.ticker.destroy();
-                }
-            } catch (e) { /* ignore */ }
-
-            if (layerObjects && layerObjects.size > 0) {
-                layerObjects.forEach((obj) => {
-                    try {
-                        if (!obj || obj.destroyed) return;
-                        if (obj.parent) {
-                            obj.parent.removeChild(obj);
-                        }
-                    } catch (e) { /* ignore */ }
-                });
-                layerObjects.clear();
+            // Stop ticker immediately
+            if (app.ticker) {
+                app.ticker.stop();
             }
 
-            try {
-                if (app.stage) {
-                    app.stage.removeChildren();
-                }
-            } catch (e) { /* ignore */ }
+            // PIXI 8: Use the comprehensive destroy method
+            // This handles renderer, stage, and canvas cleanup.
+            // We set texture: true to clear any remaining non-shared textures.
+            // We set baseTexture: false to avoid destroying textures shared with the editor.
+            app.destroy(true, { 
+                children: true, 
+                texture: true,
+                baseTexture: false
+            });
 
-            try {
-                if (app.canvas) {
+
+            // Double safety for WebGL context loss
+            if (app.canvas) {
+                try {
                     const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
                     if (gl) {
-                        const loseCtx = gl.getExtension('WEBGL_lose_context');
-                        if (loseCtx) loseCtx.loseContext();
+                        gl.getExtension('WEBGL_lose_context')?.loseContext();
                     }
-                }
-            } catch (e) { /* ignore */ }
+                    if (app.canvas.parentNode) {
+                        app.canvas.parentNode.removeChild(app.canvas);
+                    }
+                } catch (e) { /* ignore */ }
+            }
 
-            try {
-                if (app.canvas?.parentNode) {
-                    app.canvas.parentNode.removeChild(app.canvas);
-                }
-            } catch (e) { /* ignore */ }
-
+            // Cleanup host container
             try {
                 const host = app._exportCanvasHost;
                 if (host && host.parentNode) {
@@ -435,11 +456,13 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
             } catch (e) { /* ignore */ }
         }
     } catch (e) {
-        /* ignore */
+        console.warn('[videoExport] Error during app cleanup:', e);
     } finally {
         _cleanupInProgress = false;
+        console.log('[videoExport] Resource cleanup complete.');
     }
 }
+
 
 async function cleanupTempFiles(ffmpegInst, totalFramesNum, audioSourceCount, sessionId) {
     if (totalFramesNum > 0) {
@@ -552,6 +575,8 @@ export const exportVideo = async ({
     let pendingWrites = [];
     const layerObjects = new Map();
     const exportVideoElements = [];
+    const loadedUrls = new Set();
+
 
     try {
         if (signal?.aborted) throw new Error('cancelled');
@@ -607,14 +632,22 @@ export const exportVideo = async ({
                 if (!layer) continue;
 
                 let pixiObject = null;
+                const addLoadedUrl = (url) => {
+                    if (url && (url.startsWith('http') || url.startsWith('blob:'))) {
+                        loadedUrls.add(url);
+                    }
+                };
+
                 try {
                     if (layer.type === 'text') {
                         pixiObject = createTextLayer(layer);
                     } else if (layer.type === 'shape') {
                         pixiObject = createShapeLayer(layer);
                     } else if (layer.type === 'image') {
+                        if (layer.data?.url) addLoadedUrl(layer.data.url);
                         pixiObject = await createImageLayer(layer);
                     } else if (layer.type === 'video') {
+                        if (layer.data?.url) addLoadedUrl(layer.data.url);
                         pixiObject = await createExportVideoLayer(layer);
                         if (pixiObject._videoElement) {
                             exportVideoElements.push(pixiObject._videoElement);
@@ -624,9 +657,11 @@ export const exportVideo = async ({
                         
                         const setupFrameSide = async (url, side) => {
                             if (!url) return;
+                            addLoadedUrl(url);
                             try {
                                 const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
                                 const texture = await loadTextureRobust(url);
+
                                 if (!texture) return;
                                 
                                 const fw = layer.cropWidth ?? layer.width;
@@ -684,9 +719,11 @@ export const exportVideo = async ({
                         pixiObject._storedColor = layer.data?.color || 0x000000;
 
                         if (layer.data?.imageUrl) {
+                            addLoadedUrl(layer.data.imageUrl);
                             try {
                                 const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
                                 const bgTexture = await loadTextureRobust(layer.data.imageUrl);
+
                                 if (bgTexture) {
                                     const bgContainer = new PIXI.Container();
                                     bgContainer.addChild(graphics);
@@ -1098,7 +1135,7 @@ export const exportVideo = async ({
         }
         try { if (pendingWrites.length) await Promise.all(pendingWrites); } catch (e) { /* ignore */ }
         try { await pendingEncode; } catch (e) { /* ignore */ }
-        cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects);
+        cleanupExportResources(exportEngine, app, exportVideoElements, layerObjects, loadedUrls);
         try {
             await cleanupTempFiles(ffmpegInst, totalFramesNum, audioSources.length, sessionId);
         } catch (e) {

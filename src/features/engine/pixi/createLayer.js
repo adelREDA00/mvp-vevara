@@ -681,6 +681,30 @@ export function createFrameLayer(config) {
     container._backSprite = backSprite
     container._isCardFrame = true
     container._frameHasBackAsset = hasBackAsset
+    
+    // Define the reactive property for showingFront
+    container._showingFront = true
+    Object.defineProperty(container, 'showingFront', {
+      get() { return this._showingFront },
+      set(val) {
+        if (this._showingFront !== val) {
+          this._showingFront = val
+          // Toggle visibility of front/back sprites
+          if (this._imageSprite) this._imageSprite.visible = val
+          if (this._backSprite) this._backSprite.visible = !val
+          
+          // Toggle placeholder visibility based on active side's asset
+          if (this._framePlaceholder && !this._isDropTarget) {
+            const activeHasAsset = val ? this._frameHasAsset : this._frameHasBackAsset
+            this._framePlaceholder.visible = !activeHasAsset
+          }
+        }
+      },
+      configurable: true
+    })
+    
+    // Initialize based on data (defaults to true)
+    container.showingFront = data.showingFront !== false
   }
 
   return container
@@ -736,9 +760,12 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
     cropMask.fill(0xffffff)
   }
 
-  // Hide placeholder
+  // Hide placeholder if the front side is currently active
   if (container._framePlaceholder) {
-    container._framePlaceholder.visible = false
+    const isShowingFront = container._showingFront !== undefined ? container._showingFront : true
+    if (isShowingFront && !container._isDropTarget) {
+      container._framePlaceholder.visible = false
+    }
   }
   container._frameHasAsset = true
 
@@ -783,6 +810,13 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
 
   container._frameHasBackAsset = true
 
+  // Hide placeholder if the back side is currently active
+  if (container._framePlaceholder) {
+    if (container._showingFront === false && !container._isDropTarget) {
+      container._framePlaceholder.visible = false
+    }
+  }
+
   // Store back-specific cover-fit dimensions on the container
   // so the sync loop can size the back sprite independently of the front
   container._backMediaWidth = mediaW
@@ -808,7 +842,7 @@ export function redrawFramePlaceholder(container, width, height, data = null) {
 
   // For card frames, show side indicator when no label is set
   const isCardFrame = frameData?.isCardFrame || container._isCardFrame
-  const showingFront = frameData?.showingFront !== false
+  const showingFront = container._showingFront !== undefined ? container._showingFront : (frameData?.showingFront !== false)
   const sideLabel = isCardFrame ? (showingFront ? 'Front' : 'Back') : ''
 
   ph.clear()

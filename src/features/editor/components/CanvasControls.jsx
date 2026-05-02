@@ -580,6 +580,7 @@ function CanvasControls({
               setShowOpacitySlider(!showOpacitySlider)
               setShowBlurSlider(false)
               setShowCornerRadiusSlider(false)
+              setShowTiltPanel(false)
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showOpacitySlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -598,6 +599,7 @@ function CanvasControls({
               setShowBlurSlider(!showBlurSlider)
               setShowOpacitySlider(false)
               setShowCornerRadiusSlider(false)
+              setShowTiltPanel(false)
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showBlurSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -616,6 +618,7 @@ function CanvasControls({
               setShowCornerRadiusSlider(!showCornerRadiusSlider)
               setShowOpacitySlider(false)
               setShowBlurSlider(false)
+              setShowTiltPanel(false)
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showCornerRadiusSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
