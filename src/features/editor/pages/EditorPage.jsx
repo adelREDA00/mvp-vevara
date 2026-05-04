@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useLocation } from 'react-router-dom'
+import { ADS_TEMPLATE, SAAS_TEMPLATE } from '../utils/practiceTemplates'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
 import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount } from '../../../store/slices/projectSlice'
@@ -41,325 +42,14 @@ import { applyTransformInline } from '../hooks/useCanvasLayers'
 import { resetGlobalMotionEngine } from '../../engine/motion'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
-import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
+import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep, setInteractionLock, setAutoPlayState } from '../../../store/slices/tutorialSlice'
 import { updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
 import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
 
-const GUEST_TEMPLATE = {
-  "_id": {
-    "$oid": "69f5d34d1ddc8874b835c92e"
-  },
-  "name": "Neo ad",
-  "data": {
-    "scenes": [
-      {
-        "id": "1777394115352-5p0okafwj",
-        "name": "Scene 1",
-        "duration": 5,
-        "transition": "None",
-        "backgroundColor": 15856113,
-        "layers": [
-          "1777394115352-hlscwzswo",
-          "1777394171951-5iyfnybr5",
-          "1777394202967-rj4crwnek",
-          "1777394226479-1py7dlm45",
-          "1777394240295-9l2lwentt",
-          "1777718680408-qq66fh3mp"
-        ]
-      }
-    ],
-    "layers": {
-      "1777394115352-hlscwzswo": {
-        "id": "1777394115352-hlscwzswo",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "background",
-        "name": "Background",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 0,
-        "y": 0,
-        "width": 1080,
-        "height": 1920,
-        "rotation": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "anchorX": 0,
-        "anchorY": 0,
-        "data": {
-          "color": 15856113
-        },
-        "createdAt": 1777394115352,
-        "updatedAt": 1777394126045
-      },
-      "1777394171951-5iyfnybr5": {
-        "id": "1777394171951-5iyfnybr5",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "text",
-        "name": "text Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 540,
-        "y": 297.4940816331111,
-        "width": 819.0078006110506,
-        "height": 156,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0,
-        "anchorY": 0,
-        "data": {
-          "content": "Hello, Neo.",
-          "fontSize": 126.28506726296658,
-          "color": "#000000",
-          "fontFamily": "Montserrat",
-          "fontWeight": "bold",
-          "textAlign": "center"
-        },
-        "createdAt": 1777394171951,
-        "updatedAt": 1777718705841
-      },
-      "1777394202967-rj4crwnek": {
-        "id": "1777394202967-rj4crwnek",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "text",
-        "name": "text Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 540,
-        "y": 410.96127951112385,
-        "width": 400.00006935813207,
-        "height": 51,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0,
-        "anchorY": 0,
-        "data": {
-          "content": "www.apple.com",
-          "fontSize": 40.93023481381029,
-          "color": "#000000",
-          "fontFamily": "Inter",
-          "fontWeight": "normal",
-          "textAlign": "center"
-        },
-        "createdAt": 1777394202967,
-        "updatedAt": 1777718714124
-      },
-      "1777394226479-1py7dlm45": {
-        "id": "1777394226479-1py7dlm45",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "text",
-        "name": "text Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 540,
-        "y": 1522.154490301789,
-        "width": 677.3333062065974,
-        "height": 116.39999999999999,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0,
-        "anchorY": 0,
-        "data": {
-          "content": "Introducing MacBook Neo, an amazing Mac at a surprising price. With a durable design, beautiful colors, and powerful features, it’s a magical new way to fall head over heels with Mac, every day. Welcome to the family.",
-          "fontSize": 24,
-          "color": "#000000",
-          "fontFamily": "Inter",
-          "fontWeight": "normal",
-          "textAlign": "center"
-        },
-        "createdAt": 1777394226479,
-        "updatedAt": 1777718806964
-      },
-      "1777394240295-9l2lwentt": {
-        "id": "1777394240295-9l2lwentt",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "text",
-        "name": "text Layer",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 540,
-        "y": 1670.0968271227346,
-        "width": 559.1111924913196,
-        "height": 79,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0,
-        "anchorY": 0,
-        "data": {
-          "content": "Love at first Mac.",
-          "fontSize": 64,
-          "color": "#000000",
-          "fontFamily": "Inter",
-          "fontWeight": "bold",
-          "textAlign": "center"
-        },
-        "createdAt": 1777394240295,
-        "updatedAt": 1777718813251
-      },
-      "1777718680408-qq66fh3mp": {
-        "id": "1777718680408-qq66fh3mp",
-        "sceneId": "1777394115352-5p0okafwj",
-        "type": "image",
-        "name": "Mac Image",
-        "visible": true,
-        "locked": false,
-        "opacity": 1,
-        "x": 540,
-        "y": 960,
-        "width": 482.64198461473245,
-        "height": 337.81594210733186,
-        "rotation": 0,
-        "blur": 0,
-        "scaleX": 1,
-        "scaleY": 1,
-        "tiltX": 0,
-        "tiltY": 0,
-        "anchorX": 0.5,
-        "anchorY": 0.5,
-        "data": {
-          "url": "/mac.png",
-          "src": "/mac.png",
-          "width": 1443,
-          "height": 1010,
-          "duration": 0,
-          "mimeType": "image/png",
-          "size": 1149597,
-          "type": "image/png"
-        },
-        "createdAt": 1777718680408,
-        "updatedAt": 1777718830375,
-        "cropX": 0,
-        "cropY": 0,
-        "cropWidth": 482.64198461473245,
-        "cropHeight": 337.81594210733186,
-        "mediaWidth": 482.64198461473245,
-        "mediaHeight": 337.81594210733186
-      }
-    },
-    "sceneMotionFlows": {
-      "1777394115352-5p0okafwj": {
-        "steps": [
-          {
-            "id": "step-1777718833232",
-            "layerActions": {
-              "1777718680408-qq66fh3mp": [
-                {
-                  "id": "action-1777718836472-rotate-1777718680408-qq66fh3mp",
-                  "type": "rotate",
-                  "duration": 2500,
-                  "values": {
-                    "dangle": 24.369309584483613,
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                },
-                {
-                  "id": "action-1777718837678-move-1777718680408-qq66fh3mp",
-                  "type": "move",
-                  "duration": 2500,
-                  "values": {
-                    "dx": -402.60595209911617,
-                    "dy": 329.3205818313045,
-                    "controlPoints": [],
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                },
-                {
-                  "id": "action-1777718839999-scale-1777718680408-qq66fh3mp",
-                  "type": "scale",
-                  "duration": 2500,
-                  "values": {
-                    "dsx": 2.1097539428534327,
-                    "dsy": 2.1097539428534327,
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                }
-              ]
-            },
-            "duration": 2500,
-            "startTime": 0
-          },
-          {
-            "id": "step-1777718851031",
-            "layerActions": {
-              "1777718680408-qq66fh3mp": [
-                {
-                  "id": "action-1777718854080-rotate-1777718680408-qq66fh3mp",
-                  "type": "rotate",
-                  "duration": 2500,
-                  "values": {
-                    "dangle": -52.25191741835761,
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                },
-                {
-                  "id": "action-1777718855975-move-1777718680408-qq66fh3mp",
-                  "type": "move",
-                  "duration": 2500,
-                  "values": {
-                    "dx": 803.2091026805556,
-                    "dy": -96.00002358846473,
-                    "controlPoints": [
-                      {
-                        "x": 363.4948952414775,
-                        "y": 123.56822253225073
-                      }
-                    ],
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                },
-                {
-                  "id": "action-1777718866535-scale-1777718680408-qq66fh3mp",
-                  "type": "scale",
-                  "duration": 2500,
-                  "values": {
-                    "dsx": 0.7291468243517021,
-                    "dsy": 0.729146824351702,
-                    "easing": "power4.out",
-                    "duration": 2500
-                  }
-                }
-              ]
-            },
-            "duration": 2500,
-            "startTime": 2500
-          }
-        ],
-        "pageDuration": 5000,
-        "sceneStartOffset": 0
-      }
-    },
-    "aspectRatio": "9:16"
-  },
-  "thumbnail": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
-}
+
 
 function EditorPage() {
   const { theme, setTheme } = useContext(ThemeContext)
@@ -372,13 +62,14 @@ function EditorPage() {
   const selectedCanvas = useSelector(selectSelectedCanvas)
   const layers = useSelector(selectLayers)
   const { isAuthenticated, user } = useSelector((state) => state.auth)
-  const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
+  const { active: tutorialActive, step: tutorialStep, hasRunSession, autoPlayState, isInteractionLocked } = useSelector(selectTutorialState)
 
 
 
 
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
   const { projectId: urlProjectId } = useParams()
+  const location = useLocation()
   const projectName = useSelector(selectProjectName)
   const projectId = useSelector(selectProjectId)
   const projectStatus = useSelector(state => state.project.status)
@@ -394,10 +85,10 @@ function EditorPage() {
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
   const [manualTutorialRect, setManualTutorialRect] = useState(null);
-  const [zoom, setZoom] = useState(43)
+  const [zoom, setZoom] = useState(-1)
   const [showGuestModal, setShowGuestModal] = useState(false)
-  const zoomRef = useRef(43) // Ref to track current zoom without causing re-renders
-  const prevZoomRef = useRef(43) // Track previous zoom to detect changes
+  const zoomRef = useRef(-1) // Ref to track current zoom without causing re-renders
+  const prevZoomRef = useRef(-1) // Track previous zoom to detect changes
 
   // Keep zoomRef in sync with zoom state
   useEffect(() => {
@@ -412,7 +103,7 @@ function EditorPage() {
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
-  const [showPasteboard, setShowPasteboard] = useState(true)
+  const [showPasteboard, setShowPasteboard] = useState(false)
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
@@ -441,6 +132,7 @@ function EditorPage() {
   // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
   const [minTimeElapsed, setMinTimeElapsed] = useState(false)
   const minTimeRef = useRef(null)
+  const hasTriggeredInitialAutoPlay = useRef(false)
   useEffect(() => {
     minTimeRef.current = setTimeout(() => setMinTimeElapsed(true), 300)
     return () => { if (minTimeRef.current) clearTimeout(minTimeRef.current) }
@@ -983,31 +675,80 @@ function EditorPage() {
     }
   }, [bottomSectionHeight, initialBottomHeight])
 
+  // Centralized seek function to sync UI and Engine
+  const seek = useCallback((time) => {
+    const clampedTime = Math.max(0, Math.min(time, totalTime))
+    if (motionControls) {
+      motionControls.seek(clampedTime)
+    } else {
+      setPlayheadTime(clampedTime)
+      playheadTimeRef.current = clampedTime
+    }
+  }, [motionControls, totalTime, setPlayheadTime, playheadTimeRef])
+
+  const handleMotionStop = useCallback(() => {
+    if (motionControls) {
+      motionControls.stopAll()
+    }
+  }, [motionControls])
+
   // =============================================================================
-  // TUTORIAL LOGIC
+  // TUTORIAL LOGIC & AUTO-PLAY
   // =============================================================================
   useEffect(() => {
     dispatch(setGuestMode(!isAuthenticated));
   }, [isAuthenticated, dispatch]);
 
   useEffect(() => {
-    if (!isAuthenticated && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed) {
-      const isGuestTemplate = projectName === "Neo ad";
-      if (isGuestTemplate) {
-        dispatch(startTutorial());
+    if (!isAuthenticated && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
+      const isPracticeTemplate = projectName === "onb marketing" || projectName === "Mistral AI Studio";
+      if (isPracticeTemplate && !hasRunSession && autoPlayState === 'none' && !hasTriggeredInitialAutoPlay.current) {
+        hasTriggeredInitialAutoPlay.current = true;
+        dispatch(setAutoPlayState('initial'));
+        dispatch(setInteractionLock(true));
+        seek(0);
+        motionControls.playAll();
+        setIsPlaying(true);
       }
     }
-  }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch]);
+  }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
 
-  // Handle manual target rect calculation for Step 4 (PIXI layer)
+  // Handle playback completion for auto-play phases
+  const prevIsPlaying = useRef(isPlaying);
   useEffect(() => {
-    if (tutorialActive && tutorialStep === 4) {
+    if (prevIsPlaying.current && !isPlaying) {
+      if (autoPlayState === 'initial') {
+        dispatch(setAutoPlayState('none'));
+        dispatch(setInteractionLock(false));
+        dispatch(startTutorial());
+      } else if (autoPlayState === 'final') {
+        dispatch(setAutoPlayState('none'));
+        dispatch(setInteractionLock(false));
+      }
+    }
+    prevIsPlaying.current = isPlaying;
+  }, [isPlaying, autoPlayState, dispatch]);
+
+  // Handle trigger for final auto-play when entering pending_final state
+  useEffect(() => {
+    if (autoPlayState === 'pending_final' && !isPlaying && motionControls) {
+      dispatch(setAutoPlayState('final'));
+      dispatch(setInteractionLock(true));
+      seek(0);
+      motionControls.playAll();
+      setIsPlaying(true);
+    }
+  }, [autoPlayState, isPlaying, seek, setIsPlaying, dispatch, motionControls]);
+
+  // Handle manual target rect calculation for Step 2
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 2) {
       const updateRect = () => {
-        const layerId = "1777718680408-qq66fh3mp"; // Apple Logo
+        const isSaaS = projectName === "Mistral AI Studio";
+        const layerId = isSaaS ? "1777822842468-c23ve3rsq" : "1777802757479-4gfgdrm5c";
         const transforms = motionControls?.getLayerCurrentTransforms();
         const t = transforms?.get(layerId);
 
-        // Get the ACTUAL canvas element for absolute precision
         const canvasEl = document.querySelector('[data-tutorial="canvas-area"]');
         const pixiCanvas = canvasEl?.querySelector('canvas');
         const canvasRect = pixiCanvas?.getBoundingClientRect() || canvasEl?.getBoundingClientRect();
@@ -1015,8 +756,6 @@ function EditorPage() {
         const vp = motionControls?.getViewportData();
 
         if (t?.visualRect && canvasRect && vp) {
-          // PIXI visualRect is in world pixels. 
-          // We need to convert it to screen (window) pixels using the viewport scale and position.
           const screenX = canvasRect.left + (t.visualRect.x - vp.left) * vp.scale;
           const screenY = canvasRect.top + (t.visualRect.y - vp.top) * vp.scale;
           const screenW = t.visualRect.width * vp.scale;
@@ -1036,113 +775,8 @@ function EditorPage() {
     } else {
       setManualTutorialRect(null);
     }
-  }, [tutorialActive, tutorialStep, motionControls]);
+  }, [tutorialActive, tutorialStep, motionControls, projectName]);
 
-  // Handle playback stop for Step 1 -> 2 and Step 6 -> 7
-  // Handle playback stop for Step 1 -> 2 and Step 6 -> 7
-  const prevIsPlaying = useRef(isPlaying);
-  const playStartTime = useRef(0);
-  const playStartStep = useRef(0);
-
-  useEffect(() => {
-    if (isPlaying && !prevIsPlaying.current) {
-      playStartTime.current = Date.now();
-      playStartStep.current = tutorialStep;
-    }
-
-    if (tutorialActive && (tutorialStep === 1 || tutorialStep === 6) && prevIsPlaying.current && !isPlaying) {
-      const duration = Date.now() - playStartTime.current;
-
-      // Only advance if:
-      // 1. It played for at least 500ms
-      // 2. The playback started during this specific step
-      if (duration > 500 && playStartStep.current === tutorialStep) {
-        dispatch(nextStep());
-      }
-    }
-    prevIsPlaying.current = isPlaying;
-  }, [isPlaying, tutorialActive, tutorialStep, dispatch]);
-
-  // Select target layer once when entering Step 4
-  const hasSelectedTargetRef = useRef(false);
-  useEffect(() => {
-    if (tutorialActive && tutorialStep === 4) {
-      if (!hasSelectedTargetRef.current) {
-        const layerId = "1777718680408-qq66fh3mp"; // Apple Logo
-        dispatch(setSelectedLayer(layerId));
-        hasSelectedTargetRef.current = true;
-      }
-    } else {
-      hasSelectedTargetRef.current = false;
-    }
-  }, [tutorialActive, tutorialStep, dispatch]);
-
-  // Handle Step 3 -> 4 transition (Entering capture mode)
-  useEffect(() => {
-    if (tutorialActive && tutorialStep === 3 && motionCaptureMode?.isActive) {
-      dispatch(nextStep());
-    }
-  }, [motionCaptureMode?.isActive, tutorialActive, tutorialStep, dispatch]);
-
-  // Handle Step 4 -> 5 transition (Performing a transformation)
-  // [FIX] We wait until the user actually performs a significant transformation
-  const initialTransformRef = useRef(null);
-  useEffect(() => {
-    let interval;
-    if (tutorialActive && tutorialStep === 4 && motionCaptureMode?.isActive) {
-      // Capture initial state
-      const transforms = motionControls?.getLayerCurrentTransforms();
-      const target = transforms?.get("1777718680408-qq66fh3mp");
-      if (target && !initialTransformRef.current) {
-        initialTransformRef.current = { x: target.x, y: target.y, scaleX: target.scaleX };
-      }
-
-      // Start polling for change
-      interval = setInterval(() => {
-        const currentTransforms = motionControls?.getLayerCurrentTransforms();
-        const current = currentTransforms?.get("1777718680408-qq66fh3mp");
-        const initial = initialTransformRef.current;
-
-        if (current && initial) {
-          const dx = Math.abs(current.x - initial.x);
-          const dy = Math.abs(current.y - initial.y);
-          const ds = Math.abs(current.scaleX - initial.scaleX);
-
-          if (dx > 20 || dy > 20 || ds > 0.05) {
-            dispatch(nextStep());
-          }
-        }
-      }, 200);
-    } else {
-      initialTransformRef.current = null;
-    }
-    return () => clearInterval(interval);
-  }, [tutorialActive, tutorialStep, motionCaptureMode?.isActive, motionControls, dispatch]);
-
-  // Handle Step 5 -> Completion (Applying motion)
-  useEffect(() => {
-    if (tutorialActive && tutorialStep === 5 && !motionCaptureMode) {
-      dispatch(nextStep());
-    }
-  }, [motionCaptureMode, tutorialActive, tutorialStep, dispatch]);
-
-
-  // Centralized seek function to sync UI and Engine
-  const seek = useCallback((time) => {
-    const clampedTime = Math.max(0, Math.min(time, totalTime))
-    if (motionControls) {
-      motionControls.seek(clampedTime)
-    } else {
-      setPlayheadTime(clampedTime)
-      playheadTimeRef.current = clampedTime
-    }
-  }, [motionControls, totalTime, setPlayheadTime, playheadTimeRef])
-
-  const handleMotionStop = useCallback(() => {
-    if (motionControls) {
-      motionControls.stopAll()
-    }
-  }, [motionControls])
 
   // Load project if ID is provided in URL
   useEffect(() => {
@@ -1151,25 +785,37 @@ function EditorPage() {
     }
   }, [urlProjectId, dispatch, projectId])
 
-  // Initialize default scene if none exists (only once and if not loading)
   useEffect(() => {
     if (projectStatus === 'loading') return
-    if (!hasInitializedScene.current && scenes.length === 0 && !urlProjectId) {
-      hasInitializedScene.current = true
 
-      if (!isAuthenticated) {
-        // [GUEST TEMPLATE] Initialize with a practice project for guest users
-        dispatch(initializeProject({ ...GUEST_TEMPLATE.data, name: GUEST_TEMPLATE.name }))
-      } else {
-        // Default empty scene for authenticated users
-        dispatch(addScene({
-          name: 'Scene 1',
-          duration: 5.0,
-          transition: 'None',
-        }))
+    const path = location.pathname;
+    const isPracticePath = path === '/ads' || path === '/sass';
+
+    // 1. Path-based template loading for guests
+    if (!isAuthenticated && isPracticePath && !urlProjectId) {
+      let template = null;
+      if (path === '/ads') template = ADS_TEMPLATE;
+      else if (path === '/sass') template = SAAS_TEMPLATE;
+
+      if (template && projectName !== template.name) {
+        dispatch(initializeProject({ ...template.data, name: template.name }));
+        hasInitializedScene.current = true;
+        return;
       }
     }
-  }, [dispatch, scenes.length, projectStatus, urlProjectId, isAuthenticated])
+
+    // 2. Standard initialization for mount or empty state
+    if (!hasInitializedScene.current && scenes.length === 0 && !urlProjectId) {
+      hasInitializedScene.current = true;
+
+      // Default empty scene for guests (on /) and auth users
+      dispatch(addScene({
+        name: 'Scene 1',
+        duration: 5.0,
+        transition: 'None',
+      }))
+    }
+  }, [dispatch, scenes.length, projectStatus, urlProjectId, isAuthenticated, location.pathname, projectName])
 
   // Reset global motion engine and project state on unmount to prevent
   // WebGL/GSAP leaks and stale Redux state on re-entry
@@ -1294,6 +940,51 @@ function EditorPage() {
 
   // Check if motion capture is active
   const isMotionCaptureActive = !!motionCaptureMode?.isActive
+
+  // Handle Step 1 -> 2 transition (Clicking Animate)
+
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 1 && isMotionCaptureActive) {
+      dispatch(nextStep());
+    }
+  }, [isMotionCaptureActive, tutorialActive, tutorialStep, dispatch]);
+
+  // Handle Step 2 - Auto-selection and Interaction Gate
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 2) {
+      const isSaaS = projectName === "Mistral AI Studio";
+      const targetLayerId = isSaaS ? "1777822842468-c23ve3rsq" : "1777802757479-4gfgdrm5c";
+
+      // Auto-select the target layer immediately
+      if (layers[targetLayerId] && !selectedLayerIds.includes(targetLayerId)) {
+        dispatch(setSelectedLayer(targetLayerId));
+      }
+
+      // Transition to Step 3 ONLY on real interaction (Move/Scale/Rotate)
+      // This is tracked via editingStepActionCount > 0 OR live movement threshold
+      if (editingStepActionCount > 0) {
+        dispatch(nextStep());
+      } else if (motionCaptureMode?.isActive) {
+        // [OPTIMIZATION] Immediate transition: Detect meaningful movement while dragging
+        // This removes the "sticky" feel of the overlay during the first interaction.
+        const tracked = motionCaptureMode.trackedLayers?.get(targetLayerId);
+        if (tracked) {
+          const initial = tracked.initialTransform;
+          const dx = Math.abs(tracked.deltaX || 0);
+          const dy = Math.abs(tracked.deltaY || 0);
+          const ds = Math.abs((tracked.scaleX || initial.scaleX) - initial.scaleX);
+          const dr = Math.abs((tracked.rotation || initial.rotation) - initial.rotation);
+
+          // Threshold for "intentional" interaction: 5px movement, 5% scale, or 5deg rotation
+          if (dx > 5 || dy > 5 || ds > 0.05 || dr > 5) {
+            dispatch(nextStep());
+          }
+        }
+      }
+    }
+  }, [tutorialActive, tutorialStep, selectedLayerIds, editingStepActionCount, projectName, layers, dispatch, motionCaptureMode, captureVersion]);
+
+
 
   // Determine which step (if any) the playhead is currently over
   const playheadStepId = useMemo(() => {
@@ -2224,6 +1915,11 @@ function EditorPage() {
    * Apply captured motion and exit capture mode
    */
   const handleApplyMotion = useCallback((options = {}) => {
+    // [TUTORIAL LOCK] Immediately block UI when saving the final step to prevent state corruption
+    // during fast-preview and autoplay restart.
+    if (tutorialActive && tutorialStep === 3) {
+      dispatch(setInteractionLock(true))
+    }
     // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
     const hasAnyInteraction = motionCaptureMode.trackedLayers
       ? Array.from(motionCaptureMode.trackedLayers.values()).some(
@@ -2568,6 +2264,14 @@ function EditorPage() {
 
           // [SYNC FIX] Inform Redux that we are done editing
           dispatch(stopMotionEditing())
+
+          // If we are in the final tutorial step (Step 3: Save Step),
+          // trigger the pending_final auto-play state and end tutorial.
+          // This ensures we wait for the fast preview to complete.
+          if (tutorialActive && tutorialStep === 3) {
+            dispatch(setAutoPlayState('pending_final'))
+            dispatch(endTutorial())
+          }
         }
       })
     } else {
@@ -2580,7 +2284,7 @@ function EditorPage() {
       // [SYNC FIX] Inform Redux that we are done editing
       dispatch(stopMotionEditing())
     }
-  }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo])
+  }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo, tutorialActive, tutorialStep])
 
   /**
    * Cancel motion capture: delete the auto-created step and exit
@@ -4930,15 +4634,26 @@ function EditorPage() {
                 </div>
               </div>
 
-              {/* Zoom slider - fixed at bottom, outside scroll; minimal height, simple white */}
+              {/* Zoom slider - fixed at bottom, outside scroll; minimal height */}
+              {/* Log scale with narrow range (10-200%) and fine step for smooth, controlled feel */}
               <div className="pointer-events-auto flex-shrink-0 hidden lg:flex justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
                 <input
                   type="range"
-                  min={10}
-                  max={300}
-                  value={zoom === -1 ? 100 : Math.min(300, Math.max(10, zoom))}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  className={`w-24 sm:w-28 lg:w-32 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer`}
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={(() => {
+                    // Convert zoom (10-200) to slider position (0-100) using log scale
+                    const z = zoom === -1 ? 100 : Math.min(200, Math.max(10, zoom))
+                    return ((Math.log(z) - Math.log(10)) / (Math.log(200) - Math.log(10))) * 100
+                  })()}
+                  onChange={(e) => {
+                    // Convert slider position (0-100) to zoom (10-200) using exp scale
+                    const t = Number(e.target.value) / 100
+                    const newZoom = 10 * Math.pow(200 / 10, t)
+                    setZoom(Math.max(10, Math.min(200, newZoom)))
+                  }}
+                  className={`w-28 sm:w-32 lg:w-36 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
                 />
                 <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
                   {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
@@ -5134,6 +4849,18 @@ function EditorPage() {
             handleExport(res);
           }}
         />
+        {(autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && (
+          <div
+            className={`fixed inset-0 z-[999998] ${isLight ? 'bg-white' : 'bg-black'}`}
+            style={{
+              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - ${initialBottomHeight}px), 100% calc(100% - ${initialBottomHeight}px), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`,
+              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - ${initialBottomHeight}px), 100% calc(100% - ${initialBottomHeight}px), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`
+            }}
+          />
+        )}
+        {isInteractionLocked && (
+          <div className="fixed inset-0 z-[999999]" style={{ cursor: 'default' }} />
+        )}
       </div>
     </ThemeContext.Provider>
   )

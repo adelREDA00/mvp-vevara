@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 
 export const ThemeContext = createContext({
   theme: 'dark',
-  setTheme: () => {},
+  setTheme: () => { },
   isLight: false
 });
 
@@ -13,9 +13,9 @@ export const ThemeProvider = ({ children }) => {
 
   const [theme, setTheme] = useState(() => {
     try {
-      return localStorage.getItem('editorTheme') || 'light';
+      return localStorage.getItem('editorTheme') || 'dark';
     } catch {
-      return 'light';
+      return 'dark';
     }
   });
 
@@ -26,10 +26,10 @@ export const ThemeProvider = ({ children }) => {
   // 2. If logged in, sync with the user's saved preference.
   useEffect(() => {
     const currentSyncKey = isAuthenticated ? `user-${user?.id}-${user?.theme || 'light'}` : 'guest';
-    
+
     if (lastSyncRef.current !== currentSyncKey) {
       if (!isAuthenticated) {
-        setTheme('light');
+        setTheme('dark');
       } else if (user?.theme) {
         setTheme(user.theme);
       }
@@ -40,8 +40,8 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     try {
       localStorage.setItem('editorTheme', theme);
-    } catch {}
-    
+    } catch { }
+
     if (theme === 'light') {
       document.body.classList.add('theme-light');
     } else {

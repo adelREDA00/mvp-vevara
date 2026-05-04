@@ -21,12 +21,14 @@ function AppContent() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<EditorPage />} />
+        {/* <Route path="/" element={<EditorPage />} /> */}
+        <Route path="/ads" element={<EditorPage />} />
+        <Route path="/sass" element={<EditorPage />} />
         <Route path="/project/:projectId" element={<EditorPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/ads" replace />} />
       </Routes>
     </Router>
   )

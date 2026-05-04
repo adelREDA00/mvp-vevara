@@ -13,7 +13,8 @@ import { LAYER_TYPES } from '../../../store/models'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
-
+import { useSelector, useDispatch } from 'react-redux'
+import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
 function CanvasControls({
   duration = '4.4s',
   selectedLayer,
@@ -37,6 +38,8 @@ function CanvasControls({
   onTogglePasteboard
 }) {
   const { theme } = useContext(ThemeContext)
+  const dispatch = useDispatch()
+  const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)

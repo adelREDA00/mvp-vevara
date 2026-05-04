@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Lock,
   Unlock,
+  ArrowLeft,
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { createSelector } from '@reduxjs/toolkit'
@@ -158,8 +159,8 @@ function Stage({
   // Cache PIXI objects to avoid recreating them
   const maskRef = useRef(null)
 
-  // Debouncing refs for zoom and pan operations
   const zoomDebounceRef = useRef(null)
+  const zoomAccumulatorRef = useRef(0)
   const panDebounceRef = useRef(null)
 
   // Camera control optimization refs - initialized with defaults, updated by effect
@@ -383,7 +384,7 @@ function Stage({
     lockedTooltipTimeoutRef.current = setTimeout(() => {
       setLockedTooltip(null)
       lockedTooltipTimeoutRef.current = null
-    }, 3000)
+    }, 2000)
   }, [])
 
   // Handle dropping an asset (image/video URL) onto a frame layer
@@ -438,7 +439,7 @@ function Stage({
 
         // Force sync loop to pick up the new asset visibility (critical for scenes 2+)
         frameObj._forceNextSync = true
-      }).catch(() => {})
+      }).catch(() => { })
     }
   }, [layers, layerObjects, dispatch])
 
@@ -700,7 +701,7 @@ function Stage({
     // This is highly performant (only 8 triangles) and stable on all hardware.
     overlay.clear()
     const margin = 50000 // Large margin to cover screen during zoom/pan
-    
+
     // [UX CHANGE] Use semi-transparent overlay instead of opaque background
     // This allows layers outside the canvas to be visible but clearly "off-stage".
     // [NEW] Controlled by showPasteboard toggle and light theme
@@ -923,25 +924,29 @@ function Stage({
 
     // Check if Ctrl/Cmd is pressed for zoom, otherwise pan
     if (e.ctrlKey || e.metaKey) {
-      // Debounce zoom operations to prevent excessive updates
+      // Accumulate delta in a ref to handle fast scrolling without losing events
+      zoomAccumulatorRef.current += e.deltaY
+
       if (zoomDebounceRef.current) {
         clearTimeout(zoomDebounceRef.current)
       }
 
       zoomDebounceRef.current = setTimeout(() => {
+        const delta = zoomAccumulatorRef.current
+        zoomAccumulatorRef.current = 0
+
         // Calculate new zoom level using current zoom from ref
         const currentZoom = zoomScaleRef.current * 100
-        
-        // [UX FIX] Use dynamic zoom factor based on delta magnitude
-        // This provides smooth trackpad zooming while keeping mouse wheel jumps consistent
-        const zoomFactor = Math.pow(0.999, e.deltaY)
+
+        // [UX FIX] Responsive yet smooth zoom
+        const zoomFactor = Math.pow(0.9992, delta)
         const newZoom = Math.max(CAMERA_CONTROLS.MIN_ZOOM, Math.min(CAMERA_CONTROLS.MAX_ZOOM, currentZoom * zoomFactor))
 
         // Update the React state to reflect the zoom change
         if (onZoomChangeRef.current) {
           onZoomChangeRef.current(newZoom)
         }
-      }, 20) // ~50fps debounce for improved stability during gestures
+      }, 8)
     } else {
       // Pan with mouse wheel using cached calculations
       const panSpeed = wheelPanSpeedRef.current
@@ -1056,11 +1061,10 @@ function Stage({
     contextMenu && createPortal(
       <>
         <div
-          className={`fixed z-[10010] backdrop-blur-2xl rounded-xl py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95 ${
-            theme === 'light' 
-              ? 'bg-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-gray-200/80' 
-              : 'bg-[#090a0d]/80 shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10'
-          }`}
+          className={`fixed z-[10010] backdrop-blur-2xl rounded-xl py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95 ${theme === 'light'
+            ? 'bg-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-gray-200/80'
+            : 'bg-[#090a0d]/80 shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10'
+            }`}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={() => {
             if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
@@ -1079,11 +1083,10 @@ function Stage({
                     setContextMenu(null)
                   }
                 }}
-                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                  theme === 'light'
-                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                    : 'text-white/80 hover:text-white hover:bg-white/10'
-                }`}
+                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                  ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
               >
                 <Copy className="h-3.5 w-3.5 opacity-60" />
                 Duplicate
@@ -1107,11 +1110,10 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                    theme === 'light'
-                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
                 >
                   <ImageIcon className="h-3.5 w-3.5 opacity-60" />
                   Set as Background
@@ -1156,8 +1158,8 @@ function Stage({
                           anchorY: 0.5,
                           mediaWidth: assetWidth,
                           mediaHeight: assetHeight,
-                          data: { 
-                            url: assetUrl, 
+                          data: {
+                            url: assetUrl,
                             src: assetUrl,
                             // Preserving video metadata is critical for continuity
                             assetIsVideo: isVideo,
@@ -1193,11 +1195,10 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                    theme === 'light'
-                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
                 >
                   <Unlink className="h-3.5 w-3.5 opacity-60" />
                   Detach Asset
@@ -1220,11 +1221,10 @@ function Stage({
                       setContextMenu(null)
                     }
                   }}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                    theme === 'light'
-                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
                 >
                   {(() => {
                     const frameLayer = layers[selectedLayerIds[0]]
@@ -1268,11 +1268,10 @@ function Stage({
                       }
                     }
                   }}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                    theme === 'light'
-                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                      : 'text-white/80 hover:text-white hover:bg-white/10'
-                  }`}
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                    ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
                 >
                   <ImageIcon className="h-3.5 w-3.5 opacity-60" />
                   Set Label
@@ -1285,15 +1284,13 @@ function Stage({
                     subMenuTimerRef.current = setTimeout(() => setSubMenu('position'), 300)
                   }}
                   onClick={() => setSubMenu(subMenu === 'position' ? null : 'position')}
-                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center justify-between gap-2.5 border-t mt-1 pt-2.5 ${
-                    theme === 'light'
-                      ? 'border-gray-100'
-                      : 'border-white/5'
-                  } ${
-                    subMenu === 'position' 
-                      ? (theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-white/10 text-white') 
+                  className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center justify-between gap-2.5 border-t mt-1 pt-2.5 ${theme === 'light'
+                    ? 'border-gray-100'
+                    : 'border-white/5'
+                    } ${subMenu === 'position'
+                      ? (theme === 'light' ? 'bg-gray-100 text-gray-900' : 'bg-white/10 text-white')
                       : (theme === 'light' ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100' : 'text-white/80 hover:text-white hover:bg-white/10')
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-2.5">
                     <Layers className="h-3.5 w-3.5 opacity-60" />
@@ -1303,12 +1300,11 @@ function Stage({
                 </button>
 
                 {subMenu === 'position' && (
-                  <div 
-                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 backdrop-blur-2xl rounded-xl shadow-2xl py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200 ${
-                      theme === 'light'
-                        ? 'bg-white/95 border border-gray-200/80 shadow-[0_8px_32px_rgba(0,0,0,0.12)]'
-                        : 'bg-[#090a0d]/90 border border-white/10 shadow-2xl'
-                    }`}
+                  <div
+                    className={`absolute ${contextMenu.x > window.innerWidth - 350 ? 'right-full mr-1' : 'left-full ml-1'} top-0 backdrop-blur-2xl rounded-xl shadow-2xl py-1.5 min-w-[160px] animate-in fade-in slide-in-from-left-2 duration-200 ${theme === 'light'
+                      ? 'bg-white/95 border border-gray-200/80 shadow-[0_8px_32px_rgba(0,0,0,0.12)]'
+                      : 'bg-[#090a0d]/90 border border-white/10 shadow-2xl'
+                      }`}
                     onMouseEnter={() => {
                       if (subMenuTimerRef.current) clearTimeout(subMenuTimerRef.current)
                     }}
@@ -1321,11 +1317,10 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                        theme === 'light'
-                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                          : 'text-white/80 hover:text-white hover:bg-white/10'
-                      }`}
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                        }`}
                     >
                       <Layers className="h-3.5 w-3.5 opacity-60" />
                       Bring to Front
@@ -1338,11 +1333,10 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                        theme === 'light'
-                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                          : 'text-white/80 hover:text-white hover:bg-white/10'
-                      }`}
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                        }`}
                     >
                       <ChevronUp className="h-3.5 w-3.5 opacity-60" />
                       Bring Forward
@@ -1355,11 +1349,10 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                        theme === 'light'
-                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                          : 'text-white/80 hover:text-white hover:bg-white/10'
-                      }`}
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                        }`}
                     >
                       <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                       Send Backward
@@ -1372,11 +1365,10 @@ function Stage({
                           setSubMenu(null)
                         }
                       }}
-                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                        theme === 'light'
-                          ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                          : 'text-white/80 hover:text-white hover:bg-white/10'
-                      }`}
+                      className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                        }`}
                     >
                       <Layers3 className="h-3.5 w-3.5 opacity-60" />
                       Send to Back
@@ -1392,11 +1384,10 @@ function Stage({
                   dispatch(clearLayerSelection())
                   setContextMenu(null)
                 }}
-                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                  theme === 'light'
-                    ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
-                    : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
-                }`}
+                className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                  ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
+                  : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                  }`}
               >
                 <Trash2 className="h-3.5 w-3.5 opacity-70" />
                 Delete
@@ -1416,11 +1407,10 @@ function Stage({
                       }))
                       setContextMenu(null)
                     }}
-                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                      theme === 'light'
-                        ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                        : 'text-white/80 hover:text-white hover:bg-white/10'
-                    }`}
+                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                      }`}
                   >
                     <Unlink className="h-3.5 w-3.5 opacity-60" />
                     Detach Background Image
@@ -1431,11 +1421,10 @@ function Stage({
                       dispatch(removeBackgroundImage({ sceneId: currentSceneId }))
                       setContextMenu(null)
                     }}
-                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${
-                      theme === 'light'
-                        ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
-                        : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
+                      ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
+                      : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                      }`}
                   >
                     <Trash2 className="h-3.5 w-3.5 opacity-70" />
                     Remove Background Image
@@ -1572,8 +1561,8 @@ function Stage({
         const currentZoomScale = viewport.scale.x
         const targetZoomScale = zoomScale
 
-        // Only update if there's a significant difference (avoid floating point precision issues)
-        if (Math.abs(currentZoomScale - targetZoomScale) > 0.001) {
+        // Sync with viewport immediately if there's any change
+        if (currentZoomScale !== targetZoomScale) {
           // Update zoom scale, centering on viewport center
           viewport.setZoom(zoomScale, true)
         }
@@ -1689,14 +1678,14 @@ function Stage({
             <div className="w-20 h-20 mb-8 rounded-3xl bg-red-500/10 flex items-center justify-center border border-red-500/20 shadow-[0_0_40px_rgba(239,68,68,0.1)]">
               <Unlink className="w-10 h-10 text-red-500" />
             </div>
-            
+
             <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Graphics Engine Error</h3>
             <p className="text-white/50 text-[13px] max-w-sm mb-10 leading-relaxed font-medium">
               Your browser's graphics processor ran into a temporary issue. This
               usually happens when GPU resources are low. Try Re-initializing
               first — in most cases it recovers instantly.
             </p>
-            
+
             <div className="flex flex-col gap-3 w-full max-w-xs">
               {/* Primary: re-init in-place (cleans GPU contexts, re-creates renderer) */}
               <button
@@ -1723,9 +1712,9 @@ function Stage({
                       try {
                         const gl = c.getContext('webgl2') || c.getContext('webgl')
                         if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext()
-                      } catch (_) {}
+                      } catch (_) { }
                     })
-                  } catch (_) {}
+                  } catch (_) { }
                   // Hard reload after a small delay so drivers can reclaim
                   setTimeout(() => window.location.reload(), 400)
                 }}
@@ -1734,7 +1723,7 @@ function Stage({
                 Clear GPU & Restart
               </button>
             </div>
-            
+
             <div className="mt-12 group cursor-pointer">
               <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.2em] font-bold text-white/20 group-hover:text-red-400/40 transition-colors">
                 Technical Details
@@ -1772,31 +1761,32 @@ function Stage({
       {/* Right-Click Context Menu */}
       {/* Locked Layer Tooltip */}
       {lockedTooltip && createPortal(
-        <div
-          className="locked-interaction-tooltip fixed z-[10020] bg-[#090a0d]/80 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-3.5 flex flex-col gap-4 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-300 min-w-[200px] max-w-[240px] origin-top-left"
+        <button
+          onClick={() => {
+            stopAndSeekToSceneStart()
+            setLockedTooltip(null)
+            if (lockedTooltipTimeoutRef.current) {
+              clearTimeout(lockedTooltipTimeoutRef.current)
+              lockedTooltipTimeoutRef.current = null
+            }
+          }}
+          className={`locked-interaction-tooltip fixed z-[10020] backdrop-blur-xl border rounded-full shadow-xl px-3 py-1.5 flex items-center gap-2 animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 transition-all active:scale-95 group ${theme === 'light'
+            ? 'bg-white/95 border-gray-200/80 text-gray-800 hover:bg-gray-50 shadow-[0_4px_20px_rgba(0,0,0,0.06)]'
+            : 'bg-[#090a0d]/90 border-white/10 text-white hover:bg-[#12141a] shadow-[0_8px_32px_rgba(0,0,0,0.4)]'
+            }`}
           style={{
-            left: Math.min(window.innerWidth - 240, lockedTooltip.x + 20),
-            top: Math.min(window.innerHeight - 160, lockedTooltip.y + 20),
-            transform: `scale(${Math.max(0.7, Math.min(1, window.innerWidth / 1440))})`
+            left: Math.min(window.innerWidth - 180, lockedTooltip.x + 20),
+            top: Math.max(20, lockedTooltip.y - 45),
           }}
         >
-          <div className="text-white/90 text-[11px] font-medium leading-relaxed">
-            “This element is animated. Edit it from the start of the scene.”
+          <div className={`p-1 rounded-full transition-colors ${theme === 'light' ? 'bg-gray-100 group-hover:bg-gray-200' : 'bg-white/5 group-hover:bg-white/10'
+            }`}>
+            <ArrowLeft className={`w-3 h-3 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`} />
           </div>
-          <button
-            onClick={() => {
-              stopAndSeekToSceneStart()
-              if (lockedTooltipTimeoutRef.current) {
-                clearTimeout(lockedTooltipTimeoutRef.current)
-                lockedTooltipTimeoutRef.current = null
-              }
-              setLockedTooltip(null)
-            }}
-            className="w-full h-8 bg-white/10 hover:bg-white/15 border border-white/20 text-white text-[10px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center tracking-wider uppercase active:scale-95"
-          >
-            Go to Start
-          </button>
-        </div>,
+          <span className="text-[11px] font-medium tracking-tight whitespace-nowrap">
+            Animated element. Go to start to change
+          </span>
+        </button>,
         document.body
       )}
 

@@ -1,67 +1,73 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { selectTutorialState } from '../../../store/slices/tutorialSlice';
+import { selectProjectName } from '../../../store/slices/projectSlice';
 
-const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
+const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
   const { active, step } = useSelector(selectTutorialState);
+  const projectName = useSelector(selectProjectName);
   const [targetRect, setTargetRect] = useState(null);
-  const [canvasRect, setCanvasRect] = useState(null);
   const [hintPos, setHintPos] = useState({ top: 0, left: 0 });
   const requestRef = useRef();
 
+  // Reset targetRect on step change to prevent stale highlights between steps
+  useEffect(() => {
+    setTargetRect(null);
+  }, [step]);
+
   const updatePosition = useCallback(() => {
-    const margin = 16;
     const viewWidth = window.innerWidth;
+    const margin = 16;
+    const modalWidth = 280;
 
-    // If Step 4 and manualTargetRect provided, use it
-    if (step === 4 && manualTargetRect) {
-      setTargetRect(manualTargetRect);
+    // Step 2 uses the manual target rect from the canvas
+    if (step === 2 && manualTargetRect) {
+      const padding = 20;
+      const paddedRect = {
+        x: manualTargetRect.x - padding / 2,
+        y: manualTargetRect.y - padding / 2,
+        width: manualTargetRect.width + padding,
+        height: manualTargetRect.height + padding
+      };
+      setTargetRect(paddedRect);
+      const offset = 60; // Increased offset for hint box to clear handles
 
-      const modalWidth = 280; // Approximate width on mobile
-      const margin = 16;
-      const offset = 40;
-
-      // Check horizontal space
-      const hasSpaceLeft = manualTargetRect.x > (modalWidth + margin + offset);
-      const hasSpaceRight = viewWidth - (manualTargetRect.x + manualTargetRect.width) > (modalWidth + margin + offset);
+      const hasSpaceLeft = paddedRect.x > (modalWidth + margin + offset);
+      const hasSpaceRight = viewWidth - (paddedRect.x + paddedRect.width) > (modalWidth + margin + offset);
 
       if (hasSpaceLeft) {
         setHintPos({
-          top: manualTargetRect.y + manualTargetRect.height / 2,
-          left: manualTargetRect.x - offset,
+          top: paddedRect.y + paddedRect.height / 2,
+          left: paddedRect.x - offset,
           position: 'left'
         });
       } else if (hasSpaceRight) {
         setHintPos({
-          top: manualTargetRect.y + manualTargetRect.height / 2,
-          left: manualTargetRect.x + manualTargetRect.width + offset,
+          top: paddedRect.y + paddedRect.height / 2,
+          left: paddedRect.x + paddedRect.width + offset,
           position: 'right'
         });
       } else {
-        // Fallback to TOP or BOTTOM if horizontal space is tight (common on vertical canvases)
-        const hasSpaceTop = manualTargetRect.y > 150;
+        const hasSpaceTop = paddedRect.y > 180;
         setHintPos({
-          top: hasSpaceTop ? (manualTargetRect.y - 80) : (manualTargetRect.y + manualTargetRect.height + 80),
-          left: Math.max(modalWidth / 2 + margin, Math.min(viewWidth - modalWidth / 2 - margin, manualTargetRect.x + manualTargetRect.width / 2)),
+          top: hasSpaceTop ? (paddedRect.y - 100) : (paddedRect.y + paddedRect.height + 100),
+          left: Math.max(modalWidth / 2 + margin, Math.min(viewWidth - modalWidth / 2 - margin, paddedRect.x + paddedRect.width / 2)),
           position: hasSpaceTop ? 'top' : 'bottom'
         });
       }
       return;
     }
 
+    // Steps 1 and 3 target the Animate / Save Step button
     let buttonSelector = '';
-    if (step === 1 || step === 6) buttonSelector = '[data-tutorial="play-button"]';
-    else if (step === 2) buttonSelector = '[data-tutorial="steps-area"]';
-    else if (step === 3 || step === 5) buttonSelector = '[data-tutorial="add-step-button"]';
+    if (step === 1 || step === 3) buttonSelector = '[data-tutorial="add-step-button"]';
 
     const buttonElement = buttonSelector ? document.querySelector(buttonSelector) : null;
-    const canvasElement = document.querySelector('[data-tutorial="canvas-area"]');
 
     if (buttonElement) {
       const rect = buttonElement.getBoundingClientRect();
       const padding = 8;
 
-      // Update target rect with stability buffer
       setTargetRect(prev => {
         if (!prev || Math.abs(prev.x - (rect.x - padding / 2)) > 1 || Math.abs(prev.y - (rect.y - padding / 2)) > 1) {
           return {
@@ -74,56 +80,24 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
         return prev;
       });
 
-      // Positioning logic
-      let isBottom = (step === 3 || step === 5);
-      let offset = 80;
-      if (step === 1 || step === 6) offset = 100;
-      if (step === 2) offset = 160;
-
-      let top = isBottom ? (rect.bottom + 20) : (rect.top - offset);
-
-      // Safety Check: if it goes off top, force to bottom
-      if (top < 10) {
-        top = rect.bottom + 20;
-        isBottom = true;
-      }
-
+      const top = rect.bottom + 20;
       setHintPos(prev => {
-        // Horizontal safety for mobile: ensure 'left' center doesn't push edges off screen
-        // rect.left + rect.width / 2 is the center of the target
         let targetCenter = rect.left + rect.width / 2;
-
-        // Modal is roughly 280px wide on mobile (from max-w)
         const modalHalfWidth = 140;
         const left = Math.max(modalHalfWidth + margin, Math.min(viewWidth - modalHalfWidth - margin, targetCenter));
 
-        // Only update if change is significant to avoid "vibrating" hint
-        if (Math.abs(prev.top - top) > 1 || Math.abs(prev.left - left) > 1 || prev.position !== (isBottom ? 'bottom' : 'top')) {
-          return {
-            top,
-            left,
-            position: isBottom ? 'bottom' : 'top'
-          };
+        if (Math.abs(prev.top - top) > 1 || Math.abs(prev.left - left) > 1) {
+          return { top, left, position: 'bottom' };
         }
         return prev;
       });
     } else {
       setTargetRect(null);
     }
-
-    if (canvasElement) {
-      const rect = canvasElement.getBoundingClientRect();
-      setCanvasRect({
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height
-      });
-    }
   }, [step, manualTargetRect]);
 
   useEffect(() => {
-    if (active && step > 0 && step < 8) {
+    if (active && step > 0 && step <= 3) {
       updatePosition();
       requestRef.current = requestAnimationFrame(function loop() {
         updatePosition();
@@ -135,73 +109,34 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
     return () => cancelAnimationFrame(requestRef.current);
   }, [active, step, updatePosition]);
 
-  // Create the clip-path polygon with stable multi-hole bridges
   const clipPath = useMemo(() => {
-    if (!targetRect) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
-
-    // 1. Frame (Clockwise)
+    if (!targetRect || step === 3) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
     const pts = ['0px 0px', '100% 0px', '100% 100%', '0px 100%', '0px 0px'];
-
-    // Step 5 has no overlay (hint only)
-    if (step === 5 || step === 7) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
-
-    // 2. Canvas Hole (Counter-Clockwise) - Only in Step 1 and 6
-    if ((step === 1 || step === 6) && canvasRect) {
-      const { x, y, width: w, height: h } = canvasRect;
-      pts.push(`${x}px ${y}px`); // Bridge
-      pts.push(`${x}px ${y + h}px`, `${x + w}px ${y + h}px`, `${x + w}px ${y}px`, `${x}px ${y}px`);
-      pts.push('0px 0px'); // Bridge back
-    }
-
-    // 3. Target Hole (Counter-Clockwise)
-    if (targetRect) {
-      const { x, y, width: w, height: h } = targetRect;
-      pts.push(`${x}px ${y}px`); // Bridge
-      pts.push(`${x}px ${y + h}px`, `${x + w}px ${y + h}px`, `${x + w}px ${y}px`, `${x}px ${y}px`);
-      pts.push('0px 0px'); // Bridge back
-    }
-
+    const { x, y, width: w, height: h } = targetRect;
+    pts.push(`${x}px ${y}px`); // Bridge
+    pts.push(`${x}px ${y + h}px`, `${x + w}px ${y + h}px`, `${x + w}px ${y}px`, `${x}px ${y}px`);
+    pts.push('0px 0px'); // Bridge back
     return `polygon(${pts.join(', ')})`;
-  }, [targetRect, canvasRect, step]);
+  }, [targetRect, step]);
 
-  // Hide overlay while playing in Step 1 or 6
-  // Also hide completely on Step 7 (Export Modal) to prevent overlap
-  if (!active || step <= 0 || step >= 7 || (!targetRect && step !== 5) || ((step === 1 || step === 5 || step === 6) && isPlaying)) return null;
+  if (!active || step <= 0 || step > 3 || !targetRect) return null;
 
   const getHintText = () => {
-    switch (step) {
-      case 1: return "Press play. You are about to animate Mac ad";
-      case 2: return "This Page has 2 Steps. Each step builds your animation.";
-      case 3: return "Click 'Animate' to create Step 3.";
-      case 4: return "Drag to center, rotate it, scale down";
-      case 5: return "Click 'Save Step' to save Step 3.";
-      case 6: return "Nice.Press play and watch your Mac ad";
-      default: return "";
+    if (step === 1) return "Add the final animation";
+    if (step === 2) {
+      return projectName === "Mistral AI Studio"
+        ? "Try moving it to the left (outside the canvas)"
+        : "Try scaling or moving it";
     }
-  }
+    if (step === 3) return "When you're ready, Save your animation";
+    return "";
+  };
 
-  // Positioning style based on anchor
   const getHintContainerStyle = () => {
-    if (hintPos.position === 'left') {
-      return {
-        top: `${hintPos.top}px`,
-        left: `${hintPos.left}px`,
-        transform: 'translate(-100%, -50%)',
-      };
-    }
-    if (hintPos.position === 'right') {
-      return {
-        top: `${hintPos.top}px`,
-        left: `${hintPos.left}px`,
-        transform: 'translate(0, -50%)',
-      };
-    }
-    return {
-      top: `${hintPos.top}px`,
-      left: `${hintPos.left}px`,
-      transform: 'translateX(-50%)',
-    };
-  }
+    if (hintPos.position === 'left') return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translate(-100%, -50%)' };
+    if (hintPos.position === 'right') return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translate(0, -50%)' };
+    return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translateX(-50%)' };
+  };
 
   const getArrowClasses = () => {
     const base = "absolute w-4 h-4 bg-[#6940c9] rotate-45 border-white/20";
@@ -214,19 +149,16 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
 
   return (
     <div className="fixed inset-0 z-[10000] pointer-events-none overflow-hidden">
-      {/* Dark Overlay with Holes */}
-      {step < 4 && (
+      {/* Overlay - Skip for Step 3 */}
+      {step < 3 && (
         <div
           className="absolute inset-0 bg-black/40 pointer-events-auto transition-[clip-path] duration-300"
-          style={{
-            clipPath,
-            WebkitClipPath: clipPath,
-          }}
+          style={{ clipPath, WebkitClipPath: clipPath }}
         />
       )}
 
-      {/* Target Highlight (Visual only) */}
-      {targetRect && step < 4 && (
+      {/* Target Highlight */}
+      {targetRect && step < 3 && (
         <div
           className="absolute border-2 border-[#6940c9] rounded-xl transition-all duration-300 shadow-[0_0_20px_rgba(105,64,201,0.6)] pointer-events-none"
           style={{
@@ -239,31 +171,10 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect, onNext }) => {
       )}
 
       {/* Hint Message */}
-      <div
-        className="absolute transition-all duration-300 pointer-events-none"
-        style={getHintContainerStyle()}
-      >
-        <div className={`bg-[#6940c9] text-white px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex flex-col items-center gap-1.5 animate-bounce-subtle pointer-events-auto text-center ${step === 4 ? 'max-w-[400px] sm:max-w-md' : 'max-w-[280px] sm:max-w-xs'
-          }`}>
+      <div className="absolute transition-all duration-300 pointer-events-none" style={getHintContainerStyle()}>
+        <div className={`bg-[#6940c9] text-white px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex flex-col items-center gap-1.5 animate-bounce-subtle pointer-events-auto text-center ${step === 2 ? 'max-w-[400px] sm:max-w-md' : 'max-w-[280px] sm:max-w-xs'}`}>
           <span className="text-[9px] font-black tracking-[0.2em] uppercase opacity-50">Tutorial</span>
-          <span className="text-xs font-bold leading-relaxed break-words">
-            {getHintText()}
-          </span>
-
-          {step === 2 && (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (onNext) onNext();
-              }}
-              className="mt-1 px-4 py-1.5 bg-white text-[#6940c9] rounded-lg text-xs font-bold hover:bg-white/90 transition-colors"
-            >
-              Next
-            </button>
-          )}
-
-          {/* Arrow */}
+          <span className="text-xs font-bold leading-relaxed break-words">{getHintText()}</span>
           <div className={getArrowClasses()} />
         </div>
       </div>
