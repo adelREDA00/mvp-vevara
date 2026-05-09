@@ -63,6 +63,7 @@ function EditorPage() {
   const layers = useSelector(selectLayers)
   const { isAuthenticated, user } = useSelector((state) => state.auth)
   const { active: tutorialActive, step: tutorialStep, hasRunSession, autoPlayState, isInteractionLocked } = useSelector(selectTutorialState)
+  const isAutoPlaying = autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked);
 
 
 
@@ -4298,7 +4299,7 @@ function EditorPage() {
             {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
             <div
               ref={topControlsRef}
-              className="absolute z-30 pointer-events-none flex justify-center"
+              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : ''}`}
               style={{
                 top: `${topToolbarHeight + 8}px`,
                 left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
