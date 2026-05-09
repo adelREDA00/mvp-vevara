@@ -103,7 +103,12 @@ function EditorPage() {
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
-  const [showPasteboard, setShowPasteboard] = useState(false)
+  const [showPasteboard, setShowPasteboard] = useState(isAuthenticated)
+
+  // Set default pasteboard visibility based on auth status
+  useEffect(() => {
+    setShowPasteboard(isAuthenticated)
+  }, [isAuthenticated])
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
