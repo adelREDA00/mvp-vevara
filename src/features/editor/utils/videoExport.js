@@ -390,25 +390,19 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
         layerObjects.forEach((obj) => {
             try {
                 if (!obj || obj.destroyed) return;
-                // Destroy the object. We don't destroy textures here yet 
-                // because we'll handle them via Assets.unload or app.destroy
+                // [FIX] Destroy the object, but NEVER destroy textures here 
+                // as they are almost always shared with the main editor.
                 obj.destroy({ children: true, texture: false });
             } catch (e) { /* ignore */ }
         });
         layerObjects.clear();
     }
 
-    // 4. Unload Assets (Textures/Fonts) loaded specifically for this export
-    if (loadedUrls && loadedUrls.size > 0) {
-        const { Assets } = PIXI;
-        loadedUrls.forEach(url => {
-            try {
-                // Only unload if it's still in the cache to avoid errors
-                if (Assets.cache.has(url)) {
-                    Assets.unload(url);
-                }
-            } catch (e) { /* ignore */ }
-        });
+    // 4. [FIX] Removed: Assets.unload(url) loop.
+    // In PIXI 8, Assets.unload is global. Calling it here destroys textures 
+    // that are still being used by the main editor, causing project "corruption".
+    // We let the editor manage the lifecycle of these assets.
+    if (loadedUrls) {
         loadedUrls.clear();
     }
 
@@ -417,42 +411,43 @@ function cleanupExportResources(exportEngine, app, exportVideoElements, layerObj
         if (app && !app._exportDestroyed) {
             app._exportDestroyed = true;
 
-            // Stop ticker immediately
+            // Stop ticker immediately to prevent any further render calls
             if (app.ticker) {
-                app.ticker.stop();
+                try { app.ticker.stop(); } catch (e) { /* ignore */ }
             }
 
-            // PIXI 8: Use the comprehensive destroy method
+            // [FIX] Capture references before app.destroy() nulls them out
+            const canvas = app.canvas;
+            const host = app._exportCanvasHost;
+
+            // PIXI 8: Use the correct options object for destroy
             // This handles renderer, stage, and canvas cleanup.
-            // We set texture: true to clear any remaining non-shared textures.
-            // We set baseTexture: false to avoid destroying textures shared with the editor.
-            app.destroy(true, { 
+            // removeView: true removes the canvas from the DOM.
+            // texture: false ensures we don't destroy textures shared with the editor.
+            app.destroy({ 
+                removeView: true,
                 children: true, 
-                texture: true,
-                baseTexture: false
+                texture: false
             });
 
-
-            // Double safety for WebGL context loss
-            if (app.canvas) {
+            // Double safety for WebGL context loss and cleanup
+            if (canvas) {
                 try {
-                    const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+                    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
                     if (gl) {
                         gl.getExtension('WEBGL_lose_context')?.loseContext();
                     }
-                    if (app.canvas.parentNode) {
-                        app.canvas.parentNode.removeChild(app.canvas);
+                    if (canvas.parentNode) {
+                        canvas.parentNode.removeChild(canvas);
                     }
                 } catch (e) { /* ignore */ }
             }
 
-            // Cleanup host container
+            // Cleanup host container if it still exists
             try {
-                const host = app._exportCanvasHost;
                 if (host && host.parentNode) {
                     host.parentNode.removeChild(host);
                 }
-                app._exportCanvasHost = null;
             } catch (e) { /* ignore */ }
         }
     } catch (e) {

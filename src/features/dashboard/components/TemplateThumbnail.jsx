@@ -24,7 +24,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
                     setShouldRenderVideo(true)
                 }
             },
-            { 
+            {
                 threshold: 0.01,
                 rootMargin: '600px' // Start loading video 600px before it enters viewport
             }
@@ -50,7 +50,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
 
         if (isVisible) {
             attemptPlay()
-            
+
             // If play was blocked, it will stay hidden (isPlaying: false).
             // We listen for any touch/click on the document to try again.
             // This is the most robust way to unlock autoplay on mobile.
@@ -71,7 +71,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
     }, [isVisible, shouldRenderVideo, isPlaying])
 
     return (
-        <div 
+        <div
             ref={containerRef}
             id={`template-container-${project._id}`}
             className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] md:rounded-[16px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/30 transition-all duration-300 shadow-sm"
