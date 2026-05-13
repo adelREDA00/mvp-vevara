@@ -146,8 +146,7 @@ function Stage({
   const [contextMenu, setContextMenu] = useState(null)
   const [subMenu, setSubMenu] = useState(null) // 'position' or null
   const subMenuTimerRef = useRef(null)
-  const [lockedTooltip, setLockedTooltip] = useState(null) // { x, y }
-  const lockedTooltipTimeoutRef = useRef(null)
+
 
   // Refs
   const containerRef = useRef(null)
@@ -370,22 +369,7 @@ function Stage({
     return transforms
   }, [layerObjects, viewport])
 
-  // Helper to handle locked interaction feedback
-  const handleLockedInteraction = useCallback((e) => {
-    // Show tooltip at mouse position
-    const x = e.data?.global?.x || e.clientX || 0
-    const y = e.data?.global?.y || e.clientY || 0
-    setLockedTooltip({ x, y })
 
-    // Auto-hide after 3 seconds - clear existing timeout to prevent flickering
-    if (lockedTooltipTimeoutRef.current) {
-      clearTimeout(lockedTooltipTimeoutRef.current)
-    }
-    lockedTooltipTimeoutRef.current = setTimeout(() => {
-      setLockedTooltip(null)
-      lockedTooltipTimeoutRef.current = null
-    }, 2000)
-  }, [])
 
   // Handle dropping an asset (image/video URL) onto a frame layer
   const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight, assetIsVideo = false) => {
@@ -408,8 +392,6 @@ function Stage({
       : frameLayer.data?.isLockedDrop
 
     if (isLocked) {
-      // Show feedback that the frame is locked
-      handleLockedInteraction({ clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 })
       return
     }
 
@@ -487,7 +469,6 @@ function Stage({
               : frameLayer.data?.isLockedDrop
 
             if (isLocked) {
-              handleLockedInteraction(e)
               return
             }
 
@@ -517,24 +498,7 @@ function Stage({
     }
   }, [pixiApp, viewport, layerObjects, layers, selectedLayerIds, handleDropAssetOnFrame, stageContainer])
 
-  // Close locked tooltip on any click outside
-  useEffect(() => {
-    if (!lockedTooltip) return
 
-    const handleGlobalClick = (e) => {
-      // Check if clicking inside the tooltip - if so, don't close here, let the button's onClick handle it
-      if (e.target.closest('.locked-interaction-tooltip')) return
-
-      setLockedTooltip(null)
-      if (lockedTooltipTimeoutRef.current) {
-        clearTimeout(lockedTooltipTimeoutRef.current)
-        lockedTooltipTimeoutRef.current = null
-      }
-    }
-
-    window.addEventListener('pointerdown', handleGlobalClick, { capture: true })
-    return () => window.removeEventListener('pointerdown', handleGlobalClick, { capture: true })
-  }, [lockedTooltip])
 
   // Pass motion controls up to parent
   // [PERFORMANCE FIX] Memoize the motion state object to prevent unnecessary 
@@ -785,7 +749,6 @@ function Stage({
     interactionsAPIRef, // Pass interactions API ref for direct arrow synchronization
     currentSceneId, // Pass current scene ID for filtering
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
-    handleLockedInteraction, // Pass locked interaction callback
     effectiveZoom // Pass zoom for handle scaling
   )
 
@@ -819,7 +782,6 @@ function Stage({
     pausePlayback,
     isPlaying,
     multiSelectionAPI,
-    handleLockedInteraction, // Pass locked interaction callback
     layerObjectsVersion // [Bug 3 Fix] Force rebind when async layers resolve
   )
 
@@ -892,7 +854,7 @@ function Stage({
     motionCaptureMode,
     isPlaying, // Pass playing state to hide selection box during playback
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
-    handleLockedInteraction, // Pass locked interaction callback
+    interactionsAPI?.updateMotionArrowVisibility, // Pass arrow sync callback for live resize/rotate updates
     effectiveZoom, // Pass zoom for handle scaling
     layerObjectsVersion // [Bug 2 Fix] Force re-initialization when layer PIXI instances change
   )
@@ -1759,36 +1721,7 @@ function Stage({
       </div>
 
       {/* Right-Click Context Menu */}
-      {/* Locked Layer Tooltip */}
-      {lockedTooltip && createPortal(
-        <button
-          onClick={() => {
-            stopAndSeekToSceneStart()
-            setLockedTooltip(null)
-            if (lockedTooltipTimeoutRef.current) {
-              clearTimeout(lockedTooltipTimeoutRef.current)
-              lockedTooltipTimeoutRef.current = null
-            }
-          }}
-          className={`locked-interaction-tooltip fixed z-[10020] backdrop-blur-xl border rounded-full shadow-xl px-3 py-1.5 flex items-center gap-2 animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 transition-all active:scale-95 group ${theme === 'light'
-            ? 'bg-white/95 border-gray-200/80 text-gray-800 hover:bg-gray-50 shadow-[0_4px_20px_rgba(0,0,0,0.06)]'
-            : 'bg-[#090a0d]/90 border-white/10 text-white hover:bg-[#12141a] shadow-[0_8px_32px_rgba(0,0,0,0.4)]'
-            }`}
-          style={{
-            left: Math.min(window.innerWidth - 180, lockedTooltip.x + 20),
-            top: Math.max(20, lockedTooltip.y - 45),
-          }}
-        >
-          <div className={`p-1 rounded-full transition-colors ${theme === 'light' ? 'bg-gray-100 group-hover:bg-gray-200' : 'bg-white/5 group-hover:bg-white/10'
-            }`}>
-            <ArrowLeft className={`w-3 h-3 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`} />
-          </div>
-          <span className="text-[11px] font-medium tracking-tight whitespace-nowrap">
-            Animated element. Go to start to change
-          </span>
-        </button>,
-        document.body
-      )}
+
 
       {contextMenuElement}
     </div>

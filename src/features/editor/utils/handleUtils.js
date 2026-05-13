@@ -50,7 +50,7 @@ export function calculateAdaptedScale(zoomScale) {
 export function createResizeHandle({
   x, y, handleType, cursor,
   onResizeStart, onHoverEnter, onHoverLeave, zoomScale = 1,
-  isLocked = false, onLockedInteraction = null
+  isLocked = false
 }) {
   const handle = new PIXI.Graphics()
   handle.alpha = isLocked ? 0.4 : 1.0
@@ -103,7 +103,6 @@ export function createResizeHandle({
     e.stopPropagation()
     e.stopImmediatePropagation?.()
     if (isLocked) {
-      if (onLockedInteraction) onLockedInteraction(e)
       return
     }
     onResizeStart(handleType, cursor, e)
@@ -204,7 +203,7 @@ export function getRotatedCursor(handleType, rotationDeg) {
  */
 export function createRotateHandle({
   x, y, onRotateStart, zoomScale = 1,
-  isLocked = false, onLockedInteraction = null
+  isLocked = false
 }) {
   const handle = new PIXI.Container()
   handle.alpha = isLocked ? 0.4 : 1.0
@@ -314,7 +313,6 @@ export function createRotateHandle({
     e.stopPropagation()
     e.stopImmediatePropagation?.()
     if (isLocked) {
-      if (onLockedInteraction) onLockedInteraction(e)
       return
     }
     onRotateStart(e)

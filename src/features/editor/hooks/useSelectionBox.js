@@ -81,7 +81,7 @@ function getCurrentInteractionState(dragStateAPI, interactionStateRef, rotationJ
 // Helper to update selection box visibility and children visibility
 // OPTIMIZATION: Keep selection box VISIBLE during interaction but hide handles/border
 // This allows badges (children of selection box) to remain visible while the box itself is hidden
-function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, isAnimated = false) {
+function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, firstActionTime = Infinity) {
   if (!selectionBox) return
 
   // Hide completely during playback
@@ -98,9 +98,10 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     const engine = getGlobalMotionEngine()
     const currentTime = engine?.masterTimeline?.time() || 0
     const sceneStartTime = sceneMotionFlow?.sceneStartOffset || 0
+    const relativeTime = currentTime - sceneStartTime
 
     // Check if we are past the base step
-    if (Math.abs(currentTime - sceneStartTime) > 0.02) {
+    if (relativeTime > 0.02 && relativeTime >= (firstActionTime - 0.02)) {
       isPastBaseStep = true
     }
   }
@@ -139,20 +140,17 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     return
   }
 
-  const isLocked = isPastBaseStep && isAnimated
+  const isLocked = isPastBaseStep
 
   if (isLocked) {
-    // Show locked state: selection box is visible, handles are visible but locked
+    // Show outline-only locked state: show the purple outline, hide all handles
     selectionBox.visible = true
     for (let i = 0; i < selectionBox.children.length; i++) {
       const child = selectionBox.children[i]
-      child.visible = true
-      // Apply locked visual style to all handles and outlines
-      if (child.label?.includes('handle') || child.label?.includes('outline') || child.label?.includes('hitarea')) {
-        child.alpha = 0.4
-      } else {
-        child.alpha = 1.0
-      }
+      // Only keep the selection outline visible — hide all handles and hit areas
+      const isOutline = child.label === 'selection-outline'
+      child.visible = isOutline
+      child.alpha = 1.0
     }
     if (!selectionBox.parent && layersContainer) {
       layersContainer.addChild(selectionBox)
@@ -204,7 +202,7 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
 // =============================================================================
 
 
-export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, onLockedInteraction = null, zoom = 1, layerObjectsVersion = 0) {
+export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, updateMotionArrowVisibility = null, zoom = 1, layerObjectsVersion = 0) {
   // ===========================================================================
   // STATE MANAGEMENT - React refs and state variables for tracking interactions
   // ===========================================================================
@@ -877,17 +875,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
-      const engine = getGlobalMotionEngine()
-      const currentTime = engine?.masterTimeline?.time() || 0
-      const sceneFlow = latestSceneMotionFlowRef.current
-      const startOffset = sceneFlow?.sceneStartOffset || 0
-      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
-
-      if (isActuallyLocked) {
-        if (onLockedInteraction) onLockedInteraction(e)
-        return
-      }
       handleResizeStart(handleType, cursor, e)
     })
 
@@ -973,17 +960,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
-      const engine = getGlobalMotionEngine()
-      const currentTime = engine?.masterTimeline?.time() || 0
-      const sceneFlow = latestSceneMotionFlowRef.current
-      const startOffset = sceneFlow?.sceneStartOffset || 0
-      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
-
-      if (isActuallyLocked) {
-        if (onLockedInteraction) onLockedInteraction(e)
-        return
-      }
       handleResizeStart(handleType, cursor, e)
     })
 
@@ -1122,17 +1098,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      // [FIX] DYNAMIC LOCK CHECK: Avoid stale closures by checking current time from engine
-      const engine = getGlobalMotionEngine()
-      const currentTime = engine?.masterTimeline?.time() || 0
-      const sceneFlow = latestSceneMotionFlowRef.current
-      const startOffset = sceneFlow?.sceneStartOffset || 0
-      const isActuallyLocked = !latestMotionCaptureModeRef.current?.isActive && Math.abs(currentTime - startOffset) > 0.02 && getLayerFirstActionTime(latestLayerRef.current?.id, sceneFlow) !== Infinity
-
-      if (isActuallyLocked) {
-        if (onLockedInteraction) onLockedInteraction(e)
-        return
-      }
       handleRotateStart(e)
     })
 
@@ -2046,6 +2011,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         // to prevent UI flicker before Redux update N arrives.
       }
 
+      currentLayerObject._isInteracting = false
       currentLayerObject._isResizing = false
       // [SYNC FIX] Force one-shot sync from Redux to PIXI to ensure final state is correct
       // This bridges the timing gap between clearing _isResizing and Redux state propagation.
@@ -2057,6 +2023,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
+        currentLayerObject._cachedSprite._isInteracting = false
         currentLayerObject._cachedSprite._isResizing = false
       }
 
@@ -2295,9 +2262,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     )
 
     if (!currentLayerObject.destroyed) {
+      currentLayerObject._isInteracting = true
       currentLayerObject._isResizing = true
       currentLayerObject.eventMode = 'none'
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
+        currentLayerObject._cachedSprite._isInteracting = true
         currentLayerObject._cachedSprite._isResizing = true
         currentLayerObject._cachedSprite.eventMode = 'none'
       }
@@ -2449,9 +2418,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     if (!currentLayerObject.destroyed) {
+      currentLayerObject._isInteracting = true
       currentLayerObject._isRotating = true
       currentLayerObject.eventMode = 'none'
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
+        currentLayerObject._cachedSprite._isInteracting = true
         currentLayerObject._cachedSprite._isRotating = true
         currentLayerObject._cachedSprite.eventMode = 'none'
       }
@@ -2560,9 +2531,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           const prev = state.prevEventMode
           const restoredEventMode = prev !== undefined ? prev : 'static'
           latestObj.eventMode = restoredEventMode
+          latestObj._isInteracting = false
           latestObj._isRotating = false
           if (latestObj._cachedSprite && !latestObj._cachedSprite.destroyed) {
             latestObj._cachedSprite.eventMode = restoredEventMode
+            latestObj._isInteracting = false
             latestObj._cachedSprite._isRotating = false
           }
         }
@@ -2648,7 +2621,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const currentTime = engine?.masterTimeline?.time() || 0
       const sceneStartTime = latestSceneMotionFlowRef.current?.sceneStartOffset || 0
       const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
-      const isAnimated = getLayerFirstActionTime(currentLayer?.id, latestSceneMotionFlowRef.current) !== Infinity
+      const firstActionTime = getLayerFirstActionTime(currentLayer?.id, latestSceneMotionFlowRef.current)
 
       // Update visibility rules every frame to handle timeline scrubbing accurately
       updateSelectionBoxVisibility(
@@ -2661,13 +2634,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         latestMotionCaptureModeRef.current,
         latestSceneMotionFlowRef.current,
         currentLayer?.id,
-        isAnimated
+        firstActionTime
       )
 
       // [FIX] Ensure hover box (purple outline) is also hidden during movement/flipping
       // even if syncBoxVisuals() just showed it.
       if (isMoving && hoverBoxRef.current) {
         hoverBoxRef.current.visible = false
+      }
+
+      // [SYNC FIX] Update motion arrows live during selection box interactions (resize, rotate, crop)
+      // This eliminates the lag caused by Redux throttling.
+      if ((!!rs || !!rotateState) && updateMotionArrowVisibility && currentLayer?.id) {
+        updateMotionArrowVisibility(currentLayer.id, true)
       }
     }
 
@@ -3047,9 +3026,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const engine = getGlobalMotionEngine()
     const currentTime = engine?.masterTimeline?.time() || 0
     const sceneStartTime = sceneMotionFlow?.sceneStartOffset || 0
-    const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
-    const isAnimated = getLayerFirstActionTime(layer.id, sceneMotionFlow) !== Infinity
-    const isLocked = !motionCaptureMode?.isActive && isPastBaseStep && isAnimated
+    const relativeTime = currentTime - sceneStartTime
+    const firstActionTime = getLayerFirstActionTime(layer.id, sceneMotionFlow)
+    const isPastBaseStep = relativeTime > 0.02 && relativeTime >= (firstActionTime - 0.02)
+    const isLocked = !motionCaptureMode?.isActive && isPastBaseStep
 
     // Draw outline - purple color (in local coordinates)
     const outline = new PIXI.Graphics()
@@ -3065,74 +3045,78 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // Handle creation based on element type
     const isTextElement = layerObject instanceof PIXI.Text || layerObject?.isFlowText
 
-    // Check if we should hide side handles in motion capture mode
-    // We hide them if we're in capture mode AND it's a text element (no area adjustment during capture)
-    // OR if the current step has a specific scale action
+    // currentMotionCaptureMode needed both inside the handle block and by updateSelectionBoxVisibility below
     const currentMotionCaptureMode = latestMotionCaptureModeRef.current
-    const isScaleCaptureMode = currentMotionCaptureMode?.isActive && (
-      isTextElement || // Always hide side handles for text in capture mode
-      currentMotionCaptureMode.actions?.some(a => a.type === 'scale')
-    )
 
-    // Text elements: corner handles for scaling, side handles for width
-    const textHandles = [
-      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, isLocked), // nw corner
-      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, isLocked), // ne corner
-      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, isLocked), // sw corner
-      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, isLocked), // se corner
-      // Only add side handles if not in scale capture mode
-      ...(!isScaleCaptureMode ? [
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, isLocked), // left side
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, isLocked), // right side
-      ] : [])
-    ]
+    // When the layer is animated and past its base step, we show ONLY the purple outline.
+    // We MUST still add the handles to the PIXI container so that updateSelectionBoxVisibility 
+    // can unhide them live if the user scrubs the timeline back to the base state.
+      // Check if we should hide side handles in motion capture mode
+      // We hide them if we're in capture mode AND it's a text element (no area adjustment during capture)
+      // OR if the current step has a specific scale action
+      const isScaleCaptureMode = currentMotionCaptureMode?.isActive && (
+        isTextElement || // Always hide side handles for text in capture mode
+        currentMotionCaptureMode.actions?.some(a => a.type === 'scale')
+      )
 
-    // Shape elements: all handles (corners + sides)
-    const shapeHandles = [
-      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, isLocked),
-      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, isLocked),
-      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, isLocked),
-      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, isLocked),
-      // Only add side handles if not in scale capture mode
-      ...(!isScaleCaptureMode ? [
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY, 'n-resize', 'n', zoomScale, scaledWidth, scaledHeight, isLocked),
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY + scaledHeight, 's-resize', 's', zoomScale, scaledWidth, scaledHeight, isLocked),
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, isLocked),
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, isLocked),
-      ] : [])
-    ]
+      // Text elements: corner handles for scaling, side handles for width
+      const textHandles = [
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false), // nw corner
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false), // ne corner
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false), // sw corner
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false), // se corner
+        // Only add side handles if not in scale capture mode
+        ...(!isScaleCaptureMode ? [
+          createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false), // left side
+          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false), // right side
+        ] : [])
+      ]
 
-    // Add handles based on element type
-    const handles = isTextElement ? textHandles : shapeHandles
-    handles.forEach(handle => selectionBox.addChild(handle))
+      // Shape elements: all handles (corners + sides)
+      const shapeHandles = [
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false),
+        // Only add side handles if not in scale capture mode
+        ...(!isScaleCaptureMode ? [
+          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY, 'n-resize', 'n', zoomScale, scaledWidth, scaledHeight, false),
+          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY + scaledHeight, 's-resize', 's', zoomScale, scaledWidth, scaledHeight, false),
+          createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false),
+          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false),
+        ] : [])
+      ]
 
-    // Side hit areas - text gets only left/right, shapes get all sides
-    // Also skip if in scale capture mode
-    const textSideHitAreas = !isScaleCaptureMode ? [
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, isLocked), // Left
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, isLocked), // Right
-    ] : []
+      // Add handles based on element type
+      const handles = isTextElement ? textHandles : shapeHandles
+      handles.forEach(handle => selectionBox.addChild(handle))
 
-    const shapeSideHitAreas = !isScaleCaptureMode ? [
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'n', 'n-resize', zoomScale, isLocked), // Top
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 's', 's-resize', zoomScale, isLocked), // Bottom
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, isLocked), // Left
-      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, isLocked), // Right
-    ] : []
+      // Side hit areas - text gets only left/right, shapes get all sides
+      // Also skip if in scale capture mode
+      const textSideHitAreas = !isScaleCaptureMode ? [
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
+      ] : []
 
-    const sideHitAreas = isTextElement ? textSideHitAreas : shapeSideHitAreas
-    sideHitAreas.forEach(hitArea => selectionBox.addChild(hitArea))
+      const shapeSideHitAreas = !isScaleCaptureMode ? [
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'n', 'n-resize', zoomScale, false), // Top
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 's', 's-resize', zoomScale, false), // Bottom
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
+        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
+      ] : []
 
+      const sideHitAreas = isTextElement ? textSideHitAreas : shapeSideHitAreas
+      sideHitAreas.forEach(hitArea => selectionBox.addChild(hitArea))
 
-    // Add rotation handle
-    const rotationHandle = createRotationHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleRotateStart, zoomScale, isLocked)
-    selectionBox.addChild(rotationHandle)
+      // Add rotation handle
+      const rotationHandle = createRotationHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleRotateStart, zoomScale, false)
+      selectionBox.addChild(rotationHandle)
 
     // [FIX] IMMEDIATELY apply visibility rules to avoid flickering handles when past base step
     // We call this after adding all children to ensure they are properly hidden if necessary.
 
 
-    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, isAnimated)
+    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, firstActionTime)
 
   }, [
     layersContainer,

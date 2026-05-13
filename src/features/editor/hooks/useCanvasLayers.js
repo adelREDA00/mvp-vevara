@@ -494,13 +494,21 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // (alpha=0 is load-bearing for that system; the mesh shows the displayed
   // opacity).  We still forward the intended opacity through `_intendedAlpha`
   // so the next syncTiltMesh tick applies it to mesh.alpha.
+  //
+  // [ANIMATED-EDIT FIX] Mirror the colour sentinel pattern: if the Redux base
+  // opacity genuinely changed since the last time we applied it, bypass the
+  // shouldApplyBaseState gate so the edit is visible at any timeline position.
+  const reduxOpacity = layer.opacity ?? 1
+  const reduxOpacityChanged = displayObject._lastReduxOpacityApplied !== reduxOpacity
+  const allowOpacityUpdate = force || shouldApplyBaseState || reduxOpacityChanged
+
   if (!displayObject._tiltHidden) {
     if (force) {
       if (layer.opacity !== undefined) displayObject.alpha = layer.opacity
     } else if (!isActuallyPlaying) {
       if (capturedLayer && capturedLayer.opacity !== undefined) {
         displayObject.alpha = capturedLayer.opacity
-      } else if (shouldApplyBaseState && layer.opacity !== undefined) {
+      } else if (allowOpacityUpdate && layer.opacity !== undefined) {
         displayObject.alpha = layer.opacity
       }
     }
@@ -516,7 +524,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     } else if (!isActuallyPlaying) {
       if (capturedLayer && capturedLayer.opacity !== undefined) {
         displayObject._intendedAlpha = capturedLayer.opacity
-      } else if (shouldApplyBaseState && layer.opacity !== undefined) {
+      } else if (allowOpacityUpdate && layer.opacity !== undefined) {
         displayObject._intendedAlpha = layer.opacity
       }
     }
@@ -528,18 +536,31 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       displayObject.alpha = TILT_HIDE_SENTINEL
     }
   }
+  // Track the last Redux opacity we applied (for the sentinel-change bypass above)
+  if (!capturedLayer && !isActuallyPlaying) {
+    displayObject._lastReduxOpacityApplied = reduxOpacity
+  }
 
   // 7. Blur Filter Synchronization
   // Blur is stored as 0-100 in Redux.
+  // [ANIMATED-EDIT FIX] Sentinel-change bypass: allow update whenever the Redux
+  // base blur value genuinely changes, regardless of timeline position.
+  const reduxBlur = layer.blur ?? 0
+  const reduxBlurChanged = displayObject._lastReduxBlurApplied !== reduxBlur
+  const allowBlurUpdate = force || shouldApplyBaseState || reduxBlurChanged
+
   if (force) {
-    const blurValue = layer.blur ?? 0
-    syncBlurFilter(displayObject, blurValue)
+    syncBlurFilter(displayObject, reduxBlur)
   } else if (!isActuallyPlaying) {
     if (capturedLayer && capturedLayer.blur !== undefined) {
       syncBlurFilter(displayObject, capturedLayer.blur)
-    } else if (shouldApplyBaseState && layer.blur !== undefined) {
-      syncBlurFilter(displayObject, layer.blur)
+    } else if (allowBlurUpdate) {
+      syncBlurFilter(displayObject, reduxBlur)
     }
+  }
+  // Track last Redux blur applied
+  if (!capturedLayer && !isActuallyPlaying) {
+    displayObject._lastReduxBlurApplied = reduxBlur
   }
 
   // 8. Tilt Synchronization (3D perspective).
@@ -551,7 +572,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   const tiltY = capturedTiltY ?? (layer.tiltY ?? 0)
   const hasTilt = Math.abs(tiltX) > 0.01 || Math.abs(tiltY) > 0.01
   const tiltRenderer = displayObject._pixiRenderer || null
-  const canApplyTiltState = force || !!capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)
+  // [ANIMATED-EDIT FIX] Sentinel-change bypass for tilt: allow update whenever the
+  // Redux base tilt values genuinely change, regardless of timeline position.
+  const reduxTiltKey = `${layer.tiltX ?? 0},${layer.tiltY ?? 0}`
+  const reduxTiltChanged = displayObject._lastReduxTiltApplied !== reduxTiltKey
+  const canApplyTiltState = force || !!capturedLayer || (!isActuallyPlaying && (shouldApplyBaseState || reduxTiltChanged))
   if (canApplyTiltState) {
     if (hasTilt) {
       applyTiltToObject(displayObject, tiltX, tiltY, tiltRenderer)
@@ -564,6 +589,10 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       const targetAlpha = (capturedLayer?.opacity ?? layer.opacity)
       if (targetAlpha !== undefined) displayObject.alpha = targetAlpha
     }
+  }
+  // Track last Redux tilt applied
+  if (!capturedLayer && !isActuallyPlaying) {
+    displayObject._lastReduxTiltApplied = reduxTiltKey
   }
   if (displayObject._tiltMesh) {
     // Mirror the owner's intended visibility onto the mesh so scene cuts,

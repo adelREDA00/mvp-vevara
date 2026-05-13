@@ -91,7 +91,7 @@ const cancelIdleCallback = (typeof window !== 'undefined' && window.cancelIdleCa
  * @param {number} worldHeight - Canvas world height
  * @param {number} [zoom=100] - Current zoom level (percentage, e.g., 100 = 100%)
  */
-export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, onLockedInteraction = null, layerObjectsVersion = 0) {
+export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, layerObjectsVersion = 0) {
   const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0 } = interactionParams
   const dispatch = useDispatch()
 
@@ -1062,13 +1062,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     return arrow
   }, [])
 
-  const getLayerCenter = useCallback((layer, layerObject, xOverride, yOverride) => {
+  const getLayerCenter = useCallback((layer, layerObject, xOverride, yOverride, scaleXOverride, scaleYOverride) => {
     if (!layer) return { x: xOverride || 0, y: yOverride || 0 }
     const isMedia = layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO || layer.type === LAYER_TYPES.FRAME
     const trackedLayer = motionCaptureMode?.isActive ? motionCaptureMode.trackedLayers?.get(layer.id) : null
     const { anchorX, anchorY } = resolveAnchors(layer, layerObject)
 
-    const width = isMedia
+    const isInteracting = layerObject?._isInteracting || (layer.id && dragStateAPI.isLayerDragging(layer.id))
+
+    let width = isMedia
       ? (trackedLayer?.cropWidth ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropWidth : (layer.cropWidth ?? layer.width ?? 100)))
       : (trackedLayer?.width ?? layer.width ?? 100)
 
@@ -1076,24 +1078,34 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     let height = isMedia
       ? (trackedLayer?.cropHeight ?? (layerObject?._hasReactiveCropProperties ? layerObject.cropHeight : (layer.cropHeight ?? layer.height ?? 100)))
       : (trackedLayer?.height ?? layer.height ?? 100)
-    if (layerObject instanceof PIXI.Text) {
+
+    if (isInteracting && layerObject && !layerObject.destroyed) {
+      if (isMedia) {
+        width = layerObject._storedCropWidth ?? width
+        height = layerObject._storedCropHeight ?? height
+      } else if (layerObject?._actualHeight !== undefined) {
+        height = layerObject._actualHeight
+      }
+    }
+
+    if (layerObject instanceof PIXI.Text && !isInteracting) {
       layerObject.updateText?.(true)
       height = layerObject.getLocalBounds().height
-    } else if (layerObject?._actualHeight !== undefined) {
-      // [DYNAMIC SYNC] Use the engine's layout height for FlowTextContainers
-      height = layerObject._actualHeight
+    } else if (layerObject instanceof PIXI.Text && isInteracting) {
+       // Use live height during interaction
+       height = layerObject.getLocalBounds().height
     }
 
     // Prioritize captured state during motion capture
     const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layer.id)
-    const scaleX = capturedLayer?.scaleX ?? (layer.scaleX || 1)
-    const scaleY = capturedLayer?.scaleY ?? (layer.scaleY || 1)
+    const scaleX = scaleXOverride !== undefined ? scaleXOverride : (capturedLayer?.scaleX ?? (layer.scaleX || 1))
+    const scaleY = scaleYOverride !== undefined ? scaleYOverride : (capturedLayer?.scaleY ?? (layer.scaleY || 1))
 
     const x = (xOverride !== undefined ? xOverride : (layer.x || 0)) + (0.5 - anchorX) * width * scaleX
     const y = (yOverride !== undefined ? yOverride : (layer.y || 0)) + (0.5 - anchorY) * height * scaleY
 
     return { x, y }
-  }, [motionCaptureMode])
+  }, [motionCaptureMode, dragStateAPI])
 
   const updateMotionArrow = useCallback((layerId, segments = []) => {
     const arrow = motionArrowsRef.current.get(layerId)
@@ -2477,13 +2489,33 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     const engine = getGlobalMotionEngine()
 
     // Start with base state from REDUX (not PIXI object, which moves with playhead)
-    // This ensures the path is always drawn relative to the "start" of the scene
+    // This ensures the path is always drawn relative to the "start" of the scene.
+    // [DRAG-SYNC FIX] Exception: when actively interacting (dragging, resizing, rotating), use the PIXI
+    // object's live properties minus animOffset so the path origin follows the interaction smoothly.
+    const isInteractingNow = !currentMotionCaptureMode?.isActive && (dragStateAPI.isLayerDragging(layerId) || layerObject._isInteracting)
+    
     let currentState = {
       x: layer.x || 0,
       y: layer.y || 0,
       rotation: layer.rotation || 0,
       scaleX: layer.scaleX || 1,
       scaleY: layer.scaleY || 1
+    }
+    
+    if (isInteractingNow && layerObject && !layerObject.destroyed) {
+      const initPos = initialPositionsRef.current.get(layerId)
+      const animOffsetX = initPos?.animOffsetX ?? 0
+      const animOffsetY = initPos?.animOffsetY ?? 0
+      const animOffsetScaleX = initPos?.animOffsetScaleX ?? 0
+      const animOffsetScaleY = initPos?.animOffsetScaleY ?? 0
+      const animOffsetRotation = initPos?.animOffsetRotation ?? 0
+      
+      const liveObj = layerObject._cachedSprite || layerObject
+      currentState.x = (liveObj._selectionBoxX ?? liveObj.x) - animOffsetX
+      currentState.y = (liveObj._selectionBoxY ?? liveObj.y) - animOffsetY
+      currentState.scaleX = (liveObj.scale.x) - animOffsetScaleX
+      currentState.scaleY = (liveObj.scale.y) - animOffsetScaleY
+      currentState.rotation = (liveObj.rotation * 180 / Math.PI) - animOffsetRotation
     }
 
     // Iterate through steps to build the path chain
@@ -2507,7 +2539,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         const anchorKey = `${layerId}-${step.id}`
         stepAnchorPositionsRef.current.set(anchorKey, { x: currentState.x, y: currentState.y })
 
-        const startCenter = getLayerCenter(layer, layerObject, currentState.x, currentState.y)
+        const startCenter = getLayerCenter(layer, layerObject, currentState.x, currentState.y, currentState.scaleX, currentState.scaleY)
 
         // Calculate end using relative deltas
         let endX = currentState.x
@@ -2532,13 +2564,13 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         if (isCurrentlyDragged) {
           const targetObj = layerObject._cachedSprite || layerObject
-          endCenter = getLayerCenter(layer, layerObject, targetObj.x, targetObj.y)
+          endCenter = getLayerCenter(layer, layerObject, targetObj.x, targetObj.y, targetObj.scale.x, targetObj.scale.y)
         } else if (isActiveStep && trackedLayer?.currentPosition) {
           endCenter = getLayerCenter(layer, layerObject, trackedLayer.currentPosition.x, trackedLayer.currentPosition.y)
           endX = trackedLayer.currentPosition.x
           endY = trackedLayer.currentPosition.y
         } else {
-          endCenter = getLayerCenter(layer, layerObject, endX, endY)
+          endCenter = getLayerCenter(layer, layerObject, endX, endY, currentState.scaleX, currentState.scaleY)
         }
 
         const controlPoints = (isCurrentlyHandleDragged && tempControlPoints)
@@ -2559,7 +2591,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           const anchorX = storedAnchor?.x ?? currentState.x
           const anchorY = storedAnchor?.y ?? currentState.y
           const worldCenterControlPoints = controlPoints.map(cp => {
-            return getLayerCenter(layer, layerObject, anchorX + cp.x, anchorY + cp.y)
+            return getLayerCenter(layer, layerObject, anchorX + cp.x, anchorY + cp.y, currentState.scaleX, currentState.scaleY)
           })
 
           segments.push({
@@ -2769,17 +2801,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         }
         event.stopPropagation?.()
 
-        // [FIX] Block multi-drag if ANY selected layer is animated and we are past base step
-        const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
+        // Animated elements can always be dragged (move updates base Redux state)
         const targetLayerId = findLayerIdFromObject(target, layerObjectsMap, stageContainer, viewport)
-        const isTextLayer = targetLayerId && latestLayersRef.current[targetLayerId]?.type === LAYER_TYPES.TEXT
-
-        if (anyLocked && !isTextLayer) {
-          event.stopPropagation()
-          event.stopImmediatePropagation?.()
-          if (onLockedInteraction) onLockedInteraction(event)
-          return
-        }
 
         // Ensure we stop propagation to prevent other handlers from interfering
         event.stopPropagation()
@@ -2808,13 +2831,31 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             // Check for captured transform overrides during motion capture
             const capturedLayer = latestMotionCaptureModeRef.current?.isActive && latestMotionCaptureModeRef.current.trackedLayers?.get(id)
 
+            // [ANIM-DRAG FIX] Use the PIXI object's current rendered (animated) position
+            // as the drag start so the element doesn't snap back to its base position.
+            const pixiObj = layerObjectsMap.get(id)
+            const baseX = capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0)
+            const baseY = capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0)
+            const pixiX = (!capturedLayer && pixiObj && !pixiObj.destroyed) ? (pixiObj._cachedSprite?.x ?? pixiObj.x) : baseX
+            const pixiY = (!capturedLayer && pixiObj && !pixiObj.destroyed) ? (pixiObj._cachedSprite?.y ?? pixiObj.y) : baseY
+            const animOffsetX = pixiX - baseX
+            const animOffsetY = pixiY - baseY
+            const animOffsetScaleX = (pixiObj.scale.x) - (selectedLayer.scaleX || 1)
+            const animOffsetScaleY = (pixiObj.scale.y) - (selectedLayer.scaleY || 1)
+            const animOffsetRotation = ((pixiObj.rotation * 180) / Math.PI) - (selectedLayer.rotation || 0)
+
             const pos = {
-              x: capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0),
-              y: capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0),
+              x: pixiX,
+              y: pixiY,
               cropX: capturedLayer?.cropX ?? (selectedLayer.cropX || 0),
               cropY: capturedLayer?.cropY ?? (selectedLayer.cropY || 0),
               cropWidth: capturedLayer?.cropWidth ?? (selectedLayer.cropWidth || selectedLayer.width || 100),
               cropHeight: capturedLayer?.cropHeight ?? (selectedLayer.cropHeight || selectedLayer.height || 100),
+              animOffsetX,
+              animOffsetY,
+              animOffsetScaleX,
+              animOffsetScaleY,
+              animOffsetRotation,
             }
             initialPositionsRef.current.set(id, pos)
 
@@ -2861,15 +2902,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           }
           event.stopPropagation?.()
 
-          // [FIX] Block single-layer drag if it's animated and we are past base step
-          // Enforce lock even on initial selection (Bug 1 Fix)
-          const isTextLayer = latestLayersRef.current[selectedLayerId]?.type === LAYER_TYPES.TEXT
-          if (isLayerLocked(selectedLayerId) && !isTextLayer) {
-            event.stopPropagation()
-            event.stopImmediatePropagation?.()
-            if (onLockedInteraction) onLockedInteraction(event)
-            return
-          }
+          // Animated elements can always be dragged (move updates base Redux state)
 
           event.stopPropagation()
           event.stopImmediatePropagation?.()
@@ -2884,13 +2917,22 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           // Check for captured transform overrides during motion capture
           const capturedLayer = latestMotionCaptureModeRef.current?.isActive && latestMotionCaptureModeRef.current.trackedLayers?.get(selectedLayerId)
 
+          // [ANIM-DRAG FIX] Use PIXI rendered position to prevent snap-back on animated layers
+          const pixiObj = layerObjectsMap.get(selectedLayerId)
+          const baseX = capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0)
+          const baseY = capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0)
+          const pixiX = (!capturedLayer && pixiObj && !pixiObj.destroyed) ? (pixiObj._cachedSprite?.x ?? pixiObj.x) : baseX
+          const pixiY = (!capturedLayer && pixiObj && !pixiObj.destroyed) ? (pixiObj._cachedSprite?.y ?? pixiObj.y) : baseY
+
           const pos = {
-            x: capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0),
-            y: capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0),
+            x: pixiX,
+            y: pixiY,
             cropX: capturedLayer?.cropX ?? (selectedLayer.cropX || 0),
             cropY: capturedLayer?.cropY ?? (selectedLayer.cropY || 0),
             cropWidth: capturedLayer?.cropWidth ?? (selectedLayer.cropWidth || selectedLayer.width || 100),
             cropHeight: capturedLayer?.cropHeight ?? (selectedLayer.cropHeight || selectedLayer.height || 100),
+            animOffsetX: pixiX - baseX,
+            animOffsetY: pixiY - baseY,
           }
           initialPositionsRef.current.set(selectedLayerId, pos)
 
@@ -2995,15 +3037,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (hasMultiSelect) {
         // If clicking on a selected element or selection box, preserve multi-select
         if (clickedLayerInMultiSelect) {
-          // [FIX] Block multi-drag from element click if ANY selected layer is locked
-          const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
-          const isTextTarget = latestLayersRef.current[layerId]?.type === LAYER_TYPES.TEXT
-          if (anyLocked && !isTextTarget) {
-            event.stopPropagation()
-            event.stopImmediatePropagation?.()
-            if (onLockedInteraction) onLockedInteraction(event)
-            return
-          }
+          // Animated elements can always be dragged (move updates base Redux state)
 
 
           // Filter out background layers from multi-select operations
@@ -3043,13 +3077,21 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
                 // Check for captured transform overrides during motion capture
                 const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(id)
 
+                // [ANIM-DRAG FIX] Use PIXI rendered position to prevent snap-back on animated layers
+                const pixiObj2 = layerObjectsMap.get(id)
+                const base2X = capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0)
+                const base2Y = capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0)
+                const pixi2X = (!capturedLayer && pixiObj2 && !pixiObj2.destroyed) ? (pixiObj2._cachedSprite?.x ?? pixiObj2.x) : base2X
+                const pixi2Y = (!capturedLayer && pixiObj2 && !pixiObj2.destroyed) ? (pixiObj2._cachedSprite?.y ?? pixiObj2.y) : base2Y
                 initialPositionsRef.current.set(id, {
-                  x: capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0),
-                  y: capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0),
+                  x: pixi2X,
+                  y: pixi2Y,
                   cropX: capturedLayer?.cropX ?? (selectedLayer.cropX || 0),
                   cropY: capturedLayer?.cropY ?? (selectedLayer.cropY || 0),
                   cropWidth: capturedLayer?.cropWidth ?? (selectedLayer.cropWidth || selectedLayer.width || 100),
                   cropHeight: capturedLayer?.cropHeight ?? (selectedLayer.cropHeight || selectedLayer.height || 100),
+                  animOffsetX: pixi2X - base2X,
+                  animOffsetY: pixi2Y - base2Y,
                 })
               }
             })
@@ -3107,15 +3149,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // Prepare for drag if using select tool
       if (activeTool === 'select' || activeTool === 'move') {
-        // [FIX] Block single-layer drag from element click if locked
-        // Enforce lock even on initial selection (Bug 1 Fix)
-        const isTextLayer = latestLayersRef.current[layerId]?.type === LAYER_TYPES.TEXT
-        if (!hasMultiSelect && isLayerLocked(layerId) && !isTextLayer) {
-          event.stopPropagation()
-          event.stopImmediatePropagation?.()
-          if (onLockedInteraction) onLockedInteraction(event)
-          return
-        }
+        // Animated elements can always be dragged (move updates base Redux state)
 
         const currentLayers = latestLayersRef.current
         const layer = currentLayers[layerId]
@@ -3144,9 +3178,18 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               // Check for captured transform overrides during motion capture
               const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(id)
 
+              // [ANIM-DRAG FIX] Use PIXI rendered position to prevent snap-back on animated layers
+              const pixiObjM = layerObjectsMap.get(id)
+              const baseMX = capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0)
+              const baseMY = capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0)
+              const pixiMX = (!capturedLayer && pixiObjM && !pixiObjM.destroyed) ? (pixiObjM._cachedSprite?.x ?? pixiObjM.x) : baseMX
+              const pixiMY = (!capturedLayer && pixiObjM && !pixiObjM.destroyed) ? (pixiObjM._cachedSprite?.y ?? pixiObjM.y) : baseMY
+
               const pos = {
-                x: capturedLayer?.currentPosition?.x ?? (selectedLayer.x || 0),
-                y: capturedLayer?.currentPosition?.y ?? (selectedLayer.y || 0),
+                x: pixiMX,
+                y: pixiMY,
+                animOffsetX: pixiMX - baseMX,
+                animOffsetY: pixiMY - baseMY,
               }
               initialPositionsRef.current.set(id, pos)
 
@@ -3186,15 +3229,22 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           const capturedLayer = motionCaptureMode?.isActive && motionCaptureMode.trackedLayers?.get(layerId)
 
           const layerObject = layerObjectsMap.get(layerId)
+          // [ANIM-DRAG FIX] Use PIXI rendered position to prevent snap-back on animated layers
+          const baseSX = capturedLayer?.currentPosition?.x ?? (layer.x || 0)
+          const baseSY = capturedLayer?.currentPosition?.y ?? (layer.y || 0)
+          const pixiSX = (!capturedLayer && layerObject && !layerObject.destroyed) ? (layerObject._cachedSprite?.x ?? layerObject.x) : baseSX
+          const pixiSY = (!capturedLayer && layerObject && !layerObject.destroyed) ? (layerObject._cachedSprite?.y ?? layerObject.y) : baseSY
           initialPositionsRef.current.set(layerId, {
-            x: capturedLayer?.currentPosition?.x ?? (layer.x || 0),
-            y: capturedLayer?.currentPosition?.y ?? (layer.y || 0),
+            x: pixiSX,
+            y: pixiSY,
             cropX: capturedLayer?.cropX ?? (layer.cropX || 0),
             cropY: capturedLayer?.cropY ?? (layer.cropY || 0),
             cropWidth: capturedLayer?.cropWidth ?? (layer.cropWidth || layer.width || 100),
             cropHeight: capturedLayer?.cropHeight ?? (layer.cropHeight || layer.height || 100),
             mediaWidth: capturedLayer?.mediaWidth ?? layer.mediaWidth ?? layerObject?._mediaWidth ?? layer.width ?? 100,
             mediaHeight: capturedLayer?.mediaHeight ?? layer.mediaHeight ?? layerObject?._mediaHeight ?? layer.height ?? 100,
+            animOffsetX: pixiSX - baseSX,
+            animOffsetY: pixiSY - baseSY,
           })
         }
 
@@ -3255,15 +3305,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         if (distSq < dragThreshold * dragThreshold) {
           return // Not enough movement yet, don't start dragging
         }
-        // Start dragging!
+        // Start dragging! Animated elements are always draggable (move = base state update)
         const dragLayerId = dragStartRef.current.layerId
-        if (isLayerLocked(dragLayerId)) {
-          if (onLockedInteraction) onLockedInteraction(event)
-          // Reset state to stop tracking movement
-          pointerIsDownRef.current = false
-          dragStartRef.current = null
-          return
-        }
         dragStateAPI.setDragState(true, dragLayerId)
 
         // Show drag hover box when dragging starts
@@ -3287,9 +3330,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               width = dims.width
               height = dims.height
             } else if (isMedia) {
-              // CROP SYSTEM: Use cropped dimensions for media layers
-              width = capturedLayer?.cropWidth ?? layer.cropWidth ?? layer.width ?? 100
-              height = capturedLayer?.cropHeight ?? layer.cropHeight ?? layer.height ?? 100
+              // [ANIM-DRAG FIX] Prefer PIXI stored dimensions (animated state) over base Redux state
+              width = layerObject._storedCropWidth ?? capturedLayer?.cropWidth ?? layer.cropWidth ?? layer.width ?? 100
+              height = layerObject._storedCropHeight ?? capturedLayer?.cropHeight ?? layer.cropHeight ?? layer.height ?? 100
+            } else if (layerObject instanceof PIXI.Graphics && layerObject._storedWidth !== undefined) {
+              width = layerObject._storedWidth
+              height = layerObject._storedHeight
             } else {
               width = capturedLayer?.width ?? layer.width ?? 100
               height = capturedLayer?.height ?? layer.height ?? 100
@@ -3308,12 +3354,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               layersContainer.addChild(dragHoverBox) // Add to layersContainer to avoid clipping
             }
 
-            // Store dimensions for use during drag move (dimensions don't change during drag)
-            const rotationDegrees = capturedLayer?.rotation ?? (layer.rotation || 0)
-            const scaleX = capturedLayer?.scaleX ?? (layer.scaleX || 1)
-            const scaleY = capturedLayer?.scaleY ?? (layer.scaleY || 1)
-            const currentX = capturedLayer?.currentPosition?.x ?? (layer.x || 0)
-            const currentY = capturedLayer?.currentPosition?.y ?? (layer.y || 0)
+            // [ANIM-DRAG FIX] Read rotation/scale from PIXI object (animated state) not base Redux
+            const liveObj = layerObject._cachedSprite || layerObject
+            const rotationDegrees = capturedLayer?.rotation
+              ?? (liveObj.rotation !== undefined ? liveObj.rotation * 180 / Math.PI : (layer.rotation || 0))
+            const scaleX = capturedLayer?.scaleX ?? liveObj.scale?.x ?? (layer.scaleX || 1)
+            const scaleY = capturedLayer?.scaleY ?? liveObj.scale?.y ?? (layer.scaleY || 1)
+            const currentX = capturedLayer?.currentPosition?.x ?? liveObj._selectionBoxX ?? liveObj.x ?? (layer.x || 0)
+            const currentY = capturedLayer?.currentPosition?.y ?? liveObj._selectionBoxY ?? liveObj.y ?? (layer.y || 0)
 
             dragHoverBoxDimensionsRef.current = {
               width,
@@ -3410,16 +3458,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       if (isMultiSelectDrag) {
-        // [FIX] Block multi-drag move if ANY selected layer is locked
-        const anyLocked = currentSelectedLayerIds.some(id => isLayerLocked(id))
-        if (anyLocked) {
-          if (onLockedInteraction) onLockedInteraction(event)
-          // Reset state to stop tracking movement
-          pointerIsDownRef.current = false
-          dragStartRef.current = null
-          dragStateAPI.setDragState(false)
-          return
-        }
+        // Animated elements can always be dragged (move updates base Redux state)
         // Optimized multi-select drag: simplified snapping for better performance
         // Get the original bounding box center (stored at drag start)
         let originalBoundsCenter = multiSelectBoundsCenterRef.current
@@ -3713,7 +3752,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             }
           } else {
             // Store pending update for throttled Redux dispatch
-            pendingDragUpdatesRef.current.set(selectedLayerId, { x: newX, y: newY })
+            // [ANIM-DRAG FIX] Subtract animOffset so Redux receives the corrected base-state position
+            const initPosM = initialPositionsRef.current.get(selectedLayerId)
+            pendingDragUpdatesRef.current.set(selectedLayerId, {
+              x: newX - (initPosM?.animOffsetX ?? 0),
+              y: newY - (initPosM?.animOffsetY ?? 0),
+            })
           }
         })
 
@@ -4042,7 +4086,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       } else {
         // Normal mode
         updateMotionArrowVisibility(selectedLayerId, true)
-        pendingDragUpdatesRef.current.set(selectedLayerId, { x: newX, y: newY })
+        // [ANIM-DRAG FIX] Subtract animOffset so Redux receives the corrected base-state position
+        const initPosS = initialPositionsRef.current.get(selectedLayerId)
+        pendingDragUpdatesRef.current.set(selectedLayerId, {
+          x: newX - (initPosS?.animOffsetX ?? 0),
+          y: newY - (initPosS?.animOffsetY ?? 0),
+        })
 
         // [PERFORMANCE] Throttle Redux updates during drag to ~6-7 dispatches per second (150ms)
         // This significantly reduces re-render overhead on low-end PCs while 
