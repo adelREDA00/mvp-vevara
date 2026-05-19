@@ -62,7 +62,7 @@ function hslToHex(h, s, l) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
 
-function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchorElement }) {
+function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchorElement, isInline = false }) {
   const [activeTab, setActiveTab] = useState('solid') // 'solid' or 'gradient'
   
   const [hsl, setHsl] = useState(() => {
@@ -113,6 +113,8 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 
   // Calculate position relative to anchor element
   useEffect(() => {
+    if (isInline) return
+
     const updatePosition = () => {
       if (anchorElement && modalRef.current) {
         const rect = anchorElement.getBoundingClientRect()
@@ -148,10 +150,12 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
       window.removeEventListener('scroll', updatePosition, true)
       window.removeEventListener('resize', updatePosition)
     }
-  }, [anchorElement])
+  }, [anchorElement, isInline])
 
   // Handle click outside to close
   useEffect(() => {
+    if (isInline) return
+
     const handleClickOutside = (e) => {
       if (modalRef.current && !modalRef.current.contains(e.target) && 
           anchorElement && !anchorElement.contains(e.target)) {
@@ -161,7 +165,7 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose, anchorElement])
+  }, [onClose, anchorElement, isInline])
 
   // Update HSL when hex input changes
   const handleHexChange = (value) => {
@@ -291,31 +295,49 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 
   if (typeof document === 'undefined') return null
 
-  return createPortal(
+  const content = (
     <div
       ref={modalRef}
-      className="fixed rounded-xl shadow-2xl border border-white/10 z-[10000] overflow-hidden"
-      style={{ 
+      className={isInline
+        ? "w-full h-full flex flex-col overflow-hidden text-white"
+        : (typeof window !== 'undefined' && window.innerWidth < 1024
+          ? "fixed rounded-2xl shadow-2xl border border-white/10 z-[10000] overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-300"
+          : "fixed rounded-xl shadow-2xl border border-white/10 z-[10000] overflow-hidden")
+      }
+      style={isInline ? {
+        backgroundColor: 'transparent',
+      } : (typeof window !== 'undefined' && window.innerWidth < 1024 ? {
+        width: 'calc(100% - 32px)',
+        maxWidth: '320px',
+        bottom: '16px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        backgroundColor: 'rgba(15, 16, 21, 0.95)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+      } : {
         width: '280px',
         top: `${position.top}px`,
         left: `${position.left}px`,
         backgroundColor: 'rgba(15, 16, 21, 0.7)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-      }}
+      })}
       onClick={(e) => e.stopPropagation()}
     >
         {/* Header */}
         <div className="px-3 pt-3 pb-2 border-b border-white/5 flex-shrink-0 bg-white/5">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pick Colour</h2>
-            <button
-              onClick={onClose}
-              className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-          </div>
+          {!isInline && (
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pick Colour</h2>
+              <button
+                onClick={onClose}
+                className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex gap-1 bg-black/40 p-1 rounded-lg">
@@ -424,10 +446,26 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
             </div>
           )}
         </div>
-    </div>,
-    document.body
-  )
-}
+      </div>
+    )
+
+    if (isInline) {
+      return content
+    }
+
+    return createPortal(
+      <>
+        {typeof window !== 'undefined' && window.innerWidth < 1024 && (
+          <div
+            className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+            onClick={onClose}
+          />
+        )}
+        {content}
+      </>,
+      document.body
+    )
+  }
 
 export default AdvancedColorPickerModal
 

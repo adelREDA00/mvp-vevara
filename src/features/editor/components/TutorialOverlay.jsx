@@ -59,10 +59,13 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
     }
 
     // Steps 1 and 3 target the Animate / Save Step button
-    let buttonSelector = '';
-    if (step === 1 || step === 3) buttonSelector = '[data-tutorial="add-step-button"]';
-
-    const buttonElement = buttonSelector ? document.querySelector(buttonSelector) : null;
+    const buttonElements = document.querySelectorAll('[data-tutorial="add-step-button"]');
+    let buttonElement = null;
+    if (buttonElements.length > 0) {
+      // On mobile (< 1024px), the mobile CanvasControls at the bottom is shown, which is the last button in DOM order.
+      // On desktop, the top CanvasControls is shown, which is the first button in DOM order.
+      buttonElement = window.innerWidth < 1024 ? buttonElements[buttonElements.length - 1] : buttonElements[0];
+    }
 
     if (buttonElement) {
       const rect = buttonElement.getBoundingClientRect();
@@ -80,14 +83,18 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
         return prev;
       });
 
-      const top = rect.bottom + 20;
+      // Determine if Animate/Save button is at the bottom of the screen (on mobile)
+      const isAtBottom = rect.top > window.innerHeight / 2;
+      const top = isAtBottom ? rect.top - 20 : rect.bottom + 20;
+      const position = isAtBottom ? 'top' : 'bottom';
+
       setHintPos(prev => {
         let targetCenter = rect.left + rect.width / 2;
         const modalHalfWidth = 140;
         const left = Math.max(modalHalfWidth + margin, Math.min(viewWidth - modalHalfWidth - margin, targetCenter));
 
-        if (Math.abs(prev.top - top) > 1 || Math.abs(prev.left - left) > 1) {
-          return { top, left, position: 'bottom' };
+        if (Math.abs(prev.top - top) > 1 || Math.abs(prev.left - left) > 1 || prev.position !== position) {
+          return { top, left, position };
         }
         return prev;
       });
@@ -135,15 +142,22 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
   const getHintContainerStyle = () => {
     if (hintPos.position === 'left') return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translate(-100%, -50%)' };
     if (hintPos.position === 'right') return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translate(0, -50%)' };
+    if (hintPos.position === 'top') {
+      return {
+        top: `${hintPos.top}px`,
+        left: `${hintPos.left}px`,
+        transform: step === 2 ? 'translateX(-50%)' : 'translate(-50%, -100%)'
+      };
+    }
     return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translateX(-50%)' };
   };
 
   const getArrowClasses = () => {
     const base = "absolute w-4 h-4 bg-[#6940c9] rotate-45 border-white/20";
-    if (hintPos.position === 'bottom') return `${base} -top-2 left-1/2 -translateX-1/2 border-l border-t`;
-    if (hintPos.position === 'top') return `${base} -bottom-2 left-1/2 -translateX-1/2 border-r border-b`;
-    if (hintPos.position === 'left') return `${base} -right-2 top-1/2 -translateY-1/2 border-r border-t`;
-    if (hintPos.position === 'right') return `${base} -left-2 top-1/2 -translateY-1/2 border-l border-b`;
+    if (hintPos.position === 'bottom') return `${base} -top-2 left-1/2 -translate-x-1/2 border-l border-t`;
+    if (hintPos.position === 'top') return `${base} -bottom-2 left-1/2 -translate-x-1/2 border-r border-b`;
+    if (hintPos.position === 'left') return `${base} -right-2 top-1/2 -translate-y-1/2 border-r border-t`;
+    if (hintPos.position === 'right') return `${base} -left-2 top-1/2 -translate-y-1/2 border-l border-b`;
     return base;
   };
 

@@ -157,7 +157,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
         >
             {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
-            <div className={`px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
+            <div className={`hidden lg:block px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
                 <div className="flex items-center justify-between mb-4">
                     <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Media</h2>
                     {onClose && (

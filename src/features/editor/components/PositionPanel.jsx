@@ -197,7 +197,7 @@ function PositionPanel({
       <DragToCloseHandle onClose={onClose} onWidthChange={setPanelWidth} initialWidth={panelWidth} minWidth={240} />
 
       {/* Header */}
-      <div className={`px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
+      <div className={`hidden lg:block px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
         <div className="flex items-center justify-between">
           <div>
             <div className={`text-[10px] uppercase tracking-[0.2em] mb-0.5 ${isLight ? 'text-gray-500' : 'text-white/40'}`}>Layers</div>

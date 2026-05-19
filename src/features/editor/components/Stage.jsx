@@ -114,7 +114,7 @@ function Stage({
   showSafeArea,
   activeTool = 'select',
   onRightClick,
-  zoom = 100,
+  zoom = 31,
   onZoomChange,
   onViewportChange, // Add onViewportChange prop
   topToolbarHeight = 0,
@@ -1453,8 +1453,9 @@ function Stage({
   useEffect(() => {
     if (viewport && isReady && !viewportInitializedRef.current && stageSize.width > 0 && stageSize.height > 0) {
       try {
-        // Set initial zoom to fit (round to nearest 5% for clean display)
-        const initialZoom = calculateFitZoom(stageSize, worldWidth, worldHeight, true)
+        // Set initial zoom to 18% if the artboard is vertical (portrait), 31% otherwise
+        const isVertical = worldHeight > worldWidth
+        const initialZoom = isVertical ? 18 : 31
         if (onZoomChange) {
           onZoomChange(initialZoom)
         }

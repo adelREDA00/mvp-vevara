@@ -640,7 +640,7 @@ function MotionPanel({
       {/* Mobile Backdrop Overlay */}
       {isOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
+          className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200"
           style={{ top: 0 }}
           onClick={onClose}
         />
@@ -649,15 +649,17 @@ function MotionPanel({
       <div
         className={`fixed z-[61] flex flex-col shadow-2xl ${isResizing ? '' : 'transition-all duration-300'}
           ${typeof window !== 'undefined' && window.innerWidth < 1024
-            ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t'
+            ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in'
             : 'inset-y-0 right-0 border-l'}`}
         style={{
           top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : `${topToolbarHeight}px`,
-          height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '80vh' : 'auto',
+          height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '42vh' : 'auto',
+          minHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '280px' : 'auto',
+          maxHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '45vh' : 'auto',
           width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
           backgroundColor: isLight ? '#f9fafb' : '#090a0d',
-          backdropFilter: 'blur(32px)',
-          WebkitBackdropFilter: 'blur(32px)',
+          backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(32px)',
+          WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(32px)',
           borderColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
         }}
       >
@@ -667,7 +669,7 @@ function MotionPanel({
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0">
+        <div className="hidden lg:flex items-center justify-between px-5 py-4 flex-shrink-0">
           <h2 className={`text-sm font-semibold flex items-center gap-2.5 ${isLight ? 'text-gray-900' : 'text-zinc-200'}`}>
             <Zap className="h-4 w-4 text-[#7c4af0]" />
             Animation
@@ -720,7 +722,7 @@ function MotionPanel({
         />
 
         {/* Step count summary */}
-        <div className="px-5 pb-3 flex-shrink-0">
+        <div className="hidden lg:block px-5 pb-3 flex-shrink-0">
           <div className={`text-[10px] font-bold tracking-widest uppercase ${isLight ? 'text-slate-400' : 'text-zinc-400'}`}>
             {motionFlow.length === 0 ? 'No animation steps' : `${motionFlow.length} Step${motionFlow.length > 1 ? 's' : ''}`}
           </div>

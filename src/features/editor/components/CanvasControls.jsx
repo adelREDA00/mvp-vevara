@@ -15,6 +15,14 @@ import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import { useSelector, useDispatch } from 'react-redux'
 import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
+
+const DEFAULT_COLORS = [
+  '#6367FF', '#8494FF', '#C9BEFF', '#FFDBFD', '#ffffff',
+  '#222831', '#393E46', '#00ADB5', '#EEEEEE', '#000000',
+  '#FFF5E4', '#FFE3E1', '#FFD1D1', '#FF9494', '#ff4500',
+  '#00d1b2', '#f5f5f5', '#209cee', '#ffdd57', '#ff3860'
+]
+
 function CanvasControls({
   duration = '4.4s',
   selectedLayer,
@@ -35,7 +43,9 @@ function CanvasControls({
   stepsCount = 0,
   editingStepActionCount = 0,
   showPasteboard = true,
-  onTogglePasteboard
+  onTogglePasteboard,
+  isMobileBottom = false,
+  onSubmenuChange
 }) {
   const { theme } = useContext(ThemeContext)
   const dispatch = useDispatch()
@@ -45,6 +55,7 @@ function CanvasControls({
   const [showBlurSlider, setShowBlurSlider] = useState(false)
   const [showCornerRadiusSlider, setShowCornerRadiusSlider] = useState(false)
   const [showTiltPanel, setShowTiltPanel] = useState(false)
+  const [showColorMenu, setShowColorMenu] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
   const scrollContainerRef = useRef(null)
   const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
@@ -55,12 +66,42 @@ function CanvasControls({
     }
   })
 
+  const toggleSubmenu = (menuName) => {
+    const turnOn = (() => {
+      if (menuName === 'opacity') return !showOpacitySlider
+      if (menuName === 'blur') return !showBlurSlider
+      if (menuName === 'radius') return !showCornerRadiusSlider
+      if (menuName === 'tilt') return !showTiltPanel
+      if (menuName === 'color') return !showColorMenu
+      return false
+    })()
+
+    setShowOpacitySlider(false)
+    setShowBlurSlider(false)
+    setShowCornerRadiusSlider(false)
+    setShowTiltPanel(false)
+    setShowColorMenu(false)
+
+    if (turnOn) {
+      if (menuName === 'opacity') setShowOpacitySlider(true)
+      if (menuName === 'blur') setShowBlurSlider(true)
+      if (menuName === 'radius') setShowCornerRadiusSlider(true)
+      if (menuName === 'tilt') setShowTiltPanel(true)
+      if (menuName === 'color') setShowColorMenu(true)
+      onSubmenuChange?.(menuName)
+    } else {
+      onSubmenuChange?.(null)
+    }
+  }
+
   // Auto-close slider when selection changes
   useEffect(() => {
     setShowOpacitySlider(false)
     setShowBlurSlider(false)
     setShowCornerRadiusSlider(false)
     setShowTiltPanel(false)
+    setShowColorMenu(false)
+    onSubmenuChange?.(null)
   }, [selectedLayer?.id, selectedCanvas])
 
   // Open opacity/blur slider when requested by parent (e.g. from MotionPanel)
@@ -228,11 +269,22 @@ function CanvasControls({
 
 
   return (
-    <div className="relative flex flex-col items-center justify-center py-2 px-3">
+    <div className={isMobileBottom ? "relative flex flex-col items-center justify-center w-full px-4 py-1.5" : "relative flex flex-col items-center justify-center py-2 px-3"}>
       <div
         ref={scrollContainerRef}
-        className="h-10 flex items-center gap-3 px-3 rounded-[12px] max-w-[calc(100vw-24px)] overflow-x-auto mobile-scrollbar backdrop-blur-md transition-all duration-300"
-        style={{
+        className={isMobileBottom 
+          ? "h-10 flex items-center justify-center gap-3 px-4 w-full overflow-x-auto scrollbar-none transition-all duration-300"
+          : "h-10 flex items-center gap-3 px-3 rounded-[12px] max-w-[calc(100vw-24px)] overflow-x-auto mobile-scrollbar backdrop-blur-md transition-all duration-300"
+        }
+        style={isMobileBottom ? {
+          backgroundColor: 'transparent',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          border: 'none',
+          boxShadow: 'none',
+          pointerEvents: 'auto',
+          justifyContent: 'safe center',
+        } : {
           backgroundColor: 'var(--editor-panel-bg)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
@@ -247,7 +299,9 @@ function CanvasControls({
             {/* <span className="text-white text-xs">Background:</span> */}
             <button
               onClick={() => {
-                if (onOpenColorPicker) {
+                if (isMobileBottom) {
+                  toggleSubmenu('color')
+                } else if (onOpenColorPicker) {
                   onOpenColorPicker('canvas')
                 }
               }}
@@ -279,7 +333,9 @@ function CanvasControls({
           <div className="relative flex-shrink-0 flex justify-center" style={{ width: '32px' }}>
             <button
               onClick={() => {
-                if (onOpenColorPicker && selectedLayer) {
+                if (isMobileBottom) {
+                  toggleSubmenu('color')
+                } else if (onOpenColorPicker && selectedLayer) {
                   if (selectedLayer.type === LAYER_TYPES.BACKGROUND) {
                     onOpenColorPicker('canvas') // Background layers use canvas color picker
                   } else if (selectedLayer.type === LAYER_TYPES.SHAPE || selectedLayer.type === LAYER_TYPES.TEXT) {
@@ -580,10 +636,7 @@ function CanvasControls({
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <button
             onClick={() => {
-              setShowOpacitySlider(!showOpacitySlider)
-              setShowBlurSlider(false)
-              setShowCornerRadiusSlider(false)
-              setShowTiltPanel(false)
+              toggleSubmenu('opacity')
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showOpacitySlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -599,10 +652,7 @@ function CanvasControls({
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <button
             onClick={() => {
-              setShowBlurSlider(!showBlurSlider)
-              setShowOpacitySlider(false)
-              setShowCornerRadiusSlider(false)
-              setShowTiltPanel(false)
+              toggleSubmenu('blur')
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showBlurSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -618,10 +668,7 @@ function CanvasControls({
         {selectedLayer?.type === LAYER_TYPES.SHAPE && hasCorners() && (
           <button
             onClick={() => {
-              setShowCornerRadiusSlider(!showCornerRadiusSlider)
-              setShowOpacitySlider(false)
-              setShowBlurSlider(false)
-              setShowTiltPanel(false)
+              toggleSubmenu('radius')
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showCornerRadiusSlider ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -638,10 +685,7 @@ function CanvasControls({
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <button
             onClick={() => {
-              setShowTiltPanel(!showTiltPanel)
-              setShowOpacitySlider(false)
-              setShowBlurSlider(false)
-              setShowCornerRadiusSlider(false)
+              toggleSubmenu('tilt')
             }}
             className={`h-8 px-2 rounded-[8px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap border ${theme === 'light'
               ? (showTiltPanel ? 'bg-purple-500/10 border-purple-500/30 text-purple-600' : 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200')
@@ -769,14 +813,17 @@ function CanvasControls({
       {/* Transparency Sub-tab (Modal) */}
       {showOpacitySlider && selectedLayer && (
         <div
-          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          className={isMobileBottom
+            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          }
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: '240px',
+            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
@@ -796,30 +843,45 @@ function CanvasControls({
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
                 ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
+                : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Layer Opacity"
             />
           </Slider.Root>
 
-          <span className={`text-xs font-mono min-w-[32px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
+          <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round((selectedLayer.opacity ?? 1) * 100)}%
           </span>
+
+          {isMobileBottom && (
+            <button
+              onClick={() => {
+                setShowOpacitySlider(false)
+                onSubmenuChange?.(null)
+              }}
+              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )}
 
       {/* Blur Sub-tab (Modal) */}
       {showBlurSlider && selectedLayer && (
         <div
-          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          className={isMobileBottom
+            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          }
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: '240px',
+            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
@@ -840,30 +902,45 @@ function CanvasControls({
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
                 ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
+                : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Layer Blur"
             />
           </Slider.Root>
 
-          <span className={`text-xs font-mono min-w-[32px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
+          <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
           </span>
+
+          {isMobileBottom && (
+            <button
+              onClick={() => {
+                setShowBlurSlider(false)
+                onSubmenuChange?.(null)
+              }}
+              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )}
 
       {/* Corner Radius Sub-tab (Modal) */}
       {showCornerRadiusSlider && selectedLayer && hasCorners() && (
         <div
-          className="absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          className={isMobileBottom
+            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          }
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: '240px',
+            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
@@ -883,27 +960,32 @@ function CanvasControls({
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
                 ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`}
+                : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Corner Radius"
             />
           </Slider.Root>
 
-          <span className={`text-xs font-mono min-w-[36px] text-right ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
+          <span className={`text-xs font-mono min-w-[36px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
             {Math.round(selectedLayer.data?.cornerRadius ?? 0)}px
           </span>
+
+          {isMobileBottom && (
+            <button
+              onClick={() => {
+                setShowCornerRadiusSlider(false)
+                onSubmenuChange?.(null)
+              }}
+              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )}
 
-      {/* 3D Tilt Sub-panel — compact stacked-slider layout, consistent with
-          the Blur / Radius panels above.  Two short rows (H + V) keep the
-          popover small so it never covers the canvas.  Each track paints a
-          subtle safe-zone band in the centre (±45°) so the user can see at
-          a glance when they're pushing the tilt past the recommended range;
-          the degree readout turns amber beyond that point.  Range is
-          clamped to ±60° — matches TiltAction.clampTilt, the ceiling where
-          PIXI's PerspectiveMesh stays numerically stable on every GPU. */}
+      {/* 3D Tilt Sub-panel — compact stacked-slider layout */}
       {showTiltPanel && selectedLayer && (() => {
         const TILT_MAX = 60           // hard limit, matches TiltAction.clampTilt
         const TILT_SAFE = 45          // recommended upper bound
@@ -911,9 +993,6 @@ function CanvasControls({
         const tiltY = selectedLayer.tiltY ?? 0
         const isUnsafeX = Math.abs(tiltX) > TILT_SAFE
         const isUnsafeY = Math.abs(tiltY) > TILT_SAFE
-        // Centre-safe zone covers (TILT_SAFE / TILT_MAX) of each half of the
-        // track.  Painted as a centred band so the user sees the "stay inside
-        // here" region without any extra chrome.
         const safeHalfPct = (TILT_SAFE / TILT_MAX) * 50
         const trackBase = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
         const safeBand = theme === 'light' ? 'bg-emerald-300/60' : 'bg-emerald-400/25'
@@ -921,9 +1000,9 @@ function CanvasControls({
         const labelCol = theme === 'light' ? 'text-gray-500' : 'text-white/60'
         const valCol = theme === 'light' ? 'text-gray-700' : 'text-white'
         const warnCol = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
-        const thumbCls = `block w-3 h-3 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
+        const thumbCls = `block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
           ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-          : 'bg-white shadow-[0_0_10px_rgba(255,255,255,0.4)] hover:scale-110'}`
+          : 'bg-white shadow-md hover:scale-110'}`
 
         const renderRow = (axis, value, onChange, ariaLabel, isUnsafe, Icon) => (
           <div className="flex items-center gap-2 w-full">
@@ -967,31 +1046,45 @@ function CanvasControls({
 
         return (
           <div
-            className="absolute top-full mt-2 left-1/2 -translate-x-1/2 flex flex-col gap-0.5 px-4 py-2 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+            className={isMobileBottom
+              ? "absolute bottom-full mb-3 left-4 right-4 flex flex-col gap-1 p-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+              : "absolute top-full mt-2 left-1/2 -translate-x-1/2 flex flex-col gap-0.5 px-4 py-2 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+            }
             style={{
               backgroundColor: 'var(--editor-panel-bg)',
               backdropFilter: 'blur(24px)',
               WebkitBackdropFilter: 'blur(24px)',
               border: '1px solid var(--editor-panel-border)',
               boxShadow: 'var(--editor-panel-shadow)',
-              minWidth: '270px',
+              minWidth: isMobileBottom ? 'auto' : '270px',
               pointerEvents: 'auto'
             }}
           >
-            {/* Absolute Reset Icon at top-right */}
-            {(tiltX !== 0 || tiltY !== 0) && (
-              <div className="absolute top-1 right-1 z-10">
+            {/* Absolute Close/Reset Icons */}
+            <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+              {(tiltX !== 0 || tiltY !== 0) && (
                 <button
                   onClick={() => handleLayerUpdate({ tiltX: 0, tiltY: 0 })}
-                  className={`p-1.5 rounded-md transition-all ${theme === 'light' ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
+                  className={`p-1 rounded-md transition-all ${theme === 'light' ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
                   title="Reset Tilt"
                 >
-                  <RotateCcw className="h-3 w-3" />
+                  <RotateCcw className="h-3.5 w-3.5" />
                 </button>
-              </div>
-            )}
+              )}
+              {isMobileBottom && (
+                <button
+                  onClick={() => {
+                    setShowTiltPanel(false)
+                    onSubmenuChange?.(null)
+                  }}
+                  className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
 
-            <div className="pr-6">
+            <div className="pr-10 pt-1">
               {renderRow('H', tiltX, (v) => handleLayerUpdate({ tiltX: v }), 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
               {renderRow('V', tiltY, (v) => handleLayerUpdate({ tiltY: v }), 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
             </div>
@@ -999,15 +1092,138 @@ function CanvasControls({
         )
       })()}
 
+      {/* Color Sub-menu */}
+      {showColorMenu && (selectedLayer || selectedCanvas) && (
+        <div
+          className={isMobileBottom 
+            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 flex flex-col gap-2 p-3 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+          }
+          style={{
+            backgroundColor: 'var(--editor-panel-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
+            minWidth: isMobileBottom ? 'auto' : '240px',
+            pointerEvents: 'auto'
+          }}
+        >
+          {isMobileBottom ? (
+            <>
+              <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Color</span>
+              
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-none grow px-2 py-1">
+                {/* First Circle: Custom Color Picker Manual Trigger */}
+                <button
+                  onClick={() => {
+                    if (onOpenColorPicker) {
+                      if (selectedLayer) {
+                        onOpenColorPicker(selectedLayer.type === LAYER_TYPES.SHAPE ? 'fill' : 'text')
+                      } else {
+                        onOpenColorPicker('canvas')
+                      }
+                    }
+                  }}
+                  className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 cursor-pointer transition-all active:scale-95 border border-white/20"
+                  style={{
+                    background: 'linear-gradient(135deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3)',
+                  }}
+                  title="Custom color"
+                >
+                  <Plus className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                </button>
+
+                {/* Solid Colors */}
+                {DEFAULT_COLORS.map((color, index) => {
+                  const isSelected = selectedLayer 
+                    ? (selectedLayer.data?.fill || selectedLayer.data?.color || selectedLayer.color) === color
+                    : getCanvasBackgroundColor() === color
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => {
+                        if (selectedLayer) {
+                          handleLayerUpdate({ data: { ...selectedLayer.data, fill: color, color: color } })
+                        } else {
+                          onCanvasUpdate?.({ backgroundColor: color })
+                        }
+                      }}
+                      className={`w-7 h-7 rounded-full shrink-0 cursor-pointer transition-all active:scale-95 ${
+                        isSelected ? 'ring-2 ring-purple-500 scale-105 shadow-md' : 'hover:ring-2 hover:ring-zinc-500'
+                      }`}
+                      style={{ backgroundColor: color }}
+                      title={color}
+                    />
+                  )
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowColorMenu(false)
+                  onSubmenuChange?.(null)
+                }}
+                className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Color</span>
+                <button
+                  onClick={() => {
+                    setShowColorMenu(false)
+                    onSubmenuChange?.(null)
+                  }}
+                  className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              
+              <div className="max-h-[140px] overflow-y-auto pr-1 flex flex-col gap-2 scrollbar-none">
+                <div className="grid grid-cols-5 gap-2.5 justify-items-center py-1">
+                  {DEFAULT_COLORS.map((color, index) => {
+                    const isSelected = selectedLayer 
+                      ? (selectedLayer.data?.fill || selectedLayer.data?.color || selectedLayer.color) === color
+                      : getCanvasBackgroundColor() === color
+                    return (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          if (selectedLayer) {
+                            handleLayerUpdate({ data: { ...selectedLayer.data, fill: color, color: color } })
+                          } else {
+                            onCanvasUpdate?.({ backgroundColor: color })
+                          }
+                        }}
+                        className={`w-8 h-8 rounded-full cursor-pointer transition-all active:scale-95 ${
+                          isSelected ? 'ring-2 ring-purple-500 scale-105 shadow-md' : 'hover:ring-2 hover:ring-zinc-500'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        title={color}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Add Step Hint Modal */}
       {showAddStepHint && (
         <div
-          className="absolute top-full mt-4 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-2 duration-300"
+          className={`absolute ${isMobileBottom ? 'bottom-full mb-4' : 'top-full mt-4'} left-1/2 -translate-x-1/2 z-[100] animate-in fade-in ${isMobileBottom ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'} duration-300`}
           style={{ pointerEvents: 'auto' }}
         >
           {/* Arrow */}
           <div
-            className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border-t border-l border-white/20"
+            className={`absolute ${isMobileBottom ? '-bottom-1.5 border-b border-r' : '-top-1.5 border-t border-l'} left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border-white/20`}
             style={{ backgroundColor: '#6940c9' }}
           />
 
@@ -1045,6 +1261,13 @@ function CanvasControls({
         }
         .animate-bounce-subtle {
           animation: bounce-subtle 2.5s infinite ease-in-out;
+        }
+        .scrollbar-none::-webkit-scrollbar {
+          display: none;
+        }
+        .scrollbar-none {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
       `}</style>
     </div>

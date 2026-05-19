@@ -178,7 +178,7 @@ function FramesPanel({ onClose, aspectRatio }) {
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      <div className={`px-6 pt-6 pb-4 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
+      <div className={`hidden lg:block px-6 pt-6 pb-4 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="flex items-center justify-between mb-2">
           <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Frames</h2>
           {onClose && (

@@ -23,6 +23,7 @@ import CanvasControls from '../components/CanvasControls'
 import PlaybackControls from '../components/PlaybackControls'
 import ElementsPanel from '../components/ElementsPanel'
 import DesignPanel from '../components/DesignPanel'
+import ProfilePanel from '../components/ProfilePanel'
 import TextPanel from '../components/TextPanel'
 import UploadsPanel from '../components/UploadsPanel'
 import ImagesPanel from '../components/ImagesPanel'
@@ -31,6 +32,7 @@ import FramesPanel from '../components/FramesPanel'
 import ProjectsPanel from '../components/ProjectsPanel'
 import AppsPanel from '../components/AppsPanel'
 import ColorPickerPanel from '../components/ColorPickerPanel'
+import AdvancedColorPickerModal from '../components/AdvancedColorPickerModal'
 import PositionPanel from '../components/PositionPanel'
 import TutorialOverlay from '../components/TutorialOverlay'
 import TutorialExportModal from '../components/TutorialExportModal'
@@ -86,16 +88,17 @@ function EditorPage() {
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
   const [manualTutorialRect, setManualTutorialRect] = useState(null);
-  const [zoom, setZoom] = useState(-1)
+  const isInitialVertical = aspectRatio === '9:16'
+  const [zoom, setZoom] = useState(isInitialVertical ? 18 : 31)
   const [showGuestModal, setShowGuestModal] = useState(false)
-  const zoomRef = useRef(-1) // Ref to track current zoom without causing re-renders
-  const prevZoomRef = useRef(-1) // Track previous zoom to detect changes
+  const zoomRef = useRef(isInitialVertical ? 18 : 31) // Ref to track current zoom without causing re-renders
+  const prevZoomRef = useRef(isInitialVertical ? 18 : 31) // Track previous zoom to detect changes
 
   // Keep zoomRef in sync with zoom state
   useEffect(() => {
     zoomRef.current = zoom
     // Initialize prevZoomRef on first render
-    if (prevZoomRef.current === 43 && zoom !== 43) {
+    if ((prevZoomRef.current === 31 || prevZoomRef.current === 18) && zoom !== prevZoomRef.current) {
       prevZoomRef.current = zoom
     }
   }, [zoom])
@@ -625,6 +628,90 @@ function EditorPage() {
     handleSidebarItemClick,
     handleClosePanel,
   } = useEditorSidebar()
+
+  const [activeBottomMenu, setActiveBottomMenu] = useState(null)
+
+  // Touch drag-to-dismiss logic for mobile bottom sheet
+  const mobileSheetRef = useRef(null)
+  const dragStartYRef = useRef(null)
+  const isDraggingRef = useRef(false)
+
+  const handleSheetTouchStart = useCallback((e) => {
+    if (!mobileSheetRef.current) return
+    const touchY = e.touches[0].clientY
+    dragStartYRef.current = touchY
+    isDraggingRef.current = true
+    mobileSheetRef.current.style.transition = 'none'
+  }, [])
+
+  const handleSheetTouchMove = useCallback((e) => {
+    if (!isDraggingRef.current || dragStartYRef.current === null || !mobileSheetRef.current) return
+    const touchY = e.touches[0].clientY
+    const deltaY = touchY - dragStartYRef.current
+    
+    // Only allow dragging downwards (deltaY > 0)
+    if (deltaY > 0) {
+      mobileSheetRef.current.style.transform = `translateY(${deltaY}px)`
+      
+      // Update backdrop opacity in real-time
+      const backdrop = document.querySelector('.mobile-sheet-backdrop')
+      if (backdrop) {
+        const opacity = Math.max(0, 0.5 - (deltaY / window.innerHeight) * 0.5)
+        backdrop.style.backgroundColor = `rgba(0, 0, 0, ${opacity})`
+      }
+    }
+  }, [])
+
+  const handleSheetTouchEnd = useCallback((e) => {
+    if (!isDraggingRef.current || dragStartYRef.current === null || !mobileSheetRef.current) return
+    isDraggingRef.current = false
+    
+    const touchY = e.changedTouches[0].clientY
+    const deltaY = touchY - dragStartYRef.current
+    dragStartYRef.current = null
+    
+    const backdrop = document.querySelector('.mobile-sheet-backdrop')
+    
+    if (deltaY > 120) {
+      // Dismiss sheet
+      mobileSheetRef.current.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+      mobileSheetRef.current.style.transform = 'translateY(100%)'
+      if (backdrop) {
+        backdrop.style.transition = 'opacity 0.2s ease'
+        backdrop.style.opacity = '0'
+      }
+      
+      setTimeout(() => {
+        setActiveSidebarItem(null)
+        if (mobileSheetRef.current) {
+          mobileSheetRef.current.style.transform = ''
+          mobileSheetRef.current.style.transition = ''
+        }
+        if (backdrop) {
+          backdrop.style.opacity = ''
+          backdrop.style.backgroundColor = ''
+          backdrop.style.transition = ''
+        }
+      }, 200)
+    } else {
+      // Snap back
+      mobileSheetRef.current.style.transition = 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.15)'
+      mobileSheetRef.current.style.transform = 'translateY(0)'
+      if (backdrop) {
+        backdrop.style.transition = 'background-color 0.3s ease'
+        backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
+      }
+      
+      setTimeout(() => {
+        if (mobileSheetRef.current) {
+          mobileSheetRef.current.style.transition = ''
+        }
+        if (backdrop) {
+          backdrop.style.transition = ''
+        }
+      }, 300)
+    }
+  }, [setActiveSidebarItem])
 
   const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
   const [requestOpenControl, setRequestOpenControl] = useState(null)
@@ -3957,6 +4044,9 @@ function EditorPage() {
                 {activeSidebarItem === 'Design' && (
                   <DesignPanel onClose={handleClosePanel} />
                 )}
+                {activeSidebarItem === 'Profile' && (
+                  <ProfilePanel onClose={handleClosePanel} onNavigate={handleNavigate} />
+                )}
                 {activeSidebarItem === 'Elements' && (
                   <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                 )}
@@ -4122,30 +4212,39 @@ function EditorPage() {
             {activeSidebarItem && (
               <>
                 <div
-                  className="lg:hidden fixed inset-0 z-[60] bg-black/50 transition-opacity duration-200"
+                  className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 mobile-sheet-backdrop"
                   style={{ top: 0 }}
                   onClick={() => setActiveSidebarItem(null)}
                   aria-hidden
                 />
                 <div
+                  ref={mobileSheetRef}
                   className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t shadow-2xl mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
                   style={{
-                    height: '80vh',
-                    minHeight: '360px',
-                    maxHeight: '90vh',
+                    height: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '50vh' : '42vh',
+                    minHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '320px' : '280px',
+                    maxHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '52vh' : '45vh',
                     backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Drag handle */}
-                  <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0">
+                  <div 
+                    className="flex justify-center pt-2.5 pb-1 flex-shrink-0 cursor-row-resize touch-none"
+                    onTouchStart={handleSheetTouchStart}
+                    onTouchMove={handleSheetTouchMove}
+                    onTouchEnd={handleSheetTouchEnd}
+                  >
                     <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-black/10' : 'bg-white/20'}`} aria-hidden />
                   </div>
                   {/* Panel content - scrollable, same bg as sheet */}
                   <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}>
                     {activeSidebarItem === 'Design' && (
                       <DesignPanel onClose={handleClosePanel} />
+                    )}
+                    {activeSidebarItem === 'Profile' && (
+                      <ProfilePanel onClose={handleClosePanel} onNavigate={handleNavigate} />
                     )}
                     {activeSidebarItem === 'Elements' && (
                       <ElementsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
@@ -4175,72 +4274,74 @@ function EditorPage() {
                       />
                     )}
                     {activeSidebarItem === 'Color' && (
-                      <ColorPickerPanel
-                        onClose={handleClosePanel}
-                        selectedColor={
-                          colorPickerType === 'canvas'
-                            ? (currentSceneData?.backgroundColor !== undefined
-                              ? (typeof currentSceneData.backgroundColor === 'number'
-                                ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
-                                : currentSceneData.backgroundColor)
-                              : '#ffffff')
-                            : selectedLayerIds[0] && layers[selectedLayerIds[0]]
-                              ? (layers[selectedLayerIds[0]].type === 'background'
-                                ? (layers[selectedLayerIds[0]].data?.color !== undefined
-                                  ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
-                                    ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
-                                    : layers[selectedLayerIds[0]].data.color)
-                                  : '#ffffff')
-                                : colorPickerType === 'fill'
-                                  ? (layers[selectedLayerIds[0]].type === 'shape'
-                                    ? layers[selectedLayerIds[0]].data?.fill
-                                    : layers[selectedLayerIds[0]].data?.color)
-                                  : colorPickerType === 'text'
-                                    ? layers[selectedLayerIds[0]].data?.color
-                                    : layers[selectedLayerIds[0]].data?.stroke)
-                              : '#ffffff'
-                        }
-                        onColorSelect={(color) => {
-                          // Motion capture interception
-                          if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
-                            let captureLayerId = null
-                            if (colorPickerType === 'canvas') {
-                              captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
-                            } else if (selectedLayerIds?.length === 1) {
-                              captureLayerId = selectedLayerIds[0]
-                            }
-                            if (captureLayerId) {
-                              const capture = motionCaptureRef.current
-                              if (capture && capture.trackedLayers.has(captureLayerId)) {
-                                const colorValue = color === 'transparent' ? null : color
-                                effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
-                                effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
-                                return
+                      <div className="w-full h-full p-1 overflow-hidden">
+                        <AdvancedColorPickerModal
+                          isInline={true}
+                          initialColor={
+                            colorPickerType === 'canvas'
+                              ? (currentSceneData?.backgroundColor !== undefined
+                                ? (typeof currentSceneData.backgroundColor === 'number'
+                                  ? '#' + currentSceneData.backgroundColor.toString(16).padStart(6, '0')
+                                  : currentSceneData.backgroundColor)
+                                : '#ffffff')
+                              : selectedLayerIds[0] && layers[selectedLayerIds[0]]
+                                ? (layers[selectedLayerIds[0]].type === 'background'
+                                  ? (layers[selectedLayerIds[0]].data?.color !== undefined
+                                    ? (typeof layers[selectedLayerIds[0]].data.color === 'number'
+                                      ? '#' + layers[selectedLayerIds[0]].data.color.toString(16).padStart(6, '0')
+                                      : layers[selectedLayerIds[0]].data.color)
+                                    : '#ffffff')
+                                  : colorPickerType === 'fill'
+                                    ? (layers[selectedLayerIds[0]].type === 'shape'
+                                      ? layers[selectedLayerIds[0]].data?.fill
+                                      : layers[selectedLayerIds[0]].data?.color)
+                                    : colorPickerType === 'text'
+                                      ? layers[selectedLayerIds[0]].data?.color
+                                      : layers[selectedLayerIds[0]].data?.stroke)
+                                : '#ffffff'
+                          }
+                          onColorSelect={(color) => {
+                            // Motion capture interception
+                            if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate && colorPickerType !== 'stroke') {
+                              let captureLayerId = null
+                              if (colorPickerType === 'canvas') {
+                                captureLayerId = Object.keys(layers).find(id => layers[id]?.type === 'background' && layers[id]?.sceneId === currentSceneId)
+                              } else if (selectedLayerIds?.length === 1) {
+                                captureLayerId = selectedLayerIds[0]
+                              }
+                              if (captureLayerId) {
+                                const capture = motionCaptureRef.current
+                                if (capture && capture.trackedLayers.has(captureLayerId)) {
+                                  const colorValue = color === 'transparent' ? null : color
+                                  effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                                  effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                                  return
+                                }
                               }
                             }
-                          }
 
-                          if (colorPickerType === 'canvas' && currentSceneId) {
-                            const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
-                            dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
-                          } else if (selectedLayerIds && selectedLayerIds.length > 0) {
-                            selectedLayerIds.forEach((layerId) => {
-                              const layer = layers[layerId]
-                              if (!layer) return
-                              const updates = { data: { ...layer.data } }
-                              if (colorPickerType === 'fill' && layer.type === 'shape') {
-                                updates.data.fill = color === 'transparent' ? null : color
-                              } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
-                                updates.data.color = color === 'transparent' ? '#ffffff' : color
-                              } else if (colorPickerType === 'stroke') {
-                                updates.data.stroke = color === 'transparent' ? null : color
-                              }
-                              dispatch(updateLayer({ id: layerId, ...updates }))
-                            })
-                          }
-                        }}
-                        colorType={colorPickerType}
-                      />
+                            if (colorPickerType === 'canvas' && currentSceneId) {
+                              const bgColor = color.startsWith('#') ? parseInt(color.slice(1), 16) : parseInt(color, 16)
+                              dispatch(updateScene({ id: currentSceneId, backgroundColor: bgColor }))
+                            } else if (selectedLayerIds && selectedLayerIds.length > 0) {
+                              selectedLayerIds.forEach((layerId) => {
+                                const layer = layers[layerId]
+                                if (!layer) return
+                                const updates = { data: { ...layer.data } }
+                                if (colorPickerType === 'fill' && layer.type === 'shape') {
+                                  updates.data.fill = color === 'transparent' ? null : color
+                                } else if (colorPickerType === 'fill' || colorPickerType === 'text') {
+                                  updates.data.color = color === 'transparent' ? '#ffffff' : color
+                                } else if (colorPickerType === 'stroke') {
+                                  updates.data.stroke = color === 'transparent' ? null : color
+                                }
+                                dispatch(updateLayer({ id: layerId, ...updates }))
+                              })
+                            }
+                          }}
+                          onClose={handleClosePanel}
+                        />
+                      </div>
                     )}
                     {activeSidebarItem === 'Projects' && (
                       <ProjectsPanel onClose={handleClosePanel} />
@@ -4299,7 +4400,7 @@ function EditorPage() {
             {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
             <div
               ref={topControlsRef}
-              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : ''}`}
+              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : 'lg:flex hidden'}`}
               style={{
                 top: `${topToolbarHeight + 8}px`,
                 left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
@@ -4547,65 +4648,82 @@ function EditorPage() {
             {/* Removed floating mobile menu button */}
           </div>
 
-          {/* Bottom Sections - Overlay at bottom with glass effect */}
-          <div
-            ref={bottomSectionRef}
-            className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
-            style={{
-              left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-              backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              borderTop: 'none',
-              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-              height: 'auto',
-              maxHeight: '40vh'
-            }}
-          >
-            {/* Top border gradient line */}
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#7c4af0] to-transparent opacity-40" style={{ top: '-1px' }} />
+            {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
+            <div 
+              className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} 
+              style={{
+                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                bottom: `${bottomSectionHeight || 140}px`,
+                backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
+              }}
+            >
+              <div className="w-full px-4">
+                <PlaybackControls
+                  isPlaying={isPlaying}
+                  isBuffering={motionControls?.isBuffering || false}
+                  currentTime={playheadTime}
+                  totalTime={totalTime}
+                  onPlayPause={() => {
+                    if (motionControls) {
+                      if (isPlaying) {
+                        motionControls.pauseAll()
+                        setIsPlaying(false)
+                      } else {
+                        motionControls.playAll()
+                        setIsPlaying(true)
+                      }
+                    }
+                  }}
+                  onSplit={handleSplitScene}
+                  playheadStepId={playheadStepId}
+                  onUpdateStep={handleEditStep}
+                  onDeleteStep={(stepId) => {
+                    if (currentSceneId && stepId) {
+                      dispatch(deleteSceneMotionStep({
+                        sceneId: currentSceneId,
+                        stepId: stepId
+                      }))
+                    }
+                  }}
+                />
+              </div>
+            </div>
 
-            {/* Content Container - Scrollable if content overflows */}
-            <div className="flex flex-col flex-1" style={{
-              minHeight: 0, // Allow flex item to shrink
-              position: 'relative',
-              paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
-            }}>
-              {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
-              <div className="flex flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible" style={{
-                minHeight: 0
+            {/* Bottom Sections - Overlay at bottom with glass effect */}
+            <div
+              ref={bottomSectionRef}
+              className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+              style={{
+                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                borderTop: 'none',
+                paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+                height: 'auto',
+                maxHeight: '40vh'
+              }}
+            >
+              {/* Top border line */}
+              <div 
+                className="absolute top-0 left-0 right-0 h-[1px]" 
+                style={{ 
+                  top: '-1px',
+                  backgroundColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'
+                }} 
+              />
+
+              {/* Content Container - Scrollable if content overflows */}
+              <div className="flex flex-col flex-1" style={{
+                minHeight: 0, // Allow flex item to shrink
+                position: 'relative',
+                paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
               }}>
-                {/* Playback Controls - Top Section */}
-                <div ref={playbackControlsRef} className="pointer-events-auto flex-shrink-0 relative w-full">
-                  <PlaybackControls
-                    isPlaying={isPlaying}
-                    isBuffering={motionControls?.isBuffering || false}
-                    currentTime={playheadTime}
-                    totalTime={totalTime}
-                    onPlayPause={() => {
-                      if (motionControls) {
-                        if (isPlaying) {
-                          motionControls.pauseAll()
-                          setIsPlaying(false)
-                        } else {
-                          motionControls.playAll()
-                          setIsPlaying(true)
-                        }
-                      }
-                    }}
-                    onSplit={handleSplitScene}
-                    playheadStepId={playheadStepId}
-                    onUpdateStep={handleEditStep}
-                    onDeleteStep={(stepId) => {
-                      if (currentSceneId && stepId) {
-                        dispatch(deleteSceneMotionStep({
-                          sceneId: currentSceneId,
-                          stepId: stepId
-                        }))
-                      }
-                    }}
-                  />
-                </div>
+                {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
+                <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
+                  minHeight: 0
+                }}>
 
                 {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
                 <div
@@ -4664,6 +4782,121 @@ function EditorPage() {
                 <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
                   {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
                 </span>
+              </div>
+
+              {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens */}
+              <div className="lg:hidden pointer-events-auto flex-shrink-0 w-full" style={{
+                paddingBottom: 'max(6px, env(safe-area-inset-bottom, 6px))'
+              }}>
+                <CanvasControls
+                  duration={`${totalTime.toFixed(1)}s`}
+                  selectedLayer={capturedLayer || (selectedLayerIds[0] ? layers[selectedLayerIds[0]] : null)}
+                  selectedCanvas={selectedCanvas}
+                  currentScene={currentSceneData}
+                  editingStepActionCount={editingStepActionCount}
+                  onLayerUpdate={(updates) => {
+                    if (selectedLayerIds[0]) {
+                      const layerId = selectedLayerIds[0]
+
+                      // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
+                      if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate) {
+                        if (updates.opacity !== undefined) {
+                          const capture = motionCaptureRef.current
+                          if (capture && capture.trackedLayers.has(layerId)) {
+                            capture.trackedLayers.get(layerId).didFade = true
+                          }
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId, opacity: updates.opacity })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                        if (updates.rotation !== undefined) {
+                          const capture = motionCaptureRef.current
+                          if (capture && capture.trackedLayers.has(layerId)) {
+                            capture.trackedLayers.get(layerId).didRotate = true
+                          }
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId, rotation: updates.rotation })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                        if (updates.blur !== undefined) {
+                          const clampedBlur = Math.max(0, Math.min(BLUR_MAX, updates.blur))
+                          const capture = motionCaptureRef.current
+                          if (capture && capture.trackedLayers.has(layerId)) {
+                            const tracked = capture.trackedLayers.get(layerId)
+                            tracked.didBlur = true
+                          }
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId, blur: clampedBlur })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                        if (updates.tiltX !== undefined || updates.tiltY !== undefined) {
+                          const capture = motionCaptureRef.current
+                          if (capture && capture.trackedLayers.has(layerId)) {
+                            const tracked = capture.trackedLayers.get(layerId)
+                            tracked.didTilt = true
+                            if (updates.tiltX !== undefined) tracked.tiltX = updates.tiltX
+                            if (updates.tiltY !== undefined) tracked.tiltY = updates.tiltY
+                          }
+                          effectiveMotionCaptureMode.onPositionUpdate({
+                            layerId,
+                            tiltX: updates.tiltX,
+                            tiltY: updates.tiltY
+                          })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                        const radiusUpdate = updates.cornerRadius !== undefined ? updates.cornerRadius : updates.data?.cornerRadius
+                        if (radiusUpdate !== undefined) {
+                          const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, radiusUpdate))
+                          effectiveMotionCaptureMode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
+                          effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                        }
+                        const newColor = updates.data?.fill || updates.data?.color
+                        if (newColor !== undefined) {
+                          const capture = motionCaptureRef.current
+                          const tracked = capture?.trackedLayers.get(layerId)
+                          if (tracked && tracked.color !== newColor) {
+                            tracked.didColor = true
+                            tracked.color = newColor
+                            effectiveMotionCaptureMode.onPositionUpdate({ layerId, color: newColor })
+                            effectiveMotionCaptureMode.onInteractionEnd(layerId)
+                          }
+                        }
+                      } else {
+                        dispatch(updateLayer({ id: layerId, ...updates }))
+                      }
+                    }
+                  }}
+                  onCanvasUpdate={(updates) => {
+                    if (currentSceneId) {
+                      dispatch(updateScene({ id: currentSceneId, ...updates }))
+                    }
+                  }}
+                  onToggleAdvanced={() => {
+                    if (activeSidebarItem === 'Advanced') {
+                      setActiveSidebarItem(null)
+                    } else {
+                      setActiveSidebarItem('Advanced')
+                    }
+                  }}
+                  onOpenColorPicker={(type = 'fill') => {
+                    setColorPickerType(type)
+                    setActiveSidebarItem('Color')
+                  }}
+                  onOpenPositionPanel={() => {
+                    setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
+                  }}
+                  onToggleMotionPanel={() => {
+                    setIsMotionPanelOpen(prev => !prev)
+                  }}
+                  isMotionCaptureActive={isMotionCaptureActive}
+                  onStartMotionCapture={handleStartMotionCapture}
+                  onApplyMotion={handleApplyMotion}
+                  onCancelMotion={handleCancelMotion}
+                  onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
+                  requestOpenControl={requestOpenControl}
+                  stepsCount={currentSceneMotionFlow?.steps?.length || 0}
+                  showPasteboard={showPasteboard}
+                  onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
+                  isMobileBottom={true}
+                  onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
+                />
               </div>
             </div>
 
@@ -4859,8 +5092,8 @@ function EditorPage() {
           <div
             className={`fixed inset-0 z-[999998] ${isLight ? 'bg-white' : 'bg-black'}`}
             style={{
-              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - ${initialBottomHeight}px), 100% calc(100% - ${initialBottomHeight}px), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`,
-              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - ${initialBottomHeight}px), 100% calc(100% - ${initialBottomHeight}px), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`
+              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`,
+              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`
             }}
           />
         )}

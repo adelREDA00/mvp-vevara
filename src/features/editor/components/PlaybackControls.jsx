@@ -54,24 +54,27 @@ function PlaybackControls({
             if (canUpdateStep && onUpdateStep) onUpdateStep(playheadStepId)
           }}
           disabled={!canUpdateStep}
-          className={`p-1.5 rounded-md transition-all relative group ${canUpdateStep
-              ? 'hover:bg-purple-500/15 active:bg-purple-500/25 text-purple-400 hover:text-purple-300 cursor-pointer'
-              : 'text-white/15 cursor-not-allowed'
-            }`}
-          title={canUpdateStep ? 'Update step at playhead' : 'Move playhead over a step to update'}
+          className={`rounded-md relative group text-purple-400 hover:text-purple-300 hover:bg-purple-500/15 active:bg-purple-500/25 flex items-center justify-center flex-shrink-0`}
+          style={{
+            width: canUpdateStep ? '28px' : '0px',
+            height: '28px',
+            padding: '0px',
+            opacity: canUpdateStep ? 1 : 0,
+            transform: canUpdateStep ? 'scale(1)' : 'scale(0.8)',
+            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            pointerEvents: canUpdateStep ? 'auto' : 'none',
+            overflow: 'hidden',
+          }}
+          title={canUpdateStep ? 'Update step at playhead' : ''}
           type="button"
         >
-          <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-          {/* Active step indicator dot */}
-          {canUpdateStep && (
-            <span
-              className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-purple-400"
-            />
-          )}
+          <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
           {/* Tooltip */}
-          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
-            {canUpdateStep ? 'Update step' : 'No step at playhead'}
-          </span>
+          {canUpdateStep && (
+            <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
+              Update step
+            </span>
+          )}
         </button>
 
         {/* Delete Step button */}
@@ -82,18 +85,27 @@ function PlaybackControls({
             if (canUpdateStep && onDeleteStep) onDeleteStep(playheadStepId)
           }}
           disabled={!canUpdateStep}
-          className={`p-1.5 rounded-md transition-all relative group ${canUpdateStep
-              ? 'hover:bg-red-500/15 active:bg-red-500/25 text-red-400/70 hover:text-red-400 cursor-pointer'
-              : 'text-white/15 cursor-not-allowed'
-            }`}
-          title={canUpdateStep ? 'Delete step at playhead' : 'Move playhead over a step to delete'}
+          className={`rounded-md relative group text-red-400/70 hover:text-red-400 hover:bg-red-500/15 active:bg-red-500/25 flex items-center justify-center flex-shrink-0`}
+          style={{
+            width: canUpdateStep ? '28px' : '0px',
+            height: '28px',
+            padding: '0px',
+            opacity: canUpdateStep ? 1 : 0,
+            transform: canUpdateStep ? 'scale(1)' : 'scale(0.8)',
+            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+            pointerEvents: canUpdateStep ? 'auto' : 'none',
+            overflow: 'hidden',
+          }}
+          title={canUpdateStep ? 'Delete step at playhead' : ''}
           type="button"
         >
-          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
           {/* Tooltip */}
-          <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
-            {canUpdateStep ? 'Delete step' : 'No step at playhead'}
-          </span>
+          {canUpdateStep && (
+            <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
+              Delete step
+            </span>
+          )}
         </button>
       </div>
 

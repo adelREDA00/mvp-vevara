@@ -415,8 +415,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       data-tutorial="steps-area"
       className="absolute left-0 right-0 z-[120]"
       style={{
-        top: '-44px',
-        height: '40px',
+        top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '-52px' : '-44px',
+        height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '42px' : '40px',
         pointerEvents: 'auto',
       }}
     >
@@ -480,7 +480,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
               style={{
                 left: `${leftPct}%`,
                 width: `${widthPct}%`,
-                height: '28px',
+                height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '36px' : '28px',
               }}
             >
               {/* Left resize handle */}
@@ -494,10 +494,10 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: `${Math.max(isTouchDevice() ? 24 : 12, Math.min(isTouchDevice() ? 32 : 20, Math.floor(blockPx * 0.3)))}px`,
+                  width: `${Math.min(blockPx * 0.45, Math.max(isTouchDevice() ? 24 : 12, Math.min(isTouchDevice() ? 32 : 20, Math.floor(blockPx * 0.3))))}px`,
                 }}
               >
-                <div className={`w-[4px] h-[16px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
+                <div className={`${blockPx < 32 ? 'hidden' : 'w-[4px] h-[16px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
                   }`} />
               </div>
 
@@ -568,10 +568,10 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: `${Math.max(isTouchDevice() ? 16 : 8, Math.min(isTouchDevice() ? 20 : 14, Math.floor(blockPx * 0.25)))}px`,
+                  width: `${Math.min(blockPx * 0.45, Math.max(isTouchDevice() ? 16 : 8, Math.min(isTouchDevice() ? 20 : 14, Math.floor(blockPx * 0.25))))}px`,
                 }}
               >
-                <div className={`w-[3px] h-[14px] rounded-full transition-all duration-150 ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
+                <div className={`${blockPx < 32 ? 'hidden' : 'w-[3px] h-[14px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
                   }`} />
               </div>
             </div>
@@ -589,14 +589,14 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const isLight = theme === 'light'
   // Get responsive card dimensions
   const getCardDimensions = () => {
-    if (typeof window === 'undefined') return { width: 120, height: 44 }
+    if (typeof window === 'undefined') return { width: 120, height: 72 }
 
     if (window.innerWidth >= 1024) {
       return { width: 180, height: 60 }
     } else if (window.innerWidth >= 640) {
-      return { width: 150, height: 52 }
+      return { width: 150, height: 76 }
     } else {
-      return { width: 130, height: 44 }
+      return { width: 130, height: 72 }
     }
   }
 
@@ -1401,10 +1401,10 @@ const ScenesBar = React.memo(({
   }, [getDefaultCardWidth])
 
   const getDefaultCardHeight = useCallback(() => {
-    if (typeof window === 'undefined') return 60
+    if (typeof window === 'undefined') return 72
     if (window.innerWidth >= 1024) return 60
-    if (window.innerWidth >= 640) return 52
-    return 44
+    if (window.innerWidth >= 640) return 76
+    return 72
   }, [])
 
   // Utility Formatters
@@ -1752,14 +1752,26 @@ const ScenesBar = React.memo(({
 
 
   const handleTimelineClick = (e) => {
-    if (!timelineRef.current || !onSeek || isDraggingPlayhead || isTimelineInteractingRef.current) return
+    if (!cardsContainerRef.current || !onSeek || isDraggingPlayhead || isTimelineInteractingRef.current) return
 
-    const rect = timelineRef.current.getBoundingClientRect()
-    const padding = 16 // 16px padding on each side
-    const clickX = e.clientX - rect.left - padding
-    const availableWidth = rect.width - (padding * 2)
-    const percentage = Math.max(0, Math.min(1, clickX / availableWidth))
-    const seekTime = percentage * totalTime
+    const containerRect = cardsContainerRef.current.getBoundingClientRect()
+    const mouseX = e.clientX - containerRect.left
+    const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+
+    const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
+    let seekTime = 0
+
+    const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+    const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+    if (targetScene) {
+      const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+      const progressInCard = Math.min(1, positionInCard / targetScene.width)
+      seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+    } else {
+      seekTime = tTime
+    }
+
     onSeek(seekTime)
   }
 
@@ -2150,18 +2162,22 @@ const ScenesBar = React.memo(({
 
   return (
     <div
-      className={`relative flex items-center gap-1.5 sm:gap-2 md:gap-2.5 px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0`}
+      className="relative block px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
       style={{
         minWidth: '100%',
         width: `${Math.max(totalCardsWidth + 32, 100)}px`,
         backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+        paddingTop: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
       }}
     >
+
+
       {/* Timeline Ruler */}
       <div
-        className="absolute top-0 left-0 z-20"
+        className="absolute left-0 z-20"
         ref={timelineRef}
         style={{
+          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
           height: '24px',
           pointerEvents: 'none',
           width: `${totalCardsWidth + 32}px`,
@@ -2171,32 +2187,30 @@ const ScenesBar = React.memo(({
         {majorMarkers.map((marker) => (
           <div
             key={`major-${marker.time}`}
-            className="absolute top-0 flex flex-col items-center"
+            className="absolute top-1 flex flex-row items-center gap-1.5"
             style={{
               left: `${16 + marker.position}px`,
               transform: 'translateX(-50%)',
-              height: '100%',
+              height: '14px',
             }}
           >
+            <div style={{
+              width: '1.5px',
+              height: '8px',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)',
+            }} />
             <div
-              className="whitespace-nowrap"
+              className="whitespace-nowrap font-bold"
               style={{
                 color: isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)',
-                fontSize: '12px',
-                fontWeight: 700,
+                fontSize: '10px',
                 fontFamily: 'Inter, system-ui, sans-serif',
                 letterSpacing: '0.04em',
-                lineHeight: '14px',
+                lineHeight: '1',
               }}
             >
               {marker.label}
             </div>
-            <div style={{
-              width: '1px',
-              height: '6px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)',
-              marginTop: '2px',
-            }} />
           </div>
         ))}
 
@@ -2207,10 +2221,10 @@ const ScenesBar = React.memo(({
             style={{
               left: `${16 + marker.position}px`,
               transform: 'translateX(-50%)',
-              bottom: '0',
+              top: '5px',
               width: '1px',
               height: '4px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.12)'
+              backgroundColor: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)'
             }}
           />
         ))}
@@ -2238,8 +2252,9 @@ const ScenesBar = React.memo(({
       {/* Playhead */}
       <div
         ref={playheadElementRef}
-        className="absolute top-0 bottom-0"
+        className="absolute bottom-0"
         style={{
+          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
           left: `${16 + playheadPosition}px`,
           transform: 'translateX(-50%)',
           cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
@@ -2317,7 +2332,7 @@ const ScenesBar = React.memo(({
         }}
         style={{
           gap: 0,
-          marginTop: '72px',
+          marginTop: typeof window !== 'undefined' && window.innerWidth < 1024 ? '78px' : '72px',
           paddingBottom: '8px',
           minWidth: 'max-content',
           width: 'max-content',
