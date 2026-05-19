@@ -490,11 +490,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                   if (e.button !== undefined && e.button !== 0) return
                   handleStepPointerDown(e, step, 'resize-left')
                 }}
-                className="absolute left-0 top-0 bottom-0 z-30 flex items-center justify-center"
+                className="absolute top-0 bottom-0 z-30 flex items-center justify-center"
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: `${Math.min(blockPx * 0.45, Math.max(isTouchDevice() ? 24 : 12, Math.min(isTouchDevice() ? 32 : 20, Math.floor(blockPx * 0.3))))}px`,
+                  width: isTouchDevice() ? '24px' : `${Math.min(blockPx * 0.45, Math.max(12, Math.min(20, Math.floor(blockPx * 0.3))))}px`,
+                  left: isTouchDevice() ? '-12px' : '0px',
                 }}
               >
                 <div className={`${blockPx < 32 ? 'hidden' : 'w-[4px] h-[16px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
@@ -564,11 +565,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                   if (e.button !== undefined && e.button !== 0) return
                   handleStepPointerDown(e, step, 'resize-right')
                 }}
-                className="absolute right-0 top-0 bottom-0 z-30 flex items-center justify-center"
+                className="absolute top-0 bottom-0 z-30 flex items-center justify-center"
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: `${Math.min(blockPx * 0.45, Math.max(isTouchDevice() ? 16 : 8, Math.min(isTouchDevice() ? 20 : 14, Math.floor(blockPx * 0.25))))}px`,
+                  width: isTouchDevice() ? '24px' : `${Math.min(blockPx * 0.45, Math.max(8, Math.min(14, Math.floor(blockPx * 0.25))))}px`,
+                  right: isTouchDevice() ? '-12px' : '0px',
                 }}
               >
                 <div className={`${blockPx < 32 ? 'hidden' : 'w-[3px] h-[14px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'

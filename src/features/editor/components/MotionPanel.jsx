@@ -663,9 +663,24 @@ function MotionPanel({
           borderColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
         }}
       >
-        {/* Mobile Drag Handle */}
-        <div className="lg:hidden flex justify-center pt-2.5 pb-1 flex-shrink-0">
-          <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-slate-200' : 'bg-white/20'}`} />
+        {/* Mobile Top Bar Header with swipe drag handle and click-to-close down arrow */}
+        <div className="lg:hidden relative flex items-center justify-between px-4 py-3 flex-shrink-0 w-full border-b border-black/5 dark:border-white/5">
+          {/* Spacing for symmetry */}
+          <div className="w-8 h-8 flex-shrink-0" />
+
+          {/* Centered Drag Handle */}
+          <div className="absolute inset-0 flex justify-center items-center pointer-events-none">
+            <div className={`w-12 h-1.5 rounded-full ${isLight ? 'bg-black/15' : 'bg-white/30'}`} aria-hidden />
+          </div>
+
+          {/* Down Chevron button on the right */}
+          <button
+            onClick={onClose}
+            className={`relative z-10 flex h-8 w-8 items-center justify-center transition-all duration-200 active:scale-90 ${isLight ? 'text-gray-600 hover:text-gray-900' : 'text-white/60 hover:text-white'}`}
+            aria-label="Close panel"
+          >
+            <ChevronDown className="h-5 w-5" strokeWidth={2.5} />
+          </button>
         </div>
 
         {/* Header */}

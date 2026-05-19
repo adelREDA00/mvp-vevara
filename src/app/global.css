@@ -82,6 +82,11 @@
   font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+html, body, [data-editor-container] {
+  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
+}
+
 body {
   margin: 0;
   padding: 0;

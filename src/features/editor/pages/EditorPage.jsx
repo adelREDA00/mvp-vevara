@@ -12,7 +12,7 @@ import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setS
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
 import { exportVideo, initFFmpeg } from '../utils/videoExport'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ChevronDown, User } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import TopToolbar from '../components/TopToolbar'
@@ -652,13 +652,6 @@ function EditorPage() {
     // Only allow dragging downwards (deltaY > 0)
     if (deltaY > 0) {
       mobileSheetRef.current.style.transform = `translateY(${deltaY}px)`
-      
-      // Update backdrop opacity in real-time
-      const backdrop = document.querySelector('.mobile-sheet-backdrop')
-      if (backdrop) {
-        const opacity = Math.max(0, 0.5 - (deltaY / window.innerHeight) * 0.5)
-        backdrop.style.backgroundColor = `rgba(0, 0, 0, ${opacity})`
-      }
     }
   }, [])
 
@@ -697,17 +690,10 @@ function EditorPage() {
       // Snap back
       mobileSheetRef.current.style.transition = 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.15)'
       mobileSheetRef.current.style.transform = 'translateY(0)'
-      if (backdrop) {
-        backdrop.style.transition = 'background-color 0.3s ease'
-        backdrop.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
-      }
       
       setTimeout(() => {
         if (mobileSheetRef.current) {
           mobileSheetRef.current.style.transition = ''
-        }
-        if (backdrop) {
-          backdrop.style.transition = ''
         }
       }, 300)
     }
@@ -4229,14 +4215,30 @@ function EditorPage() {
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* Drag handle */}
-                  <div 
-                    className="flex justify-center pt-2.5 pb-1 flex-shrink-0 cursor-row-resize touch-none"
-                    onTouchStart={handleSheetTouchStart}
-                    onTouchMove={handleSheetTouchMove}
-                    onTouchEnd={handleSheetTouchEnd}
-                  >
-                    <div className={`w-10 h-1 rounded-full ${isLight ? 'bg-black/10' : 'bg-white/20'}`} aria-hidden />
+                  {/* Top Bar Header with swipe-to-dismiss and click-to-close down arrow */}
+                  <div className="relative flex items-center justify-between px-4 py-3 flex-shrink-0 w-full border-b border-black/5 dark:border-white/5">
+                    {/* Spacing for symmetry */}
+                    <div className="w-8 h-8 flex-shrink-0" />
+
+                    {/* Centered Drag Handle (takes full height/width of center region for easy swiping) */}
+                    <div 
+                      className="absolute inset-y-0 inset-x-12 flex justify-center items-center cursor-row-resize touch-none"
+                      style={{ touchAction: 'none' }}
+                      onTouchStart={handleSheetTouchStart}
+                      onTouchMove={handleSheetTouchMove}
+                      onTouchEnd={handleSheetTouchEnd}
+                    >
+                      <div className={`w-12 h-1.5 rounded-full ${isLight ? 'bg-black/15' : 'bg-white/30'}`} aria-hidden />
+                    </div>
+
+                    {/* Down Chevron button on the right */}
+                    <button
+                      onClick={handleClosePanel}
+                      className={`relative z-10 flex h-8 w-8 items-center justify-center transition-all duration-200 active:scale-90 ${isLight ? 'text-gray-600 hover:text-gray-900' : 'text-white/60 hover:text-white'}`}
+                      aria-label="Close panel"
+                    >
+                      <ChevronDown className="h-5 w-5" strokeWidth={2.5} />
+                    </button>
                   </div>
                   {/* Panel content - scrollable, same bg as sheet */}
                   <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}>
@@ -4274,7 +4276,7 @@ function EditorPage() {
                       />
                     )}
                     {activeSidebarItem === 'Color' && (
-                      <div className="w-full h-full p-1 overflow-hidden">
+                      <div className="w-full p-1">
                         <AdvancedColorPickerModal
                           isInline={true}
                           initialColor={
@@ -4366,19 +4368,22 @@ function EditorPage() {
                       />
                     )}
                   </div>
-                  {/* Horizontal minimal nav at bottom of sheet */}
+                  {/* Horizontal minimal nav at bottom of sheet - scrollable on mobile */}
                   <div
-                    className={`flex-shrink-0 flex items-center justify-around gap-1 px-2 py-2.5 border-t ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
-                    style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+                    className={`flex-shrink-0 flex items-center justify-start gap-3 px-4 py-2.5 border-t overflow-x-auto scrollbar-none ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
+                    style={{ 
+                      paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+                      WebkitOverflowScrolling: 'touch'
+                    }}
                   >
-                    {SIDEBAR_ITEMS.map((item) => {
+                    {[...SIDEBAR_ITEMS, { icon: User, label: 'Profile' }].map((item) => {
                       const Icon = item.icon
                       const isActive = activeSidebarItem === item.label
                       return (
                         <button
                           key={item.label}
                           onClick={() => handleSidebarItemClick(item.label)}
-                          className={`flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] rounded-xl transition-all duration-200 touch-manipulation ${isActive
+                          className={`flex flex-col items-center justify-center gap-0.5 py-1.5 px-3 min-w-[64px] flex-shrink-0 rounded-xl transition-all duration-200 touch-manipulation ${isActive
                             ? (isLight ? 'bg-gray-200 text-gray-900' : 'bg-white/10 text-white')
                             : (isLight ? 'text-gray-500 active:bg-black/5' : 'text-zinc-400 active:bg-white/5')
                             }`}

@@ -34,6 +34,11 @@ function PositionPanel({
     setDraggingId(id)
   }, [])
 
+  // Mobile touch drag-and-drop support
+  const handleTouchStart = useCallback((e, id) => {
+    setDragging(id)
+  }, [setDragging])
+
   // Custom drag ghost: clone the card so the image following the cursor shows the real layer preview
   const setDragGhost = useCallback((e, cardEl) => {
     if (!cardEl || !e.dataTransfer) return
@@ -94,6 +99,111 @@ function PositionPanel({
 
     onReorder?.(fromIdx, toIdx)
   }, [frontToBack, stack, onReorder, setDragging])
+
+  // Mobile touch drag-and-drop support
+  React.useEffect(() => {
+    if (!draggingId) return
+
+    // Create a floating touch ghost element at touch start
+    const originalCard = document.querySelector(`[data-layer-id="${draggingId}"]`)
+    let ghostEl = null
+
+    if (originalCard) {
+      const rect = originalCard.getBoundingClientRect()
+      ghostEl = originalCard.cloneNode(true)
+      // Remove data attribute so document.elementFromPoint doesn't match the ghost itself
+      ghostEl.removeAttribute('data-layer-id')
+      ghostEl.style.cssText = [
+        'position: fixed',
+        'width: ' + rect.width + 'px',
+        'height: ' + rect.height + 'px',
+        'opacity: 0.85',
+        'pointer-events: none',
+        'z-index: 9999',
+        'box-shadow: 0 10px 25px rgba(0,0,0,0.3)',
+        'background: ' + (isLight ? '#ffffff' : '#090a0d'),
+        'border: 1.5px solid #7c4af0',
+        'border-radius: 8px',
+        'transform: translate(-50%, -50%)', // center exactly on finger touch
+        'left: ' + rect.left + 'px',
+        'top: ' + rect.top + 'px',
+        'transition: none',
+      ].join(';')
+      document.body.appendChild(ghostEl)
+    }
+
+    const handleGlobalTouchMove = (e) => {
+      // Prevent standard browser scrolling while reordering layers
+      e.preventDefault()
+
+      const touch = e.touches[0]
+
+      // Position the touch ghost relative to finger movement
+      if (ghostEl) {
+        ghostEl.style.left = touch.clientX + 'px'
+        ghostEl.style.top = touch.clientY + 'px'
+      }
+
+      // Temporarily hide ghost to inspect elements underneath
+      if (ghostEl) ghostEl.style.display = 'none'
+      const element = document.elementFromPoint(touch.clientX, touch.clientY)
+      if (ghostEl) ghostEl.style.display = 'flex'
+
+      if (element) {
+        const card = element.closest('[data-layer-id]')
+        if (card) {
+          const targetId = card.getAttribute('data-layer-id')
+          if (targetId && targetId !== draggingId) {
+            setOverId(targetId)
+          } else {
+            setOverId(null)
+          }
+        } else {
+          setOverId(null)
+        }
+      }
+    }
+
+    const handleGlobalTouchEnd = (e) => {
+      const touch = e.changedTouches[0]
+
+      // Temporarily hide ghost to check drop target element
+      if (ghostEl) ghostEl.style.display = 'none'
+      const element = document.elementFromPoint(touch.clientX, touch.clientY)
+      let targetId = null
+
+      if (element) {
+        const card = element.closest('[data-layer-id]')
+        if (card) {
+          targetId = card.getAttribute('data-layer-id')
+        }
+      }
+
+      // Clean up the floating ghost card
+      if (ghostEl) {
+        ghostEl.remove()
+        ghostEl = null
+      }
+
+      if (targetId && targetId !== draggingId) {
+        handleDrop(targetId)
+      } else {
+        setDragging(null)
+        setOverId(null)
+      }
+    }
+
+    document.addEventListener('touchmove', handleGlobalTouchMove, { passive: false })
+    document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false })
+
+    return () => {
+      if (ghostEl) {
+        ghostEl.remove()
+      }
+      document.removeEventListener('touchmove', handleGlobalTouchMove)
+      document.removeEventListener('touchend', handleGlobalTouchEnd)
+    }
+  }, [draggingId, handleDrop, setDragging, isLight])
 
   const renderPreview = (layer) => {
     if (!layer) return null
@@ -232,6 +342,7 @@ function PositionPanel({
           return (
             <div
               key={layer.id}
+              data-layer-id={layer.id}
               draggable
               onDragStart={(e) => {
                 e.stopPropagation()
@@ -259,6 +370,7 @@ function PositionPanel({
                 setDragging(null)
                 setOverId(null)
               }}
+              onTouchStart={(e) => handleTouchStart(e, layer.id)}
               onClick={() => onSelectLayer?.(layer.id)}
               className={[
                 'group flex items-center gap-2 px-2 rounded-lg border transition-all select-none cursor-grab active:cursor-grabbing',
@@ -271,12 +383,15 @@ function PositionPanel({
               style={{ height: '56px' }}
             >
               {/* Grip */}
-              <div className={`transition-colors flex-shrink-0 ${isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-white/25 group-hover:text-white/55'}`}>
+              <div 
+                className={`transition-colors flex-shrink-0 cursor-grab active:cursor-grabbing ${isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-white/25 group-hover:text-white/55'}`}
+                style={{ touchAction: 'none' }}
+              >
                 <GripVertical className="h-4 w-4" />
               </div>
 
               {/* Preview — centered, fills remaining width */}
-              <div className="flex-1 h-10 overflow-hidden">
+              <div className="flex-1 h-10 overflow-hidden" style={{ pointerEvents: 'none' }}>
                 {renderPreview(layer)}
               </div>
             </div>

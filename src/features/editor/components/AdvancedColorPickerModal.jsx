@@ -299,7 +299,7 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
     <div
       ref={modalRef}
       className={isInline
-        ? "w-full h-full flex flex-col overflow-hidden text-white"
+        ? "w-full flex flex-col text-white"
         : (typeof window !== 'undefined' && window.innerWidth < 1024
           ? "fixed rounded-2xl shadow-2xl border border-white/10 z-[10000] overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-300"
           : "fixed rounded-xl shadow-2xl border border-white/10 z-[10000] overflow-hidden")
