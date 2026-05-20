@@ -1020,6 +1020,8 @@ function EditorPage() {
   // Check if motion capture is active
   const isMotionCaptureActive = !!motionCaptureMode?.isActive
 
+  const currentSidebarWidth = typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth
+
   // Handle Step 1 -> 2 transition (Clicking Animate)
 
   useEffect(() => {
@@ -3967,7 +3969,11 @@ function EditorPage() {
         {/* Top Toolbar */}
         <div
           ref={topToolbarRef}
-          className="absolute top-0 left-0 right-0 z-50 transition-all duration-300"
+          className="absolute top-0 left-0 right-0 z-50"
+          style={{
+            transform: isMotionCaptureActive ? 'translateY(-100%)' : 'translateY(0)',
+            transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
         >
           <TopToolbar
             projectName={projectName}
@@ -3999,7 +4005,10 @@ function EditorPage() {
           style={{
             top: `${topToolbarHeight}px`,
             height: `calc(100vh - ${topToolbarHeight}px)`,
-            transition: isResizingBottom ? 'none' : 'height 0.3s ease',
+            transform: isMotionCaptureActive ? 'translateX(-100%)' : 'translateX(0)',
+            transition: isResizingBottom
+              ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+              : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), height 0.3s ease',
           }}
         >
           <LeftSidebar
@@ -4408,8 +4417,9 @@ function EditorPage() {
               className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : 'lg:flex hidden'}`}
               style={{
                 top: `${topToolbarHeight + 8}px`,
-                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-                right: 0
+                left: currentSidebarWidth,
+                right: 0,
+                transform: currentSidebarWidth !== '0px' ? 'translateX(-40px)' : 'none'
               }}
             >
               <CanvasControls
@@ -4542,9 +4552,9 @@ function EditorPage() {
               data-tutorial="canvas-area"
               className="absolute flex-1 overflow-hidden select-none"
               style={{
-                top: 'var(--header-height)',
+                top: 0,
                 bottom: initialBottomHeight || 0,
-                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                left: 0,
                 right: 0,
                 backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
                 zIndex: 10,
@@ -4654,60 +4664,65 @@ function EditorPage() {
           </div>
 
             {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-            <div 
-              className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} 
-              style={{
-                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
-                bottom: `${bottomSectionHeight || 140}px`,
-                backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-                borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div className="w-full px-4">
-                <PlaybackControls
-                  isPlaying={isPlaying}
-                  isBuffering={motionControls?.isBuffering || false}
-                  currentTime={playheadTime}
-                  totalTime={totalTime}
-                  onPlayPause={() => {
-                    if (motionControls) {
-                      if (isPlaying) {
-                        motionControls.pauseAll()
-                        setIsPlaying(false)
-                      } else {
-                        motionControls.playAll()
-                        setIsPlaying(true)
+            {!isMotionCaptureActive && (
+              <div 
+                className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} 
+                style={{
+                  left: currentSidebarWidth,
+                  bottom: `${bottomSectionHeight || 140}px`,
+                  backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                  borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
+                }}
+              >
+                <div className="w-full px-4">
+                  <PlaybackControls
+                    isPlaying={isPlaying}
+                    isBuffering={motionControls?.isBuffering || false}
+                    currentTime={playheadTime}
+                    totalTime={totalTime}
+                    shiftLeft={currentSidebarWidth !== '0px'}
+                    onPlayPause={() => {
+                      if (motionControls) {
+                        if (isPlaying) {
+                          motionControls.pauseAll()
+                          setIsPlaying(false)
+                        } else {
+                          motionControls.playAll()
+                          setIsPlaying(true)
+                        }
                       }
-                    }
-                  }}
-                  onSplit={handleSplitScene}
-                  playheadStepId={playheadStepId}
-                  onUpdateStep={handleEditStep}
-                  onDeleteStep={(stepId) => {
-                    if (currentSceneId && stepId) {
-                      dispatch(deleteSceneMotionStep({
-                        sceneId: currentSceneId,
-                        stepId: stepId
-                      }))
-                    }
-                  }}
-                />
+                    }}
+                    onSplit={handleSplitScene}
+                    playheadStepId={playheadStepId}
+                    onUpdateStep={handleEditStep}
+                    onDeleteStep={(stepId) => {
+                      if (currentSceneId && stepId) {
+                        dispatch(deleteSceneMotionStep({
+                          sceneId: currentSceneId,
+                          stepId: stepId
+                        }))
+                      }
+                    }}
+                    isMotionCaptureActive={isMotionCaptureActive}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Bottom Sections - Overlay at bottom with glass effect */}
             <div
               ref={bottomSectionRef}
               className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
               style={{
-                left: typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth,
+                left: currentSidebarWidth,
                 backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
                 backdropFilter: 'blur(20px)',
                 WebkitBackdropFilter: 'blur(20px)',
                 borderTop: 'none',
                 paddingBottom: 'env(safe-area-inset-bottom, 8px)',
                 height: 'auto',
-                maxHeight: '40vh'
+                maxHeight: '40vh',
+                transition: isResizingBottom ? 'none' : 'height 0.3s ease'
               }}
             >
               {/* Top border line */}
@@ -5097,8 +5112,8 @@ function EditorPage() {
           <div
             className={`fixed inset-0 z-[999998] ${isLight ? 'bg-white' : 'bg-black'}`}
             style={{
-              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`,
-              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth} 72px)`
+              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${currentSidebarWidth} 72px, ${currentSidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${currentSidebarWidth} 72px)`,
+              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${currentSidebarWidth} 72px, ${currentSidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${currentSidebarWidth} 72px)`
             }}
           />
         )}

@@ -179,7 +179,8 @@ function TopToolbar({
           className="absolute inset-x-0 bottom-0 h-full flex items-center justify-center pointer-events-none"
           style={{
             left: sidebarWidth,
-            right: 0
+            right: 0,
+            transform: sidebarWidth !== '0px' ? 'translateX(-40px)' : 'none'
           }}
         >
           <div className="pointer-events-auto">
