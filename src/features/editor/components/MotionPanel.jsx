@@ -640,9 +640,8 @@ function MotionPanel({
       {/* Mobile Backdrop Overlay */}
       {isOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200"
+          className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 pointer-events-none"
           style={{ top: 0 }}
-          onClick={onClose}
         />
       )}
 

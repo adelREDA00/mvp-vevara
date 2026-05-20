@@ -4207,9 +4207,8 @@ function EditorPage() {
             {activeSidebarItem && (
               <>
                 <div
-                  className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 mobile-sheet-backdrop"
+                  className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 mobile-sheet-backdrop pointer-events-none"
                   style={{ top: 0 }}
-                  onClick={() => setActiveSidebarItem(null)}
                   aria-hidden
                 />
                 <div
@@ -4760,6 +4759,7 @@ function EditorPage() {
                     paddingTop: '4px',
                     paddingLeft: '20px',
                     paddingRight: '20px',
+                    touchAction: 'pan-x',
                   }}
                 >
                   <ScenesBar

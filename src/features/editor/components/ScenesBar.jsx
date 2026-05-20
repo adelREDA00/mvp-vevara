@@ -471,6 +471,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
           const widthPct = Math.min(rawWidthPct, 100 - leftPct)
           const isManual = !!step.manual
           const blockPx = (stepDur / pageDuration) * cardWidth
+          const touchWidth = Math.max(24, Math.min(blockPx * 0.45, 36))
 
           return (
             <div
@@ -494,8 +495,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: isTouchDevice() ? '24px' : `${Math.min(blockPx * 0.45, Math.max(12, Math.min(20, Math.floor(blockPx * 0.3))))}px`,
-                  left: isTouchDevice() ? '-12px' : '0px',
+                  width: isTouchDevice() ? `${touchWidth}px` : `${Math.min(blockPx * 0.45, Math.max(12, Math.min(20, Math.floor(blockPx * 0.3))))}px`,
+                  left: isTouchDevice() ? `${-touchWidth / 2}px` : '0px',
                 }}
               >
                 <div className={`${blockPx < 32 ? 'hidden' : 'w-[4px] h-[16px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
@@ -569,8 +570,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 style={{
                   cursor: 'ew-resize',
                   touchAction: 'none',
-                  width: isTouchDevice() ? '24px' : `${Math.min(blockPx * 0.45, Math.max(8, Math.min(14, Math.floor(blockPx * 0.25))))}px`,
-                  right: isTouchDevice() ? '-12px' : '0px',
+                  width: isTouchDevice() ? `${touchWidth}px` : `${Math.min(blockPx * 0.45, Math.max(8, Math.min(14, Math.floor(blockPx * 0.25))))}px`,
+                  right: isTouchDevice() ? `${-touchWidth / 2}px` : '0px',
                 }}
               >
                 <div className={`${blockPx < 32 ? 'hidden' : 'w-[3px] h-[14px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
@@ -765,6 +766,9 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const handleResizeMouseMove = (e) => {
     if (!isResizingRef.current || !resizeSideRef.current) {
       return
+    }
+    if (e.cancelable) {
+      e.preventDefault()
     }
 
     // Extract clientX from either mouse or touch events
@@ -1209,8 +1213,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         style={{
           cursor: 'ew-resize',
           touchAction: 'none',
-          width: isTouchDevice() ? '16px' : '10px',
-          left: isTouchDevice() ? '-4px' : '-2px',
+          width: isTouchDevice() ? '28px' : '10px',
+          left: isTouchDevice() ? '-14px' : '-2px',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           MozUserSelect: 'none',
@@ -1267,8 +1271,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         style={{
           cursor: 'ew-resize',
           touchAction: 'none',
-          width: isTouchDevice() ? '16px' : '10px',
-          right: isTouchDevice() ? '-4px' : '-2px',
+          width: isTouchDevice() ? '28px' : '10px',
+          right: isTouchDevice() ? '-14px' : '-2px',
           userSelect: 'none',
           WebkitUserSelect: 'none',
           MozUserSelect: 'none',
@@ -2170,6 +2174,7 @@ const ScenesBar = React.memo(({
         width: `${Math.max(totalCardsWidth + 32, 100)}px`,
         backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
         paddingTop: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
+        touchAction: 'pan-x',
       }}
     >
 

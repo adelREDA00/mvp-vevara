@@ -30,7 +30,9 @@ function DropdownMenu({ trigger, children, className = "" }) {
       const triggerRect = triggerRef.current.getBoundingClientRect()
       const menu = menuRef.current
       const viewportWidth = window.innerWidth
-      const menuWidth = 220
+      const viewportHeight = window.innerHeight
+      const menuWidth = menu.offsetWidth || 220
+      const menuHeight = menu.offsetHeight || 200
 
       let left = triggerRect.left
 
@@ -38,8 +40,18 @@ function DropdownMenu({ trigger, children, className = "" }) {
         left = Math.max(8, viewportWidth - menuWidth - 8)
       }
 
+      const spaceBelow = viewportHeight - triggerRect.bottom
+      const spaceAbove = triggerRect.top
+
+      // If space below is not enough for the dropdown, and there is more space above, open upwards
+      const openUpwards = spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow
+
       menu.style.position = 'fixed'
-      menu.style.top = `${triggerRect.bottom + 8}px`
+      if (openUpwards) {
+        menu.style.top = `${triggerRect.top - menuHeight - 8}px`
+      } else {
+        menu.style.top = `${triggerRect.bottom + 8}px`
+      }
       menu.style.left = `${left}px`
       menu.style.zIndex = '9999'
     }

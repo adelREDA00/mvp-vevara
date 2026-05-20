@@ -56,6 +56,9 @@ function CanvasControls({
   const [showCornerRadiusSlider, setShowCornerRadiusSlider] = useState(false)
   const [showTiltPanel, setShowTiltPanel] = useState(false)
   const [showColorMenu, setShowColorMenu] = useState(false)
+  const [showFontMenu, setShowFontMenu] = useState(false)
+  const [showSizeMenu, setShowSizeMenu] = useState(false)
+  const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
   const scrollContainerRef = useRef(null)
   const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
@@ -73,6 +76,9 @@ function CanvasControls({
       if (menuName === 'radius') return !showCornerRadiusSlider
       if (menuName === 'tilt') return !showTiltPanel
       if (menuName === 'color') return !showColorMenu
+      if (menuName === 'font') return !showFontMenu
+      if (menuName === 'size') return !showSizeMenu
+      if (menuName === 'align') return !showAlignMenu
       return false
     })()
 
@@ -81,6 +87,9 @@ function CanvasControls({
     setShowCornerRadiusSlider(false)
     setShowTiltPanel(false)
     setShowColorMenu(false)
+    setShowFontMenu(false)
+    setShowSizeMenu(false)
+    setShowAlignMenu(false)
 
     if (turnOn) {
       if (menuName === 'opacity') setShowOpacitySlider(true)
@@ -88,6 +97,9 @@ function CanvasControls({
       if (menuName === 'radius') setShowCornerRadiusSlider(true)
       if (menuName === 'tilt') setShowTiltPanel(true)
       if (menuName === 'color') setShowColorMenu(true)
+      if (menuName === 'font') setShowFontMenu(true)
+      if (menuName === 'size') setShowSizeMenu(true)
+      if (menuName === 'align') setShowAlignMenu(true)
       onSubmenuChange?.(menuName)
     } else {
       onSubmenuChange?.(null)
@@ -101,6 +113,9 @@ function CanvasControls({
     setShowCornerRadiusSlider(false)
     setShowTiltPanel(false)
     setShowColorMenu(false)
+    setShowFontMenu(false)
+    setShowSizeMenu(false)
+    setShowAlignMenu(false)
     onSubmenuChange?.(null)
   }, [selectedLayer?.id, selectedCanvas])
 
@@ -367,165 +382,223 @@ function CanvasControls({
         {/* Font Selection - Only for text */}
         {selectedLayer?.type === LAYER_TYPES.TEXT && (
           <>
-            <DropdownMenu
-              trigger={
-                <button className={`h-8 px-3 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[120px] ${theme === 'light'
-                  ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
-                  : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
-                  <span className="truncate flex-1 text-left font-medium">{getFontFamily()}</span>
-                  <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
-                </button>
-              }
-            >
-              <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
-                {fonts.map(font => (
-                  <DropdownMenuItem
-                    key={font}
-                    onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, fontFamily: font } })}
-                  >
-                    <span style={{ fontFamily: font }}>{font}</span>
-                  </DropdownMenuItem>
-                ))}
-              </div>
-            </DropdownMenu>
+            {isMobileBottom ? (
+              <button
+                onClick={() => toggleSubmenu('font')}
+                className={`h-8 px-3 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[100px] border ${showFontMenu
+                  ? 'bg-purple-500/10 border-purple-500/30 text-purple-600'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-900 border-gray-200 hover:bg-gray-200' : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10')}`}
+              >
+                <span className="truncate flex-1 text-left font-medium">{getFontFamily()}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
+              </button>
+            ) : (
+              <DropdownMenu
+                trigger={
+                  <button className={`h-8 px-3 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[120px] ${theme === 'light'
+                    ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
+                    : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
+                    <span className="truncate flex-1 text-left font-medium">{getFontFamily()}</span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
+                  </button>
+                }
+              >
+                <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
+                  {fonts.map(font => (
+                    <DropdownMenuItem
+                      key={font}
+                      onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, fontFamily: font } })}
+                    >
+                      <span style={{ fontFamily: font }}>{font}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenu>
+            )}
 
             {/* Font Size Dropdown */}
-            <DropdownMenu
-              trigger={
-                <button className={`h-8 px-2 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[60px] ${theme === 'light'
-                  ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
-                  : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
-                  <span className="flex-1 text-left font-medium">{getFontSize()}</span>
-                  <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
-                </button>
-              }
-            >
-              <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
-                {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
-                  <DropdownMenuItem
-                    key={size}
-                    onClick={() => {
-                      const newSize = parseInt(size, 10)
-                      handleLayerUpdate({
-                        data: { ...selectedLayer.data, fontSize: newSize },
-                        scaleX: 1,
-                        scaleY: 1
-                      })
-                    }}
-                  >
-                    {size}
-                  </DropdownMenuItem>
-                ))}
-              </div>
-            </DropdownMenu>
+            {isMobileBottom ? (
+              <button
+                onClick={() => toggleSubmenu('size')}
+                className={`h-8 px-2 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[50px] border ${showSizeMenu
+                  ? 'bg-purple-500/10 border-purple-500/30 text-purple-600'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-900 border-gray-200 hover:bg-gray-200' : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10')}`}
+              >
+                <span className="flex-1 text-left font-medium">{getFontSize()}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
+              </button>
+            ) : (
+              <DropdownMenu
+                trigger={
+                  <button className={`h-8 px-2 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[60px] ${theme === 'light'
+                    ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
+                    : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
+                    <span className="flex-1 text-left font-medium">{getFontSize()}</span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
+                  </button>
+                }
+              >
+                <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
+                  {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
+                    <DropdownMenuItem
+                      key={size}
+                      onClick={() => {
+                        const newSize = parseInt(size, 10)
+                        handleLayerUpdate({
+                          data: { ...selectedLayer.data, fontSize: newSize },
+                          scaleX: 1,
+                          scaleY: 1
+                        })
+                      }}
+                    >
+                      {size}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenu>
+            )}
 
             {/* Combined Alignment & Water Flow Dropdown */}
-            <DropdownMenu
-              trigger={
-                <button
-                  className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center min-w-[44px] border ${selectedLayer.data?.enableFlow
-                    ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                    : (theme === 'light'
-                      ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
-                      : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')
-                    }`}
-                  title={selectedLayer.data?.enableFlow ? "Water Flow Enabled" : `Align: ${selectedLayer.data?.textAlign || 'left'}`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <div className="relative">
-                      {selectedLayer.data?.textAlign === 'center' ? (
-                        <AlignCenter className="h-4 w-4 opacity-100" strokeWidth={2.5} />
-                      ) : selectedLayer.data?.textAlign === 'right' ? (
-                        <AlignRight className="h-4 w-4 opacity-100" strokeWidth={2.5} />
-                      ) : (
-                        <AlignLeft className="h-4 w-4 opacity-100" strokeWidth={2.5} />
-                      )}
+            {isMobileBottom ? (
+              <button
+                onClick={() => toggleSubmenu('align')}
+                className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center min-w-[44px] border ${showAlignMenu
+                  ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                  : (theme === 'light'
+                    ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+                    : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')
+                  }`}
+                title={selectedLayer.data?.enableFlow ? "Water Flow Enabled" : `Align: ${selectedLayer.data?.textAlign || 'left'}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <div className="relative">
+                    {selectedLayer.data?.textAlign === 'center' ? (
+                      <AlignCenter className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                    ) : selectedLayer.data?.textAlign === 'right' ? (
+                      <AlignRight className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                    ) : (
+                      <AlignLeft className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                    )}
 
-                      {selectedLayer.data?.enableFlow && (
-                        <Waves
-                          className="absolute -top-1 -right-1 h-2 w-2 text-[#22c55e] opacity-90 animate-pulse"
-                          strokeWidth={2.5}
-                        />
-                      )}
-                    </div>
-
-                    <ChevronDown className="h-3 w-3 opacity-40" strokeWidth={2.5} />
+                    {selectedLayer.data?.enableFlow && (
+                      <Waves
+                        className="absolute -top-1 -right-1 h-2 w-2 text-[#22c55e] opacity-90 animate-pulse"
+                        strokeWidth={2.5}
+                      />
+                    )}
                   </div>
-                </button>
-              }
-            >
-              <div className="py-1 min-w-[180px]">
-                <DropdownMenuItem
-                  onClick={() => handleLayerUpdate({
-                    data: {
-                      ...selectedLayer.data,
-                      textAlign: 'left'
-                    }
-                  })}
-                >
-                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'left' ? 'text-purple-400' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <AlignLeft className="h-4 w-4" strokeWidth={2} />
-                      <span className="font-medium">Left Alignment</span>
-                    </div>
-                    {selectedLayer.data?.textAlign === 'left' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                  </div>
-                </DropdownMenuItem>
 
-                <DropdownMenuItem
-                  onClick={() => handleLayerUpdate({
-                    data: {
-                      ...selectedLayer.data,
-                      textAlign: 'center'
-                    }
-                  })}
-                >
-                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'center' ? 'text-purple-400' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <AlignCenter className="h-4 w-4" strokeWidth={2} />
-                      <span className="font-medium">Center</span>
-                    </div>
-                    {selectedLayer.data?.textAlign === 'center' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                  </div>
-                </DropdownMenuItem>
+                  <ChevronDown className="h-3 w-3 opacity-40" strokeWidth={2.5} />
+                </div>
+              </button>
+            ) : (
+              <DropdownMenu
+                trigger={
+                  <button
+                    className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center min-w-[44px] border ${selectedLayer.data?.enableFlow
+                      ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                      : (theme === 'light'
+                        ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+                        : 'text-white hover:bg-white/10 border-transparent hover:border-white/10')
+                      }`}
+                    title={selectedLayer.data?.enableFlow ? "Water Flow Enabled" : `Align: ${selectedLayer.data?.textAlign || 'left'}`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative">
+                        {selectedLayer.data?.textAlign === 'center' ? (
+                          <AlignCenter className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                        ) : selectedLayer.data?.textAlign === 'right' ? (
+                          <AlignRight className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                        ) : (
+                          <AlignLeft className="h-4 w-4 opacity-100" strokeWidth={2.5} />
+                        )}
 
-                <DropdownMenuItem
-                  onClick={() => handleLayerUpdate({
-                    data: {
-                      ...selectedLayer.data,
-                      textAlign: 'right'
-                    }
-                  })}
-                >
-                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'right' ? 'text-purple-400' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <AlignRight className="h-4 w-4" strokeWidth={2} />
-                      <span className="font-medium">Right Alignment</span>
-                    </div>
-                    {selectedLayer.data?.textAlign === 'right' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                  </div>
-                </DropdownMenuItem>
+                        {selectedLayer.data?.enableFlow && (
+                          <Waves
+                            className="absolute -top-1 -right-1 h-2 w-2 text-[#22c55e] opacity-90 animate-pulse"
+                            strokeWidth={2.5}
+                          />
+                        )}
+                      </div>
 
-                <div className="h-px bg-white/5 my-1 mx-2" />
-
-                <DropdownMenuItem
-                  onClick={() => handleLayerUpdate({
-                    data: {
-                      ...selectedLayer.data,
-                      enableFlow: !selectedLayer.data?.enableFlow
-                    }
-                  })}
-                >
-                  <div className={`flex items-center justify-between w-full ${selectedLayer.data?.enableFlow ? 'text-purple-400 font-semibold' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <Waves className={`h-4 w-4 ${selectedLayer.data?.enableFlow ? 'animate-pulse' : ''}`} strokeWidth={2} />
-                      <span className="font-medium">Water Flow (Wrap)</span>
+                      <ChevronDown className="h-3 w-3 opacity-40" strokeWidth={2.5} />
                     </div>
-                    {selectedLayer.data?.enableFlow && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-                  </div>
-                </DropdownMenuItem>
-              </div>
-            </DropdownMenu>
+                  </button>
+                }
+              >
+                <div className="py-1 min-w-[180px]">
+                  <DropdownMenuItem
+                    onClick={() => handleLayerUpdate({
+                      data: {
+                        ...selectedLayer.data,
+                        textAlign: 'left'
+                      }
+                    })}
+                  >
+                    <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'left' ? 'text-purple-400' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <AlignLeft className="h-4 w-4" strokeWidth={2} />
+                        <span className="font-medium">Left Alignment</span>
+                      </div>
+                      {selectedLayer.data?.textAlign === 'left' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => handleLayerUpdate({
+                      data: {
+                        ...selectedLayer.data,
+                        textAlign: 'center'
+                      }
+                    })}
+                  >
+                    <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'center' ? 'text-purple-400' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <AlignCenter className="h-4 w-4" strokeWidth={2} />
+                        <span className="font-medium">Center</span>
+                      </div>
+                      {selectedLayer.data?.textAlign === 'center' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => handleLayerUpdate({
+                      data: {
+                        ...selectedLayer.data,
+                        textAlign: 'right'
+                      }
+                    })}
+                  >
+                    <div className={`flex items-center justify-between w-full ${selectedLayer.data?.textAlign === 'right' ? 'text-purple-400' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <AlignRight className="h-4 w-4" strokeWidth={2} />
+                        <span className="font-medium">Right Alignment</span>
+                      </div>
+                      {selectedLayer.data?.textAlign === 'right' && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                    </div>
+                  </DropdownMenuItem>
+
+                  <div className="h-px bg-white/5 my-1 mx-2" />
+
+                  <DropdownMenuItem
+                    onClick={() => handleLayerUpdate({
+                      data: {
+                        ...selectedLayer.data,
+                        enableFlow: !selectedLayer.data?.enableFlow
+                      }
+                    })}
+                  >
+                    <div className={`flex items-center justify-between w-full ${selectedLayer.data?.enableFlow ? 'text-purple-400 font-semibold' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <Waves className={`h-4 w-4 ${selectedLayer.data?.enableFlow ? 'animate-pulse' : ''}`} strokeWidth={2} />
+                        <span className="font-medium">Water Flow (Wrap)</span>
+                      </div>
+                      {selectedLayer.data?.enableFlow && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                    </div>
+                  </DropdownMenuItem>
+                </div>
+              </DropdownMenu>
+            )}
 
           </>
         )}
@@ -1212,6 +1285,189 @@ function CanvasControls({
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Font Family Sub-menu (Mobile Only) */}
+      {showFontMenu && selectedLayer?.type === LAYER_TYPES.TEXT && isMobileBottom && (
+        <div
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={{
+            backgroundColor: 'var(--editor-panel-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Font</span>
+          
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none grow px-2 py-1">
+            {fonts.map((font) => {
+              const isSelected = getFontFamily() === font
+              return (
+                <button
+                  key={font}
+                  onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, fontFamily: font } })}
+                  style={{ fontFamily: font }}
+                  className={`px-3 py-1.5 rounded-lg shrink-0 text-xs font-medium transition-all active:scale-95 border ${
+                    isSelected
+                      ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-sm'
+                      : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200' : 'bg-white/5 text-white border-transparent hover:bg-white/10')
+                  }`}
+                >
+                  {font}
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={() => {
+              setShowFontMenu(false)
+              onSubmenuChange?.(null)
+            }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Font Size Sub-menu (Mobile Only) */}
+      {showSizeMenu && selectedLayer?.type === LAYER_TYPES.TEXT && isMobileBottom && (
+        <div
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={{
+            backgroundColor: 'var(--editor-panel-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Size</span>
+          
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none grow px-2 py-1">
+            {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map((size) => {
+              const isSelected = getFontSize() === size
+              return (
+                <button
+                  key={size}
+                  onClick={() => {
+                    const newSize = parseInt(size, 10)
+                    handleLayerUpdate({
+                      data: { ...selectedLayer.data, fontSize: newSize },
+                      scaleX: 1,
+                      scaleY: 1
+                    })
+                  }}
+                  className={`px-3 py-1 rounded-lg shrink-0 text-xs font-mono font-bold transition-all active:scale-95 border ${
+                    isSelected
+                      ? 'bg-purple-600/20 border-purple-500/50 text-purple-400 shadow-sm'
+                      : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200' : 'bg-white/5 text-white border-transparent hover:bg-white/10')
+                  }`}
+                >
+                  {size}
+                </button>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={() => {
+              setShowSizeMenu(false)
+              onSubmenuChange?.(null)
+            }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Text Alignment Sub-menu (Mobile Only) */}
+      {showAlignMenu && selectedLayer?.type === LAYER_TYPES.TEXT && isMobileBottom && (
+        <div
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={{
+            backgroundColor: 'var(--editor-panel-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
+            pointerEvents: 'auto'
+          }}
+        >
+          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Align</span>
+          
+          <div className="flex items-center gap-3 overflow-x-auto scrollbar-none grow px-2 py-1 justify-center">
+            {/* Left Align */}
+            <button
+              onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, textAlign: 'left' } })}
+              className={`p-2 rounded-lg shrink-0 transition-all active:scale-95 border flex items-center gap-1.5 text-xs font-semibold ${
+                selectedLayer.data?.textAlign === 'left' || !selectedLayer.data?.textAlign
+                  ? 'bg-purple-600/20 border-purple-500/50 text-purple-400'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200' : 'bg-white/5 text-white border-transparent')
+              }`}
+            >
+              <AlignLeft className="h-4 w-4" />
+              <span>Left</span>
+            </button>
+
+            {/* Center Align */}
+            <button
+              onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, textAlign: 'center' } })}
+              className={`p-2 rounded-lg shrink-0 transition-all active:scale-95 border flex items-center gap-1.5 text-xs font-semibold ${
+                selectedLayer.data?.textAlign === 'center'
+                  ? 'bg-purple-600/20 border-purple-500/50 text-purple-400'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200' : 'bg-white/5 text-white border-transparent')
+              }`}
+            >
+              <AlignCenter className="h-4 w-4" />
+              <span>Center</span>
+            </button>
+
+            {/* Right Align */}
+            <button
+              onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, textAlign: 'right' } })}
+              className={`p-2 rounded-lg shrink-0 transition-all active:scale-95 border flex items-center gap-1.5 text-xs font-semibold ${
+                selectedLayer.data?.textAlign === 'right'
+                  ? 'bg-purple-600/20 border-purple-500/50 text-purple-400'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200' : 'bg-white/5 text-white border-transparent')
+              }`}
+            >
+              <AlignRight className="h-4 w-4" />
+              <span>Right</span>
+            </button>
+
+            <div className={`w-px h-6 shrink-0 ${theme === 'light' ? 'bg-gray-200' : 'bg-zinc-800'}`} />
+
+            {/* Water Flow */}
+            <button
+              onClick={() => handleLayerUpdate({ data: { ...selectedLayer.data, enableFlow: !selectedLayer.data?.enableFlow } })}
+              className={`p-2 rounded-lg shrink-0 transition-all active:scale-95 border flex items-center gap-1.5 text-xs font-semibold ${
+                selectedLayer.data?.enableFlow
+                  ? 'bg-purple-600/20 border-purple-500/50 text-[#22c55e]'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-700 border-gray-200' : 'bg-white/5 text-white border-transparent')
+              }`}
+            >
+              <Waves className={`h-4 w-4 ${selectedLayer.data?.enableFlow ? 'animate-pulse' : ''}`} />
+              <span>Water Flow</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowAlignMenu(false)
+              onSubmenuChange?.(null)
+            }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
