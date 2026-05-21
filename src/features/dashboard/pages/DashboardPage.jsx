@@ -7,7 +7,7 @@ import {
     Plus, Folder, Layout, LogOut, Settings, User as UserIcon,
     ExternalLink, Trash2, ChevronDown, Layers, Loader2, X,
     Music, Presentation, Sparkles, Box, Wand2, Play, Share2,
-    Search, Menu, Sun, Moon
+    Search, Menu, Sun, Moon, Rocket, Video, ArrowRight
 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from '../../editor/components/DropdownMenu'
 import Modal from '../../editor/components/Modal'
@@ -34,8 +34,8 @@ const CategoryCircle = ({ label, active, onClick, isStuck }) => {
     return (
         <button
             onClick={onClick}
-            className={`flex flex-col items-center group transition-all shrink-0 ${isStuck 
-                ? 'min-w-[60px] md:min-w-[75px] pt-0.5 gap-1 md:gap-1' 
+            className={`flex flex-col items-center group transition-all shrink-0 ${isStuck
+                ? 'min-w-[60px] md:min-w-[75px] pt-0.5 gap-1 md:gap-1'
                 : 'min-w-[70px] md:min-w-[80px] pt-2 gap-1.5 md:gap-2'
                 }`}
         >
@@ -285,6 +285,8 @@ const DashboardPage = () => {
         }
     };
 
+    const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+
     return (
         <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[#7c4af0]/20 flex overflow-x-hidden">
             {/* Sidebar */}
@@ -365,75 +367,169 @@ const DashboardPage = () => {
 
                         <DashboardHero userName={user?.firstName} />
 
-                        {/* Recent Projects Section */}
-                        <section id="projects" className="scroll-mt-24 mb-16">
-                            <div className="flex items-center justify-between mb-8">
-                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Recent Designs</h2>
+                        {/* Create New Project Section */}
+                        <section className="mb-16 relative">
+                            <style>{`
+                                @keyframes dashMove {
+                                    to { stroke-dashoffset: -80; }
+                                }
+                                @keyframes pingDot {
+                                    0%, 100% { opacity: 1; transform: scale(1); }
+                                    50% { opacity: 0.4; transform: scale(1.6); }
+                                }
+                                .dash-anim {
+                                    stroke-dasharray: 5 5;
+                                    stroke-dashoffset: 0;
+                                    animation: dashMove 4s linear infinite;
+                                }
+                                .group:hover .dash-anim { animation-duration: 1.8s; }
+                                .dot-ping {
+                                    animation: pingDot 2s ease-in-out infinite;
+                                    transform-origin: center;
+                                }
+                            `}</style>
+
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Create new project</h2>
                             </div>
 
-                            {loading ? (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                    {[1, 2, 3, 4, 5, 6].map(i => (
-                                        <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                    {/* Add New Project Card - Always visible */}
-                                    <div
-                                        onClick={() => setIsProjectStarterModalOpen(true)}
-                                        className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
-                                    >
-                                        <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
-                                            <Plus size={20} strokeWidth={2} />
+                            {/* Max-width wrapper so cards stay compact on wide screens */}
+                            <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Card 1: Product Launch Videos */}
+                                <div
+                                    onClick={() => handleDuplicateTemplate("6a0eb3c31ddc8874b8361a7f")}
+                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#9F13FF] via-[#D11BE5] to-[#FF2A93] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#D11BE5]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
+                                >
+                                    {/* Left text label */}
+                                    <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
+                                        <h3 className="text-[17px] md:text-[22px] font-extrabold tracking-tight text-white leading-tight">
+                                            Product Launches
+                                        </h3>
+                                        <p className="text-[11px] md:text-[12px] text-white/80 font-semibold mt-0.5 max-w-[85%] truncate md:max-w-none">
+                                            Demos, SaaS & feature announcements
+                                        </p>
+                                        <div className="py-1 px-3 bg-white text-black font-extrabold text-[10px] rounded-lg mt-2 flex items-center gap-1.5 hover:bg-white/95 transition-all w-fit shadow-md">
+                                            <span>Start creating</span>
+                                            <ArrowRight size={10} strokeWidth={2.5} />
                                         </div>
-                                        <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Create new</p>
                                     </div>
 
-                                    {/* Project List */}
-                                    {projects.map((project) => (
+                                    {/* Layered custom mockups */}
+                                    <div className="absolute right-0 top-0 bottom-0 w-[45%] md:w-[40%] overflow-hidden pointer-events-none">
+                                        {/* Back backing card shape */}
+                                        <div className="absolute right-[10%] bottom-[-5%] w-[80%] h-[90%] bg-white/10 backdrop-blur-md rounded-xl transform rotate-[-12deg] z-0 transition-transform duration-500 group-hover:rotate-[-8deg]" />
+                                        {/* Front mockup card image */}
                                         <div
-                                            key={project._id}
-                                            className="group cursor-pointer"
-                                            onClick={() => window.location.href = `/project/${project._id}`}
-                                        >
-                                            <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
-                                                {project.thumbnail ? (
-                                                    <img
-                                                        src={project.thumbnail}
-                                                        alt={`${project.name} thumbnail`}
-                                                        className="w-full h-full object-contain"
-                                                    />
-                                                ) : (
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
-                                                        <Layers size={28} strokeWidth={1.5} />
-                                                    </div>
-                                                )}
-
-                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] duration-300">
-                                                    <button className="h-8 px-4 bg-white text-black text-[11px] font-bold rounded-lg shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 uppercase">Open</button>
-                                                </div>
-                                                <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md rounded-md px-1.5 py-0.5 text-[8px] font-bold text-white uppercase tracking-widest flex items-center gap-1">
-                                                    <X size={8} className="rotate-45" /> Private
-                                                </div>
-                                                <button
-                                                    onClick={(e) => handleDeleteProject(e, project._id)}
-                                                    className="absolute bottom-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
-                                                >
-                                                    <Trash2 size={14} strokeWidth={2} />
-                                                </button>
-                                            </div>
-                                            <div className="px-0.5">
-                                                <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
-                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
-                                            </div>
-                                        </div>
-                                    ))}
+                                            className="absolute right-[2%] bottom-[-10%] w-[80%] h-[100%] bg-cover bg-center rounded-xl border border-white/20 shadow-2xl transform rotate-[-4deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[-2deg]"
+                                            style={{ backgroundImage: "url('/product_launch_banner.png')" }}
+                                        />
+                                    </div>
                                 </div>
-                            )}
+
+                                {/* Card 2: Product Promo Videos */}
+                                <div
+                                    onClick={() => handleDuplicateTemplate("6a0eb9d31ddc8874b8361bc6")}
+                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#00ab6b] via-[#05c46b] to-[#3bf681] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#0bb85c]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
+                                >
+                                    {/* Left text label */}
+                                    <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
+                                        <h3 className="text-[17px] md:text-[22px] font-extrabold tracking-tight text-white leading-tight">
+                                            Ads & Marketing
+                                        </h3>
+                                        <p className="text-[11px] md:text-[12px] text-white/80 font-semibold mt-0.5 max-w-[85%] truncate md:max-w-none">
+                                            Promotions, ads & social content
+                                        </p>
+                                        <div className="py-1 px-3 bg-white text-black font-extrabold text-[10px] rounded-lg mt-2 flex items-center gap-1.5 hover:bg-white/95 transition-all w-fit shadow-md">
+                                            <span>Start creating</span>
+                                            <ArrowRight size={10} strokeWidth={2.5} />
+                                        </div>
+                                    </div>
+
+                                    {/* Layered custom mockups */}
+                                    <div className="absolute right-0 top-0 bottom-0 w-[45%] md:w-[40%] overflow-hidden pointer-events-none">
+                                        {/* Back backing card shape */}
+                                        <div className="absolute right-[12%] bottom-[-5%] w-[75%] h-[90%] bg-white/10 backdrop-blur-md rounded-xl transform rotate-[10deg] z-0 transition-transform duration-500 group-hover:rotate-[6deg]" />
+                                        {/* Front phone mockup card image */}
+                                        <div
+                                            className="absolute right-[2%] bottom-[-15%] w-[80%] h-[115%] bg-cover bg-center rounded-t-xl border border-white/20 shadow-2xl transform rotate-[2deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[0deg]"
+                                            style={{ backgroundImage: "url('/product_promo_banner.png')" }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
                         </section>
 
-                        {/* Categories - Vibing Circular Filters (Sticky) */}
+                        {/* Recent Projects Section */}
+                        {(loading || projects.length > 0) && (
+                            <section id="projects" className="scroll-mt-24 mb-16">
+                                <div className="flex items-center justify-between mb-8">
+                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Your projects</h2>
+                                </div>
+
+                                {loading ? (
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                        {[1, 2, 3, 4, 5, 6].map(i => (
+                                            <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                        {/* Add New Project Card - Always visible */}
+                                        <div
+                                            onClick={() => setIsProjectStarterModalOpen(true)}
+                                            className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
+                                        >
+                                            <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
+                                                <Plus size={20} strokeWidth={2} />
+                                            </div>
+                                            <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Create new</p>
+                                        </div>
+
+                                        {/* Project List */}
+                                        {sortedProjects.map((project) => (
+                                            <div
+                                                key={project._id}
+                                                className="group cursor-pointer"
+                                                onClick={() => window.location.href = `/project/${project._id}`}
+                                            >
+                                                <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
+                                                    {project.thumbnail ? (
+                                                        <img
+                                                            src={project.thumbnail}
+                                                            alt={`${project.name} thumbnail`}
+                                                            className="w-full h-full object-contain"
+                                                        />
+                                                    ) : (
+                                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
+                                                            <Layers size={28} strokeWidth={1.5} />
+                                                        </div>
+                                                    )}
+
+                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px] duration-300">
+                                                        <button className="h-8 px-4 bg-white text-black text-[11px] font-bold rounded-lg shadow-lg transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 uppercase">Open</button>
+                                                    </div>
+                                                    <div className="absolute top-2 left-2 bg-black/40 backdrop-blur-md rounded-md px-1.5 py-0.5 text-[8px] font-bold text-white uppercase tracking-widest flex items-center gap-1">
+                                                        <X size={8} className="rotate-45" /> Private
+                                                    </div>
+                                                    <button
+                                                        onClick={(e) => handleDeleteProject(e, project._id)}
+                                                        className="absolute bottom-2 right-2 p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all duration-200 z-10"
+                                                    >
+                                                        <Trash2 size={14} strokeWidth={2} />
+                                                    </button>
+                                                </div>
+                                                <div className="px-0.5">
+                                                    <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                    <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+                        )}
+
+                        {/* Categories - Vibing Circular Filters (Sticky) - Commented out for now
                         <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
                         <section
                             className="sticky top-2 md:top-6 z-30 mb-8 md:mb-20 flex justify-center pointer-events-none"
@@ -444,7 +540,6 @@ const DashboardPage = () => {
                                     : 'bg-transparent py-2 md:py-4 w-full border-none rounded-none justify-center'
                                     }`}
                             >
-                                {/* Pinned Mobile Hamburger - Corrected Baseline to Match Circles */}
                                 <div
                                     className={`lg:hidden shrink-0 flex items-center justify-center transition-all duration-500 overflow-hidden ${isFilterStuck ? 'w-10 opacity-100 mr-2 ml-1 grow-0' : 'w-0 opacity-0'
                                         }`}
@@ -458,14 +553,13 @@ const DashboardPage = () => {
                                 </div>
 
                                 <div className={`relative max-w-full overflow-hidden rounded-full ${!isFilterStuck ? 'flex-1' : ''}`}>
-                                    {/* Left Fade Indicator - More Subtle */}
                                     <div className={`absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`} />
 
                                     <div
                                         ref={categoriesScrollRef}
                                         onScroll={checkScroll}
-                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck 
-                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6' 
+                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck
+                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6'
                                             : 'py-2 md:py-4 px-2 gap-4 md:gap-8'
                                             }`}
                                     >
@@ -476,7 +570,6 @@ const DashboardPage = () => {
                                                 active={selectedCategory === cat}
                                                 onClick={() => {
                                                     setSelectedCategory(cat)
-                                                    // Scroll to top of templates section when category is changed
                                                     const element = document.getElementById('templates')
                                                     if (element && scrollContainerRef.current) {
                                                         element.scrollIntoView({ behavior: 'smooth' })
@@ -487,11 +580,11 @@ const DashboardPage = () => {
                                         ))}
                                     </div>
 
-                                    {/* Right Fade Indicator - More Subtle */}
                                     <div className={`absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollRight ? 'opacity-100' : 'opacity-0'}`} />
                                 </div>
                             </div>
                         </section>
+                        */}
 
                         {/* Templates Section */}
                         {templateProjects.length > 0 && (
@@ -504,13 +597,9 @@ const DashboardPage = () => {
                                     {templateProjects
                                         .filter(project => {
                                             const projectCat = project.category || ''
-                                            const isFeatured = projectCat.toLowerCase() === 'featured'
-
-                                            if (selectedCategory === 'All') {
-                                                return !isFeatured
-                                            }
-
-                                            return projectCat === selectedCategory
+                                            return projectCat.trim() !== '' &&
+                                                projectCat.toLowerCase() !== 'none' &&
+                                                projectCat.toLowerCase() !== 'undefined'
                                         })
                                         .map((project) => (
                                             <div
@@ -606,7 +695,7 @@ const DashboardPage = () => {
                                                         <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
                                                     </div>
 
-                                                    <form 
+                                                    <form
                                                         onSubmit={handleFeedbackSubmit}
                                                         className="relative group/input"
                                                     >
@@ -625,7 +714,7 @@ const DashboardPage = () => {
                                                                         placeholder="Type your idea, request or a bug report..."
                                                                         className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
                                                                     />
-                                                                    <button 
+                                                                    <button
                                                                         type="submit"
                                                                         disabled={!bottomFeedback.trim() || feedbackStatus === 'loading'}
                                                                         className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -668,10 +757,10 @@ const DashboardPage = () => {
                 </div>
             </Modal>
 
-            <Modal 
-                isOpen={!!projectToDelete} 
-                onClose={() => !isDeleting && setProjectToDelete(null)} 
-                title="Delete Project" 
+            <Modal
+                isOpen={!!projectToDelete}
+                onClose={() => !isDeleting && setProjectToDelete(null)}
+                title="Delete Project"
                 maxWidth="max-w-sm"
             >
                 <div className="space-y-6">
@@ -679,16 +768,16 @@ const DashboardPage = () => {
                         Permanently delete this design? This cannot be undone.
                     </p>
                     <div className="flex gap-3">
-                        <button 
+                        <button
                             disabled={isDeleting}
-                            onClick={() => setProjectToDelete(null)} 
+                            onClick={() => setProjectToDelete(null)}
                             className="h-10 flex-1 bg-[var(--dashboard-card-bg)] text-[var(--dashboard-text)] rounded-lg text-[13px] font-semibold border border-[var(--dashboard-border)] disabled:opacity-50"
                         >
                             Cancel
                         </button>
-                        <button 
+                        <button
                             disabled={isDeleting}
-                            onClick={confirmDeleteProject} 
+                            onClick={confirmDeleteProject}
                             className="h-10 flex-1 bg-rose-500 text-white rounded-lg text-[13px] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-rose-600 transition-colors"
                         >
                             {isDeleting ? (
