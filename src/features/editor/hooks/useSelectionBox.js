@@ -875,7 +875,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      handleResizeStart(handleType, cursor, e)
+      if (e._redirected) {
+        handleResizeStart(handleType, cursor, e)
+        return
+      }
+
+      const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
+      if (closest && closest !== handle) {
+        e._redirected = true
+        closest.emit('pointerdown', e)
+      } else {
+        handleResizeStart(handleType, cursor, e)
+      }
     })
 
     return handle
@@ -960,7 +971,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      handleResizeStart(handleType, cursor, e)
+      if (e._redirected) {
+        handleResizeStart(handleType, cursor, e)
+        return
+      }
+
+      const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
+      if (closest && closest !== hitArea) {
+        e._redirected = true
+        closest.emit('pointerdown', e)
+      } else {
+        handleResizeStart(handleType, cursor, e)
+      }
     })
 
     return hitArea
@@ -1098,7 +1120,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       e.stopPropagation()
       e.stopImmediatePropagation?.()
 
-      handleRotateStart(e)
+      if (e._redirected) {
+        handleRotateStart(e)
+        return
+      }
+
+      const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
+      if (closest && closest !== rotationHandle) {
+        e._redirected = true
+        closest.emit('pointerdown', e)
+      } else {
+        handleRotateStart(e)
+      }
     })
 
     return rotationHandle
@@ -3292,4 +3325,52 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     handleRotateStart,
     handleResizeEnd
   }
+}
+
+/**
+ * Helper to find the geometrically closest selection handle to a given global touch position.
+ * Applies a bias in favor of corners and rotation handles, as they are physically smaller
+ * and harder to target than side hit areas.
+ */
+function getClosestActiveHandle(selectionBox, touchPos) {
+  if (!selectionBox) return null
+
+  let closestHandle = null
+  let minDistance = Infinity
+
+  selectionBox.children.forEach(child => {
+    if (!child.visible || !child.label) return
+
+    const isResizeHandle = child.label.startsWith('selection-handle-')
+    const isRotationHandle = child.label === 'rotation-handle'
+    const isSideHitArea = child.label.startsWith('selection-hitarea-')
+
+    if (isResizeHandle || isRotationHandle || isSideHitArea) {
+      let handlePos
+      try {
+        handlePos = child.getGlobalPosition()
+      } catch (err) {
+        return
+      }
+
+      const dx = touchPos.x - handlePos.x
+      const dy = touchPos.y - handlePos.y
+      let distance = Math.sqrt(dx * dx + dy * dy)
+
+      // Apply a priority bias for corner handles and rotation handle on touch screens
+      const isCorner = isResizeHandle && ['nw', 'ne', 'sw', 'se'].includes(child.label.replace('selection-handle-', ''))
+      if (isCorner) {
+        distance *= 0.8 // 20% bias in favor of corners
+      } else if (isRotationHandle) {
+        distance *= 0.85 // 15% bias in favor of rotation
+      }
+
+      if (distance < minDistance) {
+        minDistance = distance
+        closestHandle = child
+      }
+    }
+  })
+
+  return closestHandle
 }

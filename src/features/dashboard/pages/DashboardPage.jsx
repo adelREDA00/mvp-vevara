@@ -422,7 +422,7 @@ const DashboardPage = () => {
                                         {/* Front mockup card image */}
                                         <div
                                             className="absolute right-[2%] bottom-[-10%] w-[80%] h-[100%] bg-cover bg-center rounded-xl border border-white/20 shadow-2xl transform rotate-[-4deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[-2deg]"
-                                            style={{ backgroundImage: "url('/product_launch_banner.png')" }}
+                                            style={{ backgroundImage: "url('/sass.png')" }}
                                         />
                                     </div>
                                 </div>
@@ -453,7 +453,7 @@ const DashboardPage = () => {
                                         {/* Front phone mockup card image */}
                                         <div
                                             className="absolute right-[2%] bottom-[-15%] w-[80%] h-[115%] bg-cover bg-center rounded-t-xl border border-white/20 shadow-2xl transform rotate-[2deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[0deg]"
-                                            style={{ backgroundImage: "url('/product_promo_banner.png')" }}
+                                            style={{ backgroundImage: "url('/ads.png')" }}
                                         />
                                     </div>
                                 </div>

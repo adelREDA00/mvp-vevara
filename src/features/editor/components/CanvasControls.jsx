@@ -126,23 +126,38 @@ function CanvasControls({
       setShowBlurSlider(false)
       setShowCornerRadiusSlider(false)
       setShowTiltPanel(false)
+      setShowColorMenu(false)
+      if (isMobileBottom) onSubmenuChange?.('opacity')
     } else if (requestOpenControl === 'blur') {
       setShowBlurSlider(true)
       setShowOpacitySlider(false)
       setShowCornerRadiusSlider(false)
       setShowTiltPanel(false)
+      setShowColorMenu(false)
+      if (isMobileBottom) onSubmenuChange?.('blur')
     } else if (requestOpenControl === 'cornerRadius') {
       setShowCornerRadiusSlider(true)
       setShowOpacitySlider(false)
       setShowBlurSlider(false)
       setShowTiltPanel(false)
+      setShowColorMenu(false)
+      if (isMobileBottom) onSubmenuChange?.('radius')
     } else if (requestOpenControl === 'tilt') {
       setShowTiltPanel(true)
       setShowOpacitySlider(false)
       setShowBlurSlider(false)
       setShowCornerRadiusSlider(false)
+      setShowColorMenu(false)
+      if (isMobileBottom) onSubmenuChange?.('tilt')
+    } else if (requestOpenControl === 'color') {
+      setShowColorMenu(true)
+      setShowOpacitySlider(false)
+      setShowBlurSlider(false)
+      setShowCornerRadiusSlider(false)
+      setShowTiltPanel(false)
+      if (isMobileBottom) onSubmenuChange?.('color')
     }
-  }, [requestOpenControl])
+  }, [requestOpenControl, isMobileBottom, onSubmenuChange])
 
   // [MOBILE] Auto-scroll to the right on small screens to ensure "Add Step" is visible
   useLayoutEffect(() => {

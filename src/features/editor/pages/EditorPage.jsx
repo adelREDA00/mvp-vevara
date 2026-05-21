@@ -3695,6 +3695,14 @@ function EditorPage() {
 
     dispatch(setSelectedLayer(layerId))
 
+    // [MOBILE] Auto-close the motion panel on mobile screens if the added action
+    // requires interacting with a control panel/slider on the canvas controls or sidebar.
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      if (['colorChange', 'fade', 'blur', 'cornerRadius', 'tilt'].includes(actionType)) {
+        setIsMotionPanelOpen(false)
+      }
+    }
+
     const pixiObj = motionControls?.layerObjects?.get?.(layerId)
     const tracked = motionCaptureRef.current?.trackedLayers?.get(layerId)
 
@@ -3740,8 +3748,13 @@ function EditorPage() {
         break
       }
       case 'colorChange': {
-        setColorPickerType('fill')
-        setActiveSidebarItem('Color')
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+          setRequestOpenControl('color')
+          setTimeout(() => setRequestOpenControl(null), 100)
+        } else {
+          setColorPickerType('fill')
+          setActiveSidebarItem('Color')
+        }
         break
       }
       case 'fade':
@@ -3826,7 +3839,7 @@ function EditorPage() {
       default:
         break
     }
-  }, [isMotionCaptureActive, editingStepId, motionControls, dispatch, effectiveMotionCaptureMode, handleFlipForLayer, setActiveSidebarItem])
+  }, [isMotionCaptureActive, editingStepId, motionControls, dispatch, effectiveMotionCaptureMode, handleFlipForLayer, setActiveSidebarItem, setIsMotionPanelOpen, setRequestOpenControl])
 
   const handleDeleteCaptureAction = useCallback((stepId, layerId, actionType) => {
     if (!isMotionCaptureActive || editingStepId !== stepId) return

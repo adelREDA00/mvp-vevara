@@ -105,7 +105,19 @@ export function createResizeHandle({
     if (isLocked) {
       return
     }
-    onResizeStart(handleType, cursor, e)
+
+    if (e._redirected) {
+      onResizeStart(handleType, cursor, e)
+      return
+    }
+
+    const closest = getClosestActiveMultiHandle(handle.parent, e.data.global)
+    if (closest && closest !== handle) {
+      e._redirected = true
+      closest.emit('pointerdown', e)
+    } else {
+      onResizeStart(handleType, cursor, e)
+    }
   })
 
   return handle
@@ -315,8 +327,68 @@ export function createRotateHandle({
     if (isLocked) {
       return
     }
-    onRotateStart(e)
+
+    if (e._redirected) {
+      onRotateStart(e)
+      return
+    }
+
+    const closest = getClosestActiveMultiHandle(handle.parent, e.data.global)
+    if (closest && closest !== handle) {
+      e._redirected = true
+      closest.emit('pointerdown', e)
+    } else {
+      onRotateStart(e)
+    }
   })
 
   return handle
+}
+
+/**
+ * Helper to find the geometrically closest selection handle to a given global touch position in a multi-selection box.
+ * Applies a bias in favor of corners and rotation handles, as they are physically smaller
+ * and harder to target than side hit areas.
+ */
+function getClosestActiveMultiHandle(selectionBox, touchPos) {
+  if (!selectionBox) return null
+
+  let closestHandle = null
+  let minDistance = Infinity
+
+  selectionBox.children.forEach(child => {
+    if (!child.visible || !child.label) return
+
+    // Multi-selection box handles have child.label = 'resize-handle' or 'rotate-handle'
+    const isResizeHandle = child.label === 'resize-handle'
+    const isRotationHandle = child.label === 'rotate-handle'
+
+    if (isResizeHandle || isRotationHandle) {
+      let handlePos
+      try {
+        handlePos = child.getGlobalPosition()
+      } catch (err) {
+        return
+      }
+
+      const dx = touchPos.x - handlePos.x
+      const dy = touchPos.y - handlePos.y
+      let distance = Math.sqrt(dx * dx + dy * dy)
+
+      // Apply a priority bias for corner handles and rotation handle on touch screens
+      const isCorner = isResizeHandle && ['nw', 'ne', 'sw', 'se'].includes(child.handleType)
+      if (isCorner) {
+        distance *= 0.8 // 20% bias in favor of corners
+      } else if (isRotationHandle) {
+        distance *= 0.85 // 15% bias in favor of rotation
+      }
+
+      if (distance < minDistance) {
+        minDistance = distance
+        closestHandle = child
+      }
+    }
+  })
+
+  return closestHandle
 }
