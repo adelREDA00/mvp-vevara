@@ -586,7 +586,7 @@ const DashboardPage = () => {
                         </section>
                         */}
 
-                        {/* Templates Section */}
+                        {/* Templates Section - Commented out for now
                         {templateProjects.length > 0 && (
                             <section id="templates" className="scroll-mt-24 mb-24">
                                 <div className="flex items-center justify-between mb-8">
@@ -619,116 +619,84 @@ const DashboardPage = () => {
                                 </div>
                             </section>
                         )}
+                        */}
 
-                        {/* How it works Section */}
-                        <section id="learn" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
-                            <div className="flex items-center justify-between mb-8">
-                                <h2 className="text-[20px] font-clean tracking-tight flex items-center gap-3 text-[var(--dashboard-text)]">
-                                    <div className="w-8 h-8 rounded-lg bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
-                                        <Play size={18} fill="currentColor" />
-                                    </div>
-                                    How it works
-                                </h2>
-                            </div>
-
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                                {/* Videos Section */}
-                                <div className="space-y-6">
-                                    <div className="aspect-video bg-[var(--dashboard-card-bg)] border-2 border-[var(--dashboard-border)] rounded-[24px] overflow-hidden shadow-sm relative group">
-                                        <video
-                                            src="/first.mp4"
-                                            className="w-full h-full object-cover"
-                                            controls
-                                            playsInline
-                                        />
-                                        <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-widest border border-white/10">
-                                            Quick Start Guide
-                                        </div>
-                                    </div>
-                                    <div className="px-2">
-                                        <h3 className="text-[16px] font-bold text-[var(--dashboard-text)] mb-2">Mastering Vevara Motion</h3>
-                                        <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium leading-relaxed opacity-80">
-                                            Everything you need to know to create stunning motion designs in minutes. Watch our interactive guide to get started.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Updates & Feedback Section */}
-                                <div className="space-y-6" id="dev-message">
-                                    {/* Collapsible Card - Developer Message */}
-                                    <div className={`bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] overflow-hidden transition-all duration-300 ${isMessageCollapsed ? 'h-[64px]' : 'h-auto pb-6'}`}>
-                                        <div
-                                            className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[var(--dashboard-card-hover)] transition-colors"
-                                            onClick={() => setIsMessageCollapsed(!isMessageCollapsed)}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
-                                                    <UserIcon size={16} />
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className="text-[14px] font-bold tracking-tight">A Message from the Dev</span>
-                                                    {isMessageCollapsed && <span className="text-[10px] text-[var(--dashboard-text-muted)] opacity-60 font-medium uppercase tracking-wider">Tap to read full message</span>}
-                                                </div>
+                        {/* Updates & Feedback Section */}
+                        <section id="dev-message" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
+                            <div className="w-full">
+                                {/* Collapsible Card - Developer Message */}
+                                <div className={`bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] overflow-hidden transition-all duration-300 ${isMessageCollapsed ? 'h-[64px]' : 'h-auto pb-6'}`}>
+                                    <div
+                                        className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[var(--dashboard-card-hover)] transition-colors"
+                                        onClick={() => setIsMessageCollapsed(!isMessageCollapsed)}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
+                                                <UserIcon size={16} />
                                             </div>
-                                            <ChevronDown size={18} className={`transition-transform duration-300 text-[var(--dashboard-text-muted)] ${isMessageCollapsed ? '' : 'rotate-180'}`} />
+                                            <div className="flex flex-col">
+                                                <span className="text-[14px] font-bold tracking-tight">A Message from the Dev</span>
+                                                {isMessageCollapsed && <span className="text-[10px] text-[var(--dashboard-text-muted)] opacity-60 font-medium uppercase tracking-wider">Tap to read full message</span>}
+                                            </div>
                                         </div>
+                                        <ChevronDown size={18} className={`transition-transform duration-300 text-[var(--dashboard-text-muted)] ${isMessageCollapsed ? '' : 'rotate-180'}`} />
+                                    </div>
 
-                                        {!isMessageCollapsed && (
-                                            <div className="px-6 space-y-6 animate-in fade-in duration-300">
-                                                <div className="py-2 space-y-4">
-                                                    <div className="p-4 bg-[var(--dashboard-bg)]/30 rounded-xl border border-[var(--dashboard-border)] border-dashed">
-                                                        <p className="text-[14px] leading-relaxed text-[var(--dashboard-text)] font-medium">
-                                                            👋 Hi there! <span className="text-[var(--dashboard-accent)] font-semibold">Vevara</span> is currently in Beta.
-                                                            We are actively improving the editor every single day to bring you the best motion design experience.
+                                    {!isMessageCollapsed && (
+                                        <div className="px-6 space-y-6 animate-in fade-in duration-300">
+                                            <div className="py-2 space-y-4">
+                                                <div className="p-4 bg-[var(--dashboard-bg)]/30 rounded-xl border border-[var(--dashboard-border)] border-dashed">
+                                                    <p className="text-[14px] leading-relaxed text-[var(--dashboard-text)] font-medium">
+                                                        👋 Hi there! <span className="text-[var(--dashboard-accent)] font-semibold">Vevara</span> is currently in Beta.
+                                                        We are actively improving the editor every single day to bring you the best motion design experience.
+                                                    </p>
+                                                    <div className="mt-4 pt-4 border-t border-[var(--dashboard-border)] border-dashed">
+                                                        <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium">
+                                                            <span className="text-[var(--dashboard-accent)] font-semibold">Recommended:</span> For the best performance, especially when using Video Elements, we highly recommend using a PC.
                                                         </p>
-                                                        <div className="mt-4 pt-4 border-t border-[var(--dashboard-border)] border-dashed">
-                                                            <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium">
-                                                                <span className="text-[var(--dashboard-accent)] font-semibold">Recommended:</span> For the best performance, especially when using Video Elements, we highly recommend using a PC.
-                                                            </p>
-                                                        </div>
                                                     </div>
-                                                </div>
-
-                                                <div className="space-y-4 pt-4 border-t border-[var(--dashboard-border)]">
-                                                    <div className="flex flex-col gap-1">
-                                                        <h4 className="text-[11px] font-bold text-[#7c4af0] uppercase tracking-wider">Request a Template</h4>
-                                                        <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
-                                                    </div>
-
-                                                    <form
-                                                        onSubmit={handleFeedbackSubmit}
-                                                        className="relative group/input"
-                                                    >
-                                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
-                                                            {feedbackStatus === 'success' ? (
-                                                                <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
-                                                                    <span className="font-bold text-[13px]">Thank you for your feedback!</span>
-                                                                </div>
-                                                            ) : (
-                                                                <>
-                                                                    <input
-                                                                        type="text"
-                                                                        value={bottomFeedback}
-                                                                        onChange={(e) => setBottomFeedback(e.target.value)}
-                                                                        disabled={feedbackStatus === 'loading'}
-                                                                        placeholder="Type your idea, request or a bug report..."
-                                                                        className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
-                                                                    />
-                                                                    <button
-                                                                        type="submit"
-                                                                        disabled={!bottomFeedback.trim() || feedbackStatus === 'loading'}
-                                                                        className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                    >
-                                                                        {feedbackStatus === 'loading' ? '...' : 'Submit'}
-                                                                    </button>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </form>
                                                 </div>
                                             </div>
-                                        )}
-                                    </div>
+
+                                            <div className="space-y-4 pt-4 border-t border-[var(--dashboard-border)]">
+                                                <div className="flex flex-col gap-1">
+                                                    <h4 className="text-[11px] font-bold text-[#7c4af0] uppercase tracking-wider">Request a Template</h4>
+                                                    <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
+                                                </div>
+
+                                                <form
+                                                    onSubmit={handleFeedbackSubmit}
+                                                    className="relative group/input"
+                                                >
+                                                    <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
+                                                        {feedbackStatus === 'success' ? (
+                                                            <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
+                                                                <span className="font-bold text-[13px]">Thank you for your feedback!</span>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <input
+                                                                    type="text"
+                                                                    value={bottomFeedback}
+                                                                    onChange={(e) => setBottomFeedback(e.target.value)}
+                                                                    disabled={feedbackStatus === 'loading'}
+                                                                    placeholder="Type your idea, request or a bug report..."
+                                                                    className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
+                                                                />
+                                                                <button
+                                                                    type="submit"
+                                                                    disabled={!bottomFeedback.trim() || feedbackStatus === 'loading'}
+                                                                    className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                >
+                                                                    {feedbackStatus === 'loading' ? '...' : 'Submit'}
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </section>

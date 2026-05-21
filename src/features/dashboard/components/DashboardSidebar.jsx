@@ -27,9 +27,9 @@ const DashboardSidebar = ({ onCreateProject, isOpen, onClose }) => {
 
   const navItems = [
     { icon: Folder, label: 'Projects', to: '/dashboard#projects' },
-    { icon: Layout, label: 'Templates', to: '/dashboard#templates' },
+    // { icon: Layout, label: 'Templates', to: '/dashboard#templates' },
 
-    { icon: Play, label: 'How it works', to: '/dashboard#learn' }
+    // { icon: Play, label: 'How it works', to: '/dashboard#learn' }
   ];
 
   return (
@@ -48,19 +48,6 @@ const DashboardSidebar = ({ onCreateProject, isOpen, onClose }) => {
           <Link to="/" className="w-10 h-10 bg-[var(--dashboard-accent)] rounded-xl flex items-center justify-center hover:scale-105 transition-transform">
             <span className="text-white font-bold text-2xl group-hover:rotate-12 transition-transform">v</span>
           </Link>
-
-          <button
-            onClick={() => {
-              onCreateProject();
-              if (window.innerWidth < 1024) onClose();
-            }}
-            className="group flex flex-col items-center gap-1 text-[var(--dashboard-text-muted)] hover:text-[#7c4af0] transition-colors"
-          >
-            <div className="w-10 h-10 rounded-xl bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] flex items-center justify-center group-hover:border-[var(--dashboard-accent)]/50 transition-all">
-              <Plus size={22} strokeWidth={2} />
-            </div>
-            <span className="text-[10px] font-semibold uppercase tracking-tight opacity-80">Create</span>
-          </button>
         </div>
 
         <nav className="flex-1 w-full space-y-1">
