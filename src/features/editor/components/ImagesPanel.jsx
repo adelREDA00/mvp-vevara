@@ -6,6 +6,7 @@ import { DragToCloseHandle } from './DragToCloseHandle'
 import { AssetCard } from './AssetCard'
 import api from '../../../api/client'
 import { addLayerAndSelect, selectCurrentSceneId } from '../../../store/slices/projectSlice'
+import { assetCacheWarmer } from '../../engine/pixi/textureUtils'
 
 function SkeletonGrid({ isLight }) {
     return (
@@ -81,6 +82,13 @@ function ImagesPanel({ onClose, aspectRatio }) {
         fetchSharedAssets()
         return () => { mounted = false }
     }, [])
+
+    // Warm PIXI assets cache in the background for shared library assets
+    useEffect(() => {
+        if (sharedAssets.length > 0) {
+            assetCacheWarmer.add(sharedAssets)
+        }
+    }, [sharedAssets])
 
     const filteredImages = useMemo(() => {
         if (!sharedAssets.length) return []

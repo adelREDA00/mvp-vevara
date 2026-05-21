@@ -842,8 +842,8 @@ function CanvasControls({
                 ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
                 : (theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-zinc-800/80 text-zinc-500') + ' border border-white/5 cursor-default')
               : (theme === 'light'
-                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
-                : 'text-white hover:bg-white/10 active:bg-white/15 border border-transparent hover:border-white/10')
+                ? 'bg-gradient-to-r from-[#4285F4]/10 via-[#9B72CB]/10 to-[#D96570]/10 text-[#6940c9] border border-transparent hover:from-[#4285F4]/20 hover:via-[#9B72CB]/20 hover:to-[#D96570]/20'
+                : 'bg-gradient-to-r from-[#4285F4]/15 via-[#9B72CB]/15 to-[#D96570]/15 text-[#c084fc] border border-transparent hover:from-[#4285F4]/25 hover:via-[#9B72CB]/25 hover:to-[#D96570]/25 hover:text-white')
               }`}
             title={isMotionCaptureActive ? "Save Step" : "Animate"}
           >

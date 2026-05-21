@@ -29,6 +29,7 @@ import {
 
 import { addLayerAndSelect, selectCurrentSceneId, selectLayers, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 import Modal from './Modal'
+import { assetCacheWarmer } from '../../engine/pixi/textureUtils'
 
 // Utility functions
 const formatFileSize = (bytes) => {
@@ -125,6 +126,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
   useEffect(() => {
     dispatch(fetchUploads())
   }, [dispatch])
+
+  // Warm PIXI assets cache in the background for uploaded assets
+  useEffect(() => {
+    if (uploadedImages.length > 0) {
+      assetCacheWarmer.add(uploadedImages)
+    }
+  }, [uploadedImages])
 
   const filteredImages = useMemo(() => {
     if (!uploadedImages.length) return []

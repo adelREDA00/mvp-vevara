@@ -123,3 +123,83 @@ export const registerFont = async (fontFamily, url) => {
         console.warn(`Failed to register font: ${fontFamily}`, e)
     }
 }
+
+/**
+ * Sequential background cache warmer to pre-warm PIXI Assets cache and browser cache.
+ * Yields CPU to keep the main UI responsive.
+ */
+class AssetCacheWarmer {
+    constructor() {
+        this.queue = []
+        this.active = false
+        this.processed = new Set()
+    }
+
+    add(assets) {
+        if (!assets || !Array.isArray(assets)) return
+
+        let addedAny = false
+        assets.forEach(asset => {
+            const url = asset.url || asset.src
+            if (!url) return
+
+            // Skip if already queued/processed or already in PIXI Assets Cache
+            if (this.processed.has(url) || (PIXI.Assets.cache && PIXI.Assets.cache.has(url))) {
+                return
+            }
+
+            const isVideo = asset.type === 'video' || asset.metadata?.type?.startsWith('video/')
+
+            this.processed.add(url)
+            this.queue.push({ url, isVideo })
+            addedAny = true
+        })
+
+        if (addedAny && !this.active) {
+            this.start()
+        }
+    }
+
+    async start() {
+        if (this.queue.length === 0) {
+            this.active = false
+            return
+        }
+
+        this.active = true
+
+        const item = this.queue.shift()
+
+        // Yield to the main thread with a 300ms delay to keep the UI smooth
+        await new Promise(resolve => setTimeout(resolve, 300))
+
+        try {
+            if (PIXI.Assets.cache && !PIXI.Assets.cache.has(item.url)) {
+                if (item.isVideo) {
+                    await PIXI.Assets.load({
+                        src: item.url,
+                        data: {
+                            resourceOptions: {
+                                autoPlay: false,
+                                muted: true,
+                                loop: false,
+                                playsinline: true,
+                                crossOrigin: 'anonymous',
+                            }
+                        }
+                    })
+                } else {
+                    await loadTextureRobust(item.url)
+                }
+            }
+        } catch (e) {
+            // Silence background preloading errors
+        }
+
+        // Process next item in the queue
+        this.start()
+    }
+}
+
+export const assetCacheWarmer = new AssetCacheWarmer()
+
