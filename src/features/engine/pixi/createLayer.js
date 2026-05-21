@@ -720,10 +720,10 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   const sprite = container._imageSprite
   if (!sprite) return null
 
-  // Compute cover-fit: scale asset so it fully covers the frame
+  // Compute contain-fit: scale asset so it fits within the frame
   const texW = texture.width
   const texH = texture.height
-  const scale = Math.max(frameWidth / texW, frameHeight / texH)
+  const scale = Math.min(frameWidth / texW, frameHeight / texH)
   const mediaW = texW * scale
   const mediaH = texH * scale
 
@@ -782,10 +782,10 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
   const sprite = container._backSprite
   if (!sprite) return null
 
-  // Compute cover-fit: scale asset so it fully covers the frame
+  // Compute contain-fit: scale asset so it fits within the frame
   const texW = texture.width
   const texH = texture.height
-  const scale = Math.max(frameWidth / texW, frameHeight / texH)
+  const scale = Math.min(frameWidth / texW, frameHeight / texH)
   const mediaW = texW * scale
   const mediaH = texH * scale
 

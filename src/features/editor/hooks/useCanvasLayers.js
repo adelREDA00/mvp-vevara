@@ -452,6 +452,16 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
         displayObject._storedMediaWidth = mediaW
         displayObject._storedMediaHeight = mediaH
 
+        // If the object has reactive properties (GSAP setters), update them as well so they are in sync
+        if (displayObject._hasGSAPProperties || displayObject._hasReactiveCropProperties) {
+          displayObject.cropX = cropX
+          displayObject.cropY = cropY
+          displayObject.cropWidth = cropW
+          displayObject.cropHeight = cropH
+          displayObject.mediaWidth = mediaW
+          displayObject.mediaHeight = mediaH
+        }
+
         // Update sprite to match full media size
         if (Math.abs(sprite.width - mediaW) > 0.1) sprite.width = mediaW
         if (Math.abs(sprite.height - mediaH) > 0.1) sprite.height = mediaH

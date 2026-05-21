@@ -1755,8 +1755,8 @@ const projectSlice = createSlice({
       const oldMediaW = layer.mediaWidth ?? frameW
       const oldMediaH = layer.mediaHeight ?? frameH
 
-      // Cover-fit: scale asset to fully cover frame
-      const scale = Math.max(frameW / assetWidth, frameH / assetHeight)
+      // Contain-fit: scale asset to fit entirely within the frame
+      const scale = Math.min(frameW / assetWidth, frameH / assetHeight)
       const mediaW = assetWidth * scale
       const mediaH = assetHeight * scale
       const cropX = (mediaW - frameW) / 2

@@ -1539,6 +1539,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
               // "selection box keeps the original size" bug for image / video.
               targetObject._storedCropWidth = newWidth
               targetObject._storedCropHeight = newHeight
+              if (targetObject._hasGSAPProperties || targetObject._hasReactiveCropProperties) {
+                targetObject.cropWidth = newWidth
+                targetObject.cropHeight = newHeight
+              }
             }
           }
         }
@@ -1744,6 +1748,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             currentLayerObject.pivot.set(newCropWidth * state.anchorX, newCropHeight * state.anchorY)
             currentLayerObject._storedCropWidth = newCropWidth
             currentLayerObject._storedCropHeight = newCropHeight
+            currentLayerObject._storedCropX = newCropX
+            currentLayerObject._storedCropY = newCropY
+            currentLayerObject._storedMediaWidth = state.startMediaWidth
+            currentLayerObject._storedMediaHeight = state.startMediaHeight
+            if (currentLayerObject._hasGSAPProperties || currentLayerObject._hasReactiveCropProperties) {
+              currentLayerObject.cropWidth = newCropWidth
+              currentLayerObject.cropHeight = newCropHeight
+              currentLayerObject.cropX = newCropX
+              currentLayerObject.cropY = newCropY
+              currentLayerObject.mediaWidth = state.startMediaWidth
+              currentLayerObject.mediaHeight = state.startMediaHeight
+            }
             if (currentLayerObject._tiltMesh) markTiltTextureDirty(currentLayerObject)
 
             if (isCaptureMode) {
@@ -1790,8 +1806,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
             // rectangle keeps the original size while the user drags.
             currentLayerObject._storedCropWidth = state.startCropWidth * scaleRatio
             currentLayerObject._storedCropHeight = state.startCropHeight * scaleRatio
+            currentLayerObject._storedCropX = state.startCropX * scaleRatio
+            currentLayerObject._storedCropY = state.startCropY * scaleRatio
             currentLayerObject._storedMediaWidth = state.startMediaWidth * scaleRatio
             currentLayerObject._storedMediaHeight = state.startMediaHeight * scaleRatio
+            if (currentLayerObject._hasGSAPProperties || currentLayerObject._hasReactiveCropProperties) {
+              currentLayerObject.cropWidth = state.startCropWidth * scaleRatio
+              currentLayerObject.cropHeight = state.startCropHeight * scaleRatio
+              currentLayerObject.cropX = state.startCropX * scaleRatio
+              currentLayerObject.cropY = state.startCropY * scaleRatio
+              currentLayerObject.mediaWidth = state.startMediaWidth * scaleRatio
+              currentLayerObject.mediaHeight = state.startMediaHeight * scaleRatio
+            }
             if (currentLayerObject._tiltMesh) markTiltTextureDirty(currentLayerObject)
             // Also scale back sprite for card frames (proportional cover-fit)
             const backSprite = currentLayerObject._backSprite
@@ -1855,8 +1881,14 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           // new crop / sprite layout so the perspective view shows the actual
           // cropped pixels instead of the previous capture.
           if (currentLayerObject._tiltMesh) {
-            currentLayerObject._storedCropWidth = updates.cropWidth ?? currentLayerObject._storedCropWidth
-            currentLayerObject._storedCropHeight = updates.cropHeight ?? currentLayerObject._storedCropHeight
+            const nextCropW = updates.cropWidth ?? currentLayerObject._storedCropWidth
+            const nextCropH = updates.cropHeight ?? currentLayerObject._storedCropHeight
+            currentLayerObject._storedCropWidth = nextCropW
+            currentLayerObject._storedCropHeight = nextCropH
+            if (currentLayerObject._hasGSAPProperties || currentLayerObject._hasReactiveCropProperties) {
+              currentLayerObject.cropWidth = nextCropW
+              currentLayerObject.cropHeight = nextCropH
+            }
             markTiltTextureDirty(currentLayerObject)
           }
         }
