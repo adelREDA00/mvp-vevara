@@ -869,22 +869,35 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (canvasEl) canvasEl.style.cursor = isLocked ? 'not-allowed' : 'default'
     })
     handle.on('pointerdown', (e) => {
-      if (e.nativeEvent) {
-        e.nativeEvent.preventDefault?.()
-      }
-      e.stopPropagation()
-      e.stopImmediatePropagation?.()
-
       if (e._redirected) {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleResizeStart(handleType, cursor, e)
         return
       }
 
       const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
       if (closest && closest !== handle) {
+        // If center wins, let event bubble naturally to trigger selection box dragging
+        if (closest === selectionBoxRef.current) {
+          return
+        }
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         e._redirected = true
         closest.emit('pointerdown', e)
       } else {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleResizeStart(handleType, cursor, e)
       }
     })
@@ -965,22 +978,35 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Start resize when clicking anywhere on the side
     hitArea.on('pointerdown', (e) => {
-      if (e.nativeEvent) {
-        e.nativeEvent.preventDefault?.()
-      }
-      e.stopPropagation()
-      e.stopImmediatePropagation?.()
-
       if (e._redirected) {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleResizeStart(handleType, cursor, e)
         return
       }
 
       const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
       if (closest && closest !== hitArea) {
+        // If center wins, let event bubble naturally to trigger selection box dragging
+        if (closest === selectionBoxRef.current) {
+          return
+        }
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         e._redirected = true
         closest.emit('pointerdown', e)
       } else {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleResizeStart(handleType, cursor, e)
       }
     })
@@ -1114,22 +1140,35 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     })
 
     rotationHandle.on('pointerdown', (e) => {
-      if (e.nativeEvent) {
-        e.nativeEvent.preventDefault?.()
-      }
-      e.stopPropagation()
-      e.stopImmediatePropagation?.()
-
       if (e._redirected) {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleRotateStart(e)
         return
       }
 
       const closest = getClosestActiveHandle(selectionBoxRef.current, e.data.global)
       if (closest && closest !== rotationHandle) {
+        // If center wins, let event bubble naturally to trigger selection box dragging
+        if (closest === selectionBoxRef.current) {
+          return
+        }
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         e._redirected = true
         closest.emit('pointerdown', e)
       } else {
+        if (e.nativeEvent) {
+          e.nativeEvent.preventDefault?.()
+        }
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
         handleRotateStart(e)
       }
     })
@@ -3371,6 +3410,39 @@ function getClosestActiveHandle(selectionBox, touchPos) {
       }
     }
   })
+
+  // Calculate selection box center using opposite NW and SE corners for affine-invariant accuracy
+  const nwHandle = selectionBox.children.find(c => c.label === 'selection-handle-nw')
+  const seHandle = selectionBox.children.find(c => c.label === 'selection-handle-se')
+
+  let centerPos = null
+  if (nwHandle && seHandle && nwHandle.visible && seHandle.visible) {
+    try {
+      const nwPos = nwHandle.getGlobalPosition()
+      const sePos = seHandle.getGlobalPosition()
+      centerPos = {
+        x: (nwPos.x + sePos.x) / 2,
+        y: (nwPos.y + sePos.y) / 2
+      }
+    } catch (e) {}
+  }
+
+  if (!centerPos) {
+    try {
+      centerPos = selectionBox.getGlobalPosition()
+    } catch (e) {}
+  }
+
+  if (centerPos) {
+    const dcX = touchPos.x - centerPos.x
+    const dcY = touchPos.y - centerPos.y
+    const distanceToCenter = Math.sqrt(dcX * dcX + dcY * dcY)
+
+    // If closer to center, center wins to allow bubbling drag behavior
+    if (distanceToCenter < minDistance) {
+      return selectionBox
+    }
+  }
 
   return closestHandle
 }

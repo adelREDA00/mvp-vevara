@@ -100,22 +100,35 @@ export function createResizeHandle({
 
   // Resize start
   handle.on('pointerdown', (e) => {
-    e.stopPropagation()
-    e.stopImmediatePropagation?.()
-    if (isLocked) {
-      return
-    }
-
     if (e._redirected) {
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       onResizeStart(handleType, cursor, e)
       return
     }
 
     const closest = getClosestActiveMultiHandle(handle.parent, e.data.global)
     if (closest && closest !== handle) {
+      // If center wins, let event bubble naturally to trigger selection box dragging
+      if (closest === handle.parent) {
+        return
+      }
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       e._redirected = true
       closest.emit('pointerdown', e)
     } else {
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       onResizeStart(handleType, cursor, e)
     }
   })
@@ -322,22 +335,35 @@ export function createRotateHandle({
 
   // Start rotation
   handle.on('pointerdown', (e) => {
-    e.stopPropagation()
-    e.stopImmediatePropagation?.()
-    if (isLocked) {
-      return
-    }
-
     if (e._redirected) {
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       onRotateStart(e)
       return
     }
 
     const closest = getClosestActiveMultiHandle(handle.parent, e.data.global)
     if (closest && closest !== handle) {
+      // If center wins, let event bubble naturally to trigger selection box dragging
+      if (closest === handle.parent) {
+        return
+      }
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       e._redirected = true
       closest.emit('pointerdown', e)
     } else {
+      e.stopPropagation()
+      e.stopImmediatePropagation?.()
+      if (isLocked) {
+        return
+      }
       onRotateStart(e)
     }
   })
@@ -389,6 +415,39 @@ function getClosestActiveMultiHandle(selectionBox, touchPos) {
       }
     }
   })
+
+  // Calculate selection box center using opposite NW and SE corners for affine-invariant accuracy
+  const nwHandle = selectionBox.children.find(c => c.label === 'resize-handle' && c.handleType === 'nw')
+  const seHandle = selectionBox.children.find(c => c.label === 'resize-handle' && c.handleType === 'se')
+
+  let centerPos = null
+  if (nwHandle && seHandle && nwHandle.visible && seHandle.visible) {
+    try {
+      const nwPos = nwHandle.getGlobalPosition()
+      const sePos = seHandle.getGlobalPosition()
+      centerPos = {
+        x: (nwPos.x + sePos.x) / 2,
+        y: (nwPos.y + sePos.y) / 2
+      }
+    } catch (e) {}
+  }
+
+  if (!centerPos) {
+    try {
+      centerPos = selectionBox.getGlobalPosition()
+    } catch (e) {}
+  }
+
+  if (centerPos) {
+    const dcX = touchPos.x - centerPos.x
+    const dcY = touchPos.y - centerPos.y
+    const distanceToCenter = Math.sqrt(dcX * dcX + dcY * dcY)
+
+    // If closer to center, center wins to allow bubbling drag behavior
+    if (distanceToCenter < minDistance) {
+      return selectionBox
+    }
+  }
 
   return closestHandle
 }
