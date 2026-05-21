@@ -86,9 +86,8 @@ const DashboardPage = () => {
     const categoriesScrollRef = useRef(null)
     const [canScrollLeft, setCanScrollLeft] = useState(false)
     const [canScrollRight, setCanScrollRight] = useState(false)
-    const [isMessageCollapsed, setIsMessageCollapsed] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
-    const [bottomFeedback, setBottomFeedback] = useState('')
+    const [bottomFeedback, setBottomFeedback] = useState('I want to make a video for ')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
 
     const CATEGORIES = [
@@ -276,7 +275,7 @@ const DashboardPage = () => {
             setFeedbackStatus('loading');
             await api.post('/feedback', { text: bottomFeedback });
             setFeedbackStatus('success');
-            setBottomFeedback('');
+            setBottomFeedback('I want to make a video for ');
             setTimeout(() => setFeedbackStatus('idle'), 3000);
         } catch (error) {
             console.error('Failed to send feedback:', error);
@@ -284,6 +283,8 @@ const DashboardPage = () => {
             setTimeout(() => setFeedbackStatus('idle'), 3000);
         }
     };
+
+    const isSubmitDisabled = !bottomFeedback.trim() || bottomFeedback.trim() === 'I want to make a video for' || feedbackStatus === 'loading';
 
     const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
@@ -621,82 +622,49 @@ const DashboardPage = () => {
                         )}
                         */}
 
-                        {/* Updates & Feedback Section */}
-                        <section id="dev-message" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
+                        {/* AI Video Idea Generation Section */}
+                        <section id="ai-idea-generator" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
                             <div className="w-full">
-                                {/* Collapsible Card - Developer Message */}
-                                <div className={`bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] overflow-hidden transition-all duration-300 ${isMessageCollapsed ? 'h-[64px]' : 'h-auto pb-6'}`}>
-                                    <div
-                                        className="flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-[var(--dashboard-card-hover)] transition-colors"
-                                        onClick={() => setIsMessageCollapsed(!isMessageCollapsed)}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)]/10 flex items-center justify-center text-[var(--dashboard-accent)]">
-                                                <UserIcon size={16} />
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="text-[14px] font-bold tracking-tight">A Message from the Dev</span>
-                                                {isMessageCollapsed && <span className="text-[10px] text-[var(--dashboard-text-muted)] opacity-60 font-medium uppercase tracking-wider">Tap to read full message</span>}
-                                            </div>
-                                        </div>
-                                        <ChevronDown size={18} className={`transition-transform duration-300 text-[var(--dashboard-text-muted)] ${isMessageCollapsed ? '' : 'rotate-180'}`} />
+                                <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] p-6 space-y-4">
+                                    <div className="flex flex-col gap-1">
+                                        <h3 className="text-[14px] font-bold text-[var(--dashboard-text)]">
+                                            Describe your video idea
+                                        </h3>
+                                        <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">
+                                            Get custom templates for your business, just describe what you want
+                                        </p>
                                     </div>
 
-                                    {!isMessageCollapsed && (
-                                        <div className="px-6 space-y-6 animate-in fade-in duration-300">
-                                            <div className="py-2 space-y-4">
-                                                <div className="p-4 bg-[var(--dashboard-bg)]/30 rounded-xl border border-[var(--dashboard-border)] border-dashed">
-                                                    <p className="text-[14px] leading-relaxed text-[var(--dashboard-text)] font-medium">
-                                                        👋 Hi there! <span className="text-[var(--dashboard-accent)] font-semibold">Vevara</span> is currently in Beta.
-                                                        We are actively improving the editor every single day to bring you the best motion design experience.
-                                                    </p>
-                                                    <div className="mt-4 pt-4 border-t border-[var(--dashboard-border)] border-dashed">
-                                                        <p className="text-[13px] text-[var(--dashboard-text-muted)] font-medium">
-                                                            <span className="text-[var(--dashboard-accent)] font-semibold">Recommended:</span> For the best performance, especially when using Video Elements, we highly recommend using a PC.
-                                                        </p>
-                                                    </div>
+                                    <form
+                                        onSubmit={handleFeedbackSubmit}
+                                        className="relative group/input"
+                                    >
+                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
+                                            {feedbackStatus === 'success' ? (
+                                                <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
+                                                    <span className="font-bold text-[13px]">Thank you for your feedback!</span>
                                                 </div>
-                                            </div>
-
-                                            <div className="space-y-4 pt-4 border-t border-[var(--dashboard-border)]">
-                                                <div className="flex flex-col gap-1">
-                                                    <h4 className="text-[11px] font-bold text-[#7c4af0] uppercase tracking-wider">Request a Template</h4>
-                                                    <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">Have a specific idea or feature in mind? Tell us and we'll build it faster than you think!</p>
-                                                </div>
-
-                                                <form
-                                                    onSubmit={handleFeedbackSubmit}
-                                                    className="relative group/input"
-                                                >
-                                                    <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
-                                                        {feedbackStatus === 'success' ? (
-                                                            <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
-                                                                <span className="font-bold text-[13px]">Thank you for your feedback!</span>
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <input
-                                                                    type="text"
-                                                                    value={bottomFeedback}
-                                                                    onChange={(e) => setBottomFeedback(e.target.value)}
-                                                                    disabled={feedbackStatus === 'loading'}
-                                                                    placeholder="Type your idea, request or a bug report..."
-                                                                    className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
-                                                                />
-                                                                <button
-                                                                    type="submit"
-                                                                    disabled={!bottomFeedback.trim() || feedbackStatus === 'loading'}
-                                                                    className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                                                >
-                                                                    {feedbackStatus === 'loading' ? '...' : 'Submit'}
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </form>
-                                            </div>
+                                            ) : (
+                                                <>
+                                                    <input
+                                                        type="text"
+                                                        value={bottomFeedback}
+                                                        onChange={(e) => setBottomFeedback(e.target.value)}
+                                                        disabled={feedbackStatus === 'loading'}
+                                                        placeholder="I want to make a video for..."
+                                                        className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
+                                                    />
+                                                    <button
+                                                        type="submit"
+                                                        disabled={isSubmitDisabled}
+                                                        className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {feedbackStatus === 'loading' ? '...' : 'Submit'}
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
-                                    )}
+                                    </form>
                                 </div>
                             </div>
                         </section>
@@ -704,11 +672,11 @@ const DashboardPage = () => {
 
                     {/* Footer */}
                     <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
-                        <div className="flex items-center gap-6">
+                        {/* <div className="flex items-center gap-6">
                             <span>&copy; 2026 Vevara</span>
                             <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Privacy Policy</a>
                             <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Terms of Service</a>
-                        </div>
+                        </div> */}
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
                             <span>All Systems Operational</span>

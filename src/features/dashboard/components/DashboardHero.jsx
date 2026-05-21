@@ -9,8 +9,8 @@ const DashboardHero = ({ userName }) => {
 
       <div className="relative z-10 w-full max-w-5xl mx-auto mb-4 md:mb-8">
         <h1 className="text-[28px] sm:text-5xl md:text-[68px] font-bold tracking-tight text-[var(--dashboard-text)] leading-[1.1] max-w-4xl mx-auto">
-          Create product ads <br className="hidden md:block" /> & app demos
-          <span className="bg-gradient-to-r from-[var(--dashboard-accent)] to-[#c084fc] bg-clip-text text-transparent italic font-normal"> fast.</span>
+          What are you<br className="hidden md:block" />
+          <span className="bg-gradient-to-r from-[var(--dashboard-accent)] to-[#c084fc] bg-clip-text text-transparent italic font-normal"> making </span> today?
 
         </h1>
       </div>
