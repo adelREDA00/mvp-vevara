@@ -87,8 +87,9 @@ const DashboardPage = () => {
     const [canScrollLeft, setCanScrollLeft] = useState(false)
     const [canScrollRight, setCanScrollRight] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
-    const [bottomFeedback, setBottomFeedback] = useState('I want to make a video for ')
+    const [bottomFeedback, setBottomFeedback] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
+    const [isNoteModalOpen, setIsNoteModalOpen] = useState(false)
 
     const CATEGORIES = [
         'All',
@@ -275,7 +276,7 @@ const DashboardPage = () => {
             setFeedbackStatus('loading');
             await api.post('/feedback', { text: bottomFeedback });
             setFeedbackStatus('success');
-            setBottomFeedback('I want to make a video for ');
+            setBottomFeedback('');
             setTimeout(() => setFeedbackStatus('idle'), 3000);
         } catch (error) {
             console.error('Failed to send feedback:', error);
@@ -284,7 +285,30 @@ const DashboardPage = () => {
         }
     };
 
-    const isSubmitDisabled = !bottomFeedback.trim() || bottomFeedback.trim() === 'I want to make a video for' || feedbackStatus === 'loading';
+    const isSubmitDisabled = !bottomFeedback.trim() || feedbackStatus === 'loading';
+
+    const handleAddExample = (example) => {
+        setBottomFeedback(prev => {
+            const trimmed = prev.trim();
+            if (!trimmed) return example;
+            if (trimmed.endsWith(',')) return `${trimmed} ${example}`;
+            return `${trimmed}, ${example}`;
+        });
+    };
+
+    const currentSelectedExamples = bottomFeedback
+        .split(',')
+        .map(val => val.trim().toLowerCase());
+
+    const availableExamples = [
+        'App walkthrough',
+        'Feature announcement',
+        'Launch video',
+        'Product promo',
+        'Animated presentation',
+        'Social media ad',
+        'Landing page demo'
+    ].filter(example => !currentSelectedExamples.includes(example.toLowerCase()));
 
     const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
@@ -326,6 +350,14 @@ const DashboardPage = () => {
                             </div>
 
                             <div className="flex items-center gap-4">
+                                <button
+                                    onClick={() => setIsNoteModalOpen(true)}
+                                    className="px-3 py-1.5 flex items-center gap-1.5 rounded-full text-[11px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-card-hover)] transition-all cursor-pointer"
+                                >
+                                    <span>✨</span>
+                                    <span>Founder's Note</span>
+                                </button>
+
                                 <button
                                     onClick={() => {
                                         const newTheme = theme === 'light' ? 'dark' : 'light'
@@ -622,13 +654,14 @@ const DashboardPage = () => {
                         )}
                         */}
 
+
                         {/* AI Video Idea Generation Section */}
                         <section id="ai-idea-generator" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
                             <div className="w-full">
-                                <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] p-6 space-y-4">
+                                <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] p-6 space-y-5">
                                     <div className="flex flex-col gap-1">
                                         <h3 className="text-[14px] font-bold text-[var(--dashboard-text)]">
-                                            Describe your video idea
+                                            What kind of video are you trying to create?
                                         </h3>
                                         <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">
                                             Get custom templates for your business, just describe what you want
@@ -637,12 +670,12 @@ const DashboardPage = () => {
 
                                     <form
                                         onSubmit={handleFeedbackSubmit}
-                                        className="relative group/input"
+                                        className="relative group/input space-y-4"
                                     >
                                         <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
                                             {feedbackStatus === 'success' ? (
                                                 <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
-                                                    <span className="font-bold text-[13px]">Thank you for your feedback!</span>
+                                                    <span className="font-bold text-[13px]">Got it 🙌 This will be available in the next update</span>
                                                 </div>
                                             ) : (
                                                 <>
@@ -651,7 +684,7 @@ const DashboardPage = () => {
                                                         value={bottomFeedback}
                                                         onChange={(e) => setBottomFeedback(e.target.value)}
                                                         disabled={feedbackStatus === 'loading'}
-                                                        placeholder="I want to make a video for..."
+                                                        placeholder="What kind of video are you trying to create?"
                                                         className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
                                                     />
                                                     <button
@@ -664,19 +697,55 @@ const DashboardPage = () => {
                                                 </>
                                             )}
                                         </div>
+
+                                        {feedbackStatus !== 'success' && availableExamples.length > 0 && (
+                                            <div className="flex flex-col gap-2 pt-1">
+                                                <p className="text-[10px] text-[var(--dashboard-text-muted)]/50 font-bold uppercase tracking-wider">
+                                                    Popular ideas:
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {availableExamples.map((example) => (
+                                                        <button
+                                                            key={example}
+                                                            type="button"
+                                                            onClick={() => handleAddExample(example)}
+                                                            className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer ${isLight
+                                                                ? 'bg-violet-50 hover:bg-violet-100/80 border-violet-100 text-violet-700 shadow-sm'
+                                                                : 'bg-[#18122B] hover:bg-[#21173d] border-[#3D2C62]/30 text-violet-200 shadow-md'
+                                                                }`}
+                                                        >
+                                                            {example}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </form>
                                 </div>
                             </div>
                         </section>
+
+                        {/* High Usage System Notice - Styled to be very soft, compact, and completely neutral */}
+                        <div className="mt-8 p-3 rounded-xl border border-[var(--dashboard-border)] bg-[var(--dashboard-card-bg)]/40 flex items-center justify-center gap-2.5 text-[var(--dashboard-text-muted)] max-w-3xl mx-auto opacity-75 hover:opacity-100 transition-opacity">
+                            <svg className="w-4 h-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-[11px] font-medium leading-normal text-center">
+                                <span className="font-bold text-[var(--dashboard-text)] opacity-90">System Update:</span> Due to high demand, asset uploads may take slightly longer. We are upgrading our servers and exiting beta soon. Please use PC for the best experience.
+                            </p>
+                        </div>
                     </div>
 
                     {/* Footer */}
                     <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
-                        {/* <div className="flex items-center gap-6">
-                            <span>&copy; 2026 Vevara</span>
-                            <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Privacy Policy</a>
-                            <a href="#" className="hover:text-[var(--dashboard-text)] transition-colors">Terms of Service</a>
-                        </div> */}
+                        <div className="flex items-center gap-6">
+                            <button
+                                onClick={() => setIsNoteModalOpen(true)}
+                                className="hover:text-[var(--dashboard-text)] transition-colors cursor-pointer flex items-center gap-1 opacity-80 hover:opacity-100"
+                            >
+                                <span>✨ Founder's Note</span>
+                            </button>
+                        </div>
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
                             <span>All Systems Operational</span>
@@ -686,6 +755,26 @@ const DashboardPage = () => {
             </div>
 
             {/* Modal Components */}
+            <Modal
+                isOpen={isNoteModalOpen}
+                onClose={() => setIsNoteModalOpen(false)}
+                maxWidth="max-w-lg"
+            >
+                <div className="relative p-6 text-center select-none">
+                    <div className="absolute top-0 left-1/4 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute bottom-0 right-1/4 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
+
+
+                    <blockquote className="text-[14px] md:text-[15px] font-medium leading-relaxed italic text-[var(--dashboard-text)] opacity-90">
+                        "everything will work out in the end. Building a startup feels lonely and uncertain at first, but the key is just to keep showing up.
+                        remember the problems you stressed about last year, or even last month, don’t really matter to you now. The same will be true for what feels heavy today too."
+                    </blockquote>
+                    <div className="mt-6 flex items-center justify-center gap-1.5 text-[10px] text-[var(--dashboard-text-muted)] font-bold uppercase tracking-wider">
+                        <span>Founder's Note</span>
+                    </div>
+                </div>
+            </Modal>
+
             <Modal isOpen={isDuplicating} onClose={() => { }} hideCloseButton={true} maxWidth="max-w-sm">
                 <div className="flex flex-col items-center justify-center py-8 space-y-6">
                     <div className="w-10 h-10 border-4 border-[var(--dashboard-accent)]/10 border-t-[var(--dashboard-accent)] rounded-full animate-spin" />
