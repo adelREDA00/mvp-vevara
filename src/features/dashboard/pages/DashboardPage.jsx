@@ -89,7 +89,7 @@ const DashboardPage = () => {
     const [isDeleting, setIsDeleting] = useState(false)
     const [bottomFeedback, setBottomFeedback] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
-    const [isNoteModalOpen, setIsNoteModalOpen] = useState(false)
+    const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false)
 
     const CATEGORIES = [
         'All',
@@ -351,11 +351,11 @@ const DashboardPage = () => {
 
                             <div className="flex items-center gap-4">
                                 <button
-                                    onClick={() => setIsNoteModalOpen(true)}
+                                    onClick={() => setIsUpdatesModalOpen(true)}
                                     className="px-3 py-1.5 flex items-center gap-1.5 rounded-full text-[11px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-card-hover)] transition-all cursor-pointer"
                                 >
-                                    <span>✨</span>
-                                    <span>Founder's Note</span>
+                                    <Sparkles size={12} className="text-violet-500 animate-pulse" />
+                                    <span>Upcoming Updates</span>
                                 </button>
 
                                 <button
@@ -740,10 +740,11 @@ const DashboardPage = () => {
                     <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
                         <div className="flex items-center gap-6">
                             <button
-                                onClick={() => setIsNoteModalOpen(true)}
-                                className="hover:text-[var(--dashboard-text)] transition-colors cursor-pointer flex items-center gap-1 opacity-80 hover:opacity-100"
+                                onClick={() => setIsUpdatesModalOpen(true)}
+                                className="hover:text-[var(--dashboard-text)] transition-colors cursor-pointer flex items-center gap-1.5 opacity-80 hover:opacity-100"
                             >
-                                <span>✨ Founder's Note</span>
+                                <Sparkles size={12} className="text-violet-500" />
+                                <span>Upcoming Updates</span>
                             </button>
                         </div>
                         <div className="flex items-center gap-2">
@@ -756,21 +757,71 @@ const DashboardPage = () => {
 
             {/* Modal Components */}
             <Modal
-                isOpen={isNoteModalOpen}
-                onClose={() => setIsNoteModalOpen(false)}
-                maxWidth="max-w-lg"
+                isOpen={isUpdatesModalOpen}
+                onClose={() => setIsUpdatesModalOpen(false)}
+                maxWidth="max-w-md"
             >
-                <div className="relative p-6 text-center select-none">
+                <div className="relative p-5 text-left select-none overflow-hidden">
                     <div className="absolute top-0 left-1/4 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
                     <div className="absolute bottom-0 right-1/4 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
 
+                    <div className="flex items-center gap-2.5 mb-4">
+                        <div className="p-1.5 bg-violet-500/10 rounded-lg text-violet-500">
+                            <Sparkles size={16} className="animate-pulse" />
+                        </div>
+                        <div>
+                            <h3 className="text-[14px] font-extrabold text-[var(--dashboard-text)] tracking-tight">Upcoming Updates</h3>
+                            <p className="text-[10px] text-[var(--dashboard-text-muted)] font-semibold">Exciting new additions coming soon</p>
+                        </div>
+                    </div>
 
-                    <blockquote className="text-[14px] md:text-[15px] font-medium leading-relaxed italic text-[var(--dashboard-text)] opacity-90">
-                        "everything will work out in the end. Building a startup feels lonely and uncertain at first, but the key is just to keep showing up.
-                        remember the problems you stressed about last year, or even last month, don’t really matter to you now. The same will be true for what feels heavy today too."
-                    </blockquote>
-                    <div className="mt-6 flex items-center justify-center gap-1.5 text-[10px] text-[var(--dashboard-text-muted)] font-bold uppercase tracking-wider">
-                        <span>Founder's Note</span>
+                    <div className="space-y-4">
+                        {/* Section 1: Templates Collection */}
+                        <div>
+                            <div className="flex items-center gap-1.5 mb-2">
+                                <span className="w-1 h-1 rounded-full bg-violet-500 animate-pulse" />
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-violet-500">1. New Templates</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-xl p-2 shadow-sm">
+                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
+                                    <Video size={13} className="text-violet-500 shrink-0" />
+                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">App Walkthroughs</span>
+                                </div>
+                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
+                                    <Play size={13} className="text-emerald-500 shrink-0" />
+                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">Product Demos</span>
+                                </div>
+                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
+                                    <Layers size={13} className="text-pink-500 shrink-0" />
+                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">TikTok & IG Ads</span>
+                                </div>
+                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
+                                    <Rocket size={13} className="text-amber-500 shrink-0" />
+                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">Launch Videos</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Section 2: Motion Presentations */}
+                        <div>
+                            <div className="flex items-center gap-1.5 mb-2">
+                                <span className="w-1 h-1 rounded-full bg-pink-500 animate-pulse" />
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-pink-500">2. Interactive Engine</span>
+                            </div>
+                            <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-xl p-2.5 shadow-sm flex items-center gap-2.5 hover:bg-[var(--dashboard-card-hover)]/30 transition-all duration-300">
+                                <Presentation size={13} className="text-pink-500 shrink-0" />
+                                <span className="text-[11.5px] font-bold text-[var(--dashboard-text)]">Animated Presentation Mode</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 pt-3 border-t border-[var(--dashboard-border)] flex justify-end">
+                        <button
+                            onClick={() => setIsUpdatesModalOpen(false)}
+                            className="px-3.5 py-1.5 bg-[var(--dashboard-accent)] text-white rounded-lg text-[11px] font-bold shadow-md hover:opacity-90 transition-all cursor-pointer"
+                        >
+                            Awesome
+                        </button>
                     </div>
                 </div>
             </Modal>

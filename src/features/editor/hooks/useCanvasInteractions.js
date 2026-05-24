@@ -4112,7 +4112,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       // --- Frame drop-target highlight during drag ---
-      if (layer && (layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO)) {
+      const isMotionCaptureActive = latestMotionCaptureModeRef.current?.isActive
+      if (!isMotionCaptureActive && layer && (layer.type === LAYER_TYPES.IMAGE || layer.type === LAYER_TYPES.VIDEO)) {
         let overlappingFrameId = null
         const allLayers = latestLayersRef.current
         for (const [frameId, frameLayer] of Object.entries(allLayers)) {
@@ -4180,6 +4181,19 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
             }
           }
         }
+      } else {
+        // [BLOCK DROP IN CAPTURE MODE] Ensure any highlighted target is cleared
+        const prevHighlighted = highlightedFrameRef.current
+        if (prevHighlighted) {
+          const prevObj = layerObjectsMap.get(prevHighlighted)
+          const prevLayer = latestLayersRef.current[prevHighlighted]
+          if (prevObj && !prevObj.destroyed && prevLayer) {
+            const w = prevLayer.cropWidth ?? prevLayer.width
+            const h = prevLayer.cropHeight ?? prevLayer.height
+            unhighlightFrameDropTarget(prevObj, w, h)
+          }
+          highlightedFrameRef.current = null
+        }
       }
     }
 
@@ -4206,6 +4220,21 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
       // --- Frame drop: attach media layer to highlighted frame ---
       if (wasDragging && highlightedFrameRef.current) {
+        const isMotionCaptureActive = latestMotionCaptureModeRef.current?.isActive
+        if (isMotionCaptureActive) {
+          // Clear highlight and ignore drop
+          const frameId = highlightedFrameRef.current
+          const frameObj = layerObjectsMap.get(frameId)
+          const frameLayer = latestLayersRef.current[frameId]
+          if (frameObj && !frameObj.destroyed && frameLayer) {
+            const w = frameLayer.cropWidth ?? frameLayer.width
+            const h = frameLayer.cropHeight ?? frameLayer.height
+            unhighlightFrameDropTarget(frameObj, w, h)
+          }
+          highlightedFrameRef.current = null
+          return
+        }
+
         const draggedLayerId = dragStateAPI.getDraggingLayerId()
         const draggedLayer = latestLayersRef.current[draggedLayerId]
         const frameId = highlightedFrameRef.current
@@ -4256,7 +4285,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               // [FIX] Clear the drop target flag so the sync loop is not blocked
               unhighlightFrameDropTarget(frameObj, frameW, frameH)
 
-              loadTextureRobust(assetUrl).then(texture => {
+              loadTextureRobust(assetUrl, draggedLayer.type === 'video').then(texture => {
                 if (!texture || frameObj.destroyed) return
 
                 if (side === 'back') {

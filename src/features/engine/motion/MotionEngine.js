@@ -966,7 +966,10 @@ export class MotionEngine {
         if (id) this._videoObjects.delete(id)
         return
       }
-      let videoElement = obj._videoElement
+      let videoElement = obj._isCardFrame
+        ? (obj.showingFront !== false ? obj._frontVideoElement : obj._backVideoElement)
+        : obj._videoElement
+
       if (!videoElement) {
         // [SYNC TARGET FIX] Search all possible sprite slots for an active video resource.
         // Direct video layers use _videoSprite, but card frames with video assets 
@@ -976,7 +979,15 @@ export class MotionEngine {
           const source = sprite.texture?.source
           if (source && source.resource instanceof HTMLVideoElement) {
             videoElement = source.resource
-            obj._videoElement = videoElement
+            if (obj._isCardFrame) {
+              if (sprite === obj._imageSprite) {
+                obj._frontVideoElement = videoElement
+              } else if (sprite === obj._backSprite) {
+                obj._backVideoElement = videoElement
+              }
+            } else {
+              obj._videoElement = videoElement
+            }
             break
           }
         }
@@ -1011,8 +1022,13 @@ export class MotionEngine {
 
 
         if (inRange) {
-          const sourceStart = obj._sourceStartTime || 0
-          const sourceEnd = obj._sourceEndTime
+          const isShowingFront = obj.showingFront !== false
+          const sourceStart = obj._isCardFrame
+            ? (isShowingFront ? (obj._sourceStartTime || 0) : (obj._backSourceStartTime || 0))
+            : (obj._sourceStartTime || 0)
+          const sourceEnd = obj._isCardFrame
+            ? (isShowingFront ? obj._sourceEndTime : obj._backSourceEndTime)
+            : obj._sourceEndTime
           const localTime = currentTime - startTime
           const adjustedLocalTime = Math.max(0, localTime + sourceStart)
 
@@ -1036,7 +1052,9 @@ export class MotionEngine {
           // the segment that is actually playing, not from a stale reference.
           // [ROBUSTNESS] If multiple objects for the same element are in range, 
           // any UNMUTED preference takes precedence to prevent audio flickering.
-          const objMuted = obj._layerMuted !== undefined ? obj._layerMuted : true
+          const objMuted = obj._isCardFrame
+            ? (isShowingFront ? (obj._frontLayerMuted !== false) : (obj._backLayerMuted !== false))
+            : (obj._layerMuted !== undefined ? obj._layerMuted : true)
 
           if (intent.layerMuted !== false) {
             intent.layerMuted = objMuted
@@ -1210,7 +1228,7 @@ export class MotionEngine {
         if (force || currentVideoTime !== lastUpdated) {
           const obj = videoToObject.get(videoElement)
           if (obj) {
-            const sprite = obj._videoSprite
+            const sprite = obj._videoSprite || (obj.showingFront !== false ? obj._imageSprite : obj._backSprite)
             if (sprite && sprite.texture && sprite.texture.source) {
               try {
                 sprite.texture.source.update()
@@ -1277,11 +1295,18 @@ export class MotionEngine {
     // [FIX] Pause all tracked video elements BEFORE clearing to prevent orphan playback.
     // Without this, videos continue playing through the engine rebuild triggered by scene cuts.
     this.registeredObjects.forEach((obj) => {
-      let videoElement = obj._videoElement
-      if (!videoElement && obj._videoSprite) {
-        const source = obj._videoSprite.texture?.source
-        if (source && source.resource instanceof HTMLVideoElement) {
-          videoElement = source.resource
+      let videoElement = obj._isCardFrame
+        ? (obj.showingFront !== false ? obj._frontVideoElement : obj._backVideoElement)
+        : obj._videoElement
+
+      if (!videoElement) {
+        const targetSprites = [obj._videoSprite, obj._imageSprite, obj._backSprite].filter(Boolean)
+        for (const sprite of targetSprites) {
+          const source = sprite.texture?.source
+          if (source && source.resource instanceof HTMLVideoElement) {
+            videoElement = source.resource
+            break
+          }
         }
       }
       if (videoElement && !videoElement.paused) {
@@ -1604,6 +1629,8 @@ export class MotionEngine {
       onComplete: () => {
         this._muteVideosForFastPreview = false
         this.isPlaying = false
+        // [FIX] Force sync media to pause videos when tweenTo completes (isPlaying is now false)
+        this.syncMedia(targetTime, true)
         // Final flip evaluation at target time
         this._evaluateFlipStates(targetTime)
         // [FLOW TEXT FIX] Ensure final rest layout state is accurate

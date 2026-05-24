@@ -373,6 +373,11 @@ function Stage({
 
   // Handle dropping an asset (image/video URL) onto a frame layer
   const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight, assetIsVideo = false) => {
+    // [BLOCK DROP IN CAPTURE MODE] Block drops during motion capture
+    if (motionCaptureMode?.isActive) {
+      return
+    }
+
     const frameLayer = layers[frameLayerId]
     if (!frameLayer || frameLayer.type !== 'frame') return
 
@@ -407,7 +412,7 @@ function Stage({
       // Clear drop target highlight so the sync loop is not blocked
       unhighlightFrameDropTarget(frameObj, frameW, frameH)
 
-      loadTextureRobust(assetUrl).then(texture => {
+      loadTextureRobust(assetUrl, assetIsVideo).then(texture => {
         if (!texture || frameObj.destroyed) return
         if (side === 'back') {
           attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
@@ -423,7 +428,7 @@ function Stage({
         frameObj._forceNextSync = true
       }).catch(() => { })
     }
-  }, [layers, layerObjects, dispatch])
+  }, [layers, layerObjects, dispatch, motionCaptureMode])
 
   // Native canvas drag-and-drop listeners (React synthetic events don't reach the canvas)
   useEffect(() => {
@@ -1088,9 +1093,12 @@ function Stage({
                     if (selectedLayerIds[0]) {
                       const frameLayerId = selectedLayerIds[0]
                       const frameLayer = layers[frameLayerId]
+                      const frameObj = layerObjects?.get(frameLayerId)
                       const isCardFrame = frameLayer?.data?.isCardFrame
-                      const showingFront = frameLayer?.data?.showingFront !== false
-                      const detachBack = isCardFrame && !showingFront
+                      const currentShowingFront = frameObj?._showingFront !== undefined
+                        ? frameObj._showingFront
+                        : (frameLayer?.data?.showingFront !== false)
+                      const detachBack = isCardFrame && !currentShowingFront
 
                       const assetUrl = detachBack ? frameLayer?.data?.backAssetUrl : frameLayer?.data?.assetUrl
                       const assetWidth = detachBack
@@ -1134,7 +1142,6 @@ function Stage({
                       }
 
                       // Reset PIXI frame object immediately
-                      const frameObj = layerObjects?.get(frameLayerId)
                       if (detachBack) {
                         // Detach back side
                         if (frameObj && frameObj._backSprite) {

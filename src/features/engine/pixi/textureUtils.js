@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js'
+import { getGlobalMotionEngine } from '../motion/index'
 
 const _isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
 
@@ -14,13 +15,74 @@ const _isMobile = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.t
  * @param {string} imageUrl - The URL of the image to load.
  * @returns {Promise<PIXI.Texture|null>} - Resolves with the PIXI Texture or null.
  */
-export const loadTextureRobust = async (imageUrl) => {
+export const loadTextureRobust = async (imageUrl, isVideo = false) => {
     if (!imageUrl) return null
 
     // 1. Try Cache directly first
     if (PIXI.Assets.cache.has(imageUrl)) {
         const cachedAsset = PIXI.Assets.cache.get(imageUrl)
         if (cachedAsset) return cachedAsset
+    }
+
+    if (isVideo) {
+        // [ROBUST VIDEO LOADING]
+        // Load as a video texture with proper resource options
+        try {
+            const videoElement = document.createElement('video')
+            videoElement.crossOrigin = 'anonymous'
+            videoElement.src = imageUrl
+            videoElement.muted = true
+            videoElement.loop = false
+            videoElement.playsInline = true
+            videoElement.preload = 'auto'
+            videoElement.autoplay = false
+            videoElement.setAttribute('autoplay', 'false')
+            videoElement.pause()
+
+            // Intercept play() to prevent PIXI VideoSource from auto-playing
+            const originalPlay = videoElement.play
+            videoElement.play = function () {
+                const engine = getGlobalMotionEngine()
+                if (engine && !engine.isPlaying) {
+                    return Promise.resolve()
+                }
+                return originalPlay.apply(this, arguments)
+            }
+
+            // Wait for video load metadata
+            await new Promise((resolve) => {
+                const onMetadata = () => {
+                    videoElement.removeEventListener('loadedmetadata', onMetadata)
+                    resolve()
+                }
+                if (videoElement.readyState >= 1) {
+                    resolve()
+                } else {
+                    videoElement.addEventListener('loadedmetadata', onMetadata)
+                    // Safety timeout (5s)
+                    setTimeout(resolve, 5000)
+                }
+            })
+            videoElement.pause()
+
+            const texture = PIXI.Texture.from(videoElement, {
+                resourceOptions: {
+                    autoPlay: false,
+                    muted: true,
+                    loop: false,
+                    playsinline: true,
+                    crossOrigin: 'anonymous'
+                }
+            })
+            texture._nativeVideo = videoElement
+            
+            // Cache the video texture
+            PIXI.Assets.cache.set(imageUrl, texture)
+            return texture
+        } catch (videoError) {
+            console.error('[loadTextureRobust] Failed loading video texture:', videoError)
+            return null
+        }
     }
 
     // [MOBILE FIX] Lowered from 2048 to 1536 for more GPU headroom on iOS

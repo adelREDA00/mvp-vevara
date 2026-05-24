@@ -693,6 +693,21 @@ export function createFrameLayer(config) {
           if (this._imageSprite) this._imageSprite.visible = val
           if (this._backSprite) this._backSprite.visible = !val
           
+          // [VIDEO SWITCHING] Dynamic video element routing
+          if (val) {
+            this._videoElement = this._frontVideoElement || null
+            if (this._backVideoElement) {
+              this._backVideoElement.pause()
+              this._backVideoElement.muted = true
+            }
+          } else {
+            this._videoElement = this._backVideoElement || null
+            if (this._frontVideoElement) {
+              this._frontVideoElement.pause()
+              this._frontVideoElement.muted = true
+            }
+          }
+          
           // Toggle placeholder visibility based on active side's asset
           if (this._framePlaceholder && !this._isDropTarget) {
             const activeHasAsset = val ? this._frameHasAsset : this._frameHasBackAsset
@@ -750,6 +765,24 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   // Update container metadata
   container._mediaWidth = mediaW
   container._mediaHeight = mediaH
+
+  // [VIDEO-IN-FRAME FIX] Set _frontVideoElement and register/sync with MotionEngine
+  const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
+  if (videoElement) {
+    container._frontVideoElement = videoElement
+    if (container.showingFront !== false) {
+      container._videoElement = videoElement
+    }
+    const engine = getGlobalMotionEngine()
+    if (engine && container.label) {
+      const layerId = container.label.replace('layer-', '')
+      engine.registerLayerObject(layerId, container, {
+        sceneId: container._sceneId || container.parent?._sceneId,
+        sourceStartTime: container._sourceStartTime,
+        sourceEndTime: container._sourceEndTime
+      })
+    }
+  }
 
 
   // Update crop mask to frame dimensions
@@ -809,6 +842,24 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
   }
 
   container._frameHasBackAsset = true
+
+  // [VIDEO-IN-FRAME FIX] Set _backVideoElement and register/sync with MotionEngine
+  const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
+  if (videoElement) {
+    container._backVideoElement = videoElement
+    if (container.showingFront === false) {
+      container._videoElement = videoElement
+    }
+    const engine = getGlobalMotionEngine()
+    if (engine && container.label) {
+      const layerId = container.label.replace('layer-', '')
+      engine.registerLayerObject(layerId, container, {
+        sceneId: container._sceneId || container.parent?._sceneId,
+        sourceStartTime: container._sourceStartTime,
+        sourceEndTime: container._sourceEndTime
+      })
+    }
+  }
 
   // Hide placeholder if the back side is currently active
   if (container._framePlaceholder) {

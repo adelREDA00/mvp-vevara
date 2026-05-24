@@ -350,9 +350,19 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     displayObject._sourceStartTime = layer.data?.sourceStartTime || 0
     displayObject._sourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0)
 
-    // Sync muted state dynamically.
-    const isMuted = layer.data?.muted !== false;
-    displayObject._layerMuted = isMuted; // [BUG FIX] Pass flag to MotionEngine for playback sync
+    if (layer.data?.isCardFrame) {
+      displayObject._backSourceStartTime = layer.data?.backSourceStartTime || 0
+      displayObject._backSourceEndTime = layer.data?.backSourceEndTime || (layer.data?.backDuration || 0)
+      displayObject._frontLayerMuted = layer.data?.muted !== false
+      displayObject._backLayerMuted = layer.data?.backMuted !== false
+      // Set the active _layerMuted dynamically based on showingFront
+      const showingFront = displayObject._showingFront !== false
+      displayObject._layerMuted = showingFront ? displayObject._frontLayerMuted : displayObject._backLayerMuted
+    } else {
+      // Sync muted state dynamically.
+      const isMuted = layer.data?.muted !== false;
+      displayObject._layerMuted = isMuted; // [BUG FIX] Pass flag to MotionEngine for playback sync
+    }
   }
 
   // Skip updates during playback unless forced (GSAP is in control)
@@ -1147,25 +1157,49 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
         // If the frame already has an attached asset (loading from saved project), load it
         const assetUrl = layer.data?.assetUrl
-        if (assetUrl) {
+        const backAssetUrl = layer.data?.backAssetUrl
+
+        if (assetUrl || backAssetUrl) {
           createdLayers.add(layerId)
-          asyncLoadCounterRef.current++
-          dispatch(startPreparingLayer(layerId))
           if (loadingMode === 'global') setIsStageReady(false)
 
-          loadTextureRobust(assetUrl).then(texture => {
-            asyncLoadCounterRef.current--
-            dispatch(finishPreparingLayer(layerId))
-            if (!texture || pixiObject.destroyed) { checkReadiness(); return }
+          const promises = []
 
-            attachAssetToFrame(pixiObject, texture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
-            setLayerObjectsVersion(v => v + 1)
-            checkReadiness()
-          }).catch(() => {
-            asyncLoadCounterRef.current--
-            dispatch(finishPreparingLayer(layerId))
-            checkReadiness()
-          })
+          if (assetUrl) {
+            promises.push(
+              loadTextureRobust(assetUrl, layer.data?.assetIsVideo).then(texture => {
+                if (texture && !pixiObject.destroyed) {
+                  attachAssetToFrame(pixiObject, texture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
+                }
+              })
+            )
+          }
+
+          if (backAssetUrl) {
+            promises.push(
+              loadTextureRobust(backAssetUrl, layer.data?.backAssetIsVideo).then(texture => {
+                if (texture && !pixiObject.destroyed) {
+                  attachBackAssetToFrame(pixiObject, texture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
+                }
+              })
+            )
+          }
+
+          if (promises.length > 0) {
+            asyncLoadCounterRef.current++
+            dispatch(startPreparingLayer(layerId))
+
+            Promise.all(promises).then(() => {
+              asyncLoadCounterRef.current--
+              dispatch(finishPreparingLayer(layerId))
+              setLayerObjectsVersion(v => v + 1)
+              checkReadiness()
+            }).catch(() => {
+              asyncLoadCounterRef.current--
+              dispatch(finishPreparingLayer(layerId))
+              checkReadiness()
+            })
+          }
 
           // Still add to stage synchronously (placeholder visible until texture loads)
           if (stageContainer) stageContainer.addChild(pixiObject)
@@ -1807,6 +1841,16 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         // FRAME LAYER UPDATES (reuses image path since _imageSprite is set)
         // -------------------------------------------------------------------
         else if (layer.type === LAYER_TYPES.FRAME) {
+          // Copy timings and muted preferences to PIXI object so MotionEngine syncs them
+          pixiObject._sourceStartTime = layer.data?.sourceStartTime ?? 0
+          pixiObject._sourceEndTime = layer.data?.sourceEndTime ?? undefined
+          pixiObject._backSourceStartTime = layer.data?.backSourceStartTime ?? 0
+          pixiObject._backSourceEndTime = layer.data?.backSourceEndTime ?? undefined
+          pixiObject._frontLayerMuted = layer.data?.muted !== false
+          pixiObject._backLayerMuted = layer.data?.backMuted !== false
+          const showingFront = pixiObject._showingFront !== false
+          pixiObject._layerMuted = showingFront ? pixiObject._frontLayerMuted : pixiObject._backLayerMuted
+
           if (pixiObject._imageSprite) {
             const sprite = pixiObject._imageSprite
             const cropMask = pixiObject._cropMask

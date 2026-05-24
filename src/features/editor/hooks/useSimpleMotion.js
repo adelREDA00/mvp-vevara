@@ -216,6 +216,45 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     wasInCaptureRef.current = isInCapture
   }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, prepareEngine, layers])
 
+  // [FIX] Pause all video layers immediately when entering or during motion capture mode
+  useEffect(() => {
+    const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
+    if (isInCapture) {
+      // Force pause in the engine
+      motionEngine.isPlaying = false
+      motionEngine.pauseAll()
+
+      const pauseVideo = (videoElement) => {
+        if (videoElement && !videoElement.paused) {
+          try {
+            videoElement.pause()
+            videoElement._isPlayPending = false
+          } catch (e) {
+            console.warn('[useSimpleMotion] Failed to pause video in capture mode:', e)
+          }
+        }
+      }
+
+      if (motionEngine.registeredObjects) {
+        motionEngine.registeredObjects.forEach((obj) => {
+          const videoElement = obj._videoElement
+          if (videoElement) {
+            pauseVideo(videoElement)
+          }
+        })
+      }
+
+      if (motionEngine.backgroundMedia) {
+        motionEngine.backgroundMedia.forEach((data) => {
+          const videoElement = data._videoElement
+          if (videoElement) {
+            pauseVideo(videoElement)
+          }
+        })
+      }
+    }
+  }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, motionEngine])
+
     // ... (Listen for engine events and sync isPlaying state - no changes needed)
     useEffect(() => {
         // [FIX] Never trigger this timeout rebuild while playing or during a preview 
