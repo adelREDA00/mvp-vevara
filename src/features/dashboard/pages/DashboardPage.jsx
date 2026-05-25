@@ -13,6 +13,7 @@ import { DropdownMenu, DropdownMenuItem } from '../../editor/components/Dropdown
 import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
 import ProjectStarterModal from '../components/ProjectStarterModal'
+import CreateFromScratchModal from '../components/CreateFromScratchModal'
 import DashboardSidebar from '../components/DashboardSidebar'
 import DashboardHero from '../components/DashboardHero'
 import TemplateThumbnail from '../components/TemplateThumbnail'
@@ -90,6 +91,7 @@ const DashboardPage = () => {
     const [bottomFeedback, setBottomFeedback] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
     const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false)
+    const [isCreateScratchModalOpen, setIsCreateScratchModalOpen] = useState(false)
 
     const CATEGORIES = [
         'All',
@@ -318,7 +320,7 @@ const DashboardPage = () => {
             <DashboardSidebar
                 isOpen={isSidebarOpen}
                 onClose={() => setIsSidebarOpen(false)}
-                onCreateProject={() => setIsProjectStarterModalOpen(true)}
+                onCreateProject={() => setIsCreateScratchModalOpen(true)}
             />
 
             {/* Content Wrapper (Scrollable) */}
@@ -509,7 +511,7 @@ const DashboardPage = () => {
                                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
                                         {/* Add New Project Card - Always visible */}
                                         <div
-                                            onClick={() => setIsProjectStarterModalOpen(true)}
+                                            onClick={() => setIsCreateScratchModalOpen(true)}
                                             className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
                                         >
                                             <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
@@ -869,12 +871,13 @@ const DashboardPage = () => {
                 </div>
             </Modal>
 
-            <ProjectStarterModal
-                isOpen={isProjectStarterModalOpen}
-                onClose={() => setIsProjectStarterModalOpen(false)}
-                onSelectBlank={() => { setIsProjectStarterModalOpen(false); handleCreateProject(); }}
-                onSelectTemplate={(templateId) => { setIsProjectStarterModalOpen(false); handleDuplicateTemplate(templateId); }}
-                featuredTemplates={templateProjects.filter(p => (p.category || '').toLowerCase() === 'featured')}
+            <CreateFromScratchModal
+                isOpen={isCreateScratchModalOpen}
+                onClose={() => setIsCreateScratchModalOpen(false)}
+                onConfirm={() => {
+                    setIsCreateScratchModalOpen(false);
+                    handleCreateProject();
+                }}
             />
         </div>
     )

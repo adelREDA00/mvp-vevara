@@ -65,15 +65,12 @@ function EditorPage() {
   const layers = useSelector(selectLayers)
   const { isAuthenticated, user } = useSelector((state) => state.auth)
   const { active: tutorialActive, step: tutorialStep, hasRunSession, autoPlayState, isInteractionLocked } = useSelector(selectTutorialState)
-  const isAutoPlaying = autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked);
-
-
-
-
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
   const { projectId: urlProjectId } = useParams()
   const location = useLocation()
   const projectName = useSelector(selectProjectName)
+  const isStarterCopy = projectName === "ads starter (Copy)" || projectName === "sass starter (Copy)"
+  const isAutoPlaying = (autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy;
   const projectId = useSelector(selectProjectId)
   const projectStatus = useSelector(state => state.project.status)
   const isDirty = useSelector(selectIsDirty)
@@ -88,6 +85,8 @@ function EditorPage() {
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
   const [manualTutorialRect, setManualTutorialRect] = useState(null);
+  const [showStarterHint, setShowStarterHint] = useState(false)
+  const [starterHintText, setStarterHintText] = useState('')
   const isInitialVertical = aspectRatio === '9:16'
   const [zoom, setZoom] = useState(isInitialVertical ? 18 : 31)
   const [showGuestModal, setShowGuestModal] = useState(false)
@@ -792,11 +791,56 @@ function EditorPage() {
     }
   }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
 
+  // Starter project copy initial autoplay on load (with 500ms delay to let the user see the first glance)
+  useEffect(() => {
+    if (projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
+      if (isStarterCopy) {
+        const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${projectId}`) === 'true';
+        if (!isAutoplayDone && !hasTriggeredInitialAutoPlay.current) {
+          hasTriggeredInitialAutoPlay.current = true;
+          dispatch(setAutoPlayState('initial'));
+          dispatch(setInteractionLock(true));
+          // Seek exactly to 0
+          seek(0);
+          
+          // Delay autoplay by 500ms so user has time to digest the initial frame
+          const timer = setTimeout(() => {
+            motionControls.playAll();
+            setIsPlaying(true);
+          }, 500);
+          return () => clearTimeout(timer);
+        }
+      }
+    }
+  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, motionControls, seek, setIsPlaying, dispatch]);
+
+  // Auto-pause at 2.0s and trigger starter tooltip
+  useEffect(() => {
+    if (isStarterCopy && isPlaying && motionControls) {
+      const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${projectId}`) === 'true';
+      if (!isAutoplayDone && playheadTime >= 2.0) {
+        // Pause playback
+        motionControls.pauseAll();
+        setIsPlaying(false);
+        // Seek exactly to 2s
+        seek(2.0);
+        // Set autoplay as done for this project ID so it won't trigger again
+        localStorage.setItem(`vevara_starter_autoplay_done_${projectId}`, 'true');
+        // Clear autoplay state and interaction lock
+        dispatch(setAutoPlayState('none'));
+        dispatch(setInteractionLock(false));
+        // Trigger the custom tooltip
+        setShowStarterHint(true);
+        setStarterHintText("click animate to Add Step 2");
+      }
+    }
+  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, seek, setIsPlaying, dispatch]);
+
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);
   useEffect(() => {
     if (prevIsPlaying.current && !isPlaying) {
-      if (autoPlayState === 'initial') {
+      if (autoPlayState === 'initial' && !isStarterCopy) {
         dispatch(setAutoPlayState('none'));
         dispatch(setInteractionLock(false));
         dispatch(startTutorial());
@@ -806,7 +850,7 @@ function EditorPage() {
       }
     }
     prevIsPlaying.current = isPlaying;
-  }, [isPlaying, autoPlayState, dispatch]);
+  }, [isPlaying, autoPlayState, dispatch, isStarterCopy]);
 
   // Handle trigger for final auto-play when entering pending_final state
   useEffect(() => {
@@ -1192,6 +1236,7 @@ function EditorPage() {
     // and isPlaying=true (from tweenTo) but motionCaptureMode.isActive is still false
     // (set in onComplete), so it calls pausePlayback() killing the tween.
     dispatch(clearLayerSelection())
+    setShowStarterHint(false)
 
     // [NEW] Auto-open motion panel on desktop when adding a step
     if (typeof window !== 'undefined' && window.innerWidth >= 1024 && isAuthenticated) {
@@ -4555,6 +4600,9 @@ function EditorPage() {
                 stepsCount={currentSceneMotionFlow?.steps?.length || 0}
                 showPasteboard={showPasteboard}
                 onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
+                showStarterHint={showStarterHint}
+                starterHintText={starterHintText}
+                onHideStarterHint={() => setShowStarterHint(false)}
               />
             </div>
 
@@ -4929,6 +4977,9 @@ function EditorPage() {
                   onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
                   isMobileBottom={true}
                   onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
+                  showStarterHint={showStarterHint}
+                  starterHintText={starterHintText}
+                  onHideStarterHint={() => setShowStarterHint(false)}
                 />
               </div>
             </div>
@@ -5121,7 +5172,7 @@ function EditorPage() {
             handleExport(res);
           }}
         />
-        {(autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && (
+        {(autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy && (
           <div
             className={`fixed inset-0 z-[999998] ${isLight ? 'bg-white' : 'bg-black'}`}
             style={{

@@ -45,7 +45,10 @@ function CanvasControls({
   showPasteboard = true,
   onTogglePasteboard,
   isMobileBottom = false,
-  onSubmenuChange
+  onSubmenuChange,
+  showStarterHint = false,
+  starterHintText = '',
+  onHideStarterHint
 }) {
   const { theme } = useContext(ThemeContext)
   const dispatch = useDispatch()
@@ -61,6 +64,34 @@ function CanvasControls({
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
   const scrollContainerRef = useRef(null)
+  const containerRef = useRef(null)
+  const animateButtonRef = useRef(null)
+  const [tooltipLeft, setTooltipLeft] = useState(null)
+
+  const updateTooltipPosition = useCallback(() => {
+    if (animateButtonRef.current && containerRef.current) {
+      const btnRect = animateButtonRef.current.getBoundingClientRect()
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const center = btnRect.left - containerRect.left + (btnRect.width / 2)
+      setTooltipLeft(center)
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    updateTooltipPosition()
+    window.addEventListener('resize', updateTooltipPosition)
+    return () => window.removeEventListener('resize', updateTooltipPosition)
+  }, [
+    updateTooltipPosition,
+    selectedLayer?.id,
+    selectedCanvas,
+    stepsCount,
+    showStarterHint,
+    showAddStepHint,
+    isMotionCaptureActive,
+    isMobileBottom
+  ])
+
   const [hasShownAddStepHint, setHasShownAddStepHint] = useState(() => {
     try {
       return localStorage.getItem('vevara_hint_add_step_shown') === 'true'
@@ -299,7 +330,7 @@ function CanvasControls({
 
 
   return (
-    <div className={isMobileBottom ? "relative flex flex-col items-center justify-center w-full px-4 py-1.5" : "relative flex flex-col items-center justify-center py-2 px-3"}>
+    <div ref={containerRef} className={isMobileBottom ? "relative flex flex-col items-center justify-center w-full px-4 py-1.5" : "relative flex flex-col items-center justify-center py-2 px-3"}>
       <div
         ref={scrollContainerRef}
         className={isMobileBottom 
@@ -836,39 +867,41 @@ function CanvasControls({
         {/* Motion Controls Group */}
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {/* Motion Button - Toggle capture mode */}
-          <button
-            data-tutorial="add-step-button"
-            onClick={() => {
-              if (isMotionCaptureActive) {
-                onApplyMotion?.()
-                // Hide hint when applying motion
-                setShowAddStepHint(false)
-              } else {
-                onStartMotionCapture?.()
-                // Show hint if it's the first time AND no steps exist yet
-                // Boolean check on hasShownAddStepHint for robustness
-                if (!hasShownAddStepHint && Number(stepsCount) === 0) {
-                  setShowAddStepHint(true)
+          <div ref={animateButtonRef} className="relative">
+            <button
+              data-tutorial="add-step-button"
+              onClick={() => {
+                if (isMotionCaptureActive) {
+                  onApplyMotion?.()
+                  // Hide hint when applying motion
+                  setShowAddStepHint(false)
+                } else {
+                  onStartMotionCapture?.()
+                  // Show hint if it's the first time AND no steps exist yet
+                  // Boolean check on hasShownAddStepHint for robustness
+                  if (!hasShownAddStepHint && Number(stepsCount) === 0) {
+                    setShowAddStepHint(true)
+                  }
                 }
-              }
-            }}
-            className={`h-8 px-3 rounded-[10px] transition-all duration-300 flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
-              ? (editingStepActionCount > 0
-                ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
-                : (theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-zinc-800/80 text-zinc-500') + ' border border-white/5 cursor-default')
-              : (theme === 'light'
-                ? 'bg-gradient-to-r from-[#4285F4]/10 via-[#9B72CB]/10 to-[#D96570]/10 text-[#6940c9] border border-transparent hover:from-[#4285F4]/20 hover:via-[#9B72CB]/20 hover:to-[#D96570]/20'
-                : 'bg-gradient-to-r from-[#4285F4]/15 via-[#9B72CB]/15 to-[#D96570]/15 text-[#c084fc] border border-transparent hover:from-[#4285F4]/25 hover:via-[#9B72CB]/25 hover:to-[#D96570]/25 hover:text-white')
-              }`}
-            title={isMotionCaptureActive ? "Save Step" : "Animate"}
-          >
-            {isMotionCaptureActive ? (
-              <Check className="h-4 w-4 flex-shrink-0" strokeWidth={3} />
-            ) : (
-              <Zap className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
-            )}
-            <span>{isMotionCaptureActive ? 'Save Step' : 'Animate'}</span>
-          </button>
+              }}
+              className={`h-8 px-3 rounded-[10px] transition-all duration-300 flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${isMotionCaptureActive
+                ? (editingStepActionCount > 0
+                  ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
+                  : (theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-zinc-800/80 text-zinc-500') + ' border border-white/5 cursor-default')
+                : (theme === 'light'
+                  ? 'bg-gradient-to-r from-[#4285F4]/10 via-[#9B72CB]/10 to-[#D96570]/10 text-[#6940c9] border border-transparent hover:from-[#4285F4]/20 hover:via-[#9B72CB]/20 hover:to-[#D96570]/20'
+                  : 'bg-gradient-to-r from-[#4285F4]/15 via-[#9B72CB]/15 to-[#D96570]/15 text-[#c084fc] border border-transparent hover:from-[#4285F4]/25 hover:via-[#9B72CB]/25 hover:to-[#D96570]/25 hover:text-white')
+                }`}
+              title={isMotionCaptureActive ? "Save Step" : "Animate"}
+            >
+              {isMotionCaptureActive ? (
+                <Check className="h-4 w-4 flex-shrink-0" strokeWidth={3} />
+              ) : (
+                <Zap className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
+              )}
+              <span>{isMotionCaptureActive ? 'Save Step' : 'Animate'}</span>
+            </button>
+          </div>
 
           {/* Cancel Button - Only shown in capture mode */}
           {isMotionCaptureActive && (
@@ -1487,34 +1520,42 @@ function CanvasControls({
       )}
 
       {/* Add Step Hint Modal */}
-      {showAddStepHint && (
+      {(showAddStepHint || showStarterHint) && (
         <div
-          className={`absolute ${isMobileBottom ? 'bottom-full mb-4' : 'top-full mt-4'} left-1/2 -translate-x-1/2 z-[100] animate-in fade-in ${isMobileBottom ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'} duration-300`}
-          style={{ pointerEvents: 'auto' }}
+          className={`absolute ${isMobileBottom ? 'bottom-full mb-3' : 'top-full mt-2.5'} z-[100] animate-in fade-in ${isMobileBottom ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'} duration-300`}
+          style={{
+            pointerEvents: 'auto',
+            left: tooltipLeft !== null ? `${tooltipLeft}px` : '50%',
+            transform: 'translateX(-50%)'
+          }}
         >
-          {/* Arrow */}
           <div
-            className={`absolute ${isMobileBottom ? '-bottom-1.5 border-b border-r' : '-top-1.5 border-t border-l'} left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border-white/20`}
-            style={{ backgroundColor: '#6940c9' }}
-          />
-
-          <div
-            className="bg-[#6940c9] text-white px-4 py-2.5 rounded-2xl sm:rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-white/20 flex flex-row items-center gap-3 sm:gap-4 max-w-[calc(100vw-32px)] sm:max-w-none w-fit sm:w-max text-left sm:text-center animate-bounce-subtle"
+            className="relative bg-[#6940c9] text-white px-4 py-2.5 rounded-2xl sm:rounded-full shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-white/20 flex flex-row items-center gap-3 sm:gap-4 max-w-[calc(100vw-32px)] sm:max-w-none w-fit sm:w-max text-left sm:text-center animate-bounce-subtle"
           >
+            {/* Arrow inside the bouncing container so they move together cohesively */}
+            <div
+              className={`absolute ${isMobileBottom ? '-bottom-1.5 border-b border-r' : '-top-1.5 border-t border-l'} left-1/2 -ml-1.5 w-3 h-3 rotate-45 border-white/20`}
+              style={{ backgroundColor: '#6940c9' }}
+            />
+
             <span className="text-[11px] sm:text-[12.5px] font-semibold leading-normal opacity-95">
-              Now change anything, move, scale, rotate, blur or edit, it will animate.
+              {showStarterHint ? starterHintText : "Now change anything, move, scale, rotate, blur or edit, it will animate."}
             </span>
 
             <button
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                setShowAddStepHint(false)
-                setHasShownAddStepHint(true)
-                try {
-                  localStorage.setItem('vevara_hint_add_step_shown', 'true')
-                } catch (e) {
-                  // Ignore localStorage errors
+                if (showStarterHint) {
+                  onHideStarterHint?.()
+                } else {
+                  setShowAddStepHint(false)
+                  setHasShownAddStepHint(true)
+                  try {
+                    localStorage.setItem('vevara_hint_add_step_shown', 'true')
+                  } catch (e) {
+                    // Ignore localStorage errors
+                  }
                 }
               }}
               className="text-[11px] font-bold opacity-80 hover:opacity-100 transition-opacity underline decoration-white/40 underline-offset-4 text-purple-200 whitespace-nowrap self-center"
