@@ -212,7 +212,7 @@ function PositionPanel({
     if (layer.type === LAYER_TYPES.IMAGE) {
       const src = layer.data?.url || layer.data?.src
       return src
-        ? <img src={src} alt="" className="w-full h-full object-cover rounded-md" />
+        ? <img src={src} alt="" className="w-full h-full object-contain rounded-md" />
         : <div className={`w-full h-full rounded-md ${isLight ? 'bg-slate-200' : 'bg-gradient-to-br from-white/20 to-white/5'}`} />
     }
 
@@ -274,6 +274,69 @@ function PositionPanel({
         )
       }
       return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
+    }
+
+    // ── FRAME ─────────────────────────────────────────────────────────────────
+    if (layer.type === LAYER_TYPES.FRAME) {
+      const hasFrontAsset = !!layer.data?.assetUrl
+      const isCard = !!layer.data?.isCardFrame
+      const hasBackAsset = isCard && !!layer.data?.backAssetUrl
+      const hasAnyAsset = hasFrontAsset || hasBackAsset
+
+      if (!hasAnyAsset) {
+        return (
+          <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold tracking-wider uppercase ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/5 border border-white/10 text-white/40'}`}>
+            Frame
+          </div>
+        )
+      }
+
+      // Helper to render a single frame asset (front or back) inside a half-width or full-width container
+      const renderSingleFrameAsset = (url, isVideo, sideLabel) => {
+        if (!url) {
+          return (
+            <div className={`w-full h-full flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-50 text-slate-350' : 'bg-black/10 text-white/20'}`}>
+              {sideLabel}
+            </div>
+          )
+        }
+
+        if (isVideo) {
+          const thumb = layer.data?.thumbnail
+          return (
+            <div className="w-full h-full relative overflow-hidden bg-black/10">
+              <img src={thumb || url} alt="" className="w-full h-full object-contain" />
+              <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+                <Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
+              </div>
+            </div>
+          )
+        }
+
+        return (
+          <img src={url} alt="" className="w-full h-full object-contain" />
+        )
+      }
+
+      if (isCard) {
+        return (
+          <div className={`w-full h-full rounded-md flex overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+            <div className={`w-1/2 h-full border-r ${isLight ? 'border-slate-150' : 'border-white/10'}`}>
+              {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, 'Front')}
+            </div>
+            <div className="w-1/2 h-full">
+              {renderSingleFrameAsset(layer.data.backAssetUrl, layer.data.backAssetIsVideo, 'Back')}
+            </div>
+          </div>
+        )
+      }
+
+      // Standard frame (non-card) with asset
+      return (
+        <div className={`w-full h-full rounded-md overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+          {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, '')}
+        </div>
+      )
     }
 
     // ── BACKGROUND ────────────────────────────────────────────────────────────

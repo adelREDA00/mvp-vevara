@@ -104,6 +104,16 @@ function getAvailableActions(layer, existingActions) {
   return allowed.filter(t => !usedTypes.includes(t))
 }
 
+// Shrink font size so text always fits within the fixed-size preview card
+function getTextFontSize(text) {
+  const len = (text || '').length
+  if (len <= 5) return '13px'
+  if (len <= 12) return '11px'
+  if (len <= 22) return '9px'
+  if (len <= 40) return '7.5px'
+  return '6px'
+}
+
 function MotionPanel({
   isOpen = false,
   onClose,
@@ -225,13 +235,15 @@ function MotionPanel({
   const renderLayerPreview = (layer) => {
     if (!layer) return null
 
+    // ── IMAGE ────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.IMAGE) {
       const src = layer.data?.url || layer.data?.src
       return src
-        ? <img src={src} alt="" className="w-full h-full object-cover rounded-md" />
+        ? <img src={src} alt="" className="w-full h-full object-contain rounded-md" />
         : <div className={`w-full h-full rounded-md ${isLight ? 'bg-slate-200' : 'bg-gradient-to-br from-white/20 to-white/5'}`} />
     }
 
+    // ── VIDEO ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.VIDEO) {
       const thumb = layer.data?.thumbnail
       return (
@@ -241,27 +253,30 @@ function MotionPanel({
             : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />
           }
           <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
-            <Film className={`h-3 w-3 ${isLight ? 'text-gray-600' : 'text-white/70'}`} />
+            <Film className={`h-4 w-4 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
           </div>
         </div>
       )
     }
 
+    // ── TEXT ──────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.TEXT) {
       const text = layer.data?.content || ''
       const color = layer.data?.color || (isLight ? '#111827' : '#ffffff')
+      const fs = getTextFontSize(text)
       return (
-        <div className={`w-full h-full rounded-md flex items-center justify-center px-1 overflow-hidden ${isLight ? 'bg-white border border-gray-100 shadow-sm' : 'bg-white/5 border border-white/10'}`}>
+        <div className={`w-full h-full rounded-md flex items-center justify-center px-2 overflow-hidden ${isLight ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}>
           <span
-            style={{ fontSize: '10px', color, lineHeight: 1.1, wordBreak: 'break-all' }}
-            className="text-center font-bold"
+            style={{ fontSize: fs, color, lineHeight: 1.2, wordBreak: 'break-all' }}
+            className="text-center font-semibold"
           >
-            {text.substring(0, 10) || 'Aa'}
+            {text || <span className={`${isLight ? 'text-slate-300' : 'text-white/30'} italic`}>empty</span>}
           </span>
         </div>
       )
     }
 
+    // ── SHAPE ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.SHAPE) {
       const fill = layer.data?.fill
       const shapeType = layer.data?.shapeType || 'rect'
@@ -270,30 +285,97 @@ function MotionPanel({
       if (shapeType === 'circle') {
         return (
           <div className="w-full h-full flex items-center justify-center">
-            <div className={`w-4 h-4 rounded-full border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
+            <div className={`w-8 h-8 rounded-full border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
           </div>
         )
       }
-      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
+      if (shapeType === 'triangle') {
+        return (
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="w-0 h-0" style={{
+              borderLeft: '14px solid transparent',
+              borderRight: '14px solid transparent',
+              borderBottom: `24px solid ${fillColor}`,
+            }} />
+          </div>
+        )
+      }
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
     }
 
+    // ── FRAME ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.FRAME) {
+      const hasFrontAsset = !!layer.data?.assetUrl
+      const isCard = !!layer.data?.isCardFrame
+      const hasBackAsset = isCard && !!layer.data?.backAssetUrl
+      const hasAnyAsset = hasFrontAsset || hasBackAsset
+
+      if (!hasAnyAsset) {
+        return (
+          <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold tracking-wider uppercase ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/5 border border-white/10 text-white/40'}`}>
+            Frame
+          </div>
+        )
+      }
+
+      // Helper to render a single frame asset (front or back) inside a half-width or full-width container
+      const renderSingleFrameAsset = (url, isVideo, sideLabel) => {
+        if (!url) {
+          return (
+            <div className={`w-full h-full flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-50 text-slate-350' : 'bg-black/10 text-white/20'}`}>
+              {sideLabel}
+            </div>
+          )
+        }
+
+        if (isVideo) {
+          const thumb = layer.data?.thumbnail
+          return (
+            <div className="w-full h-full relative overflow-hidden bg-black/10">
+              <img src={thumb || url} alt="" className="w-full h-full object-contain" />
+              <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+                <Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
+              </div>
+            </div>
+          )
+        }
+
+        return (
+          <img src={url} alt="" className="w-full h-full object-contain" />
+        )
+      }
+
+      if (isCard) {
+        return (
+          <div className={`w-full h-full rounded-md flex overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+            <div className={`w-1/2 h-full border-r ${isLight ? 'border-slate-150' : 'border-white/10'}`}>
+              {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, 'Front')}
+            </div>
+            <div className="w-1/2 h-full">
+              {renderSingleFrameAsset(layer.data.backAssetUrl, layer.data.backAssetIsVideo, 'Back')}
+            </div>
+          </div>
+        )
+      }
+
+      // Standard frame (non-card) with asset
       return (
-        <div className={`w-full h-full rounded-md flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-100 border border-gray-200 text-slate-500' : 'bg-white/10 border border-white/10 text-white/50'}`}>
-          {layer.data?.isCardFrame ? 'C' : 'F'}
+        <div className={`w-full h-full rounded-md overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+          {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, '')}
         </div>
       )
     }
 
+    // ── BACKGROUND ────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.BACKGROUND) {
       const color = typeof layer.data?.color === 'number'
         ? '#' + layer.data.color.toString(16).padStart(6, '0')
         : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
-      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-gray-200' : 'border-white/10'}`} style={{ backgroundColor: color }} />
+      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: color }} />
     }
 
     return (
-      <div className="w-full h-full rounded-md bg-white/10 border border-white/10 flex items-center justify-center text-[8px] text-white/50">
+      <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/10 border border-white/10 text-white/50'}`}>
         {(layer.type || 'L').charAt(0).toUpperCase()}
       </div>
     )
@@ -380,30 +462,31 @@ function MotionPanel({
       <div
         key={layerId}
         data-layer-id={layerId}
-        className={`rounded-xl p-2.5 border transition-all ${isSelected
+        className={`rounded-xl p-2 border transition-all ${isSelected
             ? (isLight ? 'border-purple-200 bg-purple-50/50 shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03]')
             : (isLight ? 'border-slate-100 bg-white shadow-sm hover:border-slate-200' : 'border-zinc-800/10 bg-zinc-800/20 hover:border-zinc-800/30')
           }`}
       >
         {/* Layer Header */}
         <div
-          className={`flex items-center gap-2.5 min-w-0 ${!readOnly ? 'cursor-pointer' : ''}`}
+          className={`flex items-center gap-2 px-1 min-w-0 ${!readOnly ? 'cursor-pointer' : ''}`}
           onClick={!readOnly ? () => {
             dispatch(setSelectedLayer(layerId))
             toggleLayerCollapse(layerId, isLayerExpanded)
           } : undefined}
+          style={{ height: '40px' }}
         >
           {!readOnly && (
-            <ChevronDown className={`h-3 w-3 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isLayerExpanded ? '' : '-rotate-90'}`} />
+            <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isLayerExpanded ? '' : '-rotate-90'}`} />
           )}
-          <div className={`w-7 h-7 flex-shrink-0 rounded-lg overflow-hidden border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-black/20 border-white/5'}`}>
+          
+          {/* Full-width Preview */}
+          <div className="flex-1 h-10 overflow-hidden" style={{ pointerEvents: 'none' }}>
             {renderLayerPreview(layer)}
           </div>
-          <span className={`text-[10px] font-semibold truncate leading-tight flex-1 ${isLight ? 'text-slate-900' : 'text-white'}`}>
-            {getLayerDisplayName(layer)}
-          </span>
+
           {!isLayerExpanded && hasAnimations && (
-            <span className={`text-[9px] flex-shrink-0 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+            <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-300 bg-purple-500/15'}`}>
               {layerActions.length} action{layerActions.length > 1 ? 's' : ''}
             </span>
           )}
@@ -651,7 +734,7 @@ function MotionPanel({
             ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in'
             : 'inset-y-0 right-0 border-l'}`}
         style={{
-          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : `${topToolbarHeight}px`,
+          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
           height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '42vh' : 'auto',
           minHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '280px' : 'auto',
           maxHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '45vh' : 'auto',

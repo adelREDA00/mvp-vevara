@@ -1231,6 +1231,9 @@ function EditorPage() {
   const handleStartMotionCapture = useCallback(() => {
     if (!currentSceneId) return
 
+    // Close any open sidebar panels when entering motion capture mode
+    handleClosePanel()
+
     // [BUG 1 FIX] Clear any layer selection BEFORE starting the tween.
     // Without this, the auto-pause effect in Stage.jsx sees selectedLayerIds.length > 0
     // and isPlaying=true (from tweenTo) but motionCaptureMode.isActive is still false
@@ -1238,8 +1241,8 @@ function EditorPage() {
     dispatch(clearLayerSelection())
     setShowStarterHint(false)
 
-    // [NEW] Auto-open motion panel on desktop when adding a step
-    if (typeof window !== 'undefined' && window.innerWidth >= 1024 && isAuthenticated) {
+    // [NEW] Auto-open motion panel on desktop and mobile when adding a step
+    if (isAuthenticated) {
       setIsMotionPanelOpen(true)
     }
 
@@ -2630,6 +2633,11 @@ function EditorPage() {
     }
 
     if (!currentSceneId) return
+
+    // Close any open sidebar panels when entering motion capture mode
+    if (stepId !== 'base') {
+      handleClosePanel()
+    }
 
     // INSTANT FEEDBACK: Glow the block immediately regardless of state
     setEditingStepId(stepId)
@@ -4089,9 +4097,9 @@ function EditorPage() {
           <div className="relative">
             {/* Desktop Panels */}
             {activeSidebarItem && (
-              <div className="hidden lg:block absolute left-20 z-40 shadow-2xl transition-all duration-300" style={{
-                top: `${topToolbarHeight}px`,
-                height: `calc(100vh - ${topToolbarHeight}px)`,
+              <div className={`hidden lg:block absolute z-40 shadow-2xl transition-all duration-300 ${isMotionCaptureActive ? 'left-0' : 'left-20'}`} style={{
+                top: isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`,
+                height: isMotionCaptureActive ? '100vh' : `calc(100vh - ${topToolbarHeight}px)`,
                 borderRight: `1px solid ${theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`
               }}>
                 {activeSidebarItem === 'Design' && (
