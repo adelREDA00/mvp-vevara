@@ -72,6 +72,12 @@ function EditorPage() {
   const isStarterCopy = projectName === "ads starter (Copy)" || projectName === "sass starter (Copy)"
   const isAutoPlaying = (autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy;
   const projectId = useSelector(selectProjectId)
+
+  // Get motion flow for current scene
+  const currentSceneMotionFlow = useSelector((state) =>
+    currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : null
+  )
+
   const projectStatus = useSelector(state => state.project.status)
   const isDirty = useSelector(selectIsDirty)
   const projectVersion = useSelector(selectProjectVersion)
@@ -795,8 +801,22 @@ function EditorPage() {
   useEffect(() => {
     if (projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
       if (isStarterCopy) {
-        const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${projectId}`) === 'true';
-        if (!isAutoplayDone && !hasTriggeredInitialAutoPlay.current) {
+        const targetProjId = urlProjectId || projectId;
+        if (!targetProjId) return;
+
+        const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
+        const stepsCount = currentSceneMotionFlow?.steps?.length || 0;
+        const totalScenesCount = scenes?.length || 1;
+        
+        // If they have already done autoplay, have created motion steps, or have multiple scenes, do not trigger autoplay
+        if (isAutoplayDone || stepsCount >= 2 || totalScenesCount > 1) {
+          if (!isAutoplayDone) {
+            localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
+          }
+          return;
+        }
+
+        if (!hasTriggeredInitialAutoPlay.current) {
           hasTriggeredInitialAutoPlay.current = true;
           dispatch(setAutoPlayState('initial'));
           dispatch(setInteractionLock(true));
@@ -812,12 +832,15 @@ function EditorPage() {
         }
       }
     }
-  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, motionControls, seek, setIsPlaying, dispatch]);
+  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, setIsPlaying, dispatch, currentSceneMotionFlow?.steps?.length, scenes?.length]);
 
   // Auto-pause at 2.0s and trigger starter tooltip
   useEffect(() => {
     if (isStarterCopy && isPlaying && motionControls) {
-      const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${projectId}`) === 'true';
+      const targetProjId = urlProjectId || projectId;
+      if (!targetProjId) return;
+
+      const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
       if (!isAutoplayDone && playheadTime >= 2.0) {
         // Pause playback
         motionControls.pauseAll();
@@ -825,7 +848,7 @@ function EditorPage() {
         // Seek exactly to 2s
         seek(2.0);
         // Set autoplay as done for this project ID so it won't trigger again
-        localStorage.setItem(`vevara_starter_autoplay_done_${projectId}`, 'true');
+        localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
         // Clear autoplay state and interaction lock
         dispatch(setAutoPlayState('none'));
         dispatch(setInteractionLock(false));
@@ -834,7 +857,7 @@ function EditorPage() {
         setStarterHintText("click animate to Add Step 2");
       }
     }
-  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, seek, setIsPlaying, dispatch]);
+  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, urlProjectId, seek, setIsPlaying, dispatch]);
 
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);
@@ -1048,10 +1071,6 @@ function EditorPage() {
   const captureActionIdsRef = useRef(new Map()) // Tracks dispatched action IDs during capture: "layerId:type" -> actionId
   const [captureVersion, setCaptureVersion] = useState(0) // Internal state to force re-renders on Ref updates
 
-  // Get motion flow for current scene
-  const currentSceneMotionFlow = useSelector((state) =>
-    currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : null
-  )
 
   // Get timeline info for seeking
 
@@ -1240,6 +1259,9 @@ function EditorPage() {
     // (set in onComplete), so it calls pausePlayback() killing the tween.
     dispatch(clearLayerSelection())
     setShowStarterHint(false)
+    if (isStarterCopy) {
+      localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
+    }
 
     // [NEW] Auto-open motion panel on desktop and mobile when adding a step
     if (isAuthenticated) {
@@ -4610,7 +4632,12 @@ function EditorPage() {
                 onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
                 showStarterHint={showStarterHint}
                 starterHintText={starterHintText}
-                onHideStarterHint={() => setShowStarterHint(false)}
+                onHideStarterHint={() => {
+                  setShowStarterHint(false)
+                  if (isStarterCopy) {
+                    localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
+                  }
+                }}
               />
             </div>
 
@@ -4987,7 +5014,12 @@ function EditorPage() {
                   onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
                   showStarterHint={showStarterHint}
                   starterHintText={starterHintText}
-                  onHideStarterHint={() => setShowStarterHint(false)}
+                  onHideStarterHint={() => {
+                    setShowStarterHint(false)
+                    if (isStarterCopy) {
+                      localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
+                    }
+                  }}
                 />
               </div>
             </div>
