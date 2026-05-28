@@ -50,9 +50,6 @@ export function releaseOrphanedWebGLContexts() {
         // Canvas may already be in a bad state — ignore
       }
     })
-    if (released > 0) {
-      console.log(`[GPU] Released ${released} orphaned WebGL context(s)`)
-    }
   } catch (_) {
     // DOM access can fail in edge cases (e.g. during page teardown)
   }
@@ -110,6 +107,7 @@ export async function createApp(config = {}) {
   // Set global text resolution
   PIXI.TextStyle.defaultTextStyle.resolution = defaultResolution
 
+
   // ─── Phase 1: Verify WebGL availability ─────────────────────────────────
   // We probe WebGL ourselves (fresh canvas, no cache) to avoid PixiJS's
   // permanently-cached `isWebGLSupported()` returning a stale `false`.
@@ -136,7 +134,7 @@ export async function createApp(config = {}) {
     }
   }
 
-  console.log(`[PIXI] WebGL probe passed: ${probeResult}`)
+
 
   // ─── Phase 2: Create renderer directly (bypass autoDetectRenderer) ──────
   // This is the key stability fix.  `Application.init()` calls
@@ -176,14 +174,13 @@ export async function createApp(config = {}) {
       plugin.init.call(app, rendererOptions)
     })
 
-    console.log(`[PIXI] Primary init successful: ${renderer.name} (${width}x${height} @ ${defaultResolution}x)`)
   } catch (primaryError) {
     console.warn('[PIXI] Primary init failed, trying low-power fallback:', primaryError)
 
     // Clean up the failed renderer
     try {
       if (renderer && !renderer.destroyed) renderer.destroy(true)
-    } catch (_) {}
+    } catch (_) { }
 
     // Fallback: low-power, no antialias, resolution 1
     const fallbackOptions = {
@@ -212,7 +209,7 @@ export async function createApp(config = {}) {
       console.error('[PIXI] Fallback init also failed:', fallbackError)
       try {
         if (renderer && !renderer.destroyed) renderer.destroy(true)
-      } catch (_) {}
+      } catch (_) { }
       throw new Error(
         `Graphics engine failed to start: ${fallbackError.message}. ` +
         `Try closing other GPU-heavy tabs or restarting your browser.`
@@ -336,7 +333,7 @@ export function drawArtboardBackground(surface, shadow, width, height) {
   // Subtle offset to the bottom-right for a natural look
   shadow.rect(2, 2, width, height)
   shadow.fill({ color: 0x000000, alpha: 0.12 })
-  
+
   if (!shadow.filters || shadow.filters.length === 0) {
     const blur = new PIXI.BlurFilter()
     blur.strength = 8

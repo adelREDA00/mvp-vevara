@@ -103,11 +103,10 @@ function FramesPanel({ onClose, aspectRatio }) {
     return (
       <button
         onClick={item.onClick}
-        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${
-          isLight 
-            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10' 
+        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${isLight
+            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10'
             : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
-        }`}
+          }`}
         title={preset.name}
       >
         <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
@@ -132,18 +131,17 @@ function FramesPanel({ onClose, aspectRatio }) {
     return (
       <button
         onClick={item.onClick}
-        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${
-          isLight 
-            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10' 
+        className={`w-full aspect-square flex flex-col items-center justify-center rounded-[12px] transition-all duration-300 group relative gap-1.5 border shadow-sm ${isLight
+            ? 'bg-white border-transparent hover:border-purple-300 hover:bg-purple-50/10'
             : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/10'
-        }`}
+          }`}
         title={preset.name}
       >
         <svg viewBox="0 0 56 56" className="w-[44px] h-[44px] flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
           <rect x={rx + 2} y={ry + 2} width={w} height={h} rx="3" fill="none" stroke={isLight ? '#94a3b8' : '#71717a'} strokeWidth="1" strokeDasharray="4 2" />
           <rect x={rx - 1} y={ry - 1} width={w} height={h} rx="3" fill="none" stroke={isLight ? '#64748b' : '#a1a1aa'} strokeWidth="1.5" strokeDasharray="4 2" />
           {/* Two-rotation arrow icon in center */}
-          <path d="M34 22v6h-6M22 28a6 6 0 0 1 10-4.5L34 26M22 34v-6h6M34 28a6 6 0 0 1-10 4.5L22 30" 
+          <path d="M34 22v6h-6M22 28a6 6 0 0 1 10-4.5L34 26M22 34v-6h6M34 28a6 6 0 0 1-10 4.5L22 30"
             stroke={isLight ? '#64748b' : '#a1a1aa'} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span className={`text-[10px] font-medium tracking-wide ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{preset.label}</span>

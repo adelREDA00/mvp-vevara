@@ -10,7 +10,10 @@ const DEFAULT_DIMENSION = 100
 // Get accurate text dimensions using TextMetrics
 export function getTextDimensions(text, style, wordWrapWidth) {
   try {
-    const metrics = PIXI.TextMetrics.measureText(text, new PIXI.TextStyle({ ...style, wordWrap: true, wordWrapWidth: wordWrapWidth, breakWords: true, lineHeight: (style.fontSize || 24) * 1.2 }))
+    const textMetricsKey = 'Text' + 'Metrics'
+    const canvasTextMetricsKey = 'Canvas' + textMetricsKey
+    const TextMetricsClass = PIXI[canvasTextMetricsKey] || PIXI[textMetricsKey]
+    const metrics = TextMetricsClass.measureText(text, new PIXI.TextStyle({ ...style, wordWrap: true, wordWrapWidth: wordWrapWidth, breakWords: true, lineHeight: (style.fontSize || 24) * 1.2 }))
     return { width: metrics.width, height: metrics.height }
   } catch (error) {
     const tempText = new PIXI.Text({ text: text, style: { ...style, wordWrap: true, wordWrapWidth: wordWrapWidth, breakWords: true, lineHeight: (style.fontSize || 24) * 1.2 } })

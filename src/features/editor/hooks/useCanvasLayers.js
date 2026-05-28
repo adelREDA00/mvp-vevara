@@ -13,12 +13,12 @@ import { updateLayerZOrder } from '../utils/layerUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { BLUR_MAX, BLUR_QUALITY } from '../../engine/motion/blurConstants.js'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
-import { 
-  applyTiltToObject, 
-  removeTiltFromObject, 
-  syncTiltMesh, 
+import {
+  applyTiltToObject,
+  removeTiltFromObject,
+  syncTiltMesh,
   markTiltTextureDirty,
-  TILT_HIDE_SENTINEL 
+  TILT_HIDE_SENTINEL
 } from '../../engine/pixi/perspectiveTilt'
 
 // [MOBILE FIX] Detect mobile for sequential asset loading
@@ -635,7 +635,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
       if (capturedLayer && capturedLayer.showingFront !== undefined) {
         targetShowingFront = capturedLayer.showingFront
       }
-      
+
       if (!displayObject._isFlipping && displayObject.showingFront !== targetShowingFront) {
         displayObject.showingFront = targetShowingFront
       }
@@ -968,7 +968,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             // so it doesn't continue syncing stale range/muted state for the same object.
             try {
               engine.unregisterLayerObject(oldId)
-            } catch (e) {}
+            } catch (e) { }
 
             layerObjects.delete(oldId)
             createdLayers.delete(oldId)
@@ -1451,7 +1451,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           if (style.fontStyle !== (layer.data.fontStyle || 'normal')) style.fontStyle = layer.data.fontStyle || 'normal'
           if (style.letterSpacing !== 0) style.letterSpacing = 0
           if (prevFill !== style.fill || prevFontFamily !== style.fontFamily ||
-              prevFontWeight !== style.fontWeight || prevFontStyle !== style.fontStyle) {
+            prevFontWeight !== style.fontWeight || prevFontStyle !== style.fontStyle) {
             markTiltTextureDirty(pixiObject)
           }
 
@@ -1647,10 +1647,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             // Only allow Redux to overwrite the radius if we are at the start, 
             // capturing, Redux value changed, or no motion exists.
             const allowRadiusUpdate = isAtSceneStart || isLayerCaptured || reduxRadiusChanged
-            
+
             let effectiveCornerRadius = currentCornerRadius
             if (!allowRadiusUpdate && pixiObject.cornerRadius !== undefined) {
-               effectiveCornerRadius = pixiObject.cornerRadius
+              effectiveCornerRadius = pixiObject.cornerRadius
             }
 
             // [PREVIEW-PRESERVE] See the matching block in TEXT updates: after
@@ -1695,10 +1695,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
                 effectiveFill = '#' + pixiObject._animatedFillColor.toString(16).padStart(6, '0')
               }
 
-              const liveShapeData = { 
-                ...layer.data, 
+              const liveShapeData = {
+                ...layer.data,
                 fill: effectiveFill,
-                cornerRadius: effectiveCornerRadius 
+                cornerRadius: effectiveCornerRadius
               }
 
               redrawShapeWithColors(pixiObject, liveShapeData, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
@@ -1898,10 +1898,10 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               // Skip redraw when frame is highlighted as a drop target (_isDropTarget)
               if (pixiObject._framePlaceholder) {
                 const isShowingFront = pixiObject._showingFront !== undefined ? pixiObject._showingFront : true
-                const activeHasAsset = isShowingFront 
+                const activeHasAsset = isShowingFront
                   ? !!(layer.data?.assetUrl || layer.data?.url || layer.data?.src)
                   : !!(layer.data?.backAssetUrl)
-                
+
                 // [UX FIX] Keep placeholder visible if it is currently a drop target highlight
                 // OR if the active side is empty.
                 pixiObject._framePlaceholder.visible = !!pixiObject._isDropTarget || !activeHasAsset
@@ -1978,7 +1978,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         // [ENGINE CLEANUP] Properly unregister from MotionEngine to stop playback/sync
         try {
           engine.unregisterLayerObject(layerId)
-        } catch (e) {}
+        } catch (e) { }
 
         layerObjects.delete(layerId)
         createdLayers.delete(layerId)

@@ -653,7 +653,7 @@ function EditorPage() {
     if (!isDraggingRef.current || dragStartYRef.current === null || !mobileSheetRef.current) return
     const touchY = e.touches[0].clientY
     const deltaY = touchY - dragStartYRef.current
-    
+
     // Only allow dragging downwards (deltaY > 0)
     if (deltaY > 0) {
       mobileSheetRef.current.style.transform = `translateY(${deltaY}px)`
@@ -663,13 +663,13 @@ function EditorPage() {
   const handleSheetTouchEnd = useCallback((e) => {
     if (!isDraggingRef.current || dragStartYRef.current === null || !mobileSheetRef.current) return
     isDraggingRef.current = false
-    
+
     const touchY = e.changedTouches[0].clientY
     const deltaY = touchY - dragStartYRef.current
     dragStartYRef.current = null
-    
+
     const backdrop = document.querySelector('.mobile-sheet-backdrop')
-    
+
     if (deltaY > 120) {
       // Dismiss sheet
       mobileSheetRef.current.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
@@ -678,7 +678,7 @@ function EditorPage() {
         backdrop.style.transition = 'opacity 0.2s ease'
         backdrop.style.opacity = '0'
       }
-      
+
       setTimeout(() => {
         setActiveSidebarItem(null)
         if (mobileSheetRef.current) {
@@ -695,7 +695,7 @@ function EditorPage() {
       // Snap back
       mobileSheetRef.current.style.transition = 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.15)'
       mobileSheetRef.current.style.transform = 'translateY(0)'
-      
+
       setTimeout(() => {
         if (mobileSheetRef.current) {
           mobileSheetRef.current.style.transition = ''
@@ -807,7 +807,7 @@ function EditorPage() {
         const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
         const stepsCount = currentSceneMotionFlow?.steps?.length || 0;
         const totalScenesCount = scenes?.length || 1;
-        
+
         // If they have already done autoplay, have created motion steps, or have multiple scenes, do not trigger autoplay
         if (isAutoplayDone || stepsCount >= 2 || totalScenesCount > 1) {
           if (!isAutoplayDone) {
@@ -822,7 +822,7 @@ function EditorPage() {
           dispatch(setInteractionLock(true));
           // Seek exactly to 0
           seek(0);
-          
+
           // Delay autoplay by 500ms so user has time to digest the initial frame
           const timer = setTimeout(() => {
             motionControls.playAll();
@@ -4317,7 +4317,7 @@ function EditorPage() {
                     <div className="w-8 h-8 flex-shrink-0" />
 
                     {/* Centered Drag Handle (takes full height/width of center region for easy swiping) */}
-                    <div 
+                    <div
                       className="absolute inset-y-0 inset-x-12 flex justify-center items-center cursor-row-resize touch-none"
                       style={{ touchAction: 'none' }}
                       onTouchStart={handleSheetTouchStart}
@@ -4467,7 +4467,7 @@ function EditorPage() {
                   {/* Horizontal minimal nav at bottom of sheet - scrollable on mobile */}
                   <div
                     className={`flex-shrink-0 flex items-center justify-start gap-3 px-4 py-2.5 border-t overflow-x-auto scrollbar-none ${isLight ? 'border-black/5 bg-black/5' : 'border-white/5 bg-black/20'}`}
-                    style={{ 
+                    style={{
                       paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
                       WebkitOverflowScrolling: 'touch'
                     }}
@@ -4758,87 +4758,87 @@ function EditorPage() {
             {/* Removed floating mobile menu button */}
           </div>
 
-            {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-            {!isMotionCaptureActive && (
-              <div 
-                className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} 
-                style={{
-                  left: currentSidebarWidth,
-                  bottom: `${bottomSectionHeight || 140}px`,
-                  backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-                  borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
-                }}
-              >
-                <div className="w-full px-4">
-                  <PlaybackControls
-                    isPlaying={isPlaying}
-                    isBuffering={motionControls?.isBuffering || false}
-                    currentTime={playheadTime}
-                    totalTime={totalTime}
-                    shiftLeft={currentSidebarWidth !== '0px'}
-                    onPlayPause={() => {
-                      if (motionControls) {
-                        if (isPlaying) {
-                          motionControls.pauseAll()
-                          setIsPlaying(false)
-                        } else {
-                          motionControls.playAll()
-                          setIsPlaying(true)
-                        }
-                      }
-                    }}
-                    onSplit={handleSplitScene}
-                    playheadStepId={playheadStepId}
-                    onUpdateStep={handleEditStep}
-                    onDeleteStep={(stepId) => {
-                      if (currentSceneId && stepId) {
-                        dispatch(deleteSceneMotionStep({
-                          sceneId: currentSceneId,
-                          stepId: stepId
-                        }))
-                      }
-                    }}
-                    isMotionCaptureActive={isMotionCaptureActive}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Bottom Sections - Overlay at bottom with glass effect */}
+          {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
+          {!isMotionCaptureActive && (
             <div
-              ref={bottomSectionRef}
-              className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+              className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
               style={{
                 left: currentSidebarWidth,
+                bottom: `${bottomSectionHeight || 140}px`,
                 backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                borderTop: 'none',
-                paddingBottom: 'env(safe-area-inset-bottom, 8px)',
-                height: 'auto',
-                maxHeight: '40vh',
-                transition: isResizingBottom ? 'none' : 'height 0.3s ease'
+                borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
               }}
             >
-              {/* Top border line */}
-              <div 
-                className="absolute top-0 left-0 right-0 h-[1px]" 
-                style={{ 
-                  top: '-1px',
-                  backgroundColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'
-                }} 
-              />
+              <div className="w-full px-4">
+                <PlaybackControls
+                  isPlaying={isPlaying}
+                  isBuffering={motionControls?.isBuffering || false}
+                  currentTime={playheadTime}
+                  totalTime={totalTime}
+                  shiftLeft={currentSidebarWidth !== '0px'}
+                  onPlayPause={() => {
+                    if (motionControls) {
+                      if (isPlaying) {
+                        motionControls.pauseAll()
+                        setIsPlaying(false)
+                      } else {
+                        motionControls.playAll()
+                        setIsPlaying(true)
+                      }
+                    }
+                  }}
+                  onSplit={handleSplitScene}
+                  playheadStepId={playheadStepId}
+                  onUpdateStep={handleEditStep}
+                  onDeleteStep={(stepId) => {
+                    if (currentSceneId && stepId) {
+                      dispatch(deleteSceneMotionStep({
+                        sceneId: currentSceneId,
+                        stepId: stepId
+                      }))
+                    }
+                  }}
+                  isMotionCaptureActive={isMotionCaptureActive}
+                />
+              </div>
+            </div>
+          )}
 
-              {/* Content Container - Scrollable if content overflows */}
-              <div className="flex flex-col flex-1" style={{
-                minHeight: 0, // Allow flex item to shrink
-                position: 'relative',
-                paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
+          {/* Bottom Sections - Overlay at bottom with glass effect */}
+          <div
+            ref={bottomSectionRef}
+            className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+            style={{
+              left: currentSidebarWidth,
+              backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              borderTop: 'none',
+              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+              height: 'auto',
+              maxHeight: '40vh',
+              transition: isResizingBottom ? 'none' : 'height 0.3s ease'
+            }}
+          >
+            {/* Top border line */}
+            <div
+              className="absolute top-0 left-0 right-0 h-[1px]"
+              style={{
+                top: '-1px',
+                backgroundColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'
+              }}
+            />
+
+            {/* Content Container - Scrollable if content overflows */}
+            <div className="flex flex-col flex-1" style={{
+              minHeight: 0, // Allow flex item to shrink
+              position: 'relative',
+              paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
+            }}>
+              {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
+              <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
+                minHeight: 0
               }}>
-                {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
-                <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
-                  minHeight: 0
-                }}>
 
                 {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
                 <div
@@ -5062,13 +5062,7 @@ function EditorPage() {
             {/* Animated Background Pulse */}
             <div className="absolute -inset-6 bg-purple-600/5 animate-pulse pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col items-center w-full">
-              {exportState.status !== 'error' && exportState.status !== 'completed' && (
-                <div className="mb-6 relative">
-                  <div className="absolute inset-0 bg-purple-500/20 blur-2xl rounded-full" />
-                  <Loader2 className="h-10 w-10 text-purple-400 animate-spin relative z-10" />
-                </div>
-              )}
+            <div className="relative z-10 flex flex-col items-center w-full pt-2">
 
               {exportState.status === 'completed' && (
                 <div className="h-10 w-10 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
@@ -5086,9 +5080,9 @@ function EditorPage() {
                 </div>
               )}
 
-              <h3 className={`text-lg font-bold mb-2 tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>
+              <h3 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'} ${exportState.status === 'completed' || exportState.status === 'error' ? 'mb-2' : 'mb-5'}`}>
                 {exportState.status === 'initializing' && 'Preparing Export...'}
-                {exportState.status === 'rendering' && 'Rendering Frames...'}
+                {exportState.status === 'rendering' && 'Rendering & Processing...'}
                 {exportState.status === 'encoding' && 'Finalizing Video...'}
                 {exportState.status === 'encoding_palette' && 'Analyzing Colors...'}
                 {exportState.status === 'encoding_gif' && 'Encoding GIF...'}
@@ -5096,25 +5090,27 @@ function EditorPage() {
                 {exportState.status === 'error' && 'Export Failed'}
               </h3>
 
-              <div className={`text-[13px] mb-8 text-center max-w-[320px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
-                <p>
-                  {exportState.status === 'rendering' && 'Capturing high-resolution frames for each animation step.'}
-                  {exportState.status === 'encoding' && 'Processing with FFmpeg to generate your video file.'}
-                  {exportState.status === 'encoding_palette' && 'Building the optimal color palette for your GIF.'}
-                  {exportState.status === 'encoding_gif' && 'Applying palette and writing the final GIF.'}
+              {(exportState.status === 'completed' || exportState.status === 'error') && (
+                <p className={`text-[13.5px] leading-relaxed text-center max-w-[320px] mb-8 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>
                   {exportState.status === 'completed' && 'Your download has started automatically.'}
                   {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
                 </p>
-                {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
-                  <div className={`mt-4 px-4 py-2 border rounded-lg ${isLight ? 'bg-yellow-500/5 border-yellow-500/10' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
-                    <p className="text-yellow-600 font-semibold text-[11px] uppercase tracking-wider mb-1">Important</p>
-                    <p className={`text-[12px] ${isLight ? 'text-gray-600' : 'text-white/60'}`}>
-                      4K and 2K exports with video elements take a long time.
-                      <span className={`block font-bold mt-1 ${isLight ? 'text-gray-900' : 'text-white/80'}`}>Please do not close this page.</span>
-                    </p>
+              )}
+
+              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
+                <div className={`w-full max-w-[340px] mb-6 p-4 rounded-xl border text-left transition-all ${isLight ? 'bg-slate-50/80 border-slate-200/60 shadow-sm' : 'bg-white/[0.02] border-white/5'}`}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <svg className={`h-4 w-4 flex-shrink-0 ${isLight ? 'text-[#7c4af0]' : 'text-purple-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className={`text-[12px] font-semibold tracking-wide ${isLight ? 'text-gray-800' : 'text-white/90'}`}>Note for 2k & 4k export</span>
                   </div>
-                )}
-              </div>
+                  <p className={`text-[11.5px] leading-relaxed ${isLight ? 'text-gray-600/90' : 'text-white/50'}`}>
+                    If the export feels slow, try canceling it, save your project, then refresh the page and export again.
+                    <span className={`block font-medium mt-1.5 ${isLight ? 'text-[#7c4af0]' : 'text-purple-400'}`}>Please do not leave this page for fast exporting.</span>
+                  </p>
+                </div>
+              )}
 
               {exportState.status !== 'error' && exportState.status !== 'completed' && (
                 <div className="w-full">
@@ -5134,7 +5130,7 @@ function EditorPage() {
               {exportState.status !== 'error' && exportState.status !== 'completed' && (
                 <button
                   onClick={handleCancelExport}
-                  className={`mt-8 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
+                  className={`mt-6 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
                 >
                   Cancel Export
                 </button>

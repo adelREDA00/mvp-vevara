@@ -119,7 +119,7 @@ export function createTextLayer(config) {
         // We only fallback to _fullContent if data is missing or stale.
         const fullContent = this.data?.content ?? this._fullContent ?? this.text ?? 'Text'
         this._fullContent = fullContent
-        
+
         const graphemes = [...fullContent]
         const visibleCount = Math.floor(this._revealProgress * graphemes.length)
         this.text = graphemes.slice(0, visibleCount).join('')
@@ -163,9 +163,9 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX + rx, centerY + ry)
       graphics.lineTo(centerX - rx, centerY + ry)
       graphics.closePath()
-      path.push({x: centerX, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY + ry})
-      path.push({x: centerX - rx, y: centerY + ry})
+      path.push({ x: centerX, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY + ry })
+      path.push({ x: centerX - rx, y: centerY + ry })
       break
 
     case 'hexagon':
@@ -177,12 +177,12 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX - rx, centerY + ry / 3)
       graphics.lineTo(centerX - rx, centerY - ry / 3)
       graphics.closePath()
-      path.push({x: centerX, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY - ry / 3})
-      path.push({x: centerX + rx, y: centerY + ry / 3})
-      path.push({x: centerX, y: centerY + ry})
-      path.push({x: centerX - rx, y: centerY + ry / 3})
-      path.push({x: centerX - rx, y: centerY - ry / 3})
+      path.push({ x: centerX, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY - ry / 3 })
+      path.push({ x: centerX + rx, y: centerY + ry / 3 })
+      path.push({ x: centerX, y: centerY + ry })
+      path.push({ x: centerX - rx, y: centerY + ry / 3 })
+      path.push({ x: centerX - rx, y: centerY - ry / 3 })
       break
 
     case 'star': {
@@ -196,12 +196,12 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       const yOffset = outerRy - halfH  // shifts star down so top AND bottom touch their edges
       const pts = 5
       const start = -Math.PI / 2
-      
+
       const pxStart = centerX + Math.cos(start) * outerRx
       const pyStart = centerY + Math.sin(start) * outerRy + yOffset
       graphics.moveTo(pxStart, pyStart)
-      path.push({x: pxStart, y: pyStart})
-      
+      path.push({ x: pxStart, y: pyStart })
+
       for (let i = 1; i < pts * 2; i++) {
         const angle = start + (i * Math.PI) / pts
         const ex = i % 2 === 0 ? outerRx : innerRx
@@ -209,7 +209,7 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
         const px = centerX + Math.cos(angle) * ex
         const py = centerY + Math.sin(angle) * ey + yOffset
         graphics.lineTo(px, py)
-        path.push({x: px, y: py})
+        path.push({ x: px, y: py })
       }
       graphics.closePath()
       break
@@ -218,10 +218,10 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
     case 'line':
       // A line is just a thin filled rect — fill handles the colour
       graphics.rect(centerX - rx, centerY - ry, width, height)
-      path.push({x: centerX - rx, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY + ry})
-      path.push({x: centerX - rx, y: centerY + ry})
+      path.push({ x: centerX - rx, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY + ry })
+      path.push({ x: centerX - rx, y: centerY + ry })
       break
 
     case 'arrow': {
@@ -239,13 +239,13 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX - rx, centerY + stemHeight / 2)
       graphics.closePath()
 
-      path.push({x: centerX - rx, y: centerY - stemHeight / 2})
-      path.push({x: stemRight, y: centerY - stemHeight / 2})
-      path.push({x: stemRight, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY})
-      path.push({x: stemRight, y: centerY + ry})
-      path.push({x: stemRight, y: centerY + stemHeight / 2})
-      path.push({x: centerX - rx, y: centerY + stemHeight / 2})
+      path.push({ x: centerX - rx, y: centerY - stemHeight / 2 })
+      path.push({ x: stemRight, y: centerY - stemHeight / 2 })
+      path.push({ x: stemRight, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY })
+      path.push({ x: stemRight, y: centerY + ry })
+      path.push({ x: stemRight, y: centerY + stemHeight / 2 })
+      path.push({ x: centerX - rx, y: centerY + stemHeight / 2 })
       break
     }
 
@@ -255,9 +255,9 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       graphics.lineTo(centerX + rx, centerY)
       graphics.lineTo(centerX - rx, centerY + ry)
       graphics.closePath()
-      path.push({x: centerX - rx, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY})
-      path.push({x: centerX - rx, y: centerY + ry})
+      path.push({ x: centerX - rx, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY })
+      path.push({ x: centerX - rx, y: centerY + ry })
       break
 
 
@@ -265,13 +265,13 @@ export function drawShapePath(graphics, shapeType, centerX, centerY, width, heig
       // rect / square and any unknown type
       const clampedRadius = Math.min(cornerRadius || 0, Math.min(width, height) / 2)
       graphics.roundRect(centerX - rx, centerY - ry, width, height, clampedRadius)
-      path.push({x: centerX - rx, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY - ry})
-      path.push({x: centerX + rx, y: centerY + ry})
-      path.push({x: centerX - rx, y: centerY + ry})
+      path.push({ x: centerX - rx, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY - ry })
+      path.push({ x: centerX + rx, y: centerY + ry })
+      path.push({ x: centerX - rx, y: centerY + ry })
     }
   }
-  
+
   return path
 }
 
@@ -397,15 +397,15 @@ export function createShapeLayer(config) {
     shapeCenterY,
     shapePath
   }
-  
+
   // [METADATA] Store shape info for the Liquid Flow engine
   graphics.shapeType = shapeType
-  
+
   // [CORNER RADIUS] Install reactive property so setting .cornerRadius = X 
   // immediately triggers a redraw via redrawShapeWithCornerRadius.
   installReactiveCornerRadius(graphics)
   graphics.cornerRadius = data.cornerRadius || 0
-  
+
   graphics._storedFill = data.fill || null
   graphics._storedStroke = data.stroke || null
   graphics._storedStrokeWidth = strokeWidth
@@ -681,7 +681,7 @@ export function createFrameLayer(config) {
     container._backSprite = backSprite
     container._isCardFrame = true
     container._frameHasBackAsset = hasBackAsset
-    
+
     // Define the reactive property for showingFront
     container._showingFront = true
     Object.defineProperty(container, 'showingFront', {
@@ -692,7 +692,7 @@ export function createFrameLayer(config) {
           // Toggle visibility of front/back sprites
           if (this._imageSprite) this._imageSprite.visible = val
           if (this._backSprite) this._backSprite.visible = !val
-          
+
           // [VIDEO SWITCHING] Dynamic video element routing
           if (val) {
             this._videoElement = this._frontVideoElement || null
@@ -707,7 +707,7 @@ export function createFrameLayer(config) {
               this._frontVideoElement.muted = true
             }
           }
-          
+
           // Toggle placeholder visibility based on active side's asset
           if (this._framePlaceholder && !this._isDropTarget) {
             const activeHasAsset = val ? this._frameHasAsset : this._frameHasBackAsset
@@ -717,7 +717,7 @@ export function createFrameLayer(config) {
       },
       configurable: true
     })
-    
+
     // Initialize based on data (defaults to true)
     container.showingFront = data.showingFront !== false
   }
@@ -1056,11 +1056,11 @@ export async function createVideoLayer(config) {
     if (videoUrl && !currentSrc.includes(videoUrl)) {
       videoElement.pause()
       // [CORS FIX] Always re-enforce crossOrigin BEFORE setting src on reuse
-      videoElement.crossOrigin = 'anonymous' 
+      videoElement.crossOrigin = 'anonymous'
       videoElement.src = videoUrl
       videoElement.load()
     } else {
-      videoElement.pause() 
+      videoElement.pause()
     }
   }
 

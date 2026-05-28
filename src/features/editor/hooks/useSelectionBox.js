@@ -3155,66 +3155,66 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // When the layer is animated and past its base step, we show ONLY the purple outline.
     // We MUST still add the handles to the PIXI container so that updateSelectionBoxVisibility 
     // can unhide them live if the user scrubs the timeline back to the base state.
-      // Check if we should hide side handles in motion capture mode
-      // We hide them if we're in capture mode AND it's a text element (no area adjustment during capture)
-      // OR if the current step has a specific scale action
-      const isScaleCaptureMode = currentMotionCaptureMode?.isActive && (
-        isTextElement || // Always hide side handles for text in capture mode
-        currentMotionCaptureMode.actions?.some(a => a.type === 'scale')
-      )
+    // Check if we should hide side handles in motion capture mode
+    // We hide them if we're in capture mode AND it's a text element (no area adjustment during capture)
+    // OR if the current step has a specific scale action
+    const isScaleCaptureMode = currentMotionCaptureMode?.isActive && (
+      isTextElement || // Always hide side handles for text in capture mode
+      currentMotionCaptureMode.actions?.some(a => a.type === 'scale')
+    )
 
-      // Text elements: corner handles for scaling, side handles for width
-      const textHandles = [
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false), // nw corner
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false), // ne corner
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false), // sw corner
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false), // se corner
-        // Only add side handles if not in scale capture mode
-        ...(!isScaleCaptureMode ? [
-          createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false), // left side
-          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false), // right side
-        ] : [])
-      ]
+    // Text elements: corner handles for scaling, side handles for width
+    const textHandles = [
+      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false), // nw corner
+      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false), // ne corner
+      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false), // sw corner
+      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false), // se corner
+      // Only add side handles if not in scale capture mode
+      ...(!isScaleCaptureMode ? [
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false), // left side
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false), // right side
+      ] : [])
+    ]
 
-      // Shape elements: all handles (corners + sides)
-      const shapeHandles = [
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false),
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false),
-        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false),
-        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false),
-        // Only add side handles if not in scale capture mode
-        ...(!isScaleCaptureMode ? [
-          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY, 'n-resize', 'n', zoomScale, scaledWidth, scaledHeight, false),
-          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY + scaledHeight, 's-resize', 's', zoomScale, scaledWidth, scaledHeight, false),
-          createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false),
-          createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false),
-        ] : [])
-      ]
+    // Shape elements: all handles (corners + sides)
+    const shapeHandles = [
+      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY, 'nw-resize', 'nw', zoomScale, scaledWidth, scaledHeight, false),
+      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY, 'ne-resize', 'ne', zoomScale, scaledWidth, scaledHeight, false),
+      createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight, 'sw-resize', 'sw', zoomScale, scaledWidth, scaledHeight, false),
+      createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight, 'se-resize', 'se', zoomScale, scaledWidth, scaledHeight, false),
+      // Only add side handles if not in scale capture mode
+      ...(!isScaleCaptureMode ? [
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY, 'n-resize', 'n', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth / 2, localBoundsY + scaledHeight, 's-resize', 's', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX, localBoundsY + scaledHeight / 2, 'w-resize', 'w', zoomScale, scaledWidth, scaledHeight, false),
+        createHandle(rotation, handleResizeStart, localBoundsX + scaledWidth, localBoundsY + scaledHeight / 2, 'e-resize', 'e', zoomScale, scaledWidth, scaledHeight, false),
+      ] : [])
+    ]
 
-      // Add handles based on element type
-      const handles = isTextElement ? textHandles : shapeHandles
-      handles.forEach(handle => selectionBox.addChild(handle))
+    // Add handles based on element type
+    const handles = isTextElement ? textHandles : shapeHandles
+    handles.forEach(handle => selectionBox.addChild(handle))
 
-      // Side hit areas - text gets only left/right, shapes get all sides
-      // Also skip if in scale capture mode
-      const textSideHitAreas = !isScaleCaptureMode ? [
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
-      ] : []
+    // Side hit areas - text gets only left/right, shapes get all sides
+    // Also skip if in scale capture mode
+    const textSideHitAreas = !isScaleCaptureMode ? [
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
+    ] : []
 
-      const shapeSideHitAreas = !isScaleCaptureMode ? [
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'n', 'n-resize', zoomScale, false), // Top
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 's', 's-resize', zoomScale, false), // Bottom
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
-        createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
-      ] : []
+    const shapeSideHitAreas = !isScaleCaptureMode ? [
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'n', 'n-resize', zoomScale, false), // Top
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 's', 's-resize', zoomScale, false), // Bottom
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'w', 'w-resize', zoomScale, false), // Left
+      createSideHitArea(rotation, localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleResizeStart, 'e', 'e-resize', zoomScale, false), // Right
+    ] : []
 
-      const sideHitAreas = isTextElement ? textSideHitAreas : shapeSideHitAreas
-      sideHitAreas.forEach(hitArea => selectionBox.addChild(hitArea))
+    const sideHitAreas = isTextElement ? textSideHitAreas : shapeSideHitAreas
+    sideHitAreas.forEach(hitArea => selectionBox.addChild(hitArea))
 
-      // Add rotation handle
-      const rotationHandle = createRotationHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleRotateStart, zoomScale, false)
-      selectionBox.addChild(rotationHandle)
+    // Add rotation handle
+    const rotationHandle = createRotationHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleRotateStart, zoomScale, false)
+    selectionBox.addChild(rotationHandle)
 
     // [FIX] IMMEDIATELY apply visibility rules to avoid flickering handles when past base step
     // We call this after adding all children to ensure they are properly hidden if necessary.
@@ -3424,13 +3424,13 @@ function getClosestActiveHandle(selectionBox, touchPos) {
         x: (nwPos.x + sePos.x) / 2,
         y: (nwPos.y + sePos.y) / 2
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!centerPos) {
     try {
       centerPos = selectionBox.getGlobalPosition()
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (centerPos) {

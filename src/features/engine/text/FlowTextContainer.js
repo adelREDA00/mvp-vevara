@@ -19,7 +19,7 @@ import { calculateAvailableSpansAtY, layoutWaterFlow, getLocalObstacles } from '
 export class FlowTextContainer extends PIXI.Container {
   constructor(config) {
     super()
-    
+
     this.id = config.id
     this.data = config.data || {}
     this._content = this.data.content || 'Text'
@@ -33,11 +33,11 @@ export class FlowTextContainer extends PIXI.Container {
     this._wordWrapWidth = config.width || 200
     this._actualHeight = this._lineHeight // Initial estimate before first layout
     this._revealProgress = 1 // 0 to 1 for typewriter effect
-    
+
     // Pooling: re-use text objects for lines
     this._linePool = []
     this._activeLines = []
-    
+
     // Metadata for engine
     this.isFlowText = true
     this._lastObstaclesHash = ''
@@ -46,14 +46,14 @@ export class FlowTextContainer extends PIXI.Container {
     // Line positions from the engine are now centered around (0,0).
     // This ensures coordinate mapping is invariant to text height changes.
     this.pivot.set(0, 0)
-    
+
     // Anchor metadata for selection box alignment (0.5, 0.5 = centered)
-    this.anchor = { set: (x, y) => {}, x: 0.5, y: 0.5 }
-    
+    this.anchor = { set: (x, y) => { }, x: 0.5, y: 0.5 }
+
     // Pre-calculate segments and perform initial refresh to settle pivot
     this._prepare()
     this.refresh([])
-    
+
     // [INTERACTION FIX] Ensure initial hitArea covers the estimated height
     this.hitArea = new PIXI.Rectangle(-this._wordWrapWidth / 2, -this._actualHeight / 2, this._wordWrapWidth, this._actualHeight)
   }
@@ -73,7 +73,7 @@ export class FlowTextContainer extends PIXI.Container {
     this._fontWeight = this.data.fontWeight || 'normal'
     this._fontStyle = this.data.fontStyle || 'normal'
     this._lineHeight = this._fontSize * 1.2
-    
+
     const anchorX = this._textAlign === 'center' ? 0.5 : (this._textAlign === 'right' ? 1 : 0)
     this.anchor.x = anchorX
     this.anchor.y = 0
@@ -82,7 +82,7 @@ export class FlowTextContainer extends PIXI.Container {
     this.pivot.set(0, 0)
     this.anchor.x = 0.5
     this.anchor.y = 0.5
-    
+
     this._prepare()
     this.refresh(this._lastObstacles || [])
   }
@@ -95,29 +95,29 @@ export class FlowTextContainer extends PIXI.Container {
     // If obstacles haven't moved or changed dimensions, skip the expensive layout calculation.
     const currentHash = this._getObstaclesHash(worldObstacles)
     const contentHash = `${this._content}:${this._wordWrapWidth}:${this._fontSize}:${this._textAlign}:${this._fontFamily}:${this._color}:${this.data.fontWeight || 'normal'}:${this.data.fontStyle || 'normal'}`
-    
+
     if (this._lastObstaclesHash === currentHash && this._lastContentHash === contentHash) {
       return
     }
-    
+
     this._lastObstaclesHash = currentHash
     this._lastContentHash = contentHash
     this._lastObstacles = worldObstacles
-    
+
     const localObstacles = getLocalObstacles(this, worldObstacles)
-    
+
     // Calculate layout using water flow engine
     const { lines, height, width } = layoutWaterFlow(
-      this._prepared, 
-      this._wordWrapWidth, 
-      this._lineHeight, 
+      this._prepared,
+      this._wordWrapWidth,
+      this._lineHeight,
       localObstacles,
       this._actualHeight || 100
     )
 
     // Sync PIXI.Text objects from pool
     this._syncLines(lines)
-    
+
     // [STABILITY] actualHeight is used for selection box and interaction center calculations.
     // The pivot remains (0, 0) as lines are pre-centered by the engine.
     this._actualHeight = height
@@ -136,26 +136,26 @@ export class FlowTextContainer extends PIXI.Container {
     let hash = `self:${t.tx.toFixed(1)},${t.ty.toFixed(1)},${t.a.toFixed(3)},${t.b.toFixed(3)},${t.c.toFixed(3)},${t.d.toFixed(3)}|`
 
     if (!obstacles || obstacles.length === 0) return hash + 'none'
-    
+
     // Create a fast-to-compute string representing the state of all obstacles
     for (let i = 0; i < obstacles.length; i++) {
-        const o = obstacles[i]
-        // Round to whole pixels to completely ignore sub-pixel micro-drifts during interaction
-        hash += `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${Math.round(o.width)},${Math.round(o.height)}|`
+      const o = obstacles[i]
+      // Round to whole pixels to completely ignore sub-pixel micro-drifts during interaction
+      hash += `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${Math.round(o.width)},${Math.round(o.height)}|`
     }
     return hash
   }
 
   _syncLines(linesData) {
     this._lastLines = linesData // Store for revealProgress updates
-    
+
     // 1. Calculate total character count (grapheme-aware)
     let totalChars = 0
     for (let i = 0; i < linesData.length; i++) {
-        // [PERF] Use spread to handle multi-code-unit graphemes correctly
-        totalChars += [...linesData[i].text].length
+      // [PERF] Use spread to handle multi-code-unit graphemes correctly
+      totalChars += [...linesData[i].text].length
     }
-    
+
     let charsToShow = Math.floor(this._revealProgress * totalChars)
     console.log(`[DEBUG] FlowTextContainer._syncLines id=${this.id} reveal=${this._revealProgress.toFixed(2)} total=${totalChars} show=${charsToShow}`)
 
@@ -193,17 +193,17 @@ export class FlowTextContainer extends PIXI.Container {
       // [TYPEWRITER] Slice text based on reveal progress
       let lineText = ld.text
       if (this._revealProgress < 1) {
-          const graphemes = [...lineText]
-          const lineLen = graphemes.length
-          
-          if (charsToShow <= 0) {
-              lineText = ''
-          } else if (charsToShow < lineLen) {
-              lineText = graphemes.slice(0, charsToShow).join('')
-              charsToShow = 0
-          } else {
-              charsToShow -= lineLen
-          }
+        const graphemes = [...lineText]
+        const lineLen = graphemes.length
+
+        if (charsToShow <= 0) {
+          lineText = ''
+        } else if (charsToShow < lineLen) {
+          lineText = graphemes.slice(0, charsToShow).join('')
+          charsToShow = 0
+        } else {
+          charsToShow -= lineLen
+        }
       }
 
       lineObj.text = lineText
@@ -219,10 +219,10 @@ export class FlowTextContainer extends PIXI.Container {
       lineObj.x = alignX
       lineObj.y = ld.y
       lineObj.visible = lineText.length > 0
-      
+
       // SCALE LOCK: Ensure no character distortion
       lineObj.scale.set(1)
-      
+
       this._activeLines.push(lineObj)
     })
   }
@@ -234,15 +234,15 @@ export class FlowTextContainer extends PIXI.Container {
   updateColor(hex) {
     if (this._color === hex) return
     this._color = hex
-    
+
     // Update active lines directly
     for (let i = 0; i < this._activeLines.length; i++) {
-        const line = this._activeLines[i]
-        if (line.style) {
-            line.style.fill = hex
-        }
+      const line = this._activeLines[i]
+      if (line.style) {
+        line.style.fill = hex
+      }
     }
-    
+
     // Invalidate content hash to prevent refresh logic from thinking it's dirty 
     // and re-calculating everything if a regular refresh() is called later
     this._lastContentHash = `${this._content}:${this._wordWrapWidth}:${this._fontSize}:${this._textAlign}:${this._fontFamily}:${this._color}:${this.data.fontWeight || 'normal'}:${this.data.fontStyle || 'normal'}`
@@ -257,19 +257,19 @@ export class FlowTextContainer extends PIXI.Container {
   }
 
   get resolution() { return this._resolution || 2 }
-  
+
   /**
    * revealProgress: 0 to 1 property used by TypewriterAction for character reveal.
    */
   get revealProgress() { return this._revealProgress }
   set revealProgress(val) {
-      if (this._revealProgress !== val) {
-          console.log(`[DEBUG] FlowTextContainer.revealProgress set id=${this.id} val=${val.toFixed(3)}`)
-          this._revealProgress = Math.max(0, Math.min(1, val))
-          if (this._lastLines) {
-              this._syncLines(this._lastLines)
-          }
+    if (this._revealProgress !== val) {
+      console.log(`[DEBUG] FlowTextContainer.revealProgress set id=${this.id} val=${val.toFixed(3)}`)
+      this._revealProgress = Math.max(0, Math.min(1, val))
+      if (this._lastLines) {
+        this._syncLines(this._lastLines)
       }
+    }
   }
 
   // [BUG FIX] Decouple logical width (wrapping boundary) from scale
@@ -295,10 +295,10 @@ export class FlowTextContainer extends PIXI.Container {
     const h = this.height
     const w = this._wordWrapWidth
     const rect = new PIXI.Rectangle(-w / 2, -h / 2, w, h)
-    
+
     // We only log if this is called frequently or during interaction
     // console.log(`[FLOW-BOUNDS] id=${this.id} y=${rect.y} h=${rect.height}`)
-    
+
     return rect
   }
 }
