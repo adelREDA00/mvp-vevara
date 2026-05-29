@@ -438,10 +438,10 @@ const DashboardPage = () => {
                                     {/* Left text label */}
                                     <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
                                         <h3 className="text-[17px] md:text-[22px] font-extrabold tracking-tight text-white leading-tight">
-                                            Product Launches
+                                            App & Software Showcase
                                         </h3>
                                         <p className="text-[11px] md:text-[12px] text-white/80 font-semibold mt-0.5 max-w-[85%] truncate md:max-w-none">
-                                            Demos, SaaS & feature announcements
+                                            Walkthroughs, demos & feature reveals
                                         </p>
                                         <div className="py-1 px-3 bg-white text-black font-extrabold text-[10px] rounded-lg mt-2 flex items-center gap-1.5 hover:bg-white/95 transition-all w-fit shadow-md">
                                             <span>Start creating</span>
