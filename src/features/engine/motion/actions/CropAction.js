@@ -27,8 +27,6 @@ export class CropAction {
         const { values = {} } = actionData
         const duration = values.duration || 2000
 
-        // Ensure a consistent ease for motion capture playback
-        CustomEase.create("myEase", "0.5,0,0,1");
         const easing = "myEase"
 
         const startState = options.startState || {}

@@ -271,6 +271,7 @@ export class MotionEngine {
         if (prop === 'mediaWidth') defaultValue = pixiObject._originalWidth || pixiObject.width || 100
         if (prop === 'mediaHeight') defaultValue = pixiObject._originalHeight || pixiObject.height || 100
         if (prop === 'showingFront') defaultValue = true // Default to showing front
+        if (prop === 'blur') defaultValue = -1 // Use -1 as sentinel so setter always fires for 0!
         
         pixiObject[privateProp] = defaultValue
       }

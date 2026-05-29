@@ -18,8 +18,6 @@ export class BlurAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = (values.duration || 2000) / 1000
-        CustomEase.create("myEase", "0.5,0,0,1");
-
         const easing = "myEase"
 
         // [EXPORT SYNC] Cache export scale for the applier
@@ -37,7 +35,10 @@ export class BlurAction {
         // Ensure filter exists for animation if there is any blur
         if (!pixiObject._blurFilter && (startBlur > 0 || targetBlur > 0)) {
             pixiObject._blurFilter = new PIXI.BlurFilter({ strength: 0, quality: quality })
-            pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
+            // Only eagerly append to filters if the start blur is actually greater than 0
+            if (startBlur > 0) {
+                pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
+            }
         }
 
         if (!pixiObject._blurFilter) {

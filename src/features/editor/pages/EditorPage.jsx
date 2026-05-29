@@ -482,6 +482,12 @@ function EditorPage() {
       try { motionControls.pauseAll() } catch (e) { /* ignore */ }
     }
 
+    // Sleep the main editor PIXI ticker during export to free WebGL/GPU resources
+    const mainApp = stageRef.current?.getApp?.()
+    if (mainApp?.ticker) {
+      try { mainApp.ticker.stop() } catch (e) { /* ignore */ }
+    }
+
     setExportState({
       isActive: true,
       status: 'initializing',
@@ -545,6 +551,11 @@ function EditorPage() {
         error: error.message
       })
     } finally {
+      // Resume the main editor PIXI ticker
+      const appToResume = stageRef.current?.getApp?.()
+      if (appToResume?.ticker) {
+        try { appToResume.ticker.start() } catch (e) { /* ignore */ }
+      }
       exportAbortControllerRef.current = null
       if (motionControls) {
         try { motionControls.seek(savedTime) } catch (e) { /* ignore */ }

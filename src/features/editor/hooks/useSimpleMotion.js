@@ -303,6 +303,19 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         return () => clearInterval(interval)
     }, [motionEngine, isPlayingInternal])
 
+    // [PROJECT-WIDE SYNC] Stable video URLs signature to avoid thrashing on every layer change
+    const videoUrlsSignature = useMemo(() => {
+        if (!timelineInfo || !layers) return '';
+        return timelineInfo
+            .flatMap(sceneInfo => sceneInfo.layers || [])
+            .map(layerId => {
+                const layer = layers[layerId];
+                return (layer && layer.type === 'video') ? `${layerId}:${layer.data?.url || ''}` : '';
+            })
+            .filter(Boolean)
+            .join('|');
+    }, [timelineInfo, layers]);
+
     // [PROJECT-WIDE SYNC] Pre-warm and register all video layers in the project 
     // This allows the engine to pre-seek videos in upcoming scenes even before they are mounted on stage.
     useEffect(() => {
@@ -333,7 +346,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                 }
             })
         })
-    }, [timelineInfo, allMotionFlows, layers, motionEngine])
+    }, [videoUrlsSignature, timelineInfo, allMotionFlows, motionEngine])
 
     // Track project-wide buffering state from MotionEngine
     useEffect(() => {

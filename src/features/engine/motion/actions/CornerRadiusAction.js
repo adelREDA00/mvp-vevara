@@ -150,8 +150,6 @@ export class CornerRadiusAction {
     execute(pixiObject, actionData, options = {}) {
         const { values = {} } = actionData
         const duration = (values.duration || 2000) / 1000
-        CustomEase.create("myEase", "0.5,0,0,1");
-
         const easing = "myEase"
 
         // Resolve start radius
