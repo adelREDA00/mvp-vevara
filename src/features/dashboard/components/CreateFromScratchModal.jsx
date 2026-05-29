@@ -15,23 +15,7 @@ const CreateFromScratchModal = ({ isOpen, onClose, onConfirm }) => {
             showCloseButton={true}
             maxWidth="max-w-2xl"
         >
-            <div className="py-2 text-[var(--dashboard-text)] flex flex-col items-center text-center space-y-6 select-none">
-                
-                {/* Header Section */}
-                <div className="space-y-2 max-w-lg">
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/20 text-[9px] font-bold text-[var(--dashboard-accent)] uppercase tracking-wider mx-auto">
-                        <Sparkles size={10} className="text-[var(--dashboard-accent)] animate-pulse" />
-                        <span>Motion Workflow</span>
-                    </div>
-                    
-                    <h2 className="text-[20px] md:text-[23px] font-extrabold tracking-tight text-[var(--dashboard-text)] leading-none mt-0.5">
-                        Start Blank Canvas
-                    </h2>
-                    
-                    <p className="text-[13px] md:text-[14px] text-[var(--dashboard-text-muted)] font-semibold leading-normal px-2">
-                        Best workflow to make better motion videos
-                    </p>
-                </div>
+            <div className="py-2 text-[var(--dashboard-text)] flex flex-col items-center text-center space-y-4 select-none">
 
                 {/* Highly Visual, Scroll-free Horizontal Steps Diagram (No Circle BGs, Floating Icons) */}
                 <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-8 w-full max-w-xl py-2">

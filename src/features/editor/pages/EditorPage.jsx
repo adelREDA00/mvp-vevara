@@ -69,7 +69,7 @@ function EditorPage() {
   const { projectId: urlProjectId } = useParams()
   const location = useLocation()
   const projectName = useSelector(selectProjectName)
-  const isStarterCopy = projectName === "ads starter (Copy)" || projectName === "sass starter (Copy)"
+  const isStarterCopy = projectName && (projectName.endsWith(' (Copy)') || projectName.toLowerCase().includes('starter'))
   const isAutoPlaying = (autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy;
   const projectId = useSelector(selectProjectId)
 
@@ -816,14 +816,9 @@ function EditorPage() {
         if (!targetProjId) return;
 
         const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
-        const stepsCount = currentSceneMotionFlow?.steps?.length || 0;
-        const totalScenesCount = scenes?.length || 1;
 
-        // If they have already done autoplay, have created motion steps, or have multiple scenes, do not trigger autoplay
-        if (isAutoplayDone || stepsCount >= 2 || totalScenesCount > 1) {
-          if (!isAutoplayDone) {
-            localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
-          }
+        // If they have already done autoplay, do not trigger autoplay
+        if (isAutoplayDone) {
           return;
         }
 
@@ -843,21 +838,23 @@ function EditorPage() {
         }
       }
     }
-  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, setIsPlaying, dispatch, currentSceneMotionFlow?.steps?.length, scenes?.length]);
+  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, setIsPlaying, dispatch]);
 
-  // Auto-pause at 2.0s and trigger starter tooltip
+  // Auto-pause at the start of Scene 2 (end of first scene duration) and trigger starter tooltip
   useEffect(() => {
     if (isStarterCopy && isPlaying && motionControls) {
       const targetProjId = urlProjectId || projectId;
       if (!targetProjId) return;
 
       const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
-      if (!isAutoplayDone && playheadTime >= 2.0) {
+      const firstSceneDuration = scenes?.[0]?.duration || 2.0;
+
+      if (!isAutoplayDone && playheadTime >= firstSceneDuration) {
         // Pause playback
         motionControls.pauseAll();
         setIsPlaying(false);
-        // Seek exactly to 2s
-        seek(2.0);
+        // Seek exactly to the end of scene 1 / start of scene 2
+        seek(firstSceneDuration);
         // Set autoplay as done for this project ID so it won't trigger again
         localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
         // Clear autoplay state and interaction lock
@@ -865,10 +862,10 @@ function EditorPage() {
         dispatch(setInteractionLock(false));
         // Trigger the custom tooltip
         setShowStarterHint(true);
-        setStarterHintText("click animate to Add Step 2");
+        setStarterHintText("Animate this scene");
       }
     }
-  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, urlProjectId, seek, setIsPlaying, dispatch]);
+  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, urlProjectId, seek, setIsPlaying, dispatch, scenes]);
 
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);

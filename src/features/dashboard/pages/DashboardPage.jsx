@@ -14,6 +14,7 @@ import Modal from '../../editor/components/Modal'
 import { uid } from '../../../utils/ids'
 import ProjectStarterModal from '../components/ProjectStarterModal'
 import CreateFromScratchModal from '../components/CreateFromScratchModal'
+import ProjectConfigModal from '../components/ProjectConfigModal'
 import DashboardSidebar from '../components/DashboardSidebar'
 import DashboardHero from '../components/DashboardHero'
 import TemplateThumbnail from '../components/TemplateThumbnail'
@@ -92,6 +93,8 @@ const DashboardPage = () => {
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
     const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false)
     const [isCreateScratchModalOpen, setIsCreateScratchModalOpen] = useState(false)
+    const [isProjectConfigModalOpen, setIsProjectConfigModalOpen] = useState(false)
+    const [configModalMode, setConfigModalMode] = useState('app')
 
     const CATEGORIES = [
         'All',
@@ -236,6 +239,45 @@ const DashboardPage = () => {
             console.error('Failed to create project:', error)
             setIsDuplicating(false)
         }
+    }
+
+    const HERO_TEMPLATE_MAPPINGS = {
+        app: {
+            "App Walkthrough": {
+                "9:16": "6a159ee81ddc8874b8383c4b",
+                "16:9": "6a15dd3d1ddc8874b8385a41"
+            },
+            "Launch Video": {
+                "9:16": "6a171d561ddc8874b83889b6",
+                "16:9": "6a1603431ddc8874b8385f6a"
+            },
+            "Feature Announcement": {
+                "9:16": "6a159ee81ddc8874b8383c4b",
+                "16:9": "6a15dd3d1ddc8874b8385a41"
+            },
+
+            "Promo": {
+                "9:16": "6a173dfd1ddc8874b83893a2",
+                "16:9": "6a172c0e1ddc8874b8388e1a"
+            }
+        },
+        ads: {
+            "Product showcase": {
+                "9:16": "6a0eb9d31ddc8874b8361bc6",
+                "16:9": "6a0eb9d31ddc8874b8361bc6"
+            },
+            "Sale/promo announcement": {
+                "9:16": "6a196bd51ddc8874b838e502",
+                "16:9": "6a1967e71ddc8874b838e255"
+            },
+        }
+    }
+
+    const handleCreateFromConfig = async (category, platform) => {
+        setIsProjectConfigModalOpen(false)
+        const templateId = HERO_TEMPLATE_MAPPINGS[configModalMode]?.[category]?.[platform] ||
+            (configModalMode === 'app' ? "6a0eb3c31ddc8874b8361a7f" : "6a0eb9d31ddc8874b8361bc6")
+        await handleDuplicateTemplate(templateId)
     }
 
     const [isDuplicating, setIsDuplicating] = useState(false)
@@ -432,7 +474,10 @@ const DashboardPage = () => {
                             <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* Card 1: Product Launch Videos */}
                                 <div
-                                    onClick={() => handleDuplicateTemplate("6a0eb3c31ddc8874b8361a7f")}
+                                    onClick={() => {
+                                        setConfigModalMode('app')
+                                        setIsProjectConfigModalOpen(true)
+                                    }}
                                     className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#9F13FF] via-[#D11BE5] to-[#FF2A93] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#D11BE5]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
                                 >
                                     {/* Left text label */}
@@ -463,7 +508,10 @@ const DashboardPage = () => {
 
                                 {/* Card 2: Product Promo Videos */}
                                 <div
-                                    onClick={() => handleDuplicateTemplate("6a0eb9d31ddc8874b8361bc6")}
+                                    onClick={() => {
+                                        setConfigModalMode('ads')
+                                        setIsProjectConfigModalOpen(true)
+                                    }}
                                     className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#00ab6b] via-[#05c46b] to-[#3bf681] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#0bb85c]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
                                 >
                                     {/* Left text label */}
@@ -763,20 +811,7 @@ const DashboardPage = () => {
                 onClose={() => setIsUpdatesModalOpen(false)}
                 maxWidth="max-w-md"
             >
-                <div className="relative p-5 text-left select-none overflow-hidden">
-                    <div className="absolute top-0 left-1/4 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute bottom-0 right-1/4 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl pointer-events-none" />
-
-                    <div className="flex items-center gap-2.5 mb-4">
-                        <div className="p-1.5 bg-violet-500/10 rounded-lg text-violet-500">
-                            <Sparkles size={16} className="animate-pulse" />
-                        </div>
-                        <div>
-                            <h3 className="text-[14px] font-extrabold text-[var(--dashboard-text)] tracking-tight">Upcoming Updates</h3>
-                            <p className="text-[10px] text-[var(--dashboard-text-muted)] font-semibold">Exciting new additions coming soon</p>
-                        </div>
-                    </div>
-
+                <div className="p-1 text-left select-none">
                     <div className="space-y-4">
                         {/* Section 1: Templates Collection */}
                         <div>
@@ -878,6 +913,13 @@ const DashboardPage = () => {
                     setIsCreateScratchModalOpen(false);
                     handleCreateProject();
                 }}
+            />
+
+            <ProjectConfigModal
+                isOpen={isProjectConfigModalOpen}
+                onClose={() => setIsProjectConfigModalOpen(false)}
+                mode={configModalMode}
+                onCreate={handleCreateFromConfig}
             />
         </div>
     )

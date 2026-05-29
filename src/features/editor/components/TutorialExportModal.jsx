@@ -106,7 +106,7 @@ const TutorialExportModal = ({ isOpen, onClose, onExport, initialFormat = 'mp4' 
           <X className="w-4 h-4" />
         </button>
 
-        <div className={`p-5 rounded-2xl border ${isLight ? 'bg-gray-50/50 border-gray-200' : 'bg-white/5 border-white/10'}`}>
+        {/* <div className={`p-5 rounded-2xl border ${isLight ? 'bg-gray-50/50 border-gray-200' : 'bg-white/5 border-white/10'}`}>
           <div className="flex items-start gap-4">
             <div className={`mt-1 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${isLight ? 'bg-white shadow-black/5' : 'bg-black shadow-white/5'} overflow-hidden`}>
               <img src="/apple.webp" className="w-6 h-6 object-contain" alt="Apple" />
@@ -125,7 +125,7 @@ const TutorialExportModal = ({ isOpen, onClose, onExport, initialFormat = 'mp4' 
               </div>
             </div>
           </div>
-        </div>
+        </div> */}
 
         <div className={`flex gap-2 p-1 rounded-xl ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
           <button type="button" className={tabClass(format === 'mp4')} onClick={() => setFormat('mp4')}>
