@@ -263,7 +263,7 @@ async function createExportVideoLayer(layer, ffmpegWrapper = null, sessionId = '
 
     const videoElements = [];
     const textures = [];
-    const bufferSize = 3;
+    const bufferSize = 1; // Change from 3 to 1 to use a single video element and ensure sequential frame accuracy without decoder contention
 
     for (let i = 0; i < bufferSize; i++) {
         if (!exportCtx.active) {
@@ -543,9 +543,13 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
             const trimStart = src.sourceStartTime.toFixed(6);
             const trimEnd = (src.sourceStartTime + src.duration).toFixed(6);
             const delayMs = Math.round(src.globalStartTime * 1000);
-            filterParts.push(
-                `[${i + 1}:a]atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[a${i}]`
-            );
+            
+            let filter = `[${i + 1}:a]atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS`;
+            if (delayMs > 0) {
+                filter += `,adelay=${delayMs}:all=true`;
+            }
+            filter += `,aresample=async=1[a${i}]`;
+            filterParts.push(filter);
         }
 
         let filterComplex;
@@ -554,11 +558,17 @@ async function mixAudioIntoVideo(ffmpegInst, audioSources, onProgress) {
             const trimStart = src.sourceStartTime.toFixed(6);
             const trimEnd = (src.sourceStartTime + src.duration).toFixed(6);
             const delayMs = Math.round(src.globalStartTime * 1000);
-            filterComplex = `[1:a]atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[aout]`;
+            
+            let filter = `[1:a]atrim=start=${trimStart}:end=${trimEnd},asetpts=PTS-STARTPTS`;
+            if (delayMs > 0) {
+                filter += `,adelay=${delayMs}:all=true`;
+            }
+            filter += `,aresample=async=1[aout]`;
+            filterComplex = filter;
         } else {
             const labels = audioSources.map((_, i) => `[a${i}]`).join('');
             filterComplex = filterParts.join('; ') +
-                `; ${labels}amix=inputs=${audioSources.length}:duration=longest:dropout_transition=0[aout]`;
+                `; ${labels}amix=inputs=${audioSources.length}:duration=longest:dropout_transition=0,aresample=async=1[aout]`;
         }
 
         args.push('-filter_complex', filterComplex);
