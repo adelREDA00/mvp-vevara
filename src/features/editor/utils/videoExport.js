@@ -118,95 +118,12 @@ async function createExportVideoElement(videoUrl, exportCtx = { active: true }) 
 }
 
 async function optimizeVideoForSeeking(url, layer, ffmpegInst, sessionId) {
-    const startTime = performance.now();
-    const layerId = layer.id || 'unknown';
-
-    const srcStart = layer.data?.sourceStartTime || 0;
-    const srcEnd = layer.data?.sourceEndTime || (layer.data?.duration || 0);
-    const duration = srcEnd - srcStart;
-
-    if (duration <= 0) {
-        console.warn(`[videoExport] [optimizeVideoForSeeking] Invalid duration: ${duration}s. Skipping optimization.`);
-        return null;
-    }
-
-    const MAX_OPTIMIZATION_DURATION = 25; // seconds
-    if (duration > MAX_OPTIMIZATION_DURATION) {
-        console.warn(`[videoExport] [optimizeVideoForSeeking] Duration ${duration.toFixed(1)}s exceeds safety limit of ${MAX_OPTIMIZATION_DURATION}s. Skipping seeking optimization to prevent FFmpeg OOM.`);
-        return null;
-    }
-
-    // 1. Enforce strict 35MB file size limit using HEAD request to prevent browser OOM
-    try {
-        const headResponse = await fetch(url, { method: 'HEAD' });
-        if (headResponse.ok) {
-            const contentLength = headResponse.headers.get('content-length');
-            if (contentLength) {
-                const sizeInBytes = parseInt(contentLength, 10);
-                const MAX_FILE_SIZE = 35 * 1024 * 1024; // 35 MB
-                if (sizeInBytes > MAX_FILE_SIZE) {
-                    console.warn(`[videoExport] [optimizeVideoForSeeking] Original file size ${(sizeInBytes / 1024 / 1024).toFixed(1)} MB exceeds safety limit of 35 MB. Skipping seeking optimization to prevent memory exhaustion.`);
-                    return null;
-                }
-            }
-        }
-    } catch (e) {
-        console.warn(`[videoExport] HEAD request failed for ${url}, continuing with fetch check...`, e);
-    }
-
-
-
-    // 2. Fetch the video file (checked by HEAD, safely under 35MB)
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Fetch failed: ${response.statusText}`);
-
-    // Double safety check on GET headers
-    const contentLength = response.headers.get('content-length');
-    if (contentLength) {
-        const sizeInBytes = parseInt(contentLength, 10);
-        const MAX_FILE_SIZE = 35 * 1024 * 1024; // 35 MB
-        if (sizeInBytes > MAX_FILE_SIZE) {
-            console.warn(`[videoExport] [optimizeVideoForSeeking] GET file size ${(sizeInBytes / 1024 / 1024).toFixed(1)} MB exceeds safety limit of 35 MB. Skipping seeking optimization.`);
-            return null;
-        }
-    }
-
-    const blob = await response.blob();
-    const arrayBuffer = await blob.arrayBuffer();
-
-    const inputFileName = `${sessionId}_opt_in_${layerId}.mp4`;
-    const outputFileName = `${sessionId}_opt_out_${layerId}.mp4`;
-
-    await ffmpegInst.writeFile(inputFileName, new Uint8Array(arrayBuffer));
-
-    // GOP=1 (keyint=1) ensures every frame is a keyframe, making seeking instant
-    const ffmpegArgs = [
-        '-y',
-        '-ss', srcStart.toFixed(3),
-        '-t', duration.toFixed(3),
-        '-i', inputFileName,
-        '-c:v', 'libx264',
-        '-x264-params', 'keyint=1',
-        '-preset', 'ultrafast',
-        '-an', // Discard audio since audio is mixed back at the end
-        outputFileName
-    ];
-
-
-    await ffmpegInst.exec(ffmpegArgs);
-
-    const optimizedData = await ffmpegInst.readFile(outputFileName);
-
-    try { await ffmpegInst.deleteFile(inputFileName); } catch (e) { }
-    try { await ffmpegInst.deleteFile(outputFileName); } catch (e) { }
-
-    const outBlob = new Blob([optimizedData.buffer], { type: 'video/mp4' });
-    const optimizedUrl = URL.createObjectURL(outBlob);
-
-    return {
-        optimizedUrl,
-        duration
-    };
+    // ALWAYS skip client-side video seeking optimization in the browser.
+    // Client-side FFmpeg re-encoding of video layers is extremely CPU and memory intensive,
+    // causing browsers to run out of WASM memory and freeze/deadlock indefinitely at 0% in production
+    // (especially when larger video sizes bypass safety checks due to stripped headers).
+    // Native HTML5 Media Fragments (#t=start,end) and seek events are highly stable, fast, and precise.
+    return null;
 }
 
 async function compressAndWriteFrame({ canvas, filename, ffmpegInst, quality, exportCtx }) {
