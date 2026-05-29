@@ -1205,6 +1205,7 @@ export const exportVideo = async ({
                         exportEngine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId });
                     }
                 } catch (e) {
+                    if (e.message === 'cancelled') throw e;
                     console.error(`[videoExport]   [LayerInit] FAILED for ${layerId}:`, e);
                 }
             }
