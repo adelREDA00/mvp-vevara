@@ -263,8 +263,8 @@ const DashboardPage = () => {
         },
         ads: {
             "Product showcase": {
-                "9:16": "6a0eb9d31ddc8874b8361bc6",
-                "16:9": "6a0eb9d31ddc8874b8361bc6"
+                "9:16": "6a159ee81ddc8874b8383c4b",
+                "16:9": "6a15dd3d1ddc8874b8385a41"
             },
             "Sale/promo announcement": {
                 "9:16": "6a196bd51ddc8874b838e502",
