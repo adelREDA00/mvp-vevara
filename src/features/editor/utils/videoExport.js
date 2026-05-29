@@ -15,15 +15,10 @@ import { syncTiltedDisplay } from '../../engine/pixi/perspectiveTilt.js';
 let ffmpeg = null;
 
 const _canUseMT = () => {
-    try {
-        return typeof self !== 'undefined'
-            && self.crossOriginIsolated === true
-            && typeof SharedArrayBuffer !== 'undefined'
-            && (navigator.hardwareConcurrency || 0) >= 4
-            && (navigator.deviceMemory || 4) >= 4;
-    } catch (e) {
-        return false;
-    }
+    // ALWAYS disable multi-threading. Multi-threaded WebAssembly FFmpeg (@ffmpeg/core-mt) 
+    // is highly unstable and deadlocks/freezes in production cross-origin isolated environments.
+    // The single-threaded build is completely stable and works flawlessly.
+    return false;
 };
 
 export const initFFmpeg = async (onLog = null) => {
@@ -990,7 +985,7 @@ export const exportVideo = async ({
         for (const scene of scenes) {
             if (!scene.layers) continue;
             for (const layerId of scene.layers) {
-                if (signal?.aborted) throw new Error('cancelled');
+                if (signal?.aborted || !exportCtx.active) throw new Error('cancelled');
 
                 const layer = layers[layerId];
                 if (!layer) {
@@ -1012,11 +1007,11 @@ export const exportVideo = async ({
                         if (layer.data?.url) addLoadedUrl(layer.data.url);
                         pixiObject = await createExportVideoLayer(layer, ffmpegWrapper, sessionId, exportCtx);
                         ffmpegInst = ffmpegWrapper.inst; // Re-sync lexical instance in case of self-healing reload!
-                        if (!exportCtx.active) {
+                        if (!exportCtx.active || signal?.aborted) {
                             if (pixiObject) {
                                 try { pixiObject.destroy({ children: true }); } catch (e) { }
                             }
-                            return;
+                            throw new Error('cancelled');
                         }
                         if (pixiObject) {
                             if (pixiObject._videoElements) {
@@ -1153,7 +1148,9 @@ export const exportVideo = async ({
                         };
 
                         await setupFrameSide(layer.data?.assetUrl, 'front');
+                        if (!exportCtx.active || signal?.aborted) throw new Error('cancelled');
                         await setupFrameSide(layer.data?.backAssetUrl, 'back');
+                        if (!exportCtx.active || signal?.aborted) throw new Error('cancelled');
                     } else if (layer.type === 'background') {
                         const graphics = new PIXI.Graphics();
                         graphics.rect(0, 0, worldWidth, worldHeight);
