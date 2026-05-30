@@ -805,14 +805,14 @@ function EditorPage() {
 
   // Auto-pause at the end of the last step during autoplay (on load and after adding a step)
   useEffect(() => {
-    if (isPlaying && (autoPlayState === 'initial' || autoPlayState === 'final') && motionControls && lastStepEndTime > 0) {
+    if (isPlaying && (autoPlayState === 'initial' || autoPlayState === 'final') && !isStarterCopy && motionControls && lastStepEndTime > 0) {
       if (playheadTime >= lastStepEndTime) {
         motionControls.pauseAll();
         setIsPlaying(false);
         seek(lastStepEndTime);
       }
     }
-  }, [isPlaying, autoPlayState, playheadTime, lastStepEndTime, motionControls, seek, setIsPlaying]);
+  }, [isPlaying, autoPlayState, playheadTime, lastStepEndTime, motionControls, seek, setIsPlaying, isStarterCopy]);
 
   useEffect(() => {
     dispatch(setGuestMode(!isAuthenticated));
