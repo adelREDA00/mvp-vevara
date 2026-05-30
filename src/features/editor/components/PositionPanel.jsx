@@ -26,43 +26,23 @@ function PositionPanel({
   const [panelWidth, setPanelWidth] = useState(320)
   const [overId, setOverId] = useState(null)
 
-  const draggingIdRef = useRef(null)
+  const containerRef = useRef(null)
+  const pointerYRef = useRef(0)
+  const dragScrollLoopRef = useRef(null)
+
+  const dragInfoRef = useRef({
+    isDown: false,
+    startX: 0,
+    startY: 0,
+    offsetX: 0,
+    offsetY: 0,
+    draggingId: null,
+    ghostEl: null,
+    hasStarted: false,
+    cardEl: null,
+  })
+
   const [draggingId, setDraggingId] = useState(null)
-
-  const setDragging = useCallback((id) => {
-    draggingIdRef.current = id
-    setDraggingId(id)
-  }, [])
-
-  // Mobile touch drag-and-drop support
-  const handleTouchStart = useCallback((e, id) => {
-    setDragging(id)
-  }, [setDragging])
-
-  // Custom drag ghost: clone the card so the image following the cursor shows the real layer preview
-  const setDragGhost = useCallback((e, cardEl) => {
-    if (!cardEl || !e.dataTransfer) return
-    const rect = cardEl.getBoundingClientRect()
-    const ghost = cardEl.cloneNode(true)
-    ghost.style.cssText = [
-      'position:fixed',
-      'left:-9999px',
-      'top:0',
-      'width:' + rect.width + 'px',
-      'height:' + rect.height + 'px',
-      'opacity:1',
-      'box-shadow:0 12px 28px rgba(0,0,0,0.5)',
-      'pointer-events:none',
-      'background:' + (isLight ? '#ffffff' : '#090a0d'),
-      'color:' + (isLight ? '#000000' : '#ffffff'),
-      'box-sizing:border-box',
-    ].join(';')
-    document.body.appendChild(ghost)
-    const offsetX = e.clientX - rect.left
-    const offsetY = e.clientY - rect.top
-    e.dataTransfer.setDragImage(ghost, offsetX, offsetY)
-    requestAnimationFrame(() => ghost.remove())
-  }, [])
 
   const stack = useMemo(() => layers.filter(Boolean), [layers])
 
@@ -76,84 +56,156 @@ function PositionPanel({
     [stack]
   )
 
-  const getDisplayIndex = (id) => frontToBack.findIndex(l => l.id === id)
+  const getDisplayIndex = useCallback((id) => frontToBack.findIndex(l => l.id === id), [frontToBack])
 
-  const stackIndexFromDisplayIndex = (di) => stack.length - 1 - di
+  const stackIndexFromDisplayIndex = useCallback((di) => stack.length - 1 - di, [stack])
 
-  const handleDrop = useCallback((targetId) => {
-    const from = draggingIdRef.current
-    if (!from) return
+  // Continuous autoscroll loop using requestAnimationFrame
+  const startAutoscroll = useCallback(() => {
+    if (dragScrollLoopRef.current) return
 
-    const fromDi = getDisplayIndex(from)
-    const toDi = getDisplayIndex(targetId)
-
-    setDragging(null)
-    setOverId(null)
-
-    if (fromDi === -1 || toDi === -1 || fromDi === toDi) return
-
-    const fromIdx = stackIndexFromDisplayIndex(fromDi)
-    const toIdx = stackIndexFromDisplayIndex(toDi)
-
-    if (fromIdx <= 0 || toIdx <= 0) return
-
-    onReorder?.(fromIdx, toIdx)
-  }, [frontToBack, stack, onReorder, setDragging])
-
-  // Mobile touch drag-and-drop support
-  React.useEffect(() => {
-    if (!draggingId) return
-
-    // Create a floating touch ghost element at touch start
-    const originalCard = document.querySelector(`[data-layer-id="${draggingId}"]`)
-    let ghostEl = null
-
-    if (originalCard) {
-      const rect = originalCard.getBoundingClientRect()
-      ghostEl = originalCard.cloneNode(true)
-      // Remove data attribute so document.elementFromPoint doesn't match the ghost itself
-      ghostEl.removeAttribute('data-layer-id')
-      ghostEl.style.cssText = [
-        'position: fixed',
-        'width: ' + rect.width + 'px',
-        'height: ' + rect.height + 'px',
-        'opacity: 0.85',
-        'pointer-events: none',
-        'z-index: 9999',
-        'box-shadow: 0 10px 25px rgba(0,0,0,0.3)',
-        'background: ' + (isLight ? '#ffffff' : '#090a0d'),
-        'border: 1.5px solid #7c4af0',
-        'border-radius: 8px',
-        'transform: translate(-50%, -50%)', // center exactly on finger touch
-        'left: ' + rect.left + 'px',
-        'top: ' + rect.top + 'px',
-        'transition: none',
-      ].join(';')
-      document.body.appendChild(ghostEl)
-    }
-
-    const handleGlobalTouchMove = (e) => {
-      // Prevent standard browser scrolling while reordering layers
-      e.preventDefault()
-
-      const touch = e.touches[0]
-
-      // Position the touch ghost relative to finger movement
-      if (ghostEl) {
-        ghostEl.style.left = touch.clientX + 'px'
-        ghostEl.style.top = touch.clientY + 'px'
+    const scrollFn = () => {
+      const container = containerRef.current
+      if (!container || !dragInfoRef.current.isDown) {
+        dragScrollLoopRef.current = null
+        return
       }
 
-      // Temporarily hide ghost to inspect elements underneath
-      if (ghostEl) ghostEl.style.display = 'none'
-      const element = document.elementFromPoint(touch.clientX, touch.clientY)
-      if (ghostEl) ghostEl.style.display = 'flex'
+      const rect = container.getBoundingClientRect()
+      const clientY = pointerYRef.current
+      const threshold = 55
+      const maxSpeed = 15 // pixels per frame
+
+      let speed = 0
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        const distTop = clientY - rect.top
+        const distBottom = rect.bottom - clientY
+
+        if (distTop < threshold) {
+          speed = -((threshold - distTop) / threshold) * maxSpeed
+        } else if (distBottom < threshold) {
+          speed = ((threshold - distBottom) / threshold) * maxSpeed
+        }
+      }
+
+      if (speed !== 0) {
+        container.scrollTop += speed
+
+        // When scrolling, re-evaluate the element under the pointer to update the overId
+        const ghost = dragInfoRef.current.ghostEl
+        if (ghost) {
+          ghost.style.display = 'none'
+          const element = document.elementFromPoint(window.innerWidth / 2, pointerYRef.current)
+          ghost.style.display = 'flex'
+
+          if (element) {
+            const card = element.closest('[data-layer-id]')
+            if (card) {
+              const targetId = card.getAttribute('data-layer-id')
+              if (targetId && targetId !== dragInfoRef.current.draggingId) {
+                setOverId(targetId)
+              } else {
+                setOverId(null)
+              }
+            } else {
+              setOverId(null)
+            }
+          }
+        }
+      }
+
+      dragScrollLoopRef.current = requestAnimationFrame(scrollFn)
+    }
+
+    dragScrollLoopRef.current = requestAnimationFrame(scrollFn)
+  }, [])
+
+  const stopAutoscroll = useCallback(() => {
+    if (dragScrollLoopRef.current) {
+      cancelAnimationFrame(dragScrollLoopRef.current)
+      dragScrollLoopRef.current = null
+    }
+  }, [])
+
+  const handlePointerDown = useCallback((e, layerId) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+
+    const cardEl = e.currentTarget
+    const rect = cardEl.getBoundingClientRect()
+
+    dragInfoRef.current = {
+      isDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      draggingId: layerId,
+      ghostEl: null,
+      hasStarted: false,
+      cardEl: cardEl,
+    }
+
+    pointerYRef.current = e.clientY
+    cardEl.setPointerCapture(e.pointerId)
+  }, [])
+
+  const handlePointerMove = useCallback((e) => {
+    const info = dragInfoRef.current
+    if (!info.isDown) return
+
+    pointerYRef.current = e.clientY
+
+    if (!info.hasStarted) {
+      const dist = Math.hypot(e.clientX - info.startX, e.clientY - info.startY)
+      if (dist > 5) {
+        info.hasStarted = true
+        setDraggingId(info.draggingId)
+
+        const originalCard = info.cardEl
+        if (originalCard) {
+          const rect = originalCard.getBoundingClientRect()
+          const ghost = originalCard.cloneNode(true)
+          ghost.removeAttribute('data-layer-id')
+          ghost.style.cssText = [
+            'position: fixed',
+            'width: ' + rect.width + 'px',
+            'height: ' + rect.height + 'px',
+            'opacity: 0.92',
+            'pointer-events: none',
+            'z-index: 9999',
+            'box-shadow: 0 20px 35px rgba(0,0,0,0.35), 0 0 0 1.5px rgba(124, 74, 240, 0.25)',
+            'background: ' + (isLight ? '#ffffff' : '#0e0f12'),
+            'border: 1.5px solid #7c4af0',
+            'border-radius: 10px',
+            'transform: scale(1.02) rotate(0.8deg)',
+            'left: ' + (e.clientX - info.offsetX) + 'px',
+            'top: ' + (e.clientY - info.offsetY) + 'px',
+            'transition: transform 0.15s ease, box-shadow 0.15s ease',
+            'backdrop-filter: blur(12px)',
+            '-webkit-backdrop-filter: blur(12px)',
+          ].join(';')
+          document.body.appendChild(ghost)
+          info.ghostEl = ghost
+        }
+
+        startAutoscroll()
+      }
+    }
+
+    if (info.hasStarted && info.ghostEl) {
+      info.ghostEl.style.left = (e.clientX - info.offsetX) + 'px'
+      info.ghostEl.style.top = (e.clientY - info.offsetY) + 'px'
+
+      // Temporarily hide ghost to check elements under pointer
+      info.ghostEl.style.display = 'none'
+      const element = document.elementFromPoint(e.clientX, e.clientY)
+      info.ghostEl.style.display = 'flex'
 
       if (element) {
         const card = element.closest('[data-layer-id]')
         if (card) {
           const targetId = card.getAttribute('data-layer-id')
-          if (targetId && targetId !== draggingId) {
+          if (targetId && targetId !== info.draggingId) {
             setOverId(targetId)
           } else {
             setOverId(null)
@@ -163,15 +215,43 @@ function PositionPanel({
         }
       }
     }
+  }, [isLight, startAutoscroll])
 
-    const handleGlobalTouchEnd = (e) => {
-      const touch = e.changedTouches[0]
+  const handlePointerUp = useCallback((e) => {
+    const info = dragInfoRef.current
+    if (!info.isDown) return
 
-      // Temporarily hide ghost to check drop target element
-      if (ghostEl) ghostEl.style.display = 'none'
-      const element = document.elementFromPoint(touch.clientX, touch.clientY)
+    try {
+      info.cardEl?.releasePointerCapture(e.pointerId)
+    } catch (err) {}
+
+    stopAutoscroll()
+
+    if (info.ghostEl) {
+      info.ghostEl.remove()
+    }
+
+    const wasDragging = info.hasStarted
+    const finalDraggingId = info.draggingId
+
+    dragInfoRef.current = {
+      isDown: false,
+      startX: 0,
+      startY: 0,
+      offsetX: 0,
+      offsetY: 0,
+      draggingId: null,
+      ghostEl: null,
+      hasStarted: false,
+      cardEl: null,
+    }
+
+    setDraggingId(null)
+    setOverId(null)
+
+    if (wasDragging) {
+      const element = document.elementFromPoint(e.clientX, e.clientY)
       let targetId = null
-
       if (element) {
         const card = element.closest('[data-layer-id]')
         if (card) {
@@ -179,31 +259,23 @@ function PositionPanel({
         }
       }
 
-      // Clean up the floating ghost card
-      if (ghostEl) {
-        ghostEl.remove()
-        ghostEl = null
-      }
+      if (targetId && targetId !== finalDraggingId) {
+        const fromDi = getDisplayIndex(finalDraggingId)
+        const toDi = getDisplayIndex(targetId)
 
-      if (targetId && targetId !== draggingId) {
-        handleDrop(targetId)
-      } else {
-        setDragging(null)
-        setOverId(null)
+        if (fromDi !== -1 && toDi !== -1 && fromDi !== toDi) {
+          const fromIdx = stackIndexFromDisplayIndex(fromDi)
+          const toIdx = stackIndexFromDisplayIndex(toDi)
+          if (fromIdx > 0 && toIdx > 0) {
+            onReorder?.(fromIdx, toIdx)
+          }
+        }
       }
+    } else {
+      onSelectLayer?.(finalDraggingId)
     }
+  }, [getDisplayIndex, stackIndexFromDisplayIndex, onReorder, onSelectLayer, stopAutoscroll])
 
-    document.addEventListener('touchmove', handleGlobalTouchMove, { passive: false })
-    document.addEventListener('touchend', handleGlobalTouchEnd, { passive: false })
-
-    return () => {
-      if (ghostEl) {
-        ghostEl.remove()
-      }
-      document.removeEventListener('touchmove', handleGlobalTouchMove)
-      document.removeEventListener('touchend', handleGlobalTouchEnd)
-    }
-  }, [draggingId, handleDrop, setDragging, isLight])
 
   const renderPreview = (layer) => {
     if (!layer) return null
@@ -386,9 +458,8 @@ function PositionPanel({
 
       {/* Card list */}
       <div
-        className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5"
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
-        onDrop={(e) => { e.preventDefault(); e.stopPropagation() }}
+        ref={containerRef}
+        className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5 scroll-smooth"
       >
         {frontToBack.length === 0 && (
           <div className={`text-sm px-3 py-6 rounded-xl border border-dashed text-center leading-relaxed ${isLight ? 'border-slate-200 text-slate-400 bg-white shadow-sm' : 'border-white/10 text-white/50 animate-pulse'}`}>
@@ -406,49 +477,23 @@ function PositionPanel({
             <div
               key={layer.id}
               data-layer-id={layer.id}
-              draggable
-              onDragStart={(e) => {
-                e.stopPropagation()
-                setDragging(layer.id)
-                e.dataTransfer.effectAllowed = 'move'
-                setDragGhost(e, e.currentTarget)
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                e.dataTransfer.dropEffect = 'move'
-                if (draggingIdRef.current && draggingIdRef.current !== layer.id) {
-                  setOverId(layer.id)
-                }
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget)) setOverId(null)
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                handleDrop(layer.id)
-              }}
-              onDragEnd={() => {
-                setDragging(null)
-                setOverId(null)
-              }}
-              onTouchStart={(e) => handleTouchStart(e, layer.id)}
-              onClick={() => onSelectLayer?.(layer.id)}
+              onPointerDown={(e) => handlePointerDown(e, layer.id)}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
               className={[
                 'group flex items-center gap-2 px-2 rounded-lg border transition-all select-none cursor-grab active:cursor-grabbing',
                 isSelected
                   ? isLight ? 'border-purple-500 bg-purple-500/10' : 'border-purple-500/60 bg-purple-500/10 shadow-[0_0_0_1px_rgba(168,85,247,0.15)]'
                   : isLight ? 'border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50/10' : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]',
-                isDragged ? isLight ? 'opacity-90 scale-[0.98] ring-1 ring-gray-200' : 'opacity-90 scale-[0.98] ring-1 ring-white/20' : '',
-                isOver ? isLight ? 'border-purple-400 bg-purple-50' : 'border-purple-400/70 bg-purple-500/10 scale-[1.01]' : '',
+                isDragged ? isLight ? 'opacity-40 scale-[0.98] border-dashed border-purple-400/50' : 'opacity-40 scale-[0.98] border-dashed border-purple-500/40' : '',
+                isOver ? isLight ? 'border-purple-400 bg-purple-50/80 scale-[1.01] translate-y-0.5' : 'border-purple-400/70 bg-purple-500/15 scale-[1.01] translate-y-0.5' : '',
               ].join(' ')}
-              style={{ height: '56px' }}
+              style={{ height: '56px', touchAction: 'none' }}
             >
               {/* Grip */}
               <div 
                 className={`transition-colors flex-shrink-0 cursor-grab active:cursor-grabbing ${isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-white/25 group-hover:text-white/55'}`}
-                style={{ touchAction: 'none' }}
               >
                 <GripVertical className="h-4 w-4" />
               </div>
