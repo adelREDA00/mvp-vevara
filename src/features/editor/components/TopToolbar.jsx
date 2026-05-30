@@ -174,7 +174,7 @@ function TopToolbar({
 
         </div>
 
-        {/* Center Section - Project Name (centered relative to workspace) */}
+        {/* Center Section - Project Name or Open Account Button (centered relative to workspace) */}
         <div
           className="absolute inset-x-0 bottom-0 h-full flex items-center justify-center pointer-events-none"
           style={{
@@ -184,22 +184,37 @@ function TopToolbar({
           }}
         >
           <div className="pointer-events-auto">
-            <input
-              type="text"
-              value={isEditingName ? editedName : projectName}
-              onFocus={() => setIsEditingName(true)}
-              onBlur={handleNameSubmit}
-              onChange={(e) => setEditedName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleNameSubmit()
-                if (e.key === 'Escape') {
-                  setEditedName(projectName)
-                  setIsEditingName(false)
-                }
-              }}
-              className="bg-transparent text-white text-center font-semibold outline-none max-w-[100px] xs:max-w-[120px] sm:max-w-xs md:max-w-md text-[15px] md:text-[16px] origin-center truncate border-none placeholder:text-white/40 focus:placeholder:opacity-0 transition-all"
-              placeholder="Untitled"
-            />
+            {!isAuthenticated && (projectName === 'onb marketing' || projectName === 'Mistral AI Studio') ? (
+              <button
+                onClick={() => {
+                  if (onNavigate) {
+                    onNavigate('/login')
+                  } else {
+                    window.location.href = '/login'
+                  }
+                }}
+                className="bg-white hover:bg-white/95 text-[#7c4af0] h-7 md:h-8 px-3 rounded-[8px] text-[11px] md:text-xs font-bold transition-all duration-200 active:scale-95 flex items-center gap-1.5 pointer-events-auto"
+              >
+                Open Account
+              </button>
+            ) : (
+              <input
+                type="text"
+                value={isEditingName ? editedName : projectName}
+                onFocus={() => setIsEditingName(true)}
+                onBlur={handleNameSubmit}
+                onChange={(e) => setEditedName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNameSubmit()
+                  if (e.key === 'Escape') {
+                    setEditedName(projectName)
+                    setIsEditingName(false)
+                  }
+                }}
+                className="bg-transparent text-white text-center font-semibold outline-none max-w-[100px] xs:max-w-[120px] sm:max-w-xs md:max-w-md text-[15px] md:text-[16px] origin-center truncate border-none placeholder:text-white/40 focus:placeholder:opacity-0 transition-all"
+                placeholder="Untitled"
+              />
+            )}
           </div>
         </div>
 
