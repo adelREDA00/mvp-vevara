@@ -3480,23 +3480,25 @@ function EditorPage() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {
         e.preventDefault()
 
-        // Check if we have scene clipboard data
         try {
-          const sceneClipboard = localStorage.getItem('vevara_scene_clipboard')
-          if (sceneClipboard) {
-            // Check if we also have layer clipboard to determine which to paste
-            const layerClipboard = localStorage.getItem('vevara_clipboard')
-
-            // If we have both, prefer scene clipboard if no layers are selected
-            // Otherwise prefer layer clipboard if layers are selected
-            if (sceneClipboard && (!layerClipboard || selectedLayerIds.length === 0)) {
-              dispatch(pasteScene())
-            } else if (layerClipboard) {
+          const lastCopiedType = localStorage.getItem('vevara_last_copied_type')
+          if (lastCopiedType === 'scene') {
+            dispatch(pasteScene())
+          } else if (lastCopiedType === 'layers') {
+            dispatch(pasteLayers())
+          } else {
+            // Legacy / fallback heuristic if marker is not set
+            const sceneClipboard = localStorage.getItem('vevara_scene_clipboard')
+            if (sceneClipboard) {
+              const layerClipboard = localStorage.getItem('vevara_clipboard')
+              if (sceneClipboard && (!layerClipboard || selectedLayerIds.length === 0)) {
+                dispatch(pasteScene())
+              } else if (layerClipboard) {
+                dispatch(pasteLayers())
+              }
+            } else {
               dispatch(pasteLayers())
             }
-          } else {
-            // Only layer clipboard available
-            dispatch(pasteLayers())
           }
         } catch (e) {
           // Fallback to layer paste

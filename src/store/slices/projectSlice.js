@@ -1312,6 +1312,7 @@ const projectSlice = createSlice({
           timestamp: Date.now(),
           version: '1.0', // Version marker for validation
         }))
+        localStorage.setItem('vevara_last_copied_type', 'layers')
       } catch (e) {
         // Clear clipboard if storage fails
         try {
@@ -1512,11 +1513,13 @@ const projectSlice = createSlice({
             name: scene.name,
             duration: scene.duration,
             transition: scene.transition,
+            backgroundColor: scene.backgroundColor,
           },
           originalSceneId: sceneId, // Store original scene ID to position paste after it
           layers: sceneLayers,
           timestamp: Date.now(),
         }))
+        localStorage.setItem('vevara_last_copied_type', 'scene')
       } catch (e) {
       }
     },
@@ -1541,6 +1544,7 @@ const projectSlice = createSlice({
         name: `${clipboardData.scene.name} Copy`,
         duration: clipboardData.scene.duration || 5.0,
         transition: clipboardData.scene.transition || 'None',
+        backgroundColor: clipboardData.scene.backgroundColor || '#ffffff',
         layers: [],
       }
 

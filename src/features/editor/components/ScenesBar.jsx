@@ -26,6 +26,52 @@ function useDebounce(value, delay) {
   return debouncedValue
 }
 
+// Standalone utility to auto-scroll a container based on cursor X coordinate
+const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll) => {
+  if (!container) {
+    if (scrollTimerRef.current) {
+      clearInterval(scrollTimerRef.current)
+      scrollTimerRef.current = null
+    }
+    return
+  }
+
+  const rect = container.getBoundingClientRect()
+  const threshold = 60 // px from edge to start scrolling
+  const leftDist = clientX - rect.left
+  const rightDist = rect.right - clientX
+
+  let speed = 0
+  if (rightDist < threshold && rightDist > -100) {
+    const ratio = Math.max(0, (threshold - rightDist) / threshold)
+    speed = Math.round(ratio * 12) + 4 // speed range: 4px to 16px
+  } else if (leftDist < threshold && leftDist > -100) {
+    const ratio = Math.max(0, (threshold - leftDist) / threshold)
+    speed = -Math.round(ratio * 12) - 4
+  }
+
+  if (speed !== 0) {
+    if (!scrollTimerRef.current) {
+      scrollTimerRef.current = setInterval(() => {
+        container.scrollLeft += speed
+        if (onScroll) onScroll(speed)
+      }, 16)
+    }
+  } else {
+    if (scrollTimerRef.current) {
+      clearInterval(scrollTimerRef.current)
+      scrollTimerRef.current = null
+    }
+  }
+}
+
+const stopAutoScroll = (scrollTimerRef) => {
+  if (scrollTimerRef.current) {
+    clearInterval(scrollTimerRef.current)
+    scrollTimerRef.current = null
+  }
+}
+
 // Normalize layer fill/stroke to CSS color. Returns null for transparent/empty so we can show outline only.
 function normalizeShapeColor(value) {
   if (value === undefined || value === null || value === '') return null
@@ -608,6 +654,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const { height } = defaultDimensions
 
   // Track drag position for floating preview - minimize React state updates
+  const dragAllowedRef = useRef(false)
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 })
   const cardElementRef = useRef(null)
   const dragPositionRef = useRef({ x: 0, y: 0 })
@@ -759,35 +806,65 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     isDraggingRef.current = false
     dragPositionRef.current = { x: 0, y: 0 }
     setDragPosition({ x: 0, y: 0 })
+    dragAllowedRef.current = false
     if (onDragEnd) onDragEnd()
   }
 
-  // Resize handlers - support both left and right side resizing (mouse + touch)
-  const handleResizeMouseMove = (e) => {
+  // Reset dragAllowedRef on mouseup/touchend anywhere
+  useEffect(() => {
+    const handleGlobalUp = () => {
+      dragAllowedRef.current = false
+    }
+    window.addEventListener('mouseup', handleGlobalUp)
+    window.addEventListener('touchend', handleGlobalUp)
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalUp)
+      window.removeEventListener('touchend', handleGlobalUp)
+    }
+  }, [])
+
+  const resizeScrollTimerRef = useRef(null)
+  const startScrollLeftRef = useRef(0)
+  const lastClientXRef = useRef(0)
+
+  // Declare high-performance resize function that accounts for scroll distance
+  const performResize = useCallback((clientX) => {
     if (!isResizingRef.current || !resizeSideRef.current) {
       return
     }
-    if (e.cancelable) {
-      e.preventDefault()
-    }
+    lastClientXRef.current = clientX
 
-    // Extract clientX from either mouse or touch events
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX
     const deltaX = clientX - startXRef.current
     let newWidth
     const cardPaddingRight = 4 // Gap between cards
-    // Minimum width corresponds to 0.1 seconds duration
     const defaultWidth = getCardDimensions().width
     const minWidth = minCardWidth || (0.1 / 5.0) * defaultWidth
+
+    // Find nearest overflow-x scroll container
+    const scrollContainer = cardRef.current ? (() => {
+      let el = cardRef.current.parentElement
+      while (el) {
+        const style = window.getComputedStyle(el)
+        if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+          return el
+        }
+        el = el.parentElement
+      }
+      return null
+    })() : null
+
+    // Scroll delta increases the effective drag distance
+    const scrollDelta = scrollContainer ? (scrollContainer.scrollLeft - startScrollLeftRef.current) : 0
+    const adjustedDeltaX = resizeSideRef.current === 'right' ? (deltaX + scrollDelta) : (deltaX - scrollDelta)
 
     let leftOffset = 0
     let gapSize = 0
 
     if (resizeSideRef.current === 'right') {
-      newWidth = Math.max(minWidth, startWidthRef.current + deltaX)
+      newWidth = Math.max(minWidth, startWidthRef.current + adjustedDeltaX)
     } else {
-      newWidth = startWidthRef.current - deltaX
-      if (deltaX >= 0) {
+      newWidth = startWidthRef.current - adjustedDeltaX
+      if (adjustedDeltaX >= 0) {
         newWidth = Math.max(minWidth, newWidth)
         const widthDecrease = startWidthRef.current - newWidth
         const maxTransform = Math.min(widthDecrease, cardPaddingRight * 1.5)
@@ -815,7 +892,6 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
 
     // Consolidated ATOMIC state update
     setResizeState(prev => {
-      // Small optimization: only update if something actually changed
       const hasChanged =
         prev.duration !== newDuration ||
         prev.width !== newWidth ||
@@ -838,9 +914,43 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     if (onCardWidthChange) {
       onCardWidthChange(index, newWidth, resizeSideRef.current)
     }
+  }, [minCardWidth, index, calculateDurationFromWidth, onCardWidthChange, onMotionStop, resizeSideRef, resizeState.tooltipPosition])
+
+  // Resize handlers - support both left and right side resizing (mouse + touch)
+  const handleResizeMouseMove = (e) => {
+    if (!isResizingRef.current || !resizeSideRef.current) {
+      return
+    }
+    if (e.cancelable) {
+      e.preventDefault()
+    }
+
+    // Extract clientX from either mouse or touch events
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX
+    performResize(clientX)
+
+    // Check if we need to auto-scroll the container
+    const scrollContainer = cardRef.current ? (() => {
+      let el = cardRef.current.parentElement
+      while (el) {
+        const style = window.getComputedStyle(el)
+        if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+          return el
+        }
+        el = el.parentElement
+      }
+      return null
+    })() : null
+
+    if (scrollContainer) {
+      checkAutoScroll(clientX, scrollContainer, resizeScrollTimerRef, () => {
+        performResize(lastClientXRef.current)
+      })
+    }
   }
 
   const handleResizeMouseUp = () => {
+    stopAutoScroll(resizeScrollTimerRef)
     const wasLeftResize = resizeSideRef.current === 'left'
     const currentGapSize = resizeState.gapSize
     const currentWidth = currentCardWidth
@@ -887,6 +997,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
 
   useEffect(() => {
     return () => {
+      stopAutoScroll(resizeScrollTimerRef)
       document.removeEventListener('mousemove', resizeMouseMoveWrapper)
       document.removeEventListener('mouseup', resizeMouseUpWrapper)
       document.removeEventListener('touchmove', resizeMouseMoveWrapper)
@@ -901,13 +1012,26 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     e.stopPropagation()
     e.preventDefault()
 
-    const startX = e.clientX
+    const startX = e.clientX || (e.touches && e.touches[0].clientX)
     const startWidth = currentCardWidth
 
     if (side === 'left' && e.currentTarget.offsetParent) {
       startLeftRef.current = e.currentTarget.offsetParent.offsetLeft || 0
     }
 
+    const scrollContainer = cardRef.current ? (() => {
+      let el = cardRef.current.parentElement
+      while (el) {
+        const style = window.getComputedStyle(el)
+        if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+          return el
+        }
+        el = el.parentElement
+      }
+      return null
+    })() : null
+
+    startScrollLeftRef.current = scrollContainer ? scrollContainer.scrollLeft : 0
     isResizingRef.current = true
     resizeSideRef.current = side
     startXRef.current = startX
@@ -1054,7 +1178,18 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         }}
         draggable={!resizeState.isResizing}
         onDragStart={(e) => {
+          // Only allow dragging if the drag started directly on or inside the card body/preview
+          if (!dragAllowedRef.current) {
+            e.preventDefault()
+            e.stopPropagation()
+            return false
+          }
           if (e.target.classList.contains('resize-handle') || e.target.closest('.resize-handle')) {
+            e.preventDefault()
+            e.stopPropagation()
+            return false
+          }
+          if (e.target.closest('[data-tutorial="steps-area"]')) {
             e.preventDefault()
             e.stopPropagation()
             return false
@@ -1073,9 +1208,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         onDrop={handleDrop}
       >
         <div
+          data-scene-card-body="true"
           onClick={handleCardClickWithResize}
           onContextMenu={onContextMenu}
           onMouseDown={(e) => {
+            dragAllowedRef.current = true
             const rect = e.currentTarget.getBoundingClientRect()
             const clickX = e.clientX - rect.left
             const cardWidth = rect.width
@@ -1085,6 +1222,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             }
           }}
           onTouchStart={(e) => {
+            dragAllowedRef.current = true
             const touch = e.touches[0]
             const startX = touch.clientX
             const startY = touch.clientY
@@ -1383,6 +1521,8 @@ const ScenesBar = React.memo(({
   const cardsContainerRef = useRef(null)
   const playheadElementRef = useRef(null) // Ref for direct DOM manipulation
   const isTimelineInteractingRef = useRef(false)
+  const dragScrollTimerRef = useRef(null)
+  const playheadScrollTimerRef = useRef(null)
 
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
@@ -1796,6 +1936,7 @@ const ScenesBar = React.memo(({
 
     let rafId = null
     let pendingSeekTime = null
+    let lastClientX = null
 
     const computeSeekTime = (clientX) => {
       if (!cardsContainerRef.current) return null
@@ -1836,13 +1977,10 @@ const ScenesBar = React.memo(({
       return seekTime
     }
 
-    const handleMouseMove = (e) => {
-      if (!onSeek) return
-      const seekTime = computeSeekTime(e.clientX)
-      if (seekTime === null) return
+    const triggerSeek = (clientX) => {
+      const seekTime = computeSeekTime(clientX)
+      if (seekTime === null || !onSeek) return
 
-      // [PERF] Batch seek calls to once per animation frame.
-      // Visual playhead position is already updated above for instant feedback.
       pendingSeekTime = seekTime
       if (rafId === null) {
         rafId = requestAnimationFrame(() => {
@@ -1854,7 +1992,21 @@ const ScenesBar = React.memo(({
       }
     }
 
+    const handleMouseMove = (e) => {
+      lastClientX = e.clientX
+      triggerSeek(e.clientX)
+
+      // Find nearest scrollable container
+      const scrollContainer = timelineRef.current?.parentElement
+      if (scrollContainer) {
+        checkAutoScroll(e.clientX, scrollContainer, playheadScrollTimerRef, () => {
+          if (lastClientX !== null) triggerSeek(lastClientX)
+        })
+      }
+    }
+
     const handleMouseUp = () => {
+      stopAutoScroll(playheadScrollTimerRef)
       // Flush any pending seek on release to ensure final position is exact
       if (pendingSeekTime !== null) {
         if (rafId !== null) {
@@ -1884,6 +2036,7 @@ const ScenesBar = React.memo(({
     document.addEventListener('touchend', handleMouseUp)
 
     return () => {
+      stopAutoScroll(playheadScrollTimerRef)
       if (rafId !== null) cancelAnimationFrame(rafId)
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
@@ -1943,117 +2096,41 @@ const ScenesBar = React.memo(({
   // Simplified and robust insertion index calculation
   // Uses the center of the dragged card (mouse position) to determine drop position
   // Much larger drop zones for first/last positions to make them easy to target
+  // Simplified and robust insertion index calculation
+  // Uses bounding client rects of actual card elements for perfect accuracy, even with custom sizes
   const calculateInsertionIndex = (clientX) => {
     if (!cardsContainerRef.current || draggedIndex === null) {
       return null
     }
 
-    const container = cardsContainerRef.current
-    const containerRect = container.getBoundingClientRect()
-    const cardCenterX = clientX - containerRect.left
-
-    const gap = 4
-    const firstLastDropZone = 200 // Large drop zone for first/last positions
-
-    // Build positions array excluding dragged card
+    const wrappers = Array.from(cardsContainerRef.current.querySelectorAll('[data-scene-card-wrapper]'))
     const positions = []
-    let currentX = 0
 
-    for (let i = 0; i < scenes.length; i++) {
-      if (i === draggedIndex) continue
+    wrappers.forEach((wrapper, i) => {
+      if (i === draggedIndex) return // Skip the dragged card itself
 
-      const cardWidth = cardWidths[i] || getDefaultCardWidth()
+      const rect = wrapper.getBoundingClientRect()
       positions.push({
         originalIndex: i,
-        leftEdge: currentX,
-        rightEdge: currentX + cardWidth,
-        center: currentX + (cardWidth / 2)
+        leftEdge: rect.left,
+        rightEdge: rect.right,
+        center: rect.left + (rect.width / 2)
       })
-
-      currentX += cardWidth + gap
-    }
+    })
 
     if (positions.length === 0) {
       return 0
     }
 
-    const firstPos = positions[0]
-    const lastPos = positions[positions.length - 1]
-    const tolerance = 2
-
-    // FIRST: Check middle positions (cards and gaps between them)
-    // This must happen BEFORE first/last checks to avoid false positives
+    // Find the first position where the mouse cursor is to the left of the card's center
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i]
-      const nextPos = positions[i + 1]
-
-      // Check if center is in gap between cards (with tolerance)
-      if (nextPos) {
-        const gapStart = pos.rightEdge - tolerance
-        const gapEnd = nextPos.leftEdge + tolerance
-
-        if (cardCenterX >= gapStart && cardCenterX < gapEnd) {
-          // In gap - use gap center to decide
-          const gapCenter = pos.rightEdge + (gap / 2)
-          if (cardCenterX < gapCenter) {
-            // Insert before next card
-            return draggedIndex < nextPos.originalIndex ? nextPos.originalIndex - 1 : nextPos.originalIndex
-          } else {
-            // Insert after current card
-            return draggedIndex < pos.originalIndex ? pos.originalIndex : pos.originalIndex + 1
-          }
-        }
-      }
-
-      // Check if center is over a card (with tolerance)
-      const cardStart = pos.leftEdge - tolerance
-      const cardEnd = pos.rightEdge + tolerance
-
-      if (cardCenterX >= cardStart && cardCenterX < cardEnd) {
-        // Use card center as threshold
-        if (cardCenterX < pos.center) {
-          // Insert before this card
-          return draggedIndex < pos.originalIndex ? pos.originalIndex - 1 : pos.originalIndex
-        } else {
-          // Insert after this card
-          if (draggedIndex < pos.originalIndex) {
-            // Dragging from left: after removal, this card moves left by 1, insert after it
-            return pos.originalIndex
-          } else {
-            // Dragging from right: this card's index doesn't change
-            // After removal, we want to insert after this card
-            // If this is the last card in positions array, we want to insert at the end
-            // Otherwise, insert at the next position
-            if (i === positions.length - 1) {
-              // This is the last visible card, insert at the end
-              return scenes.length - 1
-            } else {
-              // Insert after this card
-              return pos.originalIndex + 1
-            }
-          }
-        }
+      if (clientX < pos.center) {
+        return draggedIndex < pos.originalIndex ? pos.originalIndex - 1 : pos.originalIndex
       }
     }
 
-    // SECOND: Check first/last positions with extended drop zones
-    // Only trigger if card center is clearly outside the middle card area
-    // Use extended zones to make first/last positions easy to target
-
-    // First position: extended zone to the left of first card
-    // If center is to the left of first card (even slightly), and within extended zone
-    if (cardCenterX < firstPos.leftEdge + firstLastDropZone) {
-      return 0
-    }
-
-    // Last position: extended zone to the right of last card
-    // If center is to the right of last card (even slightly), trigger last position
-    // Use tolerance to make it easy to trigger when near the right edge
-    if (cardCenterX > lastPos.rightEdge - tolerance) {
-      return scenes.length - 1
-    }
-
-    // Fallback - if we somehow didn't match anything, use last position
+    // Otherwise, insert at the end
     return scenes.length - 1
   }
 
@@ -2061,17 +2138,35 @@ const ScenesBar = React.memo(({
   useEffect(() => {
     if (draggedIndex === null) return
 
+    let lastClientX = null
+
     const handleMove = (e) => {
       // Handle both MouseEvent and TouchEvent
       const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX
+      lastClientX = clientX
+
       // Calculate insertion index based on position during drag
       const newIndex = calculateInsertionIndex(clientX)
       if (newIndex !== insertionIndex) {
         setInsertionIndex(newIndex)
       }
+
+      // Auto-scroll the timeline if dragging near the edge
+      const scrollContainer = timelineRef.current?.parentElement
+      if (scrollContainer) {
+        checkAutoScroll(clientX, scrollContainer, dragScrollTimerRef, () => {
+          if (lastClientX !== null) {
+            const indexOnScroll = calculateInsertionIndex(lastClientX)
+            if (indexOnScroll !== insertionIndex) {
+              setInsertionIndex(indexOnScroll)
+            }
+          }
+        })
+      }
     }
 
     const handleEnd = (e) => {
+      stopAutoScroll(dragScrollTimerRef)
       // For touch, we may need to look at changedTouches
       const clientX = e.type.startsWith('touch') ? (e.changedTouches[0]?.clientX || 0) : e.clientX
       // Calculate the final insertion index based on final position
@@ -2093,6 +2188,7 @@ const ScenesBar = React.memo(({
     document.addEventListener('touchend', handleEnd, { passive: false })
 
     return () => {
+      stopAutoScroll(dragScrollTimerRef)
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleEnd)
       document.removeEventListener('touchmove', handleMove)
@@ -2432,28 +2528,25 @@ const ScenesBar = React.memo(({
             className="absolute z-30 pointer-events-none"
             style={{
               left: (() => {
-                const gap = 4
-                // Calculate position by iterating through card widths
-                // We need to account for the gap and the absolute position within the scrollable container
-                let x = 0
-                let visibleCardCount = 0
-
-                for (let i = 0; i < scenes.length; i++) {
-                  if (i === draggedIndex) continue
-
-                  // If this is the spot where we want to insert, return the current x
-                  if (visibleCardCount === insertionIndex) {
-                    // Adjust by half gap to center it (except at the very start)
-                    return visibleCardCount === 0 ? '0px' : `${x - (gap / 2)}px`
-                  }
-
-                  const cardWidth = cardWidths[i] || getDefaultCardWidth()
-                  x += cardWidth + gap
-                  visibleCardCount++
+                if (!cardsContainerRef.current) return '0px'
+                const wrappers = Array.from(cardsContainerRef.current.querySelectorAll('[data-scene-card-wrapper]'))
+                const containerRect = cardsContainerRef.current.getBoundingClientRect()
+                
+                // Find all cards excluding the dragged card
+                const visibleWrappers = wrappers.filter((_, i) => i !== draggedIndex)
+                
+                if (insertionIndex === 0 && visibleWrappers[0]) {
+                  const rect = visibleWrappers[0].getBoundingClientRect()
+                  return `${rect.left - containerRect.left - 2}px`
                 }
-
-                // If we reach the end, return the final x - adjustment
-                return `${x - (gap / 2)}px`
+                
+                if (insertionIndex >= visibleWrappers.length) {
+                  const lastRect = visibleWrappers[visibleWrappers.length - 1].getBoundingClientRect()
+                  return `${lastRect.right - containerRect.left + 2}px`
+                }
+                
+                const nextRect = visibleWrappers[insertionIndex].getBoundingClientRect()
+                return `${nextRect.left - containerRect.left - 2}px`
               })(),
               top: '0',
               bottom: '8px',
