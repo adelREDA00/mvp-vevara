@@ -8,7 +8,7 @@ export const ADS_TEMPLATE = {
       {
         "id": "1777732680812-vhpudzfvh",
         "name": "Scene 1",
-        "duration": 4,
+        "duration": 9,
         "transition": "None",
         "backgroundColor": 15856113,
         "layers": [
@@ -509,7 +509,7 @@ export const SAAS_TEMPLATE = {
       {
         "id": "1777817441081-xmohwyb6b",
         "name": "Scene 2",
-        "duration": 7,
+        "duration": 12,
         "transition": "None",
         "backgroundColor": 16777215,
         "layers": [

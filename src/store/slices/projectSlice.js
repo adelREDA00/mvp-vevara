@@ -80,73 +80,74 @@ const initialState = {
 
 // Resolve step layout: auto steps get default duration, manual steps are preserved.
 // Overflow is absorbed by trimming rightmost manual step(s). Steps are placed contiguously.
-const resolveStepLayout = (steps, sceneDurationMs) => {
+// Resolve step layout: auto and manual steps behave like fixed duration objects.
+// Under shrink, we apply a non-linear intelligent packing system that protects block durations
+// and uses push/collision cascades to maintain ordering.
+const resolveStepLayout = (steps, sceneDurationMs, resizeSide = 'right') => {
   if (steps.length === 0) return
   const MIN_DURATION = 200 // ms — minimum to prevent micro-durations
-  const defaultDuration = Math.max(MIN_DURATION, Math.round(sceneDurationMs / steps.length))
+  const MIN_SPACING = 50   // ms — minimum spacing between steps to maintain visual gaps
 
-  // Step 1: Set auto step durations to default, keep manual durations
+  // Step 1: Initialize step durations and enforce minimums
+  const defaultDuration = Math.max(MIN_DURATION, Math.round(sceneDurationMs / steps.length))
   steps.forEach(step => {
-    if (!step.manual) {
+    // Treat all steps as fixed duration objects if they already have a duration
+    if (!step.duration) {
       step.duration = defaultDuration
     }
-    // Enforce minimum for all steps
-    if (!step.duration || step.duration < MIN_DURATION) step.duration = MIN_DURATION
+    if (step.duration < MIN_DURATION) {
+      step.duration = MIN_DURATION
+    }
   })
 
-  // Step 2: Resolve overflow — trim from rightmost manual steps
-  let total = steps.reduce((sum, s) => sum + s.duration, 0)
-  if (total > sceneDurationMs) {
-    let overflow = total - sceneDurationMs
-    for (let i = steps.length - 1; i >= 0 && overflow > 0; i--) {
-      if (steps[i].manual) {
-        const maxTrim = steps[i].duration - MIN_DURATION
-        if (maxTrim > 0) {
-          const trim = Math.min(maxTrim, overflow)
-          steps[i].duration = Math.round(steps[i].duration - trim)
-          overflow -= trim
-        }
-      }
+  // Ensure every step has an initial startTime if not set
+  let tempCursor = 0
+  steps.forEach(step => {
+    if (step.startTime == null) {
+      step.startTime = Math.round(tempCursor)
     }
-    // Emergency fallback: if still overflowing, trim auto steps from right
-    if (overflow > 0) {
-      for (let i = steps.length - 1; i >= 0 && overflow > 0; i--) {
-        const maxTrim = steps[i].duration - MIN_DURATION
-        if (maxTrim > 0) {
-          const trim = Math.min(maxTrim, overflow)
-          steps[i].duration = Math.round(steps[i].duration - trim)
-          overflow -= trim
-        }
+    tempCursor = step.startTime + step.duration
+  })
+
+  // Step 2 & 3: Push behavior & collision handling
+  const totalStepDuration = steps.reduce((sum, s) => sum + s.duration, 0)
+  const totalMinSpacing = (steps.length - 1) * MIN_SPACING
+  const totalSpaceRequired = totalStepDuration + totalMinSpacing
+
+  if (totalSpaceRequired <= sceneDurationMs) {
+    // Shrunk from either side (effect is always on the right side of the blocks):
+    // Cascade Right-to-Left first (pushing steps leftward from the right boundary)
+    let rightWall = sceneDurationMs
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i]
+      if (step.startTime + step.duration > rightWall) {
+        step.startTime = Math.max(0, rightWall - step.duration)
       }
+      rightWall = step.startTime - MIN_SPACING
     }
-  }
 
-  // Step 3: Position steps — preserve manually set positions (with gaps)
-  const hasManualPositions = steps.some(s => s.manual && s.startTime != null)
-
-  if (hasManualPositions) {
-    let cursor = 0
-    steps.forEach(step => {
-      if (step.manual && step.startTime != null) {
-        // Manual step: keep its user-set position (preserves gaps)
-        cursor = step.startTime + step.duration
-      } else {
-        // Auto step: place after the last positioned step
-        step.startTime = Math.round(cursor)
-        cursor += step.duration
+    // Secondary check: If steps got pushed before 0, cascade Left-to-Right
+    let leftWall = 0
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]
+      if (step.startTime < leftWall) {
+        step.startTime = leftWall
       }
-    })
+      leftWall = step.startTime + step.duration + MIN_SPACING
+    }
   } else {
-    // All auto: contiguous placement (default behavior)
+    // Step 4: Final emergency compression stage
+    // Compress spacing to 0, then scale durations proportionally to fit inside scene
+    const scaleFactor = sceneDurationMs / totalStepDuration
     let cursor = 0
     steps.forEach(step => {
+      step.duration = Math.max(MIN_DURATION, Math.round(step.duration * scaleFactor))
       step.startTime = Math.round(cursor)
       cursor += step.duration
     })
   }
 
-  // Step 4: Boundary clamp — no step may extend past the scene duration.
-  // This prevents tweens from bleeding into the next scene (which breaks playback).
+  // Boundary clamp fallback (ensures no steps bleed out of bounds under any edge case)
   steps.forEach(step => {
     if (step.startTime >= sceneDurationMs) {
       step.startTime = Math.max(0, sceneDurationMs - MIN_DURATION)
@@ -158,7 +159,7 @@ const resolveStepLayout = (steps, sceneDurationMs) => {
 }
 
 // Sync motion flow: resolve layout and sync action durations.
-const syncSceneMotionDuration = (state, sceneId) => {
+const syncSceneMotionDuration = (state, sceneId, resizeSide = 'right') => {
   const scene = state.scenes.find(s => s.id === sceneId)
   if (!scene) return
 
@@ -176,7 +177,7 @@ const syncSceneMotionDuration = (state, sceneId) => {
   if (steps.length === 0) return
 
   // Resolve layout: auto steps reflow, manual steps preserved
-  resolveStepLayout(steps, sceneDurationMs)
+  resolveStepLayout(steps, sceneDurationMs, resizeSide)
 
   // Sync action durations to each step's effective duration
   steps.forEach(step => {
@@ -300,7 +301,7 @@ const projectSlice = createSlice({
       const newScene = {
         id: sceneId,
         name: action.payload.name || `Scene ${state.scenes.length + 1}`,
-        duration: action.payload.duration || 5.0,
+        duration: action.payload.duration || 10.0,
         transition: action.payload.transition || 'None',
         backgroundColor: backgroundColor,
         layers: [backgroundLayer.id], // Start with background layer
@@ -365,27 +366,7 @@ const projectSlice = createSlice({
             }
           })
 
-          // Scale manual step positions AND durations proportionally when scene duration changes
-          const motionFlow = state.sceneMotionFlows[id]
-          if (motionFlow && motionFlow.steps && motionFlow.steps.length > 0) {
-            const oldPageDuration = motionFlow.pageDuration || 5000
-            const newPageDuration = Math.round(updates.duration * 1000)
-            if (oldPageDuration > 0 && newPageDuration !== oldPageDuration) {
-              const ratio = newPageDuration / oldPageDuration
-              motionFlow.steps.forEach(step => {
-                if (step.manual) {
-                  if (step.startTime != null) {
-                    step.startTime = Math.round(step.startTime * ratio)
-                  }
-                  if (step.duration != null) {
-                    step.duration = Math.round(Math.max(200, step.duration * ratio))
-                  }
-                }
-              })
-            }
-          }
-
-          syncSceneMotionDuration(state, id)
+          syncSceneMotionDuration(state, id, 'right')
         }
         state.isDirty = true
         state.version++
@@ -889,9 +870,9 @@ const projectSlice = createSlice({
     },
 
     addSceneMotionStep: (state, action) => {
-      const { sceneId, stepId } = action.payload
+      const { sceneId, stepId, playheadTimeMs } = action.payload
       const scene = state.scenes.find(s => s.id === sceneId)
-      const pageDuration = scene ? Math.round(scene.duration * 1000) : 6000
+      const pageDuration = scene ? Math.round(scene.duration * 1000) : 10000
 
       if (!state.sceneMotionFlows[sceneId]) {
         state.sceneMotionFlows[sceneId] = {
@@ -900,15 +881,41 @@ const projectSlice = createSlice({
         }
       }
 
-      // New step is always auto (manual: false or undefined)
-      state.sceneMotionFlows[sceneId].steps.push({
+      const steps = state.sceneMotionFlows[sceneId].steps || []
+
+      // Calculate the end time of the last step in the scene
+      let lastStepEndMs = 0
+      if (steps.length > 0) {
+        const lastStep = steps[steps.length - 1]
+        lastStepEndMs = (lastStep.startTime || 0) + (lastStep.duration || 0)
+      }
+
+      // Playhead comparison router:
+      // Case A: Playhead is behind or inside sequence -> Start at EndTime of last step
+      // Case B: Playhead is at or after sequence end -> Start at P
+      let newStartTime = lastStepEndMs
+      if (playheadTimeMs !== undefined) {
+        newStartTime = playheadTimeMs < lastStepEndMs ? lastStepEndMs : playheadTimeMs
+      }
+
+      // Clamp startTime to fit within scene bounds
+      if (newStartTime >= pageDuration) {
+        newStartTime = Math.max(0, pageDuration - 200)
+      }
+
+      // Default duration is 2.0s, clamped to fit scene bounds, down to minimum 200ms
+      const newDuration = Math.max(200, Math.min(2000, pageDuration - newStartTime))
+
+      // Push as manual locked object to protect durations
+      steps.push({
         id: stepId || generateId(),
         layerActions: {},
-        // No manual flag → auto step, resolveStepLayout assigns duration
+        startTime: newStartTime,
+        duration: newDuration,
+        manual: true
       })
 
-      // resolveStepLayout recalculates: auto steps get default, manual preserved, overflow trimmed
-      syncSceneMotionDuration(state, sceneId)
+      syncSceneMotionDuration(state, sceneId, 'right')
       state.isDirty = true
       state.version++
     },
@@ -2099,7 +2106,7 @@ export const selectProjectTimelineInfo = createSelector(
   (scenes) => {
     let cumulativeTime = 0
     return scenes.map((scene) => {
-      const duration = typeof scene?.duration === 'number' ? scene.duration : 5.0
+      const duration = typeof scene?.duration === 'number' ? scene.duration : 10.0
       const startTime = cumulativeTime
       const endTime = cumulativeTime + duration
       cumulativeTime = endTime

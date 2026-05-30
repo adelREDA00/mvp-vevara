@@ -203,7 +203,7 @@ const DashboardPage = () => {
                     scenes: [{
                         id: sceneId,
                         name: 'Scene 1',
-                        duration: 5.0,
+                        duration: 10.0,
                         transition: 'None',
                         backgroundColor: 0xffffff,
                         layers: [bgLayerId]

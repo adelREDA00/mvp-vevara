@@ -753,25 +753,33 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     handleDragRef.current = (e) => {
       if (!isDraggingRef.current || !previewEl) return
 
-      const x = e.clientX
-      const y = e.clientY
+      if (e.type === 'touchmove' && e.cancelable) {
+        e.preventDefault()
+      }
 
-      previewEl.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%)`
+      const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX
+      const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY
 
-      dragPositionRef.current.x = x
-      dragPositionRef.current.y = y
+      if (clientX !== undefined && clientY !== undefined) {
+        previewEl.style.transform = `translate3d(${clientX}px,${clientY}px,0) translate(-50%,-50%)`
+
+        dragPositionRef.current.x = clientX
+        dragPositionRef.current.y = clientY
+      }
     }
 
     // Use stable wrapper
     document.addEventListener('dragover', dragMoveWrapper, { passive: true, capture: true })
     document.addEventListener('mousemove', dragMoveWrapper, { passive: true, capture: true })
     document.addEventListener('pointermove', dragMoveWrapper, { passive: true, capture: true })
+    document.addEventListener('touchmove', dragMoveWrapper, { passive: false, capture: true })
 
     return () => {
       isDraggingRef.current = false
       document.removeEventListener('dragover', dragMoveWrapper, { capture: true })
       document.removeEventListener('mousemove', dragMoveWrapper, { capture: true })
       document.removeEventListener('pointermove', dragMoveWrapper, { capture: true })
+      document.removeEventListener('touchmove', dragMoveWrapper, { capture: true })
     }
   }, [draggedIndex, index, dragMoveWrapper])
 
@@ -1244,10 +1252,26 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             const onTouchMove = (moveE) => {
               const dx = moveE.touches[0].clientX - startX
               const dy = moveE.touches[0].clientY - startY
-              if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+              const threshold = 8
+              if (Math.abs(dx) > threshold || Math.abs(dy) > threshold || hasMoved) {
+                if (moveE.cancelable) {
+                  moveE.preventDefault()
+                }
+
                 if (!hasMoved && !isContextMenuShown) {
                   hasMoved = true
                   clearTimeout(contextTimer)
+                  
+                  const touchX = moveE.touches[0].clientX
+                  const touchY = moveE.touches[0].clientY
+                  isDraggingRef.current = true
+                  dragPositionRef.current = { x: touchX, y: touchY }
+                  setDragPosition({ x: touchX, y: touchY })
+
+                  if (previewElementRef.current) {
+                    previewElementRef.current.style.transform = `translate3d(${touchX}px,${touchY}px,0) translate(-50%,-50%)`
+                  }
+
                   onDragStart(index)
                 }
               }
@@ -1259,7 +1283,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               e.currentTarget?.removeEventListener('touchend', onTouchEnd)
             }
 
-            e.currentTarget.addEventListener('touchmove', onTouchMove, { passive: true })
+            e.currentTarget.addEventListener('touchmove', onTouchMove, { passive: false })
             e.currentTarget.addEventListener('touchend', onTouchEnd, { once: true })
           }}
           className="rounded-md touch-manipulation flex-shrink-0 relative"
@@ -1297,7 +1321,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             letterSpacing: '0.02em',
           }}
         >
-          {formatDuration(scene.duration || 0)}
+          {formatDuration(calculateDurationFromWidth(actualWidth))}
         </div>
         {/* Motion indicator */}
         {hasMotionSteps && (
@@ -1316,8 +1340,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           onStepClick={onStepClick}
           onStepContextMenu={onStepContextMenu}
           isMotionCaptureActive={isMotionCaptureActive}
-          cardWidth={width}
-          pageDuration={scene.duration ? scene.duration * 1000 : 5000}
+          cardWidth={actualWidth}
+          pageDuration={calculateDurationFromWidth(actualWidth) * 1000}
           sceneId={scene.id}
         />
       </div>
@@ -1730,17 +1754,11 @@ const ScenesBar = React.memo(({
     const scene = scenes[index]
     if (!scene) return
 
-    // Update local state for visual responsiveness (throttled for parent layout)
-    const nowLocal = Date.now()
-    const shouldUpdateLocal = isFinal || (nowLocal - lastLocalUpdateTimeRef.current >= LOCAL_THROTTLE_MS)
-
-    if (shouldUpdateLocal) {
-      setSceneIdToWidth(prev => {
-        if (prev[scene.id] === clampedWidth) return prev
-        return { ...prev, [scene.id]: clampedWidth }
-      })
-      lastLocalUpdateTimeRef.current = nowLocal
-    }
+    // Update local state instantly for 60fps visual responsiveness across the timeline and adjacent elements
+    setSceneIdToWidth(prev => {
+      if (prev[scene.id] === clampedWidth) return prev
+      return { ...prev, [scene.id]: clampedWidth }
+    })
 
     // Throttle Redux dispatch to avoid overwhelming the store
     const now = Date.now()
@@ -1771,7 +1789,8 @@ const ScenesBar = React.memo(({
       dispatch(updateScene({
         id: scene.id,
         duration: roundedDuration,
-        trimStartDelta
+        trimStartDelta,
+        resizeSide: side
       }))
     }
   }, [scenes, dispatch, getMinCardWidth, calculateDurationFromWidth, calculateWidthFromDuration])
@@ -1798,8 +1817,8 @@ const ScenesBar = React.memo(({
     const cardPaddingRight = 4
 
     scenes.forEach((scene, i) => {
-      const duration = scene.duration || 5.0
       const width = cardWidths[i] || getDefaultCardWidth()
+      const duration = calculateDurationFromWidth(width)
 
       offsets.push({
         startTime: accumulatedTime,
@@ -1817,7 +1836,7 @@ const ScenesBar = React.memo(({
       totalTime: accumulatedTime,
       totalWidth: accumulatedWidth
     }
-  }, [scenes, cardWidths, getDefaultCardWidth])
+  }, [scenes, cardWidths, getDefaultCardWidth, calculateDurationFromWidth])
 
   const totalCardsWidth = cumulativeOffsets.totalWidth
 
@@ -2052,7 +2071,7 @@ const ScenesBar = React.memo(({
     dispatch(addScene({
       id: newSceneId,
       name: `Scene ${scenes.length + 1}`,
-      duration: 5.0, // Default duration is 5 seconds
+      duration: 10.0, // Default duration is 10 seconds
       transition: 'None',
       width: worldWidth,
       height: worldHeight,
@@ -2141,6 +2160,11 @@ const ScenesBar = React.memo(({
     let lastClientX = null
 
     const handleMove = (e) => {
+      // Prevent default scrolling on mobile while dragging
+      if (e.type.startsWith('touch') && e.cancelable) {
+        e.preventDefault()
+      }
+      
       // Handle both MouseEvent and TouchEvent
       const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX
       lastClientX = clientX

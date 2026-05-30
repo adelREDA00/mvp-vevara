@@ -790,6 +790,30 @@ function EditorPage() {
   // =============================================================================
   // TUTORIAL LOGIC & AUTO-PLAY
   // =============================================================================
+  const lastStepEndTime = useMemo(() => {
+    if (!currentSceneMotionFlow?.steps || currentSceneMotionFlow.steps.length === 0) return 0;
+    let maxTimeMs = 0;
+    for (let i = 0; i < currentSceneMotionFlow.steps.length; i++) {
+      const s = currentSceneMotionFlow.steps[i];
+      const end = (s.startTime || 0) + (s.duration || 0);
+      if (end > maxTimeMs) {
+        maxTimeMs = end;
+      }
+    }
+    return maxTimeMs / 1000;
+  }, [currentSceneMotionFlow]);
+
+  // Auto-pause at the end of the last step during autoplay (on load and after adding a step)
+  useEffect(() => {
+    if (isPlaying && (autoPlayState === 'initial' || autoPlayState === 'final') && motionControls && lastStepEndTime > 0) {
+      if (playheadTime >= lastStepEndTime) {
+        motionControls.pauseAll();
+        setIsPlaying(false);
+        seek(lastStepEndTime);
+      }
+    }
+  }, [isPlaying, autoPlayState, playheadTime, lastStepEndTime, motionControls, seek, setIsPlaying]);
+
   useEffect(() => {
     dispatch(setGuestMode(!isAuthenticated));
   }, [isAuthenticated, dispatch]);
@@ -965,7 +989,7 @@ function EditorPage() {
       // Default empty scene for guests (on /) and auth users
       dispatch(addScene({
         name: 'Scene 1',
-        duration: 5.0,
+        duration: 10.0,
         transition: 'None',
       }))
     }
@@ -1289,10 +1313,15 @@ function EditorPage() {
     // 3. Create a new step ID
     const newStepId = `step-${Date.now()}`
 
-    // 4. Dispatch action to add the step
+    // 4. Calculate relative playheadTimeMs relative to the scene start using up-to-date Ref
+    const currentPlayTime = playheadTimeRef.current || 0
+    const timeInSceneMs = Math.round((currentPlayTime - (currentSceneTimelineInfo?.startTime || 0)) * 1000)
+
+    // 5. Dispatch action to add the step
     dispatch(addSceneMotionStep({
       sceneId: currentSceneId,
-      stepId: newStepId
+      stepId: newStepId,
+      playheadTimeMs: Math.max(0, timeInSceneMs)
     }))
 
     // [SYNC FIX] Inform Redux that we are starting to edit this specific step
@@ -2034,11 +2063,21 @@ function EditorPage() {
       // The engine will rebuild with the new layout after React re-renders.
       // existingFlow is from stale React state (before addSceneMotionStep dispatch),
       // which is EXACTLY what the engine's internal masterTimeline currently matches.
+      // Incorporate playhead-aware creation logic: if playhead is after all steps, target is the playhead position.
       const lastExisting = existingFlow[existingFlow.length - 1]
-      const lastStepEnd = lastExisting
+      const lastStepEndMs = lastExisting
         ? (lastExisting.startTime || 0) + (lastExisting.duration || Math.round(pageDuration / existingFlow.length))
-        : pageDuration
-      let stepStartTimeSeconds = startTimeOffset + lastStepEnd / 1000
+        : 0
+
+      const currentPlayTime = playheadTimeRef.current || 0
+      const timeInSceneMs = Math.max(0, Math.round((currentPlayTime - (currentSceneTimelineInfo?.startTime || 0)) * 1000))
+
+      let newStartTimeMs = timeInSceneMs < lastStepEndMs ? lastStepEndMs : timeInSceneMs
+      if (newStartTimeMs >= pageDuration) {
+        newStartTimeMs = Math.max(0, pageDuration - 200)
+      }
+
+      let stepStartTimeSeconds = startTimeOffset + newStartTimeMs / 1000
 
       // [BUG 2 FIX] Clamp the tween target to stay safely within the current scene boundary.
       // Without this, when existing steps fill the entire scene duration, the target equals
@@ -2062,8 +2101,18 @@ function EditorPage() {
         enableCaptureMode()
       }
     } else if (motionControls) {
-      // No previous steps, just seek to start
-      motionControls.seek(startTimeOffset)
+      // No previous steps, seek to the newly created step's start time (which matches the playhead position)
+      const pageDuration = currentSceneMotionFlow?.pageDuration || 5000
+      const currentPlayTime = playheadTimeRef.current || 0
+      const timeInSceneMs = Math.max(0, Math.round((currentPlayTime - (currentSceneTimelineInfo?.startTime || 0)) * 1000))
+
+      let newStartTimeMs = timeInSceneMs
+      if (newStartTimeMs >= pageDuration) {
+        newStartTimeMs = Math.max(0, pageDuration - 200)
+      }
+
+      let stepStartTimeSeconds = startTimeOffset + newStartTimeMs / 1000
+      motionControls.seek(stepStartTimeSeconds)
       enableCaptureMode()
     } else {
       enableCaptureMode()
