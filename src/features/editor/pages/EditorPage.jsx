@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams, useLocation } from 'react-router-dom'
@@ -175,37 +175,87 @@ function EditorPage() {
     // Allowing the error UI to be visible.
     if (!isLoading || loadingMode === 'local' || error) return null;
 
+    const percent = progress?.percent || 0;
+    const loadedCount = progress?.loaded || 0;
+    const totalCount = progress?.total || 0;
+
     return (
-      <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center p-6 text-center transition-opacity duration-500 ${isLight ? 'bg-[#f3f4f7]' : 'bg-[#090a0d]'}`}>
-        <div className="relative mb-8">
-          <div className={`w-20 h-20 border-[3px] rounded-full ${isLight ? 'border-black/5' : 'border-white/5'}`} />
-          <div className="absolute inset-0 w-20 h-20 border-[3px] border-[#6940c9] border-t-transparent rounded-full animate-spin" />
-          <Layers className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-[#6940c9] animate-pulse" />
+      <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center p-8 text-center transition-opacity duration-500 ${isLight ? 'bg-[#f4f5f8]' : 'bg-[#090a10]'}`}>
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes appleFloatCircle {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-8px) rotate(10deg); }
+          }
+          @keyframes appleFloatSquare {
+            0%, 100% { transform: translateY(0px) rotate(45deg); }
+            50% { transform: translateY(-5px) rotate(60deg); }
+          }
+          @keyframes appleFloatTriangle {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-11px) rotate(-15deg); }
+          }
+          .animate-shape-circle {
+            animation: appleFloatCircle 4s ease-in-out infinite;
+          }
+          .animate-shape-square {
+            animation: appleFloatSquare 4.5s ease-in-out infinite;
+          }
+          .animate-shape-triangle {
+            animation: appleFloatTriangle 3.8s ease-in-out infinite;
+          }
+        `}} />
+        
+        {/* Apple style minimal shape indicator */}
+        <div className="flex items-center justify-center gap-6 mb-12 relative h-12">
+          {/* Square */}
+          <div className={`w-3.5 h-3.5 rounded-[3px] rotate-[45deg] animate-shape-square transition-colors duration-500 ${
+            isLight ? 'bg-black/20 shadow-[0_4px_12px_rgba(0,0,0,0.04)]' : 'bg-white/20 shadow-[0_4px_12px_rgba(255,255,255,0.02)]'
+          }`} />
+
+          {/* Circle */}
+          <div className={`w-3.5 h-3.5 rounded-full animate-shape-circle transition-colors duration-500 ${
+            isLight ? 'bg-black/35 shadow-[0_4px_12px_rgba(0,0,0,0.05)]' : 'bg-white/35 shadow-[0_4px_12px_rgba(255,255,255,0.03)]'
+          }`} />
+
+          {/* Triangle */}
+          <svg 
+            viewBox="0 0 24 24" 
+            className={`w-4 h-4 fill-current animate-shape-triangle transition-colors duration-500 ${
+              isLight ? 'text-black/15' : 'text-white/15'
+            }`}
+          >
+            <path d="M12 3L2 21H22L12 3Z" />
+          </svg>
         </div>
 
-        <div className="space-y-3 max-w-xs">
-          <h2 className={`text-xl font-medium tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Preparing your creative space</h2>
-          <p className={`text-[13px] leading-relaxed ${isLight ? 'text-gray-500' : 'text-white/40'}`}>
-            We're optimizing your assets for high-performance motion design...
-          </p>
+        <div className="space-y-4 max-w-[280px] w-full">
+          <div className="space-y-1">
+            <h2 className={`text-[15px] font-medium tracking-tight ${isLight ? 'text-gray-900/90' : 'text-white/90'}`}>
+              Preparing workspace
+            </h2>
+            <p className={`text-[12px] ${isLight ? 'text-gray-400' : 'text-white/30'}`}>
+              Organizing your motion assets
+            </p>
+          </div>
 
-          {/* Progress Bar */}
-          <div className="pt-4 space-y-2">
-            <div className={`h-1 w-full rounded-full overflow-hidden ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
+          {/* Premium Thin Progress Bar */}
+          <div className="pt-2 space-y-2">
+            <div className={`h-[2px] w-full rounded-full overflow-hidden ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
               <div
-                className="h-full bg-[#6940c9] transition-all duration-500 ease-out"
-                style={{ width: `${progress?.percent || 0}%` }}
+                className="h-full bg-[#7c4af0] transition-all duration-300 ease-out shadow-[0_0_8px_rgba(124,74,240,0.4)]"
+                style={{ width: `${percent}%` }}
               />
             </div>
-            <div className={`flex justify-between items-center text-[10px] font-bold uppercase tracking-widest ${isLight ? 'text-black/20' : 'text-white/20'}`}>
-              <span>Loading Assets</span>
-              <span>{progress?.loaded || 0} / {progress?.total || 0}</span>
+            <div className={`flex justify-between items-center text-[10px] font-medium tracking-wider ${isLight ? 'text-black/30' : 'text-white/20'}`}>
+              <span>Progress</span>
+              <span className="font-mono">{loadedCount} / {totalCount}</span>
             </div>
           </div>
         </div>
       </div>
     );
   };
+
   const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
 
   // [NEW] Transition to local loading mode once initially ready
@@ -4115,8 +4165,90 @@ function EditorPage() {
 
         {/* Loading Overlay */}
         {projectStatus === 'loading' && (
-          <div className={`absolute inset-0 z-[100] flex items-center justify-center backdrop-blur-sm ${isLight ? 'bg-white/60' : 'bg-[#090a0d]/60'}`}>
-            <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+          <div className={`fixed inset-0 z-[9999] flex flex-col ${isLight ? 'bg-[#f4f5f8]' : 'bg-[#090a10]'}`}>
+            <style dangerouslySetInnerHTML={{__html: `
+              @keyframes shimmer {
+                0% { background-position: -200% 0; }
+                100% { background-position: 200% 0; }
+              }
+              .skeleton-shimmer {
+                background: linear-gradient(90deg, rgba(255,255,255,0.015) 25%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.015) 75%);
+                background-size: 200% 100%;
+                animation: shimmer 1.6s infinite linear;
+              }
+              .skeleton-shimmer-light {
+                background: linear-gradient(90deg, rgba(0,0,0,0.02) 25%, rgba(0,0,0,0.05) 50%, rgba(0,0,0,0.02) 75%);
+                background-size: 200% 100%;
+                animation: shimmer 1.6s infinite linear;
+              }
+            `}} />
+            
+            {/* 1. TOP NAVBAR SKELETON */}
+            <div className="h-14 flex items-center justify-between px-4 shrink-0">
+              <div className="flex items-center gap-4">
+                {/* Back Arrow Button */}
+                <div className={`w-8 h-8 rounded-lg ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                {/* Project Name */}
+                <div className={`w-36 h-4 rounded ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Save Status / Aspect Ratio */}
+                <div className={`w-16 h-7 rounded-lg ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                {/* Export Button */}
+                <div className={`w-20 h-7 rounded-lg ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                {/* Profile Circle */}
+                <div className={`w-7 h-7 rounded-full ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+              </div>
+            </div>
+
+            {/* MAIN BODY AREA */}
+            <div className="flex flex-1 overflow-hidden relative">
+              
+              {/* 2. LEFT SIDEBAR SKELETON (Desktop only) */}
+              <div className="w-20 flex flex-col items-center py-5 gap-5 shrink-0 hidden md:flex">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className={`w-11 h-11 rounded-xl ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                ))}
+              </div>
+
+              {/* 3. MIDDLE CANVAS & TIMELINE AREA */}
+              <div className="flex-1 flex flex-col overflow-hidden relative">
+                
+                {/* EMPTY CANVAS AREA (Spacious & Clean) */}
+                <div className="flex-1" />
+
+                {/* 4. BOTTOM TIMELINE SKELETON (Desktop & Mobile) */}
+                <div className="h-[140px] p-4 flex flex-col gap-3 shrink-0">
+                  {/* Timeline Controls bar */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-3">
+                      {/* Play Button Icon */}
+                      <div className={`w-5 h-5 rounded-full ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                      {/* Time Code */}
+                      <div className={`w-14 h-3.5 mt-0.5 rounded ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                    </div>
+                    {/* Add Scene Button */}
+                    <div className={`w-24 h-6 rounded-lg ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                  </div>
+
+                  {/* Horizontal Scene Cards Grid */}
+                  <div className="flex-1 flex gap-3 items-center overflow-hidden">
+                    {[1, 2, 3, 4].map(i => (
+                      <React.Fragment key={i}>
+                        {/* Scene Card */}
+                        <div className={`w-32 h-16 rounded-xl shrink-0 ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                        {/* transition spacer (except last item) */}
+                        {i < 4 && (
+                          <div className={`w-5 h-3 rounded shrink-0 opacity-40 ${isLight ? 'bg-black/5' : 'bg-white/5'} ${isLight ? 'skeleton-shimmer-light' : 'skeleton-shimmer'}`} />
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
           </div>
         )}
 

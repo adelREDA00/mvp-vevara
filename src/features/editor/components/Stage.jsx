@@ -1705,13 +1705,18 @@ function Stage({
           </div>
         ) : !isReady ? (
           /* Initializing state — only when Pixi is starting up and no error */
-          <div className="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none" style={{ zIndex: 0 }}>
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-white/10 border-t-[#6940c9] rounded-full animate-spin" />
-              <p className="text-sm text-white/30 animate-pulse">Initializing engine...</p>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 0 }}>
+            <div className="flex flex-col items-center gap-2">
+              <div className={`w-5 h-5 border-[1.5px] rounded-full animate-spin ${
+                theme === 'light' ? 'border-black/10 border-t-black/40' : 'border-white/10 border-t-white/40'
+              }`} />
+              <p className={`text-[10px] font-medium tracking-wider uppercase ${
+                theme === 'light' ? 'text-black/30' : 'text-white/20'
+              }`}>Initializing</p>
             </div>
           </div>
         ) : null}
+
 
         {/* Text Edit Overlay */}
         {(() => {
