@@ -517,102 +517,62 @@ function EditorPage() {
   }, [])
 
   const handleExport = useCallback(async (options) => {
-    if (exportState.isActive) return
+    // 1. Pause editor playback
+    if (motionControls?.isPlaying) {
+      try { motionControls.pauseAll() } catch (e) { /* ignore */ }
+    }
 
-    // Backwards compatibility: a bare resolution string still works.
+    // 2. Determine options
     const opts = typeof options === 'string'
       ? { format: 'mp4', resolution: options }
       : (options || { format: 'mp4', resolution: '720p' })
     const format = opts.format === 'gif' ? 'gif' : 'mp4'
     const resolution = opts.resolution || '720p'
-    const gifOptions = opts.gifOptions || { width: 480, fps: 24, loop: 0 }
+    const gifOptions = opts.gifOptions || { width: 480, fps: 15, loop: 0 }
 
-    const savedTime = playheadTimeRef.current || 0
-
-    if (motionControls?.isPlaying) {
-      try { motionControls.pauseAll() } catch (e) { /* ignore */ }
+    // 3. Auto-save project if logged in (to ensure fallback fetching has the latest)
+    if (isAuthenticated) {
+      try {
+        await handleSave({ silent: true })
+      } catch (saveErr) {
+        console.warn('[handleExport] Background auto-save failed:', saveErr)
+      }
     }
 
-    // Sleep the main editor PIXI ticker during export to free WebGL/GPU resources
-    const mainApp = stageRef.current?.getApp?.()
-    if (mainApp?.ticker) {
-      try { mainApp.ticker.stop() } catch (e) { /* ignore */ }
+    // 4. Create snapshot of the state
+    const exportId = `export_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    const projectState = {
+      projectName,
+      scenes,
+      layers,
+      sceneMotionFlows,
+      aspectRatio: aspectRatio || '16:9'
     }
-
-    setExportState({
-      isActive: true,
-      status: 'initializing',
-      progress: 0,
-      error: null
-    })
-
-    const controller = new AbortController()
-    exportAbortControllerRef.current = controller
 
     try {
-      const resultBlob = await exportVideo({
-        scenes,
-        layers,
-        sceneMotionFlows,
-        timelineInfo,
-        aspectRatio,
-        resolution,
-        fps: 30,
-        format,
-        gifOptions,
-        onProgress: (update) => {
-          if (controller.signal.aborted) return
-          setExportState(prev => ({
-            ...prev,
-            status: update.status,
-            progress: update.progress
-          }))
-        },
-        signal: controller.signal,
-        editorMotionControls: motionControls
-      })
+      // 5. Store snapshot in sessionStorage (which will be cloned to the new tab)
+      sessionStorage.setItem(exportId, JSON.stringify(projectState))
+      
+      // 6. Build the query params
+      const gifWidth = gifOptions.width || 480
+      const gifFps = gifOptions.fps || 15
+      const gifLoop = gifOptions.loop !== undefined ? gifOptions.loop : 0
 
+      let exportUrl = `/export?id=${exportId}&format=${format}&resolution=${resolution}`
+      if (projectId) {
+        exportUrl += `&projectId=${projectId}`
+      }
       if (format === 'gif') {
-        saveAs(resultBlob, `${projectName || 'animation'}_${gifOptions.width}.gif`)
-      } else {
-        saveAs(resultBlob, `${projectName || 'video'}_${resolution}.mp4`)
+        exportUrl += `&gifWidth=${gifWidth}&gifFps=${gifFps}&gifLoop=${gifLoop}`
       }
 
-      setExportState(prev => ({
-        ...prev,
-        status: 'completed',
-        progress: 100
-      }))
-
-      // Close overlay after a short delay
-      setTimeout(() => {
-        setExportState(prev => ({ ...prev, isActive: false }))
-      }, 2000)
-
-    } catch (error) {
-      if (error.message === 'cancelled') {
-        setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
-        return
-      }
-      console.error('Export failed:', error)
-      setExportState({
-        isActive: true,
-        status: 'error',
-        progress: 0,
-        error: error.message
-      })
-    } finally {
-      // Resume the main editor PIXI ticker
-      const appToResume = stageRef.current?.getApp?.()
-      if (appToResume?.ticker) {
-        try { appToResume.ticker.start() } catch (e) { /* ignore */ }
-      }
-      exportAbortControllerRef.current = null
-      if (motionControls) {
-        try { motionControls.seek(savedTime) } catch (e) { /* ignore */ }
-      }
+      // 7. Open the dedicated export page in a new browser tab
+      window.open(exportUrl, '_blank')
+    } catch (e) {
+      console.error('Failed to initiate dedicated tab export:', e)
+      alert('Failed to open export tab. Please check your browser popup blocker.')
     }
-  }, [scenes, layers, sceneMotionFlows, timelineInfo, projectName, exportState.isActive, motionControls, aspectRatio])
+  }, [scenes, layers, sceneMotionFlows, projectName, motionControls, aspectRatio, projectId, isAuthenticated, handleSave])
 
   // [PERF] Warm up the FFmpeg WASM core while the editor is idle so the first
   // user-triggered export doesn't have to wait for a 2-3s download. Skipped on
@@ -5256,125 +5216,7 @@ function EditorPage() {
           editingStepId={editingStepId}
         />
 
-        {/* Export Progress Overlay */}
-        <Modal
-          isOpen={exportState.isActive}
-          onClose={() => {
-            if (exportState.status !== 'completed' && exportState.status !== 'error') {
-              handleCancelExport()
-            } else {
-              setExportState(prev => ({ ...prev, isActive: false }))
-            }
-          }}
-          showCloseButton={exportState.status === 'completed' || exportState.status === 'error'}
-          maxWidth="max-w-md"
-        >
-          <div className="relative">
-            {/* Animated Background Pulse */}
-            <div className="absolute -inset-6 bg-purple-600/5 animate-pulse pointer-events-none" />
 
-            <div className="relative z-10 flex flex-col items-center w-full pt-2">
-
-              {exportState.status === 'completed' && (
-                <div className="h-10 w-10 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
-                  <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-              )}
-
-              {exportState.status === 'error' && (
-                <div className="h-10 w-10 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
-                  <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </div>
-              )}
-
-              <h3 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'} ${exportState.status === 'completed' || exportState.status === 'error' ? 'mb-2' : 'mb-5'}`}>
-                {exportState.status === 'initializing' && 'Preparing Export...'}
-                {exportState.status === 'rendering' && 'Rendering & Processing...'}
-                {exportState.status === 'encoding' && 'Finalizing Video...'}
-                {exportState.status === 'encoding_palette' && 'Analyzing Colors...'}
-                {exportState.status === 'encoding_gif' && 'Encoding GIF...'}
-                {exportState.status === 'completed' && 'Export Successful!'}
-                {exportState.status === 'error' && 'Export Failed'}
-              </h3>
-
-              {(exportState.status === 'completed' || exportState.status === 'error') && (
-                <p className={`text-[13.5px] leading-relaxed text-center max-w-[320px] mb-8 ${isLight ? 'text-gray-500' : 'text-white/50'}`}>
-                  {exportState.status === 'completed' && 'Your download has started automatically.'}
-                  {exportState.status === 'error' && (exportState.error || 'An unexpected error occurred during encoding.')}
-                </p>
-              )}
-
-              {(exportState.status === 'rendering' || exportState.status === 'encoding' || exportState.status === 'encoding_palette' || exportState.status === 'encoding_gif' || exportState.status === 'initializing') && (
-                <div className={`w-full max-w-[340px] mb-6 p-4 rounded-xl border text-left transition-all ${isLight ? 'bg-slate-50/80 border-slate-200/60 shadow-sm' : 'bg-white/[0.02] border-white/5'}`}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <svg className={`h-4 w-4 flex-shrink-0 ${isLight ? 'text-[#7c4af0]' : 'text-purple-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className={`text-[12px] font-semibold tracking-wide ${isLight ? 'text-gray-800' : 'text-white/90'}`}>Note for 2k & 4k export</span>
-                  </div>
-                  <p className={`text-[11.5px] leading-relaxed ${isLight ? 'text-gray-600/90' : 'text-white/50'}`}>
-                    If the export feels slow, try canceling it, save your project, then refresh the page and export again.
-                    <span className={`block font-medium mt-1.5 ${isLight ? 'text-[#7c4af0]' : 'text-purple-400'}`}>Please do not leave this page for fast exporting.</span>
-                  </p>
-                </div>
-              )}
-
-              {exportState.status !== 'error' && exportState.status !== 'completed' && (
-                <div className="w-full">
-                  <div className="flex justify-between items-end mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]">Progress</span>
-                    <span className={`text-base font-mono font-medium ${isLight ? 'text-gray-900' : 'text-white/90'}`}>{exportState.progress}%</span>
-                  </div>
-                  <div className={`w-full h-1.5 rounded-full overflow-hidden border shadow-inner ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/5'}`}>
-                    <div
-                      className="h-full bg-gradient-to-r from-[#7c4af0] to-indigo-500 shadow-[0_0_15px_rgba(124,74,240,0.4)] transition-all duration-300 ease-out"
-                      style={{ width: `${exportState.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {exportState.status !== 'error' && exportState.status !== 'completed' && (
-                <button
-                  onClick={handleCancelExport}
-                  className={`mt-6 w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-500 hover:text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/90 border-white/5'}`}
-                >
-                  Cancel Export
-                </button>
-              )}
-
-              {exportState.status === 'completed' && (
-                <button
-                  onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                  className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
-                >
-                  Close Window
-                </button>
-              )}
-
-              {exportState.status === 'error' && (
-                <div className="w-full flex flex-col gap-3 mt-2">
-                  <button
-                    onClick={() => handleExport('1080p')}
-                    className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#8d61f2] text-white rounded-xl text-[12px] font-bold transition-all shadow-lg shadow-purple-500/20"
-                  >
-                    Try Again
-                  </button>
-                  <button
-                    onClick={() => setExportState(prev => ({ ...prev, isActive: false }))}
-                    className={`w-full py-2.5 rounded-xl text-[12px] font-medium transition-all border ${isLight ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5' : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/5'}`}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </Modal>
         {/* Project Status Loading Modal */}
         <Modal
           isOpen={isSaving || isNavigating}

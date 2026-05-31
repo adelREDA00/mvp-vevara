@@ -5,6 +5,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { store } from '../store'
 import { checkAuth } from '../store/slices/authSlice'
 import EditorPage from '../features/editor/pages/EditorPage'
+import ExportPage from '../features/editor/pages/ExportPage'
 import LoginPage from '../features/auth/pages/LoginPage'
 import RegisterPage from '../features/auth/pages/RegisterPage'
 import DashboardPage from '../features/dashboard/pages/DashboardPage'
@@ -25,6 +26,7 @@ function AppContent() {
         <Route path="/ads" element={<EditorPage />} />
         <Route path="/sass" element={<EditorPage />} />
         <Route path="/project/:projectId" element={<EditorPage />} />
+        <Route path="/export" element={<ExportPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
