@@ -1653,6 +1653,7 @@ export class MotionEngine {
     })
 
     this.masterTimeline.pause(time)
+    this.masterTimeline.render(time, true, true)
     this.isPlaying = false
 
     // Apply GSAP-controlled state (color, blur, flip) to PIXI objects after seek.
@@ -1730,6 +1731,7 @@ export class MotionEngine {
     })
 
     this.masterTimeline.pause(time)
+    this.masterTimeline.render(time, true, true)
     this.isPlaying = false
 
     // [PERF] Apply animated state (color/blur/corner) — needed for visual accuracy.

@@ -1247,6 +1247,7 @@ export const exportVideo = async ({
 
             if (exportEngine && !exportEngine._destroyed) {
                 exportEngine.seek(time);
+                exportEngine.masterTimeline.render(time, true, true);
             }
 
             layerObjects.forEach((obj) => {
