@@ -883,6 +883,7 @@ export const exportVideo = async ({
 
         exportEngine = new MotionEngine();
         exportEngine.syncMedia = () => { };
+        exportEngine.setProjectConfig({ width: worldWidth, height: worldHeight });
 
         onProgress?.({ status: 'initializing', progress: 0 });
 
