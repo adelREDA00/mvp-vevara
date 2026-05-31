@@ -1,4 +1,4 @@
-import { Plus, Zap, ChevronDown, Pencil } from 'lucide-react'
+import { Plus, Zap, ChevronDown, Pencil, Scissors, Trash2 } from 'lucide-react'
 import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
@@ -636,6 +636,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
 const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
+  const scenes = useSelector(selectScenes)
   // Get responsive card dimensions
   const getCardDimensions = () => {
     if (typeof window === 'undefined') return { width: 120, height: 72 }
@@ -1307,6 +1308,51 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             cardHeight={height}
             backgroundColor={scene.backgroundColor}
           />
+          
+          {/* Outgoing transition overlay (at the right edge of this scene card) */}
+          {(() => {
+            const nextScene = scenes?.[index + 1]
+            const hasOutgoingTransition = nextScene && nextScene.transition && nextScene.transition !== 'None'
+            const cardDurationSec = calculateDurationFromWidth(actualWidth)
+            const transitionDurationPx = (0.5 / cardDurationSec) * actualWidth
+
+            if (!hasOutgoingTransition) return null
+
+            return (
+              <div
+                className="absolute top-0 bottom-0 right-0 z-10 pointer-events-none bg-purple-500/20 flex items-center justify-end pr-1.5"
+                style={{
+                  width: `${transitionDurationPx}px`,
+                }}
+              >
+                <span className="text-[7px] text-white font-extrabold uppercase tracking-wider whitespace-nowrap drop-shadow-sm">
+                  Trans
+                </span>
+              </div>
+            )
+          })()}
+
+          {/* Incoming transition overlay (at the left edge of this scene card) */}
+          {(() => {
+            const hasIncomingTransition = scene && scene.transition && scene.transition !== 'None'
+            const cardDurationSec = calculateDurationFromWidth(actualWidth)
+            const transitionDurationPx = (0.5 / cardDurationSec) * actualWidth
+
+            if (!hasIncomingTransition) return null
+
+            return (
+              <div
+                className="absolute top-0 bottom-0 left-0 z-10 pointer-events-none bg-purple-500/20 flex items-center pl-1.5"
+                style={{
+                  width: `${transitionDurationPx}px`,
+                }}
+              >
+                <span className="text-[7px] text-white font-extrabold uppercase tracking-wider whitespace-nowrap drop-shadow-sm">
+                  Trans
+                </span>
+              </div>
+            )
+          })()}
         </div>
         {/* Duration label */}
         <div
@@ -1517,7 +1563,8 @@ const ScenesBar = React.memo(({
   onStepEdit, // Explicit edit action (context menu "Update Step")
   bottomSectionHeight = null, // Dynamic height from EditorPage
   onPlay, // Optional: to resume playback after split
-  onPause // Optional: to pause during split
+  onPause, // Optional: to pause during split
+  onOpenTransitionsPanel
 }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
@@ -2495,8 +2542,43 @@ const ScenesBar = React.memo(({
             <React.Fragment key={scene.id}>
               <div
                 data-scene-card-wrapper
-                className="transition-all duration-300 ease-out"
+                className="relative transition-all duration-300 ease-out"
               >
+                {index > 0 && (
+                  <button
+                    onClick={() => onOpenTransitionsPanel?.(scene.id)}
+                    className="absolute z-[100] flex items-center justify-center rounded-full border transition-all duration-300 ease-out hover:scale-115 active:scale-90 cursor-pointer group"
+                    style={{
+                      left: '-12px',
+                      top: 'calc(50% - 12px)',
+                      width: '24px',
+                      height: '24px',
+                      backgroundColor: scene.transition && scene.transition !== 'None'
+                        ? '#7c4af0'
+                        : (isLight ? '#ffffff' : '#1e1e24'),
+                      borderColor: scene.transition && scene.transition !== 'None'
+                        ? '#8b5cf6'
+                        : (isLight ? '#cbd5e1' : '#3f3f46'),
+                      color: scene.transition && scene.transition !== 'None'
+                        ? '#ffffff'
+                        : (isLight ? '#64748b' : '#a1a1aa'),
+                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
+                      backdropFilter: 'blur(8px)',
+                      WebkitBackdropFilter: 'blur(8px)',
+                      zIndex: 100,
+                    }}
+                    title={scene.transition && scene.transition !== 'None' 
+                      ? `${scene.transition === 'LiquidShapes' ? 'Liquid Shapes' : scene.transition === 'BubbleWipe' ? 'Bubble Wipe' : scene.transition} Transition - Click to edit`
+                      : 'Add Scene Transition'
+                    }
+                  >
+                    {scene.transition && scene.transition !== 'None' ? (
+                      <Zap className="h-3.5 w-3.5 fill-current text-white" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5 stroke-[2.8] transition-transform duration-300 group-hover:rotate-90" />
+                    )}
+                  </button>
+                )}
                 <SceneCard
                   key={scene.id}
                   index={index}
@@ -2671,9 +2753,10 @@ const ScenesBar = React.memo(({
             style={{ width: 'calc(100% - 4px)' }}
             onClick={handleCutPage}
           >
-            <Plus className="h-3.5 w-3.5 rotate-45 text-purple-400" />
+            <Scissors className="h-3.5 w-3.5 text-purple-400" />
             <span>Split at Playhead</span>
           </button>
+
 
           <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
 
@@ -2685,6 +2768,7 @@ const ScenesBar = React.memo(({
               setContextMenu(prev => ({ ...prev, visible: false }))
             }}
           >
+            <Trash2 className="h-3.5 w-3.5 text-red-500" />
             <span>Delete Page</span>
           </button>
         </div>,

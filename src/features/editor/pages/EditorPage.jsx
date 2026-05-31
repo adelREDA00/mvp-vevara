@@ -34,6 +34,7 @@ import AppsPanel from '../components/AppsPanel'
 import ColorPickerPanel from '../components/ColorPickerPanel'
 import AdvancedColorPickerModal from '../components/AdvancedColorPickerModal'
 import PositionPanel from '../components/PositionPanel'
+import TransitionsPanel from '../components/TransitionsPanel'
 import TutorialOverlay from '../components/TutorialOverlay'
 import TutorialExportModal from '../components/TutorialExportModal'
 import { useEditorSidebar } from '../hooks/useEditorSidebar'
@@ -644,6 +645,12 @@ function EditorPage() {
     handleSidebarItemClick,
     handleClosePanel,
   } = useEditorSidebar()
+
+  const [activeTransitionSceneId, setActiveTransitionSceneId] = useState(null)
+  const handleOpenTransitionsPanel = useCallback((sceneId) => {
+    setActiveTransitionSceneId(sceneId)
+    setActiveSidebarItem('Transitions')
+  }, [setActiveSidebarItem])
 
   const [activeBottomMenu, setActiveBottomMenu] = useState(null)
 
@@ -4144,6 +4151,8 @@ function EditorPage() {
               dispatch(redo())
             }}
             sidebarWidth={typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth}
+            showPasteboard={showPasteboard}
+            onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
           />
         </div>
 
@@ -4203,6 +4212,13 @@ function EditorPage() {
                 )}
                 {activeSidebarItem === 'Media' && (
                   <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Transitions' && (
+                  <TransitionsPanel
+                    onClose={handleClosePanel}
+                    activeTransitionSceneId={activeTransitionSceneId}
+                    motionControls={motionControls}
+                  />
                 )}
                 {/* {activeSidebarItem === 'Tools' && (
                 <ToolsPanel onClose={handleClosePanel} />
@@ -4417,6 +4433,13 @@ function EditorPage() {
                     )}
                     {activeSidebarItem === 'Media' && (
                       <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Transitions' && (
+                      <TransitionsPanel
+                        onClose={handleClosePanel}
+                        activeTransitionSceneId={activeTransitionSceneId}
+                        motionControls={motionControls}
+                      />
                     )}
                     {/* {activeSidebarItem === 'Tools' && (
                     <ToolsPanel onClose={handleClosePanel} />
@@ -4687,8 +4710,6 @@ function EditorPage() {
                 onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
                 requestOpenControl={requestOpenControl}
                 stepsCount={currentSceneMotionFlow?.steps?.length || 0}
-                showPasteboard={showPasteboard}
-                onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
                 showStarterHint={showStarterHint}
                 starterHintText={starterHintText}
                 onHideStarterHint={() => {
@@ -4929,6 +4950,7 @@ function EditorPage() {
                     bottomSectionHeight={customBottomHeight}
                     onSeek={seek}
                     onMotionStop={handleMotionStop}
+                    onOpenTransitionsPanel={handleOpenTransitionsPanel}
                   />
                 </div>
               </div>
@@ -5067,8 +5089,6 @@ function EditorPage() {
                   onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
                   requestOpenControl={requestOpenControl}
                   stepsCount={currentSceneMotionFlow?.steps?.length || 0}
-                  showPasteboard={showPasteboard}
-                  onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
                   isMobileBottom={true}
                   onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
                   showStarterHint={showStarterHint}

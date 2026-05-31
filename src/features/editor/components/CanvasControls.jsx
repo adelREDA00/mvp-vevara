@@ -42,8 +42,6 @@ function CanvasControls({
   requestOpenControl = null,
   stepsCount = 0,
   editingStepActionCount = 0,
-  showPasteboard = true,
-  onTogglePasteboard,
   isMobileBottom = false,
   onSubmenuChange,
   showStarterHint = false,
@@ -373,19 +371,7 @@ function CanvasControls({
               }}
               title="Canvas Background Color"
             />
-            <button
-              onClick={() => onTogglePasteboard?.()}
-              className={`h-6 px-1.5 rounded-md transition-all flex items-center justify-center border ${showPasteboard
-                ? 'bg-[#7c4af0]/20 border-[#7c4af0]/50 text-[#7c4af0]'
-                : (theme === 'light'
-                  ? 'text-gray-400 hover:bg-gray-100 border-transparent hover:border-gray-200'
-                  : 'text-white/40 hover:bg-white/10 border-transparent hover:border-white/10')
-                }`}
-              title={showPasteboard ? "Hide Pasteboard" : "Show Pasteboard"}
-            >
-              {showPasteboard ? <Eye className="h-4 w-4" strokeWidth={2.5} /> : <EyeOff className="h-4 w-4" strokeWidth={2.5} />}
-            </button>
-            <div className={`w-px h-4 mx-1 ${theme === 'light' ? 'bg-gray-200' : 'bg-zinc-700'}`} />
+
           </div>
         )}
 

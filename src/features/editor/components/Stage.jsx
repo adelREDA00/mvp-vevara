@@ -319,7 +319,7 @@ function Stage({
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, pixiApp?.renderer)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {

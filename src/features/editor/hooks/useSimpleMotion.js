@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
-import { selectSceneMotionFlow, selectLayers, selectProjectTimelineInfo, selectTotalProjectDuration, selectSceneMotionFlows } from '../../../store/slices/projectSlice'
+import { selectSceneMotionFlow, selectLayers, selectProjectTimelineInfo, selectTotalProjectDuration, selectSceneMotionFlows, selectAspectRatio } from '../../../store/slices/projectSlice'
 import { applyTransformInline } from './useCanvasLayers'
 import { createVideoLayer } from '../../engine/pixi/createLayer'
 
@@ -14,11 +14,45 @@ import { createVideoLayer } from '../../engine/pixi/createLayer'
  * @param {number} totalTimeInSeconds - Total scene duration in seconds
  * @param {function} onPlayingChange - Callback when playing state changes (optional)
  */
-export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null, motionCaptureMode = null) {
+export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null, motionCaptureMode = null, stageContainer = null) {
     const dispatch = useDispatch()
 
     // Get all layers for resetting state during transitions
     const layers = useSelector(selectLayers)
+    const aspectRatio = useSelector(selectAspectRatio)
+
+    // Calculate dimensions matching current aspect ratio
+    const [widthRatio, heightRatio] = useMemo(() => {
+        if (!aspectRatio) return [16, 9]
+        return aspectRatio.split(':').map(Number)
+    }, [aspectRatio])
+
+    const { worldWidth, worldHeight } = useMemo(() => {
+        const aspectRatioValue = widthRatio / heightRatio
+        if (aspectRatioValue >= 1) {
+            const baseWidth = 1920
+            const baseHeight = 1080
+            const baseAspect = baseWidth / baseHeight
+            if (Math.abs(aspectRatioValue - baseAspect) < 0.01) {
+                return { worldWidth: 1920, worldHeight: 1080 }
+            } else {
+                const worldHeight = 1080
+                const worldWidth = Math.round(worldHeight * aspectRatioValue)
+                return { worldWidth, worldHeight }
+            }
+        } else {
+            const baseWidth = 1080
+            const baseHeight = 1920
+            const baseAspect = baseWidth / baseHeight
+            if (Math.abs(aspectRatioValue - baseAspect) < 0.01) {
+                return { worldWidth: 1080, worldHeight: 1920 }
+            } else {
+                const worldWidth = 1080
+                const worldHeight = Math.round(worldWidth / aspectRatioValue)
+                return { worldWidth, worldHeight }
+            }
+        }
+    }, [widthRatio, heightRatio])
 
     // When capture is active or transitioning (e.g. after add-step fast preview), skip resetting
     // PIXI objects to base in prepareEngine so the video/layer stays at end-of-step position.
@@ -121,13 +155,19 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     }).join('|')
 
     const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
+    const transitionsSignature = timeline?.map(s => {
+      const colorsStr = s.transitionColors ? s.transitionColors.join(',') : ''
+      return `${s.id}:${s.transition || 'None'}:${colorsStr}:${s.transitionDirection || ''}`
+    }).join('|')
 
     const currentDataSignature = JSON.stringify({
       sceneCount: timeline.length,
       layerCount: objects.size,
       totalDuration: totalProjectDuration,
+      aspectRatio,
       layerPositionsHash,
       sceneTimingsHash,
+      transitionsSignature,
       flowsHash: JSON.stringify(flowsMap)
     })
 
@@ -135,9 +175,10 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
       return
     }
 
+        motionEngine.setProjectConfig({ width: worldWidth, height: worldHeight })
         const currentPlayheadTime = motionEngine.masterTimeline?.time() || 0
         motionEngine.unloadAllMotions()
-
+ 
         const capture = motionCaptureModeRef.current
         const skipResetForCapture = capture?.isActive || capture?.isTransitioning
 
@@ -152,7 +193,8 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }
 
         motionEngine.loadProjectMotionFlow(timeline, flowsMap, objects, {
-            allLayers: currentLayers
+            allLayers: currentLayers,
+            transitionContainer: stageContainer
         })
 
         if (currentPlayheadTime > 0) {
@@ -161,7 +203,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }
 
         lastPreparedDataRef.current = currentDataSignature
-    }, [motionEngine, totalProjectDuration])
+    }, [motionEngine, totalProjectDuration, stageContainer, worldWidth, worldHeight, aspectRatio])
 
     // Get all motion flows for project-wide tracking
     const allMotionFlows = useSelector(selectSceneMotionFlows)
@@ -182,6 +224,15 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         }).join('|')
     }, [layers, timelineInfo])
 
+    // Memoize a hash of scene transitions to detect when transitions change
+    const transitionsHash = useMemo(() => {
+        if (!timelineInfo) return ''
+        return timelineInfo.map(s => {
+            const colorsStr = s.transitionColors ? s.transitionColors.join(',') : ''
+            return `${s.id}:${s.transition || 'None'}:${colorsStr}:${s.transitionDirection || ''}`
+        }).join('|')
+    }, [timelineInfo])
+
     // Rebuild engine when project structure, motion flow, OR base layer state changes
     const flowsJson = JSON.stringify(allMotionFlows)
     useEffect(() => {
@@ -196,7 +247,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     layersRef.current = layers
 
     prepareEngine(false)
-  }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers])
+  }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers, transitionsHash, stageContainer])
 
   // [TILT/PERF] When motion capture exits, run the deferred engine rebuild
   // so the freshly captured tilt/blur/etc. actions get loaded into GSAP
@@ -467,7 +518,8 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                 if (flowToLoad) {
                     motionEngine.loadSceneMotionFlow(flowToLoad, objects || new Map(), {
                         startTimeOffset: sceneInfo.startTime,
-                        allLayers: currentLayers
+                        allLayers: currentLayers,
+                        transitionContainer: stageContainer
                     }, sharedContext)
                 }
             })

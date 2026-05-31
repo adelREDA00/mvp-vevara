@@ -1150,7 +1150,8 @@ export const exportVideo = async ({
         exportEngine.loadProjectMotionFlow(timelineInfo, sceneMotionFlows, layerObjects, {
             allLayers: layers,
             isExport: true,
-            exportScale: exportScale
+            exportScale: exportScale,
+            transitionContainer: stageContainer
         });
 
         // Disable the per-frame obstacle layout pass when there are no Liquid Flow text

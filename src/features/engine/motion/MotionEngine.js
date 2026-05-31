@@ -19,6 +19,7 @@ export class MotionEngine {
     this.backgroundMedia = new Map() // layerId -> { _videoElement, _sceneId, _sourceStartTime, _sourceEndTime }
     // [PERF] Index of only video-bearing registered objects for fast syncMedia iteration
     this._videoObjects = new Map() // layerId -> PIXI.DisplayObject (subset of registeredObjects)
+    this.transitionContainer = null
 
     // [Dimentions Tracking] For relative occupancy filtering
     this.projectWidth = 1920
@@ -943,6 +944,246 @@ export class MotionEngine {
       this.setTotalDuration(lastScene.endTime)
     }
 
+    // [TRANSITIONS] Setup scene transitions dynamically
+    this.setupTransitions(timelineInfo, options)
+  }
+
+  setupTransitions(timelineInfo, options = {}) {
+    const parentContainer = options.transitionContainer
+    if (!parentContainer || parentContainer.destroyed) return
+
+    // Clean up any existing transition container first
+    this.clearTransitions()
+
+    // Create a new transition container
+    this.transitionContainer = new PIXI.Container()
+    this.transitionContainer.label = 'engine-transitions-overlay'
+    this.transitionContainer.eventMode = 'none'
+
+    parentContainer.addChild(this.transitionContainer)
+
+    // Build transitions for each scene boundary
+    timelineInfo.forEach((sceneInfo, index) => {
+      if (index === 0) return
+
+      const transitionType = sceneInfo.transition || 'None'
+      if (!transitionType || transitionType === 'None') return
+
+      const T = sceneInfo.startTime // Boundary time in seconds
+
+      if (transitionType === 'Fade') {
+        const parseColor = (col) => {
+          if (typeof col === 'string') {
+            return parseInt(col.replace('#', '0x'), 16)
+          }
+          return col
+        }
+
+        const transitionColors = sceneInfo.transitionColors || ['#000000']
+        const colors = transitionColors.map(parseColor)
+        const fadeColor = colors[0] !== undefined ? colors[0] : 0x000000
+
+        const fadeOverlay = new PIXI.Graphics()
+        fadeOverlay.rect(0, 0, this.projectWidth, this.projectHeight)
+        fadeOverlay.fill({ color: fadeColor })
+        fadeOverlay.alpha = 0
+        fadeOverlay.visible = false
+        fadeOverlay.eventMode = 'none'
+        this.transitionContainer.addChild(fadeOverlay)
+
+        // Add to GSAP masterTimeline
+        this.masterTimeline.fromTo(fadeOverlay, { alpha: 0 }, { alpha: 1, duration: 0.4, ease: 'power1.in' }, T - 0.4)
+        this.masterTimeline.to(fadeOverlay, { alpha: 0, duration: 0.4, ease: 'power1.out' }, T)
+        
+        // Ensure it is completely hidden outside the transition window
+        this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, 0)
+        this.masterTimeline.set(fadeOverlay, { visible: true }, T - 0.4)
+        this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, T + 0.4)
+      } 
+      else if (transitionType === 'LiquidShapes') {
+        const liquidContainer = new PIXI.Container()
+        liquidContainer.visible = false
+        liquidContainer.eventMode = 'none'
+        this.transitionContainer.addChild(liquidContainer)
+
+        const parseColor = (col) => {
+          if (typeof col === 'string') {
+            return parseInt(col.replace('#', '0x'), 16)
+          }
+          return col
+        }
+
+        const transitionColors = sceneInfo.transitionColors || ['#5b21b6', '#7c3aed', '#8b5cf6', '#a78bfa']
+        const colors = transitionColors.map(parseColor)
+        const direction = sceneInfo.transitionDirection || 'left'
+        const width = this.projectWidth
+        const height = this.projectHeight
+        const rects = []
+
+        for (let i = 0; i < 4; i++) {
+          const rect = new PIXI.Graphics()
+          rect.eventMode = 'none'
+          rect.clear()
+          rect.rect(0, 0, width, height)
+          rect.fill({ color: colors[i] })
+          
+          let startProps = { x: width, y: 0 }
+          let endProps = { x: -width, y: 0 }
+          
+          if (direction === 'right') {
+            startProps = { x: -width, y: 0 }
+            endProps = { x: width, y: 0 }
+          } else if (direction === 'top') {
+            startProps = { x: 0, y: height }
+            endProps = { x: 0, y: -height }
+          } else if (direction === 'bottom') {
+            startProps = { x: 0, y: -height }
+            endProps = { x: 0, y: height }
+          }
+          
+          rect.x = startProps.x
+          rect.y = startProps.y
+          
+          liquidContainer.addChild(rect)
+          rects.push(rect)
+
+          const startOffset = -0.5 + i * 0.05
+          const endOffset = 0.35 + i * 0.05
+
+          this.masterTimeline.fromTo(rect, 
+            startProps, 
+            { ...endProps, duration: 0.9, ease: 'power2.inOut' }, 
+            T + startOffset
+          )
+
+          this.masterTimeline.set(rect, startProps, 0)
+          this.masterTimeline.set(rect, endProps, T + endOffset)
+        }
+
+        // Ensure the entire liquidContainer is invisible outside the transition window
+        this.masterTimeline.set(liquidContainer, { visible: false }, 0)
+        this.masterTimeline.set(liquidContainer, { visible: true }, T - 0.5)
+        this.masterTimeline.set(liquidContainer, { visible: false }, T + 0.55)
+      }
+      else if (transitionType === 'BubbleWipe') {
+        const liquidContainer = new PIXI.Container()
+        liquidContainer.visible = false
+        liquidContainer.eventMode = 'none'
+        this.transitionContainer.addChild(liquidContainer)
+
+        const parseColor = (col) => {
+          if (typeof col === 'string') {
+            return parseInt(col.replace('#', '0x'), 16)
+          }
+          return col
+        }
+
+        const transitionColors = sceneInfo.transitionColors || ['#ec4899', '#f43f5e', '#d946ef', '#8b5cf6']
+        const colors = transitionColors.map(parseColor)
+        const direction = sceneInfo.transitionDirection || 'bottom-left'
+        const width = this.projectWidth
+        const height = this.projectHeight
+        
+        const maxRadius = Math.sqrt(width * width + height * height) * 0.8
+        const circles = []
+
+        for (let i = 0; i < 4; i++) {
+          const circle = new PIXI.Graphics()
+          circle.eventMode = 'none'
+          circle.clear()
+          circle.circle(0, 0, maxRadius)
+          circle.fill({ color: colors[i] })
+          
+          let startX, startY, exitX, exitY, midX, midY
+          
+          if (direction === 'bottom-right') {
+            startX = -maxRadius
+            startY = -maxRadius
+            exitX = width + maxRadius
+            exitY = height + maxRadius
+            midX = width * (0.3 + i * 0.08)
+            midY = height * (0.6 + i * 0.08)
+          } else if (direction === 'top-left') {
+            startX = width + maxRadius
+            startY = height + maxRadius
+            exitX = -maxRadius
+            exitY = -maxRadius
+            midX = width * (0.7 - i * 0.08)
+            midY = height * (0.4 - i * 0.08)
+          } else if (direction === 'top-right') {
+            startX = -maxRadius
+            startY = height + maxRadius
+            exitX = width + maxRadius
+            exitY = -maxRadius
+            midX = width * (0.3 + i * 0.08)
+            midY = height * (0.4 - i * 0.08)
+          } else {
+            // bottom-left (default)
+            startX = width + maxRadius
+            startY = -maxRadius
+            exitX = -maxRadius
+            exitY = height + maxRadius
+            midX = width * (0.7 - i * 0.08)
+            midY = height * (0.6 + i * 0.08)
+          }
+          
+          circle.x = startX
+          circle.y = startY
+          
+          liquidContainer.addChild(circle)
+          circles.push(circle)
+
+          const startOffset = -0.65 + i * 0.12
+
+          // Wipe in: diagonal sweep from selected corner towards the center
+          this.masterTimeline.fromTo(circle,
+            { 
+              x: startX, 
+              y: startY 
+            },
+            { 
+              x: midX, 
+              y: midY, 
+              duration: 0.6, 
+              ease: 'power2.in' 
+            },
+            T + startOffset
+          )
+
+          // Wipe out: exit to the opposite corner off-screen
+          this.masterTimeline.to(circle,
+            { 
+              x: exitX, 
+              y: exitY, 
+              duration: 0.6, 
+              ease: 'power2.out' 
+            },
+            T + startOffset + 0.6
+          )
+
+          this.masterTimeline.set(circle, { x: startX, y: startY }, 0)
+        }
+
+        // Keep the container visible throughout the entire extended window
+        this.masterTimeline.set(liquidContainer, { visible: false }, 0)
+        this.masterTimeline.set(liquidContainer, { visible: true }, T - 0.7)
+        this.masterTimeline.set(liquidContainer, { visible: false }, T + 1.15)
+      }
+    })
+  }
+
+  clearTransitions() {
+    if (this.transitionContainer) {
+      try {
+        if (!this.transitionContainer.destroyed && this.transitionContainer.parent) {
+          this.transitionContainer.parent.removeChild(this.transitionContainer)
+        }
+        this.transitionContainer.destroy({ children: true })
+      } catch (e) {
+        console.warn('Error clearing transitions:', e)
+      }
+      this.transitionContainer = null
+    }
   }
 
   /**
@@ -1335,6 +1576,7 @@ export class MotionEngine {
     this.activeTimelines.forEach(tl => tl.destroy())
     this.activeTimelines.clear()
     this.isPlaying = false
+    this.clearTransitions()
   }
 
   /**

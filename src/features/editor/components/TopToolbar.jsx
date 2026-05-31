@@ -5,6 +5,7 @@ import {
   Share2,
   Download,
   Eye,
+  EyeOff,
   FileText,
   Maximize2,
   ChevronDown,
@@ -40,6 +41,8 @@ function TopToolbar({
   onRedo,
   hideExport = false,
   sidebarWidth = '0px',
+  showPasteboard = true,
+  onTogglePasteboard,
 }) {
   const { isAuthenticated } = useSelector((state) => state.auth)
   const dispatch = useDispatch()
@@ -220,6 +223,22 @@ function TopToolbar({
 
         {/* Right Section: User (Circle), Export, Sidebar Toggle (Mobile) */}
         <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
+          {/* Pasteboard Toggle Button (Always Visible) */}
+          <button
+            onClick={() => onTogglePasteboard?.()}
+            className="text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
+            title={showPasteboard ? "Switch to Canvas View" : "Switch to Workspace View"}
+          >
+            {showPasteboard ? (
+              <Eye className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <EyeOff className="h-4 w-4" strokeWidth={2} />
+            )}
+            <span className="hidden md:inline">
+              {showPasteboard ? "Workspace View" : "Canvas View"}
+            </span>
+          </button>
+
           {/* Mobile Only: 3 Dots Menu */}
           <div className="md:hidden">
             <DropdownMenu
@@ -335,8 +354,8 @@ function TopToolbar({
               key={i}
               onClick={() => handleResizeOption(opt.w, opt.h)}
               className={`w-full text-left p-4 rounded-xl text-sm transition-all border ${isLight
-                  ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5'
-                  : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
+                ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5'
+                : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
                 }`}
             >
               {opt.label}
@@ -363,8 +382,8 @@ function TopToolbar({
               key={i}
               onClick={() => handleExportOption(opt.id)}
               className={`w-full text-left p-4 rounded-xl text-sm transition-all border ${isLight
-                  ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5'
-                  : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
+                ? 'bg-black/5 hover:bg-black/10 text-gray-900 border-black/5'
+                : 'bg-white/5 hover:bg-white/10 text-white border-white/5'
                 }`}
             >
               {opt.label}

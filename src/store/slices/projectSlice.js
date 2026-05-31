@@ -391,6 +391,9 @@ const projectSlice = createSlice({
       if (state.currentSceneId === sceneId && state.scenes.length > 0) {
         state.currentSceneId = state.scenes[0].id
       }
+      if (state.scenes[0]) {
+        state.scenes[0].transition = 'None'
+      }
       state.isDirty = true
       state.version++
     },
@@ -411,6 +414,9 @@ const projectSlice = createSlice({
         fromIndex < state.scenes.length && toIndex < state.scenes.length) {
         const [moved] = state.scenes.splice(fromIndex, 1)
         state.scenes.splice(toIndex, 0, moved)
+        if (state.scenes[0]) {
+          state.scenes[0].transition = 'None'
+        }
         state.isDirty = true
         state.version++
       }

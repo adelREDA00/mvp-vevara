@@ -62,7 +62,7 @@ function hslToHex(h, s, l) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
 
-function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchorElement, isInline = false }) {
+function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchorElement, isInline = false, hideHeader = false }) {
   const [activeTab, setActiveTab] = useState('solid') // 'solid' or 'gradient'
   
   const [hsl, setHsl] = useState(() => {
@@ -326,43 +326,45 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
       onClick={(e) => e.stopPropagation()}
     >
         {/* Header */}
-        <div className="px-3 pt-3 pb-2 border-b border-white/5 flex-shrink-0 bg-white/5">
-          {!isInline && (
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pick Colour</h2>
+        {!hideHeader && (
+          <div className="px-3 pt-3 pb-2 border-b border-white/5 flex-shrink-0 bg-white/5">
+            {!isInline && (
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pick Colour</h2>
+                <button
+                  onClick={onClose}
+                  className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+              </div>
+            )}
+
+            {/* Tabs */}
+            <div className="flex gap-1 bg-black/40 p-1 rounded-lg">
               <button
-                onClick={onClose}
-                className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                onClick={() => setActiveTab('solid')}
+                className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
+                  activeTab === 'solid'
+                    ? 'bg-white/10 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-300'
+                }`}
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
+                Solid
+              </button>
+              <button
+                onClick={() => setActiveTab('gradient')}
+                className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
+                  activeTab === 'gradient'
+                    ? 'bg-white/10 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-300'
+                }`}
+              >
+                Gradient
               </button>
             </div>
-          )}
-
-          {/* Tabs */}
-          <div className="flex gap-1 bg-black/40 p-1 rounded-lg">
-            <button
-              onClick={() => setActiveTab('solid')}
-              className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
-                activeTab === 'solid'
-                  ? 'bg-white/10 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-300'
-              }`}
-            >
-              Solid
-            </button>
-            <button
-              onClick={() => setActiveTab('gradient')}
-              className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
-                activeTab === 'gradient'
-                  ? 'bg-white/10 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-300'
-              }`}
-            >
-              Gradient
-            </button>
           </div>
-        </div>
+        )}
 
         {/* Content */}
         <div className="p-3">
