@@ -295,7 +295,7 @@ export default function ExportPage() {
   const isCompleted = exportState.status === 'completed'
 
   return (
-    <div className="relative flex h-screen w-screen flex-col bg-[#f3efff] font-sans text-[#7c4af0] select-none overflow-hidden">
+    <div className="relative flex flex-col justify-between h-screen w-screen bg-[#f3efff] font-sans text-[#7c4af0] select-none p-6 md:p-16 overflow-hidden">
 
       {/* 1. Stretched Horizontal Progress Bar at the absolute top */}
       <div className="absolute top-0 left-0 w-full h-[6px] bg-[#7c4af0]/10 z-50">
@@ -305,8 +305,8 @@ export default function ExportPage() {
         />
       </div>
 
-      {/* 2. Top-Left Big Brand Header */}
-      <div className="absolute top-8 left-6 md:top-12 md:left-16 z-40">
+      {/* 2. Brand Header */}
+      <div className="z-40">
         <h1
           className="text-3xl md:text-4xl font-extrabold tracking-tight text-[#7c4af0] select-none"
           style={{ fontFamily: 'Poppins, sans-serif' }}
@@ -315,8 +315,8 @@ export default function ExportPage() {
         </h1>
       </div>
 
-      {/* 3. Left Panel Metadata & Options (Jitter Style) */}
-      <div className="absolute top-24 left-6 right-6 md:right-auto md:top-36 md:left-16 max-w-sm flex flex-col space-y-6 md:space-y-10 z-40">
+      {/* 3. Main Center Panel */}
+      <div className="flex-1 flex flex-col justify-center max-w-sm w-full z-40 my-4 md:my-0 md:absolute md:top-36 md:left-16 md:space-y-10 space-y-6">
 
         {/* Export Properties */}
         <div className="space-y-2 md:space-y-4">
@@ -389,9 +389,9 @@ export default function ExportPage() {
 
       {/* 4. Bottom-Right Massive Progress Percentage (Jitter Style) */}
       <div
-        className="absolute bottom-4 right-6 md:bottom-6 md:right-16 z-30 font-extrabold select-none pointer-events-none transition-all duration-300"
+        className="z-30 font-extrabold select-none pointer-events-none transition-all duration-300 text-right self-end md:absolute md:bottom-6 md:right-16"
         style={{
-          fontSize: 'clamp(80px, 18vw, 240px)',
+          fontSize: 'clamp(70px, 16vw, 240px)',
           lineHeight: '0.8',
           letterSpacing: '-0.06em',
           color: '#7c4af0',
