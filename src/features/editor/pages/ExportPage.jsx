@@ -18,24 +18,65 @@ const preloadFonts = async (layers) => {
 
   console.log('[ExportPage] Preloading font families:', Array.from(fontFamilies))
 
-  const loadPromises = Array.from(fontFamilies).map(async (fontFamily) => {
+  // 2-second timeout to prevent infinite preloading block on browser font ready hangs
+  const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000))
+
+  const loadTask = (async () => {
+    const loadPromises = Array.from(fontFamilies).map(async (fontFamily) => {
+      try {
+        await document.fonts.load(`12px "${fontFamily}"`)
+        await document.fonts.load(`bold 12px "${fontFamily}"`)
+        await document.fonts.load(`italic 12px "${fontFamily}"`)
+      } catch (err) {
+        console.warn(`[ExportPage] Failed to load font face: ${fontFamily}`, err)
+      }
+    })
+
+    await Promise.all(loadPromises)
+
     try {
-      await document.fonts.load(`12px "${fontFamily}"`)
-      await document.fonts.load(`bold 12px "${fontFamily}"`)
-      await document.fonts.load(`italic 12px "${fontFamily}"`)
-    } catch (err) {
-      console.warn(`[ExportPage] Failed to load font face: ${fontFamily}`, err)
+      await document.fonts.ready
+      console.log('[ExportPage] Browser font faces are fully loaded.')
+    } catch (e) {
+      console.warn('[ExportPage] Warning waiting for fonts ready:', e)
+    }
+  })()
+
+  await Promise.race([loadTask, timeoutPromise])
+}
+
+const getFromIndexedDB = (key) => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('VevaraExportDB', 1)
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result
+      if (!db.objectStoreNames.contains('exports')) {
+        db.createObjectStore('exports')
+      }
+    }
+    request.onsuccess = (e) => {
+      const db = e.target.result
+      const tx = db.transaction('exports', 'readonly')
+      const store = tx.objectStore('exports')
+      const getRequest = store.get(key)
+      getRequest.onsuccess = () => resolve(getRequest.result)
+      getRequest.onerror = () => reject(getRequest.error)
+    }
+    request.onerror = () => reject(request.error)
+  })
+}
+
+const removeFromIndexedDB = (key) => {
+  return new Promise((resolve) => {
+    const request = indexedDB.open('VevaraExportDB', 1)
+    request.onsuccess = (e) => {
+      const db = e.target.result
+      const tx = db.transaction('exports', 'readwrite')
+      const store = tx.objectStore('exports')
+      store.delete(key)
+      tx.oncomplete = () => resolve(true)
     }
   })
-
-  await Promise.all(loadPromises)
-
-  try {
-    await document.fonts.ready
-    console.log('[ExportPage] Browser font faces are fully loaded.')
-  } catch (e) {
-    console.warn('[ExportPage] Warning waiting for fonts ready:', e)
-  }
 }
 
 export default function ExportPage() {
@@ -66,25 +107,62 @@ export default function ExportPage() {
   // Fetch project data (from sessionStorage first, fallback to DB if missing/reloaded)
   useEffect(() => {
     async function loadProject() {
+      console.log('[ExportPage] loadProject initiated. exportId:', exportId, 'projectId:', projectId)
       try {
         setLoading(true)
         setError(null)
 
-        // 1. Try Session Storage (Fast Copy-on-Spawn Path)
+        // 1. Poll for IndexedDB, Local Storage, or Session Storage snapshot (handles race conditions on fast tabs)
+        let projectSnapshot = null
         if (exportId) {
-          const cached = sessionStorage.getItem(exportId)
-          if (cached) {
-            const parsed = JSON.parse(cached)
-            setProjectData(parsed)
-            setLoading(false)
-            return
+          console.log('[ExportPage] Starting 15-attempt polling for key:', exportId)
+          for (let attempt = 0; attempt < 15; attempt++) {
+            console.log(`[ExportPage] Polling attempt ${attempt + 1}/15...`)
+            // Check IndexedDB first (no size limits)
+            try {
+              projectSnapshot = await getFromIndexedDB(exportId)
+              if (projectSnapshot) {
+                console.log('[ExportPage] Found snapshot in IndexedDB!')
+                break
+              }
+            } catch (err) {
+              console.warn('[ExportPage] IndexedDB read attempt failed:', err)
+            }
+
+            // Check LocalStorage/SessionStorage fallbacks
+            try {
+              const cached = localStorage.getItem(exportId) || sessionStorage.getItem(exportId)
+              if (cached) {
+                console.log('[ExportPage] Found snapshot in LocalStorage or SessionStorage fallback!')
+                projectSnapshot = JSON.parse(cached)
+                break
+              }
+            } catch (err) {
+              console.warn('[ExportPage] Storage read attempt failed:', err)
+            }
+
+            // Wait 100ms before retrying
+            await new Promise((resolve) => setTimeout(resolve, 100))
           }
         }
 
-        // 2. Fallback to Database API (if authenticated / reloaded)
+        if (projectSnapshot) {
+          console.log('[ExportPage] Successfully loaded snapshot:', {
+            projectName: projectSnapshot.projectName,
+            scenesCount: projectSnapshot.scenes?.length,
+            layersCount: Object.keys(projectSnapshot.layers || {}).length,
+          })
+          setProjectData(projectSnapshot)
+          setLoading(false)
+          return
+        }
+
+        // 2. Fallback to Database API (only if authenticated & projectId exists)
         if (projectId) {
+          console.log('[ExportPage] Snapshot not in local storage. Fetching from DB for projectId:', projectId)
           const project = await api.get(`/projects/${projectId}`)
           if (project && project.data) {
+            console.log('[ExportPage] Successfully fetched project from DB API')
             setProjectData({
               projectName: project.name || 'Untitled Project',
               scenes: project.data.scenes || [],
@@ -110,6 +188,7 @@ export default function ExportPage() {
 
   // Run the export pipeline
   useEffect(() => {
+    console.log('[ExportPage] export run effect triggered. loading:', loading, 'error:', error, 'hasProjectData:', !!projectData, 'startedRef:', exportStartedRef.current)
     if (loading || error || !projectData || exportStartedRef.current) return
     exportStartedRef.current = true
 
@@ -118,11 +197,17 @@ export default function ExportPage() {
 
     async function runExport() {
       try {
+        console.log('[ExportPage] Beginning export pipeline execution')
         setExportState({ status: 'initializing', progress: 0 })
 
         // Preload all custom Google Fonts before starting the PIXI rendering pipeline
+        console.log('[ExportPage] Invoking font preloader')
         await preloadFonts(projectData.layers)
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted) {
+          console.log('[ExportPage] Export aborted during font preloading')
+          return
+        }
+        console.log('[ExportPage] Font preloading finished or timed out')
 
         // Derive timelineInfo (cumulative scene times)
         let cumulativeTime = 0
@@ -155,6 +240,7 @@ export default function ExportPage() {
           },
           onProgress: (update) => {
             if (controller.signal.aborted) return
+            console.log(`[ExportPage] exportVideo callback. status: ${update.status}, progress: ${update.progress}%`)
             setExportState({
               status: update.status,
               progress: update.progress,
@@ -163,6 +249,7 @@ export default function ExportPage() {
           signal: controller.signal,
         }
 
+        console.log('[ExportPage] Invoking exportVideo with derived options:', opts)
         const blob = await exportVideo(opts)
 
         if (controller.signal.aborted) return
@@ -176,10 +263,12 @@ export default function ExportPage() {
 
         setExportState({ status: 'completed', progress: 100 })
 
-        // Clean up sessionStorage to free memory
+        // Clean up sessionStorage, localStorage, and IndexedDB snapshots on success
         if (exportId) {
           try {
             sessionStorage.removeItem(exportId)
+            localStorage.removeItem(exportId)
+            removeFromIndexedDB(exportId)
           } catch (e) { /* ignore */ }
         }
       } catch (err) {
@@ -196,10 +285,11 @@ export default function ExportPage() {
     runExport()
 
     return () => {
-      // Abort export on unmount
+      console.log('[ExportPage] Cleaning up runExport effect, resetting exportStartedRef')
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
+      exportStartedRef.current = false
     }
   }, [loading, error, projectData, format, resolution, gifWidth, gifFps, gifLoop, exportId])
 
@@ -316,7 +406,18 @@ export default function ExportPage() {
       </div>
 
       {/* 3. Main Center Panel */}
-      <div className="flex-1 flex flex-col justify-center max-w-sm w-full z-40 my-4 md:my-0 md:absolute md:top-36 md:left-16 md:space-y-10 space-y-6">
+      <div className="flex-grow flex flex-col justify-center items-center md:items-start max-w-sm w-full z-40 my-auto space-y-4 md:space-y-10 md:absolute md:top-36 md:left-16 text-center md:text-left">
+
+        {/* On mobile: Put the percentage right in the middle! */}
+        <div className="block md:hidden text-center my-4 select-none pointer-events-none">
+          <div
+            className="font-extrabold tracking-tighter text-[#7c4af0] leading-none"
+            style={{ fontSize: '72px' }}
+          >
+            {exportState.progress}%
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-[#7c4af0]/60">Exporting Progress</span>
+        </div>
 
         {/* Export Properties */}
         <div className="space-y-2 md:space-y-4">
@@ -324,14 +425,14 @@ export default function ExportPage() {
             <span className="text-[11px] font-bold uppercase tracking-wider text-[#7c4af0]/60">Export format</span>
             <div className="mt-0.5 font-semibold text-gray-900 text-sm">{getResolutionPixels()}</div>
           </div>
-          <div className="flex gap-4 md:block">
+          <div className="flex gap-4 md:block justify-center md:justify-start">
             <div className="font-semibold text-gray-900 text-sm">{format.toUpperCase()}</div>
             <div className="font-semibold text-gray-900 text-sm md:mt-1">{format === 'gif' ? `${gifFps} fps` : '30 fps'}</div>
           </div>
         </div>
 
         {/* Dynamic Status / Prompts */}
-        <div className="space-y-2">
+        <div className="space-y-2 flex flex-col items-center md:items-start">
           {!isCompleted ? (
             <>
               <div className="text-[13px] font-semibold text-gray-800">
@@ -342,8 +443,8 @@ export default function ExportPage() {
               </p>
             </>
           ) : (
-            <div className="space-y-3 md:space-y-4 pt-1 md:pt-2">
-              <div className="text-[14px] font-bold text-green-600 flex items-center gap-1.5">
+            <div className="space-y-3 md:space-y-4 pt-1 md:pt-2 w-full flex flex-col items-center md:items-start">
+              <div className="text-[14px] font-bold text-green-600 flex items-center gap-1.5 justify-center md:justify-start">
                 <svg className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
                 </svg>
@@ -356,7 +457,7 @@ export default function ExportPage() {
               <div>
                 <button
                   onClick={handleDownload}
-                  className="text-[12px] text-[#7c4af0] hover:text-[#5e32c2] font-bold underline underline-offset-4 transition text-left"
+                  className="text-[12px] text-[#7c4af0] hover:text-[#5e32c2] font-bold underline underline-offset-4 transition text-center md:text-left"
                 >
                   If your download did not start automatically, click here to download
                 </button>
@@ -389,7 +490,7 @@ export default function ExportPage() {
 
       {/* 4. Bottom-Right Massive Progress Percentage (Jitter Style) */}
       <div
-        className="z-30 font-extrabold select-none pointer-events-none transition-all duration-300 text-right self-end md:absolute md:bottom-6 md:right-16"
+        className="hidden md:block z-30 font-extrabold select-none pointer-events-none transition-all duration-300 text-right self-end md:absolute md:bottom-6 md:right-16"
         style={{
           fontSize: 'clamp(70px, 16vw, 240px)',
           lineHeight: '0.8',

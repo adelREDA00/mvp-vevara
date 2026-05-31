@@ -508,6 +508,27 @@ function EditorPage() {
     window.location.href = path
   }, [isAuthenticated, theme, dispatch, handleSave])
 
+  const saveToIndexedDB = (key, value) => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('VevaraExportDB', 1)
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result
+        if (!db.objectStoreNames.contains('exports')) {
+          db.createObjectStore('exports')
+        }
+      }
+      request.onsuccess = (e) => {
+        const db = e.target.result
+        const tx = db.transaction('exports', 'readwrite')
+        const store = tx.objectStore('exports')
+        const putRequest = store.put(value, key)
+        putRequest.onsuccess = () => resolve(true)
+        putRequest.onerror = () => reject(putRequest.error)
+      }
+      request.onerror = () => reject(request.error)
+    })
+  }
+
   const handleCancelExport = useCallback(() => {
     if (exportAbortControllerRef.current) {
       exportAbortControllerRef.current.abort()
@@ -516,9 +537,11 @@ function EditorPage() {
     setExportState({ isActive: false, status: 'rendering', progress: 0, error: null })
   }, [])
 
-  const handleExport = useCallback((options) => {
+  const handleExport = useCallback(async (options) => {
+    console.log('[EditorPage] handleExport invoked with options:', options)
     // 1. Pause editor playback
     if (motionControls?.isPlaying) {
+      console.log('[EditorPage] Pausing active editor playback')
       try { motionControls.pauseAll() } catch (e) { /* ignore */ }
     }
 
@@ -530,8 +553,13 @@ function EditorPage() {
     const resolution = opts.resolution || '720p'
     const gifOptions = opts.gifOptions || { width: 480, fps: 15, loop: 0 }
 
-    // 3. Create snapshot of the state synchronously (instant)
+    // 3. Pre-open blank tab synchronously (user gesture) -> 100% bypasses Safari/iOS popup blockers
+    console.log('[EditorPage] Pre-opening blank window')
+    const exportWindow = window.open('about:blank', '_blank')
+
+    // 4. Create snapshot of the state
     const exportId = `export_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    console.log('[EditorPage] Created unique exportId:', exportId)
     const projectState = {
       projectName,
       scenes,
@@ -539,14 +567,29 @@ function EditorPage() {
       sceneMotionFlows,
       aspectRatio: aspectRatio || '16:9'
     }
+    console.log('[EditorPage] Constructed projectState snapshot:', {
+      projectName: projectState.projectName,
+      scenesCount: projectState.scenes?.length,
+      layersCount: Object.keys(projectState.layers || {}).length,
+      aspectRatio: projectState.aspectRatio
+    })
 
+    // 5. Asynchronously save snapshot to IndexedDB (virtually unlimited quota!)
     try {
-      sessionStorage.setItem(exportId, JSON.stringify(projectState))
+      console.log('[EditorPage] Saving snapshot to IndexedDB under key:', exportId)
+      await saveToIndexedDB(exportId, projectState)
+      console.log('[EditorPage] IndexedDB write completed successfully')
     } catch (e) {
-      console.warn('[handleExport] Failed to save session snapshot:', e)
+      console.warn('[EditorPage] Failed to save snapshot to IndexedDB, falling back to localStorage:', e)
+      try {
+        localStorage.setItem(exportId, JSON.stringify(projectState))
+        console.log('[EditorPage] LocalStorage write completed successfully as fallback')
+      } catch (storageErr) {
+        console.error('[EditorPage] LocalStorage fallback also failed (QuotaExceeded):', storageErr)
+      }
     }
 
-    // 4. Build the query params
+    // 6. Build the query params
     const gifWidth = gifOptions.width || 480
     const gifFps = gifOptions.fps || 15
     const gifLoop = gifOptions.loop !== undefined ? gifOptions.loop : 0
@@ -559,10 +602,14 @@ function EditorPage() {
       exportUrl += `&gifWidth=${gifWidth}&gifFps=${gifFps}&gifLoop=${gifLoop}`
     }
 
-    // 5. Open the export tab IMMEDIATELY with the final URL (synchronous, bypassed blocker)
-    window.open(exportUrl, '_blank')
+    // 7. Update URL of the pre-opened tab (instant branded pre-loader rendered!)
+    if (exportWindow) {
+      exportWindow.location.href = exportUrl
+    } else {
+      window.open(exportUrl, '_blank')
+    }
 
-    // 6. Non-blocking parallel auto-save in the background
+    // 8. Non-blocking parallel auto-save in the background
     if (isAuthenticated) {
       handleSave({ silent: true }).catch((saveErr) => {
         console.warn('[handleExport] Parallel background auto-save failed:', saveErr)
