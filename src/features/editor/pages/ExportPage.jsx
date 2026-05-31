@@ -306,9 +306,9 @@ export default function ExportPage() {
       </div>
 
       {/* 2. Top-Left Big Brand Header */}
-      <div className="absolute top-12 left-16 z-40">
+      <div className="absolute top-8 left-6 md:top-12 md:left-16 z-40">
         <h1
-          className="text-4xl font-extrabold tracking-tight text-[#7c4af0] select-none"
+          className="text-3xl md:text-4xl font-extrabold tracking-tight text-[#7c4af0] select-none"
           style={{ fontFamily: 'Poppins, sans-serif' }}
         >
           vevara
@@ -316,19 +316,17 @@ export default function ExportPage() {
       </div>
 
       {/* 3. Left Panel Metadata & Options (Jitter Style) */}
-      <div className="absolute top-36 left-16 max-w-sm flex flex-col space-y-10 z-40">
+      <div className="absolute top-24 left-6 right-6 md:right-auto md:top-36 md:left-16 max-w-sm flex flex-col space-y-6 md:space-y-10 z-40">
 
         {/* Export Properties */}
-        <div className="space-y-4">
+        <div className="space-y-2 md:space-y-4">
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-[#7c4af0]/60">Export format</span>
-            <div className="mt-1 font-semibold text-gray-900 text-sm">{getResolutionPixels()}</div>
+            <div className="mt-0.5 font-semibold text-gray-900 text-sm">{getResolutionPixels()}</div>
           </div>
-          <div>
+          <div className="flex gap-4 md:block">
             <div className="font-semibold text-gray-900 text-sm">{format.toUpperCase()}</div>
-          </div>
-          <div>
-            <div className="font-semibold text-gray-900 text-sm">{format === 'gif' ? `${gifFps} fps` : '30 fps'}</div>
+            <div className="font-semibold text-gray-900 text-sm md:mt-1">{format === 'gif' ? `${gifFps} fps` : '30 fps'}</div>
           </div>
         </div>
 
@@ -344,7 +342,7 @@ export default function ExportPage() {
               </p>
             </>
           ) : (
-            <div className="space-y-4 pt-2">
+            <div className="space-y-3 md:space-y-4 pt-1 md:pt-2">
               <div className="text-[14px] font-bold text-green-600 flex items-center gap-1.5">
                 <svg className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
@@ -358,16 +356,16 @@ export default function ExportPage() {
               <div>
                 <button
                   onClick={handleDownload}
-                  className="text-[12px] text-[#7c4af0] hover:text-[#5e32c2] font-bold underline underline-offset-4 transition"
+                  className="text-[12px] text-[#7c4af0] hover:text-[#5e32c2] font-bold underline underline-offset-4 transition text-left"
                 >
                   If your download did not start automatically, click here to download
                 </button>
               </div>
 
-              <div className="pt-6 w-full">
+              <div className="pt-4 md:pt-6 w-full">
                 <button
                   onClick={handleClose}
-                  className="w-full py-5 text-sm font-extrabold text-[#7c4af0] bg-white hover:bg-gray-50  rounded-none transition-all tracking-widest uppercase"
+                  className="w-full py-4 md:py-5 text-sm font-extrabold text-[#7c4af0] bg-white hover:bg-gray-50 rounded-none transition-all tracking-widest uppercase"
                 >
                   Close Window
                 </button>
@@ -378,7 +376,7 @@ export default function ExportPage() {
 
         {/* Cancellation route when processing */}
         {!isCompleted && (
-          <div className="pt-4">
+          <div className="pt-2 md:pt-4">
             <button
               onClick={handleClose}
               className="text-[11px] font-bold text-[#7c4af0]/60 hover:text-[#7c4af0] transition hover:underline"
@@ -391,9 +389,9 @@ export default function ExportPage() {
 
       {/* 4. Bottom-Right Massive Progress Percentage (Jitter Style) */}
       <div
-        className="absolute bottom-6 right-16 z-30 font-extrabold select-none pointer-events-none transition-all duration-300"
+        className="absolute bottom-4 right-6 md:bottom-6 md:right-16 z-30 font-extrabold select-none pointer-events-none transition-all duration-300"
         style={{
-          fontSize: '18vw',
+          fontSize: 'clamp(80px, 18vw, 240px)',
           lineHeight: '0.8',
           letterSpacing: '-0.06em',
           color: '#7c4af0',

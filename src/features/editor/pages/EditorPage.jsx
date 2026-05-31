@@ -530,7 +530,10 @@ function EditorPage() {
     const resolution = opts.resolution || '720p'
     const gifOptions = opts.gifOptions || { width: 480, fps: 15, loop: 0 }
 
-    // 3. Auto-save project if logged in (to ensure fallback fetching has the latest)
+    // 3. Pre-open a blank window synchronously to bypass the popup blocker
+    const exportWindow = window.open('about:blank', '_blank')
+
+    // 4. Auto-save project if logged in (to ensure fallback fetching has the latest)
     if (isAuthenticated) {
       try {
         await handleSave({ silent: true })
@@ -539,7 +542,7 @@ function EditorPage() {
       }
     }
 
-    // 4. Create snapshot of the state
+    // 5. Create snapshot of the state
     const exportId = `export_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
     const projectState = {
       projectName,
@@ -550,10 +553,10 @@ function EditorPage() {
     }
 
     try {
-      // 5. Store snapshot in sessionStorage (which will be cloned to the new tab)
+      // 6. Store snapshot in sessionStorage (which will be cloned to the new tab)
       sessionStorage.setItem(exportId, JSON.stringify(projectState))
       
-      // 6. Build the query params
+      // 7. Build the query params
       const gifWidth = gifOptions.width || 480
       const gifFps = gifOptions.fps || 15
       const gifLoop = gifOptions.loop !== undefined ? gifOptions.loop : 0
@@ -566,10 +569,17 @@ function EditorPage() {
         exportUrl += `&gifWidth=${gifWidth}&gifFps=${gifFps}&gifLoop=${gifLoop}`
       }
 
-      // 7. Open the dedicated export page in a new browser tab
-      window.open(exportUrl, '_blank')
+      // 8. Redirect the pre-opened tab to the export path
+      if (exportWindow) {
+        exportWindow.location.href = exportUrl
+      } else {
+        window.open(exportUrl, '_blank')
+      }
     } catch (e) {
       console.error('Failed to initiate dedicated tab export:', e)
+      if (exportWindow) {
+        try { exportWindow.close() } catch (err) { /* ignore */ }
+      }
       alert('Failed to open export tab. Please check your browser popup blocker.')
     }
   }, [scenes, layers, sceneMotionFlows, projectName, motionControls, aspectRatio, projectId, isAuthenticated, handleSave])
