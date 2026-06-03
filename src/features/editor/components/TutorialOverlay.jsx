@@ -62,9 +62,15 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
     const buttonElements = document.querySelectorAll('[data-tutorial="add-step-button"]');
     let buttonElement = null;
     if (buttonElements.length > 0) {
-      // On mobile (< 1024px), the mobile CanvasControls at the bottom is shown, which is the last button in DOM order.
-      // On desktop, the top CanvasControls is shown, which is the first button in DOM order.
-      buttonElement = window.innerWidth < 1024 ? buttonElements[buttonElements.length - 1] : buttonElements[0];
+      // Find the button element that is currently visible in the DOM
+      buttonElement = Array.from(buttonElements).find(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      // Fallback if none are visible or rect is in transition
+      if (!buttonElement) {
+        buttonElement = window.innerWidth < 1024 ? buttonElements[buttonElements.length - 1] : buttonElements[0];
+      }
     }
 
     if (buttonElement) {
@@ -129,13 +135,13 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
   if (!active || step <= 0 || step > 3 || !targetRect) return null;
 
   const getHintText = () => {
-    if (step === 1) return "Add the final animation";
+    if (step === 1) return "Add the final moment";
     if (step === 2) {
       return projectName === "Mistral AI Studio"
         ? "Try moving it to the left (outside the canvas)"
         : "Try scaling or moving it";
     }
-    if (step === 3) return "When you're ready, Save your animation";
+    if (step === 3) return "When you're ready, Save your moment";
     return "";
   };
 

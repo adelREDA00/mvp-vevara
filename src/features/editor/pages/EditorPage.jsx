@@ -7,6 +7,7 @@ import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
 import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount } from '../../../store/slices/projectSlice'
 import { LAYER_TYPES } from '../../../store/models'
+import { store } from '../../../store'
 import { gsap } from 'gsap'
 import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
@@ -43,6 +44,7 @@ import { useEditorLayout } from '../hooks/useEditorLayout'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
 import { resetGlobalMotionEngine } from '../../engine/motion'
+import { PRESET_REGISTRY } from '../../engine/motion/presets.js'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep, setInteractionLock, setAutoPlayState } from '../../../store/slices/tutorialSlice'
@@ -95,16 +97,22 @@ function EditorPage() {
   const [showStarterHint, setShowStarterHint] = useState(false)
   const [starterHintText, setStarterHintText] = useState('')
   const isInitialVertical = aspectRatio === '9:16'
-  const [zoom, setZoom] = useState(isInitialVertical ? 18 : 31)
+  const [zoom, setZoom] = useState(isInitialVertical ? 10 : 24)
   const [showGuestModal, setShowGuestModal] = useState(false)
-  const zoomRef = useRef(isInitialVertical ? 18 : 31) // Ref to track current zoom without causing re-renders
-  const prevZoomRef = useRef(isInitialVertical ? 18 : 31) // Track previous zoom to detect changes
+  const zoomRef = useRef(isInitialVertical ? 10 : 24) // Ref to track current zoom without causing re-renders
+  const prevZoomRef = useRef(isInitialVertical ? 10 : 24) // Track previous zoom to detect changes
+
+  // Update zoom when aspect ratio changes (e.g. after a template loads)
+  useEffect(() => {
+    const isVertical = aspectRatio === '9:16';
+    setZoom(isVertical ? 10 : 24);
+  }, [aspectRatio]);
 
   // Keep zoomRef in sync with zoom state
   useEffect(() => {
     zoomRef.current = zoom
     // Initialize prevZoomRef on first render
-    if ((prevZoomRef.current === 31 || prevZoomRef.current === 18) && zoom !== prevZoomRef.current) {
+    if ((prevZoomRef.current === 24 || prevZoomRef.current === 10) && zoom !== prevZoomRef.current) {
       prevZoomRef.current = zoom
     }
   }, [zoom])
@@ -181,7 +189,8 @@ function EditorPage() {
 
     return (
       <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center p-8 text-center transition-opacity duration-500 ${isLight ? 'bg-[#f4f5f8]' : 'bg-[#090a10]'}`}>
-        <style dangerouslySetInnerHTML={{__html: `
+        <style dangerouslySetInnerHTML={{
+          __html: `
           @keyframes appleFloatCircle {
             0%, 100% { transform: translateY(0px) rotate(0deg); }
             50% { transform: translateY(-8px) rotate(10deg); }
@@ -204,25 +213,22 @@ function EditorPage() {
             animation: appleFloatTriangle 3.8s ease-in-out infinite;
           }
         `}} />
-        
+
         {/* Apple style minimal shape indicator */}
         <div className="flex items-center justify-center gap-6 mb-12 relative h-12">
           {/* Square */}
-          <div className={`w-3.5 h-3.5 rounded-[3px] rotate-[45deg] animate-shape-square transition-colors duration-500 ${
-            isLight ? 'bg-black/20 shadow-[0_4px_12px_rgba(0,0,0,0.04)]' : 'bg-white/20 shadow-[0_4px_12px_rgba(255,255,255,0.02)]'
-          }`} />
+          <div className={`w-3.5 h-3.5 rounded-[3px] rotate-[45deg] animate-shape-square transition-colors duration-500 ${isLight ? 'bg-black/20 shadow-[0_4px_12px_rgba(0,0,0,0.04)]' : 'bg-white/20 shadow-[0_4px_12px_rgba(255,255,255,0.02)]'
+            }`} />
 
           {/* Circle */}
-          <div className={`w-3.5 h-3.5 rounded-full animate-shape-circle transition-colors duration-500 ${
-            isLight ? 'bg-black/35 shadow-[0_4px_12px_rgba(0,0,0,0.05)]' : 'bg-white/35 shadow-[0_4px_12px_rgba(255,255,255,0.03)]'
-          }`} />
+          <div className={`w-3.5 h-3.5 rounded-full animate-shape-circle transition-colors duration-500 ${isLight ? 'bg-black/35 shadow-[0_4px_12px_rgba(0,0,0,0.05)]' : 'bg-white/35 shadow-[0_4px_12px_rgba(255,255,255,0.03)]'
+            }`} />
 
           {/* Triangle */}
-          <svg 
-            viewBox="0 0 24 24" 
-            className={`w-4 h-4 fill-current animate-shape-triangle transition-colors duration-500 ${
-              isLight ? 'text-black/15' : 'text-white/15'
-            }`}
+          <svg
+            viewBox="0 0 24 24"
+            className={`w-4 h-4 fill-current animate-shape-triangle transition-colors duration-500 ${isLight ? 'text-black/15' : 'text-white/15'
+              }`}
           >
             <path d="M12 3L2 21H22L12 3Z" />
           </svg>
@@ -255,6 +261,35 @@ function EditorPage() {
       </div>
     );
   };
+
+  // [CANVAS SKELETON] Shimmer placeholder shown in the canvas area while the editor
+  // loads. It is driven by the SAME readiness flags as FullScreenLoading (no separate
+  // canvas-only loading state) so it appears and disappears with the global lifecycle.
+  const CanvasSkeleton = ({ isLight }) => (
+    <div
+      className="absolute inset-0 z-40 overflow-hidden pointer-events-none"
+      style={{ backgroundColor: isLight ? '#f3f4f7' : '#090a0d' }}
+    >
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @keyframes canvasSkeletonShimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      ` }} />
+      {/* Centered card mimicking the canvas stage */}
+      <div className="absolute inset-0 flex items-center justify-center p-8">
+        <div
+          className={`relative w-full h-full max-w-[80%] max-h-[80%] rounded-2xl overflow-hidden ${isLight ? 'bg-black/[0.06]' : 'bg-white/[0.05]'}`}
+        >
+          <div
+            className={`absolute inset-0 bg-gradient-to-r from-transparent to-transparent ${isLight ? 'via-black/[0.06]' : 'via-white/[0.06]'}`}
+            style={{ transform: 'translateX(-100%)', animation: 'canvasSkeletonShimmer 1.6s ease-in-out infinite' }}
+          />
+        </div>
+      </div>
+    </div>
+  )
 
   const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
 
@@ -844,6 +879,16 @@ function EditorPage() {
   const handleMotionStop = useCallback(() => {
     if (motionControls) {
       motionControls.stopAll()
+    }
+  }, [motionControls])
+
+  // [PLAYHEAD PRESERVE] Used by scene-card resize: pause playback WITHOUT resetting
+  // the playhead. stopAll() seeks to 0 + zeroes playheadTime, which made resizing a
+  // scene jump the timeline back to the project start. pauseAll() only pauses; the
+  // duration-change engine rebuild in useSimpleMotion already preserves the playhead.
+  const handleMotionPause = useCallback(() => {
+    if (motionControls) {
+      motionControls.pauseAll()
     }
   }, [motionControls])
 
@@ -1508,6 +1553,36 @@ function EditorPage() {
         if (tiltAction) {
           if (tiltAction.values?.tiltX !== undefined) currentTiltX = tiltAction.values.tiltX
           if (tiltAction.values?.tiltY !== undefined) currentTiltY = tiltAction.values.tiltY
+        }
+
+        // [FIX] Also account for preset-generated actions in state accumulation.
+        // Without this, a step with e.g. "slide_out_right" (dx=+150) wouldn't be
+        // reflected in the next step's initialTransform, causing position mismatch.
+        const presetInfo = prevStep.layerPresets?.[layerId]
+        if (presetInfo && PRESET_REGISTRY[presetInfo.id]) {
+          const customTypes = new Set(actions.map(a => a.type))
+          const presetActions = PRESET_REGISTRY[presetInfo.id].getActions(
+            { x: currentX, y: currentY, scaleX: currentScaleX, scaleY: currentScaleY, rotation: currentRotation, opacity: currentOpacity, blur: currentBlur },
+            prevStep.duration || 1000
+          )
+          // Only apply deltas from preset actions that DON'T conflict with custom actions
+          // (custom overrides preset in the engine's resolution logic)
+          presetActions.forEach(pAction => {
+            if (customTypes.has(pAction.type)) return
+            if (pAction.type === 'move') {
+              currentX += pAction.values?.dx || 0
+              currentY += pAction.values?.dy || 0
+            } else if (pAction.type === 'scale') {
+              currentScaleX *= (pAction.values?.dsx ?? 1)
+              currentScaleY *= (pAction.values?.dsy ?? 1)
+            } else if (pAction.type === 'rotate') {
+              currentRotation += pAction.values?.dangle ?? 0
+            } else if (pAction.type === 'fade') {
+              if (pAction.values?.opacity !== undefined) currentOpacity = pAction.values.opacity
+            } else if (pAction.type === 'blur') {
+              if (pAction.values?.blur !== undefined) currentBlur = pAction.values.blur
+            }
+          })
         }
       }
 
@@ -2188,7 +2263,7 @@ function EditorPage() {
     if (tutorialActive && tutorialStep === 3) {
       dispatch(setInteractionLock(true))
     }
-    // [FIX] Efficiently check if ONLY meaningful interactions or existing actions exist
+    // [FIX] Efficiently check if ONLY meaningful interactions or existing actions/presets exist
     const hasAnyInteraction = motionCaptureMode.trackedLayers
       ? Array.from(motionCaptureMode.trackedLayers.values()).some(
         l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
@@ -2196,11 +2271,26 @@ function EditorPage() {
       : false
 
     const stepId = editingStepId
-    const currentFlow = currentSceneMotionFlow || { steps: [] }
-    const currentStep = currentFlow.steps?.find(s => s.id === stepId)
-    const hasAnyActionsInRedux = currentStep && currentStep.layerActions && Object.keys(currentStep.layerActions).length > 0
+    // [FIX] Read directly from Redux store to avoid stale React selector state.
+    // When a user selects a preset then immediately clicks Save, React hasn't
+    // re-rendered yet so currentSceneMotionFlow misses the just-dispatched preset.
+    const freshState = store.getState()
+    const freshFlow = freshState.project.sceneMotionFlows?.[currentSceneId]
+    const freshStep = freshFlow?.steps?.find(s => s.id === stepId)
+    const hasAnyActionsInRedux = freshStep?.layerActions && Object.keys(freshStep.layerActions).length > 0
+    const hasAnyPresetsInRedux = freshStep?.layerPresets && Object.keys(freshStep.layerPresets).length > 0
 
-    const isMeaningfulSession = hasAnyInteraction || hasAnyActionsInRedux
+    // Also use fresh flow for the optimistic preview below
+    const currentFlow = freshFlow || currentSceneMotionFlow || { steps: [] }
+
+    const isMeaningfulSession = hasAnyInteraction || hasAnyActionsInRedux || hasAnyPresetsInRedux
+    console.log('[PRESETS DEBUG] handleApplyMotion session validity check:', {
+      stepId,
+      hasAnyInteraction,
+      hasAnyActionsInRedux,
+      hasAnyPresetsInRedux,
+      isMeaningfulSession
+    })
 
     if (!isMeaningfulSession) {
       // Nothing was changed and no previous actions exist — restore original flow or delete new step
@@ -2310,7 +2400,21 @@ function EditorPage() {
           const hasControlPoints = preservedControlPoints.length > 0
           const hasSignificantMovement = Math.abs(deltaX || 0) > 0.1 || Math.abs(deltaY || 0) > 0.1
           const moveActionAlreadyExists = !!originalMoveAction
-          const shouldIncludeMoveAction = (didMove || hasControlPoints || moveActionAlreadyExists || !hasCropChanged) && (hasSignificantMovement || hasControlPoints || moveActionAlreadyExists)
+
+          // [PRESET FROM/TO FIX] When a preset owns this layer's motion for the step,
+          // the engine renders the layer at the preset's START offset during capture
+          // (e.g. base.x + 150 for "Slide In Right"). The capture loop reads that back
+          // as a non-zero deltaX/deltaY even though the user never dragged (didMove=false).
+          // For non-croppable layers `!hasCropChanged` is always true, so without this
+          // guard that artifact gets injected as a spurious move into the preview's
+          // optimistic flow — carrying the OLD preset's coordinates and corrupting the
+          // new preset's from/to. The preset already defines the motion, so skip the
+          // injected move unless the user GENUINELY interacted with the layer.
+          const layerHasPreset = !!freshStep?.layerPresets?.[layerId]
+          const userGenuinelyMoved = didMove || hasControlPoints || moveActionAlreadyExists
+          const shouldIncludeMoveAction = layerHasPreset && !userGenuinelyMoved
+            ? false
+            : (didMove || hasControlPoints || moveActionAlreadyExists || !hasCropChanged) && (hasSignificantMovement || hasControlPoints || moveActionAlreadyExists)
 
           if (shouldIncludeMoveAction) {
             const moveIdx = actions.findIndex(a => a.type === 'move')
@@ -2347,7 +2451,7 @@ function EditorPage() {
           }
 
           // Scale action
-          if (scaleX !== undefined && scaleY !== undefined) {
+          if (layerData.didScale && scaleX !== undefined && scaleY !== undefined) {
             const initialScaleX = initialTransform?.scaleX || 1
             const initialScaleY = initialTransform?.scaleY || 1
             if (Math.abs(scaleX - initialScaleX) > 0.001 || Math.abs(scaleY - initialScaleY) > 0.001) {
@@ -2367,7 +2471,7 @@ function EditorPage() {
 
           // Rotate action
           const initialRotation = initialTransform?.rotation || 0
-          if (rotation !== undefined && Math.abs(rotation - initialRotation) > 0.1) {
+          if (layerData.didRotate && rotation !== undefined && Math.abs(rotation - initialRotation) > 0.1) {
             const rotateIdx = actions.findIndex(a => a.type === 'rotate')
             const action = {
               type: 'rotate',
@@ -2410,7 +2514,7 @@ function EditorPage() {
           // Fade (Opacity) action
           const opacity = layerData.opacity
           const initialOpacity = initialTransform?.opacity !== undefined ? initialTransform.opacity : 1
-          if (opacity !== undefined && Math.abs(opacity - initialOpacity) > 0.001) {
+          if (layerData.didFade && opacity !== undefined && Math.abs(opacity - initialOpacity) > 0.001) {
             const fadeIdx = actions.findIndex(a => a.type === 'fade')
             const action = {
               type: 'fade',
@@ -2426,7 +2530,7 @@ function EditorPage() {
           // Blur action
           const blur = layerData.blur
           const initialBlur = initialTransform?.blur !== undefined ? initialTransform.blur : 0
-          if (blur !== undefined && Math.abs(blur - initialBlur) > 0.1) {
+          if (layerData.didBlur && blur !== undefined && Math.abs(blur - initialBlur) > 0.1) {
             const blurIdx = actions.findIndex(a => a.type === 'blur')
             const action = {
               type: 'blur',
@@ -2442,7 +2546,7 @@ function EditorPage() {
           // Corner Radius action
           const cornerRadius = layerData.cornerRadius
           const initialCornerRadius = initialTransform?.cornerRadius !== undefined ? initialTransform.cornerRadius : 0
-          if (cornerRadius !== undefined && Math.abs(cornerRadius - initialCornerRadius) > 0.1) {
+          if (layerData.didCornerRadius && cornerRadius !== undefined && Math.abs(cornerRadius - initialCornerRadius) > 0.1) {
             const radiusIdx = actions.findIndex(a => a.type === 'cornerRadius')
             const action = {
               type: 'cornerRadius',
@@ -2462,7 +2566,7 @@ function EditorPage() {
           const initialTiltY = initialTransform?.tiltY !== undefined ? initialTransform.tiltY : 0
           const tiltXDiff = tiltX !== undefined && Math.abs(tiltX - initialTiltX) > 0.01
           const tiltYDiff = tiltY !== undefined && Math.abs(tiltY - initialTiltY) > 0.01
-          if (tiltXDiff || tiltYDiff) {
+          if (layerData.didTilt && (tiltXDiff || tiltYDiff)) {
             const tiltIdx = actions.findIndex(a => a.type === 'tilt')
             const action = {
               type: 'tilt',
@@ -2475,7 +2579,7 @@ function EditorPage() {
             }
             console.log(`[TILT DEBUG] handleApplyMotion target layer ${layerId}:`, action.values)
             if (tiltIdx !== -1) actions[tiltIdx] = action; else actions.push(action)
-          } else {
+          } else if (layerData.didTilt) {
             const tiltIdx = actions.findIndex(a => a.type === 'tilt')
             if (tiltIdx !== -1) {
               console.log(`[TILT DEBUG] handleApplyMotion removing tilt for layer ${layerId}`)
@@ -2486,7 +2590,7 @@ function EditorPage() {
           // [COLOR FIX] Add colorChange action to optimistic flow
           const color = layerData.color
           const initialColor = initialTransform?.color
-          if (color !== undefined && color !== initialColor) {
+          if (layerData.didColor && color !== undefined && color !== initialColor) {
             const colorIdx = actions.findIndex(a => a.type === 'colorChange')
             const action = {
               type: 'colorChange',
@@ -2598,11 +2702,6 @@ function EditorPage() {
     setEditingStepId(null)
     motionCaptureRef.current = null
     isNewStepRef.current = false
-
-    // [FIX] Snap timeline marker back to base state when canceling
-    if (motionControls) {
-      motionControls.seek(startTimeOffset)
-    }
 
     // [SYNC FIX] Inform Redux that we are done editing
     dispatch(stopMotionEditing())
@@ -2844,76 +2943,8 @@ function EditorPage() {
       let currentTiltY = layer.tiltY !== undefined ? layer.tiltY : 0
 
       // Accumulate transforms from previous steps using RELATIVE values
-      for (let i = 0; i < stepIndex; i++) {
-        const prevStep = motionFlow[i]
-        const actions = prevStep.layerActions?.[layerId] || []
-
-        const moveAction = actions.find(a => a.type === 'move')
-        const scaleAction = actions.find(a => a.type === 'scale')
-        const rotateAction = actions.find(a => a.type === 'rotate')
-        const cropAction = actions.find(a => a.type === 'crop')
-
-        if (moveAction) {
-          currentX += moveAction.values?.dx || 0
-          currentY += moveAction.values?.dy || 0
-        }
-
-        if (scaleAction) {
-          currentScaleX *= (scaleAction.values?.dsx ?? 1)
-          currentScaleY *= (scaleAction.values?.dsy ?? 1)
-        }
-        if (rotateAction) {
-          currentRotation += (rotateAction.values?.dangle ?? 0)
-        }
-        if (cropAction) {
-          // [FIX] CUMULATIVE CROP SHIFT: Always check for bundled displacement in crop actions
-          // regardless of whether a move action exists. This ensures initialTransform is 100% accurate.
-          currentX += cropAction.values?.dx || 0
-          currentY += cropAction.values?.dy || 0
-
-          currentCropX = cropAction.values?.cropX ?? currentCropX
-          currentCropY = cropAction.values?.cropY ?? currentCropY
-          currentCropWidth = cropAction.values?.cropWidth ?? currentCropWidth
-          currentCropHeight = cropAction.values?.cropHeight ?? currentCropHeight
-          currentMediaWidth = cropAction.values?.mediaWidth ?? currentMediaWidth
-          currentMediaHeight = cropAction.values?.mediaHeight ?? currentMediaHeight
-        }
-
-        const fadeAction = actions.find(a => a.type === 'fade')
-        if (fadeAction) {
-          currentOpacity = fadeAction.values?.opacity !== undefined ? fadeAction.values.opacity : currentOpacity
-        }
-
-        const blurAction = actions.find(a => a.type === 'blur')
-        if (blurAction) {
-          currentBlur = blurAction.values?.blur !== undefined ? blurAction.values.blur : currentBlur
-        }
-
-        const radiusAction = actions.find(a => a.type === 'cornerRadius')
-        if (radiusAction) {
-          currentCornerRadius = radiusAction.values?.cornerRadius !== undefined ? radiusAction.values.cornerRadius : currentCornerRadius
-        }
-
-        const colorAction = actions.find(a => a.type === 'colorChange')
-        if (colorAction && colorAction.values?.color) {
-          currentColor = colorAction.values.color
-        }
-
-        // Flip: toggle showingFront for each flip action in previous steps
-        const flipAction = actions.find(a => a.type === 'flip')
-        if (flipAction) {
-          currentShowingFront = !currentShowingFront
-        }
-
-        // Tilt: absolute per step
-        const tiltAction = actions.find(a => a.type === 'tilt')
-        if (tiltAction) {
-          currentTiltX = tiltAction.values?.tiltX !== undefined ? tiltAction.values.tiltX : currentTiltX
-          currentTiltY = tiltAction.values?.tiltY !== undefined ? tiltAction.values.tiltY : currentTiltY
-        }
-      }
-
-      const sessionStartTransform = {
+      // We pass the currentState sequentially to getActions to evaluate offsets properly
+      let currentState = {
         x: currentX,
         y: currentY,
         width: currentCropWidth,
@@ -2933,9 +2964,148 @@ function EditorPage() {
         color: currentColor,
         tiltX: currentTiltX,
         tiltY: currentTiltY,
+        showingFront: currentShowingFront
       }
 
-      const currentStepActions = step?.layerActions?.[layerId] || []
+      const pageDuration = currentSceneMotionFlow.pageDuration || 5000
+      const stepCount = motionFlow.length
+      const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+
+      for (let i = 0; i < stepIndex; i++) {
+        const prevStep = motionFlow[i]
+        const prevStepDuration = prevStep.duration || stepDuration
+        let actions = prevStep.layerActions?.[layerId] || []
+
+        // Resolve presets vs custom overrides for this historical step
+        const preset = prevStep.layerPresets?.[layerId]
+        if (preset && PRESET_REGISTRY[preset.id]) {
+          const presetActions = PRESET_REGISTRY[preset.id].getActions(currentState, prevStepDuration)
+          const customTypes = new Set(actions.map(a => a.type))
+          const filteredPresetActions = presetActions.filter(pAction => !customTypes.has(pAction.type))
+          actions = [...filteredPresetActions, ...actions]
+        }
+
+        // Apply starting offsets of resolved preset actions
+        actions.forEach(action => {
+          if (action.startOffset) {
+            if (action.startOffset.x !== undefined) currentState.x += action.startOffset.x
+            if (action.startOffset.y !== undefined) currentState.y += action.startOffset.y
+            if (action.startOffset.opacity !== undefined) currentState.opacity = action.startOffset.opacity
+            if (action.startOffset.scaleX !== undefined) currentState.scaleX *= action.startOffset.scaleX
+            if (action.startOffset.scaleY !== undefined) currentState.scaleY *= action.startOffset.scaleY
+            if (action.startOffset.rotation !== undefined) currentState.rotation += action.startOffset.rotation
+          }
+        })
+
+        const moveAction = actions.find(a => a.type === 'move')
+        const scaleAction = actions.find(a => a.type === 'scale')
+        const rotateAction = actions.find(a => a.type === 'rotate')
+        const cropAction = actions.find(a => a.type === 'crop')
+
+        if (moveAction) {
+          currentState.x += moveAction.values?.dx || 0
+          currentState.y += moveAction.values?.dy || 0
+        }
+
+        if (scaleAction) {
+          currentState.scaleX *= (scaleAction.values?.dsx ?? 1)
+          currentState.scaleY *= (scaleAction.values?.dsy ?? 1)
+        }
+        if (rotateAction) {
+          currentState.rotation += (rotateAction.values?.dangle ?? 0)
+        }
+        if (cropAction) {
+          currentState.x += cropAction.values?.dx || 0
+          currentState.y += cropAction.values?.dy || 0
+
+          currentState.cropX = cropAction.values?.cropX ?? currentState.cropX
+          currentState.cropY = cropAction.values?.cropY ?? currentState.cropY
+          currentState.cropWidth = cropAction.values?.cropWidth ?? currentState.cropWidth
+          currentState.cropHeight = cropAction.values?.cropHeight ?? currentState.cropHeight
+          currentState.mediaWidth = cropAction.values?.mediaWidth ?? currentState.mediaWidth
+          currentState.mediaHeight = cropAction.values?.mediaHeight ?? currentState.mediaHeight
+        }
+
+        const fadeAction = actions.find(a => a.type === 'fade')
+        if (fadeAction) {
+          currentState.opacity = fadeAction.values?.opacity !== undefined ? fadeAction.values.opacity : currentState.opacity
+        }
+
+        const blurAction = actions.find(a => a.type === 'blur')
+        if (blurAction) {
+          currentState.blur = blurAction.values?.blur !== undefined ? blurAction.values.blur : currentState.blur
+        }
+
+        const radiusAction = actions.find(a => a.type === 'cornerRadius')
+        if (radiusAction) {
+          currentState.cornerRadius = radiusAction.values?.cornerRadius !== undefined ? radiusAction.values.cornerRadius : currentState.cornerRadius
+        }
+
+        const colorAction = actions.find(a => a.type === 'colorChange')
+        if (colorAction && colorAction.values?.color) {
+          currentState.color = colorAction.values.color
+        }
+
+        // Flip: toggle showingFront for each flip action in previous steps
+        const flipAction = actions.find(a => a.type === 'flip')
+        if (flipAction) {
+          currentState.showingFront = !currentState.showingFront
+        }
+
+        // Tilt: absolute per step
+        const tiltAction = actions.find(a => a.type === 'tilt')
+        if (tiltAction) {
+          currentState.tiltX = tiltAction.values?.tiltX !== undefined ? tiltAction.values.tiltX : currentState.tiltX
+          currentState.tiltY = tiltAction.values?.tiltY !== undefined ? tiltAction.values.tiltY : currentState.tiltY
+        }
+      }
+
+      const sessionStartTransform = {
+        x: currentState.x,
+        y: currentState.y,
+        width: currentState.cropWidth,
+        height: currentState.cropHeight,
+        scaleX: currentState.scaleX,
+        scaleY: currentState.scaleY,
+        rotation: currentState.rotation,
+        cropX: currentState.cropX,
+        cropY: currentState.cropY,
+        cropWidth: currentState.cropWidth,
+        cropHeight: currentState.cropHeight,
+        mediaWidth: currentState.mediaWidth,
+        mediaHeight: currentState.mediaHeight,
+        opacity: currentState.opacity,
+        blur: currentState.blur,
+        cornerRadius: currentState.cornerRadius,
+        color: currentState.color,
+        tiltX: currentState.tiltX,
+        tiltY: currentState.tiltY,
+      }
+
+      // Resolve actions for the CURRENT step combining presets + custom
+      let currentStepActions = step?.layerActions?.[layerId] || []
+      const currentPreset = step?.layerPresets?.[layerId]
+      const currentStepDuration = step?.duration || stepDuration
+      if (currentPreset && PRESET_REGISTRY[currentPreset.id]) {
+        const presetActions = PRESET_REGISTRY[currentPreset.id].getActions(sessionStartTransform, currentStepDuration)
+        const customTypes = new Set(currentStepActions.map(a => a.type))
+        const filteredPresetActions = presetActions.filter(pAction => !customTypes.has(pAction.type))
+        currentStepActions = [...filteredPresetActions, ...currentStepActions]
+      }
+
+      // Apply current step's preset starting offsets to sessionStartTransform
+      // so editing begins from the correct preset offset initial state
+      currentStepActions.forEach(action => {
+        if (action.startOffset) {
+          if (action.startOffset.x !== undefined) sessionStartTransform.x += action.startOffset.x
+          if (action.startOffset.y !== undefined) sessionStartTransform.y += action.startOffset.y
+          if (action.startOffset.opacity !== undefined) sessionStartTransform.opacity = action.startOffset.opacity
+          if (action.startOffset.scaleX !== undefined) sessionStartTransform.scaleX *= action.startOffset.scaleX
+          if (action.startOffset.scaleY !== undefined) sessionStartTransform.scaleY *= action.startOffset.scaleY
+          if (action.startOffset.rotation !== undefined) sessionStartTransform.rotation += action.startOffset.rotation
+        }
+      })
+
       const currentMove = currentStepActions.find(a => a.type === 'move')
       const currentScale = currentStepActions.find(a => a.type === 'scale')
       const currentRotate = currentStepActions.find(a => a.type === 'rotate')
@@ -2976,6 +3146,10 @@ function EditorPage() {
         // Accumulated flip state: base from previous steps, then apply current step's flip if re-editing
         showingFront: currentStepActions.find(a => a.type === 'flip') ? !currentShowingFront : currentShowingFront,
         didMove: false,
+        didScale: false,
+        didRotate: false,
+        didFade: false,
+        didBlur: false,
         didColor: !!currentColorAction,
         didCornerRadius: !!currentStepActions.find(a => a.type === 'cornerRadius'),
         // Pre-set didFlip if the step already has a flip action (re-editing)
@@ -3094,12 +3268,18 @@ function EditorPage() {
             }
           }
 
-          // Scale
+          // Scale — only persist/remove when the user GENUINELY scaled this session.
+          // [PRESET COMPOSITION FIX] On edit, tracked.scaleX is seeded to the preset's
+          // END scale (e.g. grow_in: 0.01 → 1) while init.scaleX is the START (0.01), so
+          // a raw value-diff reads as a "scale change" and persists a bogus custom dsx
+          // (= end/start = 100) that then composes with the preset on reload, exploding
+          // the scale. `didScale` is set only by real user interaction (onPositionUpdate),
+          // never by the engine animating a preset — so it cleanly separates the two.
           const initialScaleX = init.scaleX || 1
           const initialScaleY = init.scaleY || 1
           const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
             (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
-          if (scaleChanged) {
+          if (scaleChanged && tracked.didScale) {
             const key = `${layerId}:scale`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
@@ -3115,7 +3295,7 @@ function EditorPage() {
               }))
               captureActionIdsRef.current.set(key, actionId)
             }
-          } else {
+          } else if (tracked.didScale) {
             // Scale returned to initial — remove the action if it exists
             const key = `${layerId}:scale`
             const existingId = captureActionIdsRef.current.get(key)
@@ -3125,10 +3305,11 @@ function EditorPage() {
             }
           }
 
-          // Rotate
+          // Rotate — gated on didRotate for the same reason as scale (a spin preset's
+          // -360 → 0 envelope must not be persisted as a bogus custom rotate).
           const initialRotation = init.rotation || 0
           const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
-          if (rotateChanged) {
+          if (rotateChanged && tracked.didRotate) {
             const key = `${layerId}:rotate`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
@@ -3144,7 +3325,7 @@ function EditorPage() {
               }))
               captureActionIdsRef.current.set(key, actionId)
             }
-          } else {
+          } else if (tracked.didRotate) {
             // Rotation returned to initial — remove the action if it exists
             const key = `${layerId}:rotate`
             const existingId = captureActionIdsRef.current.get(key)
@@ -3243,10 +3424,12 @@ function EditorPage() {
             }
           }
 
-          // Fade (Opacity)
+          // Fade (Opacity) — gated on didFade. Nearly every IN/OUT preset animates
+          // opacity (0 → base for IN), so without this gate a spurious fade action is
+          // persisted on every edit and composes with the preset's own fade.
           const initialOpacity = init.opacity !== undefined ? init.opacity : 1
           const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
-          if (opacityChanged) {
+          if (opacityChanged && tracked.didFade) {
             const key = `${layerId}:fade`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
@@ -3262,7 +3445,7 @@ function EditorPage() {
               }))
               captureActionIdsRef.current.set(key, actionId)
             }
-          } else {
+          } else if (tracked.didFade) {
             const key = `${layerId}:fade`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
@@ -3271,10 +3454,11 @@ function EditorPage() {
             }
           }
 
-          // Blur
+          // Blur — gated on didBlur (a blur preset's 20 → 0 envelope must not persist
+          // as a bogus custom blur action that composes with the preset on reload).
           const initialBlur = init.blur !== undefined ? init.blur : 0
           const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
-          const shouldCreateBlurAction = blurChanged || tracked.didBlur
+          const shouldCreateBlurAction = blurChanged && tracked.didBlur
 
           if (shouldCreateBlurAction) {
             const key = `${layerId}:blur`
@@ -3292,7 +3476,7 @@ function EditorPage() {
               }))
               captureActionIdsRef.current.set(key, actionId)
             }
-          } else {
+          } else if (tracked.didBlur) {
             const key = `${layerId}:blur`
             const existingId = captureActionIdsRef.current.get(key)
             if (existingId) {
@@ -3395,17 +3579,25 @@ function EditorPage() {
               entry.deltaX = data.x - entry.initialTransform.x
               entry.deltaY = data.y - entry.initialTransform.y
             }
-            if (data.scaleX !== undefined) entry.scaleX = data.scaleX
-            if (data.scaleY !== undefined) entry.scaleY = data.scaleY
-            if (data.rotation !== undefined) entry.rotation = data.rotation
+            // [BUG #2 FIX] Set the did* interaction flags here, mirroring the add-step
+            // onPositionUpdate (2076-2095). The edit-path scale/rotate/fade/blur commits
+            // are gated on `tracked.didScale`/`didRotate`/`didFade`/`didBlur` (so a preset's
+            // animated envelope isn't persisted as a bogus custom action). Previously this
+            // handler updated entry.scaleX/rotation/etc. but never set the flags, so a user's
+            // scale or rotate edit performed via a canvas drag was silently dropped on save.
+            // Crop-only resizes pass the unchanged scale, so the commit's scaleChanged check
+            // still no-ops them (no spurious scale action is created).
+            if (data.scaleX !== undefined) { entry.scaleX = data.scaleX; entry.didScale = true }
+            if (data.scaleY !== undefined) { entry.scaleY = data.scaleY; entry.didScale = true }
+            if (data.rotation !== undefined) { entry.rotation = data.rotation; entry.didRotate = true }
             if (data.cropX !== undefined) entry.cropX = data.cropX
             if (data.cropY !== undefined) entry.cropY = data.cropY
             if (data.cropWidth !== undefined) entry.cropWidth = data.cropWidth
             if (data.cropHeight !== undefined) entry.cropHeight = data.cropHeight
             if (data.mediaWidth !== undefined) entry.mediaWidth = data.mediaWidth
             if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
-            if (data.opacity !== undefined) entry.opacity = data.opacity
-            if (data.blur !== undefined) entry.blur = data.blur
+            if (data.opacity !== undefined) { entry.opacity = data.opacity; entry.didFade = true }
+            if (data.blur !== undefined) { entry.blur = data.blur; entry.didBlur = true }
             if (data.cornerRadius !== undefined) {
               entry.cornerRadius = data.cornerRadius
               entry.didCornerRadius = true
@@ -3447,7 +3639,7 @@ function EditorPage() {
       const sceneEndTime = currentSceneTimelineInfo?.endTime || calculatedEndTime
       const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
 
-      const hasActions = step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)
+      const hasActions = (step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)) || (step.layerPresets && Object.keys(step.layerPresets).length > 0)
       const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
 
       motionControls.tweenTo(targetTime, {
@@ -3825,6 +4017,47 @@ function EditorPage() {
   }, [motionCaptureMode, editingStepId, currentSceneMotionFlow])
 
   /**
+   * [MOTION PANEL INLINE CONTROLS] Commit a custom-action value edited from the Motion
+   * Panel's inline settings rows (Color / Opacity / Blur / 3D Tilt). Mirrors the canvas
+   * controls' capture path exactly: flag the interaction (did*) and push the value through
+   * onPositionUpdate (which updates tracked state + triggers the capture re-render for live
+   * visual feedback), then onInteractionEnd to persist/update the motion action in Redux.
+   * Only meaningful during motion capture; in normal mode the canvas controls handle base
+   * layer edits.
+   */
+  const handleMotionPanelValueChange = useCallback((layerId, updates) => {
+    const mode = effectiveMotionCaptureMode
+    const capture = motionCaptureRef.current
+    if (!layerId || !mode?.onPositionUpdate || !capture?.trackedLayers?.has(layerId)) return
+    const tracked = capture.trackedLayers.get(layerId)
+
+    if (updates.opacity !== undefined) {
+      tracked.didFade = true
+      mode.onPositionUpdate({ layerId, opacity: updates.opacity })
+      mode.onInteractionEnd(layerId)
+    }
+    if (updates.blur !== undefined) {
+      const clampedBlur = Math.max(0, Math.min(BLUR_MAX, updates.blur))
+      tracked.didBlur = true
+      mode.onPositionUpdate({ layerId, blur: clampedBlur })
+      mode.onInteractionEnd(layerId)
+    }
+    if (updates.tiltX !== undefined || updates.tiltY !== undefined) {
+      tracked.didTilt = true
+      if (updates.tiltX !== undefined) tracked.tiltX = updates.tiltX
+      if (updates.tiltY !== undefined) tracked.tiltY = updates.tiltY
+      mode.onPositionUpdate({ layerId, tiltX: updates.tiltX, tiltY: updates.tiltY })
+      mode.onInteractionEnd(layerId)
+    }
+    if (updates.color !== undefined && tracked.color !== updates.color) {
+      tracked.didColor = true
+      tracked.color = updates.color
+      mode.onPositionUpdate({ layerId, color: updates.color })
+      mode.onInteractionEnd(layerId)
+    }
+  }, [effectiveMotionCaptureMode])
+
+  /**
    * Flip a card frame layer visually and record in motion capture if active.
    * Extracted for reuse by both CanvasControls and handleAddAnimation.
    */
@@ -4169,7 +4402,8 @@ function EditorPage() {
         {/* Loading Overlay */}
         {projectStatus === 'loading' && (
           <div className={`fixed inset-0 z-[9999] flex flex-col ${isLight ? 'bg-[#f4f5f8]' : 'bg-[#090a10]'}`}>
-            <style dangerouslySetInnerHTML={{__html: `
+            <style dangerouslySetInnerHTML={{
+              __html: `
               @keyframes shimmer {
                 0% { background-position: -200% 0; }
                 100% { background-position: 200% 0; }
@@ -4185,7 +4419,7 @@ function EditorPage() {
                 animation: shimmer 1.6s infinite linear;
               }
             `}} />
-            
+
             {/* 1. TOP NAVBAR SKELETON */}
             <div className="h-14 flex items-center justify-between px-4 shrink-0">
               <div className="flex items-center gap-4">
@@ -4206,7 +4440,7 @@ function EditorPage() {
 
             {/* MAIN BODY AREA */}
             <div className="flex flex-1 overflow-hidden relative">
-              
+
               {/* 2. LEFT SIDEBAR SKELETON (Desktop only) */}
               <div className="w-20 flex flex-col items-center py-5 gap-5 shrink-0 hidden md:flex">
                 {[1, 2, 3, 4, 5].map(i => (
@@ -4216,7 +4450,7 @@ function EditorPage() {
 
               {/* 3. MIDDLE CANVAS & TIMELINE AREA */}
               <div className="flex-1 flex flex-col overflow-hidden relative">
-                
+
                 {/* EMPTY CANVAS AREA (Spacious & Clean) */}
                 <div className="flex-1" />
 
@@ -4718,9 +4952,9 @@ function EditorPage() {
             {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
             <div
               ref={topControlsRef}
-              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : 'lg:flex hidden'}`}
+              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : (isMotionCaptureActive ? 'flex' : 'lg:flex hidden')}`}
               style={{
-                top: `${topToolbarHeight + 8}px`,
+                top: isMotionCaptureActive ? '8px' : `${topToolbarHeight + 8}px`,
                 left: currentSidebarWidth,
                 right: 0,
                 transform: currentSidebarWidth !== '0px' ? 'translateX(-40px)' : 'none'
@@ -4870,6 +5104,13 @@ function EditorPage() {
                 zIndex: 10,
               }}
             >
+              {/* Canvas skeleton — same readiness gate as the global FullScreenLoading,
+                  rendered behind the Stage so it clears the moment loading finishes. */}
+              {(projectStatus !== 'succeeded' || isPreloading || !isStageReady || !minTimeElapsed)
+                && loadingMode !== 'local' && !pixiError && (
+                  <CanvasSkeleton isLight={isLight} />
+                )}
+
               <Stage
                 ref={stageRef}
                 aspectRatio={aspectRatio}
@@ -5085,6 +5326,7 @@ function EditorPage() {
                     bottomSectionHeight={customBottomHeight}
                     onSeek={seek}
                     onMotionStop={handleMotionStop}
+                    onMotionPause={handleMotionPause}
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
                   />
                 </div>
@@ -5116,8 +5358,10 @@ function EditorPage() {
                 </span>
               </div>
 
-              {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens */}
-              <div className="lg:hidden pointer-events-auto flex-shrink-0 w-full" style={{
+              {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens.
+                  [UPDATE #2] During Motion Capture the controls move to the top of the
+                  canvas (rendered by the shared top overlay above), so hide this one. */}
+              <div className={`${isMotionCaptureActive ? 'hidden' : 'lg:hidden'} pointer-events-auto flex-shrink-0 w-full`} style={{
                 paddingBottom: 'max(6px, env(safe-area-inset-bottom, 6px))'
               }}>
                 <CanvasControls
@@ -5252,11 +5496,13 @@ function EditorPage() {
           onCancelMotion={handleCancelMotion}
           onStartMotionCapture={handleStartMotionCapture}
           onAddAnimation={handleAddAnimation}
+          onCustomActionValueChange={handleMotionPanelValueChange}
           onDeleteCaptureAction={handleDeleteCaptureAction}
           sceneLayers={sceneLayersForMotion}
           selectedLayerIds={selectedLayerIds}
           isMotionCaptureActive={isMotionCaptureActive}
           editingStepId={editingStepId}
+          editingStepActionCount={editingStepActionCount}
         />
 
 

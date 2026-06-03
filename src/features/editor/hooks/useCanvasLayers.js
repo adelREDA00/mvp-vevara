@@ -302,6 +302,11 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     return
   }
 
+  // Skip visual overrides if the layer is currently animating a local preset preview
+  if (displayObject._isPlayingPresetPreview) {
+    return
+  }
+
   // [FIX] BACKGROUND PROTECTION: Skip geometric transforms for background layers.
   // Their dimensions and positioning are managed separately to ensure "cover" fit
   // and non-interactivity.
@@ -338,9 +343,9 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   const isEditingBase = editingStepId === 'base'
   const startTimeOffset = layer.sceneStartOffset ?? 0
   const hasMotion = engine.activeTimelines?.has(layerId)
-  const isAtSceneStart = !hasMotion || Math.abs(currentTime - startTimeOffset) < 0.1
-  // Allow base state updates ONLY if at scene start (even if editing base)
-  const shouldApplyBaseState = isAtSceneStart
+  // [FIX] GSAP Baseline Priority: Redux raw base state is only applied if the layer has no animation timeline at all,
+  // or if the user is explicitly editing the base layer starting state. This prevents clobbering baseline set tweens.
+  const shouldApplyBaseState = !hasMotion || isEditingBase
 
   // 4. Metadata & Muted State Synchronization (CRITICAL for Video playback)
   // This must happen even during playback to ensure scene switches and mute toggles are reactive.
@@ -424,11 +429,25 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     if (displayObject instanceof PIXI.Text) {
       const isResizing = displayObject._isResizing === true
       const style = displayObject.style
-      if (!isResizing && style && layer.width > 0) {
-        if (style.wordWrapWidth !== layer.width) {
-          style.wordWrapWidth = layer.width
-          if (displayObject.updateText) displayObject.updateText(true)
+      if (!isResizing && style) {
+        // [SELECTION BOX FIX] Push the Redux font size onto the PIXI text style so the
+        // glyph texture — and getLocalBounds(), which the selection box reads — updates
+        // the instant the user changes font size from the canvas controls. Previously
+        // only wordWrapWidth was synced here, so the selection box kept stale dimensions
+        // until a manual resize/scale happened to set style.fontSize. lineHeight mirrors
+        // the 1.2 ratio used by the resize handler for visual consistency.
+        let needsTextUpdate = false
+        const desiredFontSize = layer.data?.fontSize
+        if (typeof desiredFontSize === 'number' && desiredFontSize > 0 && style.fontSize !== desiredFontSize) {
+          style.fontSize = desiredFontSize
+          style.lineHeight = desiredFontSize * 1.2
+          needsTextUpdate = true
         }
+        if (layer.width > 0 && style.wordWrapWidth !== layer.width) {
+          style.wordWrapWidth = layer.width
+          needsTextUpdate = true
+        }
+        if (needsTextUpdate && displayObject.updateText) displayObject.updateText(true)
       }
 
       const align = layer.data?.textAlign || 'left'
@@ -519,8 +538,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // opacity genuinely changed since the last time we applied it, bypass the
   // shouldApplyBaseState gate so the edit is visible at any timeline position.
   const reduxOpacity = layer.opacity ?? 1
-  const reduxOpacityChanged = displayObject._lastReduxOpacityApplied !== reduxOpacity
-  const allowOpacityUpdate = force || shouldApplyBaseState || reduxOpacityChanged
+  const allowOpacityUpdate = force || shouldApplyBaseState
 
   if (!displayObject._tiltHidden) {
     if (force) {
@@ -566,8 +584,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // [ANIMATED-EDIT FIX] Sentinel-change bypass: allow update whenever the Redux
   // base blur value genuinely changes, regardless of timeline position.
   const reduxBlur = layer.blur ?? 0
-  const reduxBlurChanged = displayObject._lastReduxBlurApplied !== reduxBlur
-  const allowBlurUpdate = force || shouldApplyBaseState || reduxBlurChanged
+  const allowBlurUpdate = force || shouldApplyBaseState
 
   if (force) {
     syncBlurFilter(displayObject, reduxBlur)
@@ -595,8 +612,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // [ANIMATED-EDIT FIX] Sentinel-change bypass for tilt: allow update whenever the
   // Redux base tilt values genuinely change, regardless of timeline position.
   const reduxTiltKey = `${layer.tiltX ?? 0},${layer.tiltY ?? 0}`
-  const reduxTiltChanged = displayObject._lastReduxTiltApplied !== reduxTiltKey
-  const canApplyTiltState = force || !!capturedLayer || (!isActuallyPlaying && (shouldApplyBaseState || reduxTiltChanged))
+  const canApplyTiltState = force || !!capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)
   if (canApplyTiltState) {
     if (hasTilt) {
       applyTiltToObject(displayObject, tiltX, tiltY, tiltRenderer)
@@ -619,7 +635,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     // editing-text-hide, and other visibility toggles propagate.
     displayObject._tiltOwnerVisible = displayObject.visible !== false
     syncTiltMesh(displayObject, layer)
-  } else if (!displayObject._tiltHidden && displayObject.alpha === 0 && (capturedLayer?.opacity ?? layer.opacity ?? 1) > 0) {
+  } else if (allowOpacityUpdate && !displayObject._tiltHidden && displayObject.alpha === 0 && (capturedLayer?.opacity ?? layer.opacity ?? 1) > 0) {
     // Guard for the frame after tilt is removed: step 6 may have been gated by
     // _tiltHidden earlier, so the alpha=0 left over from the hide mechanism would
     // otherwise persist. Restore here once mesh is gone.
@@ -1025,6 +1041,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         container._storedImageUrl = undefined // Set to undefined to force initial load in update block
 
         pixiObject = container
+        pixiObject.isBackground = true
         engine.registerLayerObject(layerId, pixiObject, { sceneId: layer.sceneId })
       }
       else if (layer.type === LAYER_TYPES.IMAGE) {
@@ -1281,8 +1298,36 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     // console.time(`[useCanvasLayers] update-loop-${currentScene?.id}`)
     layerOrder.forEach((layerId, desiredIndex) => {
       const layer = layers?.[layerId]
-      const pixiObject = layerObjects.get(layerId)
+      let pixiObject = layerObjects.get(layerId)
       if (!layer || !pixiObject || pixiObject.destroyed) return
+
+      // [TEXT WRAP] createTextLayer chooses PIXI.Text vs FlowTextContainer at creation
+      // time only, so toggling Water-Flow (data.enableFlow) does nothing on its own.
+      // Swap the PIXI object in place when the flag no longer matches the live object.
+      if (layer.type === LAYER_TYPES.TEXT) {
+        const wantsFlow = !!layer.data?.enableFlow
+        const isFlow = !!pixiObject.isFlowText
+        const busy = pixiObject._isResizing || pixiObject._isRotating || pixiObject._isDragging
+        if (wantsFlow !== isFlow && !busy && layerId !== editingTextLayerId) {
+          const parent = pixiObject.parent
+          const childIndex = parent ? parent.getChildIndex(pixiObject) : -1
+          const newObj = createTextLayer(layer)
+          if (parent) {
+            const idx = childIndex >= 0 ? Math.min(childIndex, parent.children.length) : parent.children.length
+            parent.addChildAt(newObj, idx)
+            parent.removeChild(pixiObject)
+          } else if (stageContainer && !stageContainer.destroyed) {
+            stageContainer.addChild(newObj)
+          }
+          try { pixiObject.destroy({ children: true }) } catch (e) { /* already gone */ }
+          layerObjects.set(layerId, newObj)
+          engine.registerLayerObject(layerId, newObj, { sceneId: layer.sceneId })
+          applyTransformInline(newObj, layer, dragStateAPI, layerId, motionCaptureMode, true, editingTextLayerId, editingStepId)
+          // Re-run obstacle-aware wrapping immediately so the swap reflows at once.
+          engine.refreshFlows?.()
+          pixiObject = newObj
+        }
+      }
 
       // UPDATE [Sync]: Ensure MotionEngine always has the latest metadata (especially sceneId)
       // This handles cases where a layer is moved between scenes or updated.
@@ -1351,6 +1396,32 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         // Opacity and Z-order are handled below.
       } else {
         if (layer.type === LAYER_TYPES.TEXT && layer.data && (!isActuallyPlaying || isLayerCaptured)) {
+          if (pixiObject.isFlowText) {
+            // [TEXT WRAP] FlowTextContainer is a PIXI.Container — it has no .style/.text.
+            // Sync via its `data` ref + updateText()/wordWrapWidth (which re-layout), and
+            // updateColor() for live colour. Obstacle-aware reflow is driven by the engine's
+            // refreshFlows(); here we only rebuild on content/style/width/colour changes.
+            const fd = layer.data
+            pixiObject.data = { ...pixiObject.data, ...fd }
+            const wrapW = layer.width || 200
+            const relayout =
+              pixiObject._content !== (fd.content || 'Text') ||
+              pixiObject._fontSize !== (fd.fontSize || 24) ||
+              pixiObject._fontFamily !== (fd.fontFamily || 'Arial') ||
+              pixiObject._textAlign !== (fd.textAlign || 'left') ||
+              (pixiObject._fontWeight || 'normal') !== (fd.fontWeight || 'normal') ||
+              (pixiObject._fontStyle || 'normal') !== (fd.fontStyle || 'normal')
+            if (relayout) {
+              pixiObject._wordWrapWidth = wrapW
+              pixiObject.updateText()
+            } else if (pixiObject._wordWrapWidth !== wrapW) {
+              pixiObject.wordWrapWidth = wrapW // setter triggers refresh
+            }
+            const liveColor = (capturedLayer?.color !== undefined && capturedLayer?.color !== null)
+              ? capturedLayer.color
+              : (fd.color || '#000000')
+            if (pixiObject._color !== liveColor) pixiObject.updateColor(liveColor)
+          } else {
           // [SYNC FIX] Remove scrubbing/scene-start skip.
           // We always want to sync text if the timeline is paused so Redux truth is visible.
           // Only update text content if it actually changed
@@ -1504,6 +1575,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
             pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
           }
+          } // end else — standard PIXI.Text branch
         }
 
         // -------------------------------------------------------------------

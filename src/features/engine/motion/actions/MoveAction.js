@@ -107,8 +107,9 @@ export class MoveAction {
     }
 
     
-    // [DEBUG]
-
-    return gsap.fromTo(pixiObject, fromVars, gsapVars)
+    const tl = gsap.timeline()
+    tl.set(pixiObject, fromVars, 0)
+    tl.to(pixiObject, gsapVars, 0)
+    return tl
   }
 }

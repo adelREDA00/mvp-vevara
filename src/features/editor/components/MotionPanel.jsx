@@ -1,29 +1,18 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
+import { gsap } from 'gsap'
+import * as Slider from '@radix-ui/react-slider'
 import { ThemeContext } from '../../../app/context/ThemeContext'
+import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
+import { PRESET_REGISTRY, getPresetGroups } from '../../engine/motion/presets.js'
+import { getContrastCardBg } from '../utils/contrast'
+import PresetPreviewCard from './PresetPreviewCard'
 import {
-  Plus,
-  Move,
-  RotateCw,
-  Maximize2,
-  Eye,
-  X,
-  Trash2,
-  Play,
-  Crop,
-  Zap,
-  FlipHorizontal2,
-  Check,
-  ChevronDown,
-  Droplets,
-  Palette,
-  Film,
-  Type,
-  Pencil,
-  Rotate3d,
+  Move, RotateCw, Maximize2, Eye, X, Crop, FlipHorizontal2,
+  ChevronDown, Droplets, Palette, Film, Type, Rotate3d,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, ChevronRight, Zap,
 } from 'lucide-react'
 
-// Custom Corner Radius Icon representing a rounded corner path
 const CornerRadiusIcon = (props) => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
     <path d="M21 4H11C7.13401 4 4 7.13401 4 11V21" />
@@ -31,155 +20,302 @@ const CornerRadiusIcon = (props) => (
 )
 
 import { LAYER_TYPES } from '../../../store/models'
-
 import {
-  selectSceneMotionFlow,
-  deleteSceneMotionStep,
-  deleteSceneMotionAction,
-  selectCurrentSceneId,
-  selectLayers,
+  selectSceneMotionFlow, deleteSceneMotionAction,
+  selectCurrentSceneId, selectLayers, applyPresetToStep, clearPresetFromStep,
 } from '../../../store/slices/projectSlice'
 import { setSelectedLayer } from '../../../store/slices/selectionSlice'
+import { getGlobalMotionEngine } from '../../engine/motion'
+import * as PIXI from 'pixi.js'
 
-// Stable default motion flow reference to prevent unnecessary rerenders
 const DEFAULT_MOTION_FLOW = { steps: [], pageDuration: 5000 }
 
-// Action type metadata for UI display
 const actionTypes = [
-  { id: 'move', label: 'Move', icon: Move, color: 'bg-blue-500/80' },
-  { id: 'rotate', label: 'Rotate', icon: RotateCw, color: 'bg-green-500/80' },
-  { id: 'scale', label: 'Scale', icon: Maximize2, color: 'bg-purple-500/80' },
-  { id: 'crop', label: 'Crop', icon: Crop, color: 'bg-indigo-500/80' },
-  { id: 'fade', label: 'Fade', icon: Eye, color: 'bg-yellow-500/80' },
-  { id: 'flip', label: 'Flip', icon: FlipHorizontal2, color: 'bg-teal-500/80' },
-  { id: 'colorChange', label: 'Color', icon: Palette, color: 'bg-pink-500/80' },
-  { id: 'blur', label: 'Blur', icon: Droplets, color: 'bg-cyan-500/80' },
-  { id: 'cornerRadius', label: 'Radius', icon: CornerRadiusIcon, color: 'bg-orange-500/80' },
-  { id: 'typewriter', label: 'Typewriter', icon: Type, color: 'bg-emerald-500/80' },
-  { id: 'tilt', label: '3D Tilt', icon: Rotate3d, color: 'bg-rose-500/80' },
+  { id: 'move', label: 'Move', icon: Move },
+  { id: 'rotate', label: 'Rotate', icon: RotateCw },
+  { id: 'scale', label: 'Scale', icon: Maximize2 },
+  { id: 'crop', label: 'Crop', icon: Crop },
+  { id: 'fade', label: 'Fade', icon: Eye },
+  { id: 'flip', label: 'Flip', icon: FlipHorizontal2 },
+  { id: 'colorChange', label: 'Color', icon: Palette },
+  { id: 'blur', label: 'Blur', icon: Droplets },
+  { id: 'cornerRadius', label: 'Radius', icon: CornerRadiusIcon },
+  { id: 'typewriter', label: 'Typewriter', icon: Type },
+  { id: 'tilt', label: '3D Tilt', icon: Rotate3d },
 ]
 
-// Which actions are available per layer type (HOLD excluded entirely)
+// ─────────────────────────────────────────────────────────────────────────────
+// PRESET GROUPING LOGIC
+//
+// Presets with direction variants (slide_in_left/right/top/bottom etc.) are
+// collapsed into a single representative card. When that card is selected the
+// inline expanded row lets the user pick IN/OUT and the direction.
+//
+// A "preset family" is a group of presets that share the same base name but
+// differ only in direction. We define families explicitly so the grid shows one
+// card per family.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Direction arrows represent the element's DIRECTION OF TRAVEL, so the glyph flips
+// between entrance and exit:
+//   IN  — element travels from the named side toward center (e.g. 'bottom' rises → ↑)
+//   OUT — element travels toward the named side          (e.g. 'bottom' exits down → ↓)
+const DIRECTION_ICONS_IN = {
+  left:   ArrowRight,
+  right:  ArrowLeft,
+  top:    ArrowDown,
+  bottom: ArrowUp,
+}
+const DIRECTION_ICONS_OUT = {
+  left:   ArrowLeft,
+  right:  ArrowRight,
+  top:    ArrowUp,
+  bottom: ArrowDown,
+}
+const getDirectionIcon = (direction, mode) =>
+  (mode === 'OUT' ? DIRECTION_ICONS_OUT : DIRECTION_ICONS_IN)[direction]
+
+// Each family entry:
+//   representativeId  – the preset shown as the card (first direction by default)
+//   inIds             – [presetId, direction] pairs for IN variants
+//   outIds            – [presetId, direction] pairs for OUT variants
+//   hasDirections     – whether to show direction arrows in the expanded row
+const PRESET_FAMILIES = [
+  // ── FADE ────────────────────────────────────────────────────────────────────
+  {
+    familyKey: 'fade',
+    label: 'Fade',
+    inIds:  [{ id: 'fade_in',  direction: null }],
+    outIds: [{ id: 'fade_out', direction: null }],
+    hasDirections: false,
+  },
+  // ── SLIDE ───────────────────────────────────────────────────────────────────
+  {
+    familyKey: 'slide',
+    label: 'Slide',
+    inIds: [
+      { id: 'slide_in_left',   direction: 'left'   },
+      { id: 'slide_in_right',  direction: 'right'  },
+      { id: 'slide_in_top',    direction: 'top'    },
+      { id: 'slide_in_bottom', direction: 'bottom' },
+    ],
+    outIds: [
+      { id: 'slide_out_left',   direction: 'left'   },
+      { id: 'slide_out_right',  direction: 'right'  },
+      { id: 'slide_out_top',    direction: 'top'    },
+      { id: 'slide_out_bottom', direction: 'bottom' },
+    ],
+    hasDirections: true,
+  },
+  // ── SCALE ───────────────────────────────────────────────────────────────────
+  {
+    familyKey: 'grow',
+    label: 'Grow',
+    inIds:  [{ id: 'grow_in',  direction: null }],
+    outIds: [{ id: 'grow_out', direction: null }],
+    hasDirections: false,
+  },
+  {
+    familyKey: 'shrink',
+    label: 'Shrink',
+    inIds:  [{ id: 'shrink_in',  direction: null }],
+    outIds: [{ id: 'shrink_out', direction: null }],
+    hasDirections: false,
+  },
+  // ── ROTATION ────────────────────────────────────────────────────────────────
+  {
+    familyKey: 'spin',
+    label: 'Spin',
+    inIds:  [{ id: 'spin_in',  direction: null }],
+    outIds: [{ id: 'spin_out', direction: null }],
+    hasDirections: false,
+  },
+  // ── BLUR ────────────────────────────────────────────────────────────────────
+  {
+    familyKey: 'blur',
+    label: 'Blur',
+    inIds:  [{ id: 'blur_in',  direction: null }],
+    outIds: [{ id: 'blur_out', direction: null }],
+    hasDirections: false,
+  },
+  {
+    familyKey: 'blur_slide',
+    label: 'Blur Slide',
+    inIds: [
+      { id: 'blur_slide_in_left',   direction: 'left'   },
+      { id: 'blur_slide_in_right',  direction: 'right'  },
+      { id: 'blur_slide_in_top',    direction: 'top'    },
+      { id: 'blur_slide_in_bottom', direction: 'bottom' },
+    ],
+    outIds: [
+      { id: 'blur_slide_out_left',   direction: 'left'   },
+      { id: 'blur_slide_out_right',  direction: 'right'  },
+      { id: 'blur_slide_out_top',    direction: 'top'    },
+      { id: 'blur_slide_out_bottom', direction: 'bottom' },
+    ],
+    hasDirections: true,
+  },
+  {
+    familyKey: 'blur_scale',
+    label: 'Blur Scale',
+    inIds:  [{ id: 'blur_scale_in',  direction: null }],
+    outIds: [{ id: 'blur_scale_out', direction: null }],
+    hasDirections: false,
+  },
+  // ── TYPEWRITER ───────────────────────────────────────────────────────────────
+  // Text-only entrance preset. `layerTypes` gates it to TEXT layers (other
+  // families have no `layerTypes` and apply to every layer type).
+  {
+    familyKey: 'typewriter',
+    label: 'Typewriter',
+    inIds:  [{ id: 'typewriter_in', direction: null }],
+    outIds: [],
+    hasDirections: false,
+    layerTypes: [LAYER_TYPES.TEXT],
+  },
+]
+
+// Build a reverse lookup: presetId → familyKey
+const PRESET_ID_TO_FAMILY = {}
+PRESET_FAMILIES.forEach(fam => {
+  fam.inIds.forEach(({ id }) => { PRESET_ID_TO_FAMILY[id] = fam.familyKey })
+  fam.outIds.forEach(({ id }) => { PRESET_ID_TO_FAMILY[id] = fam.familyKey })
+})
+
 const ACTION_AVAILABILITY = {
-  [LAYER_TYPES.SHAPE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius', 'tilt'],
-  [LAYER_TYPES.TEXT]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'typewriter', 'tilt'],
-  [LAYER_TYPES.IMAGE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  [LAYER_TYPES.VIDEO]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  [LAYER_TYPES.GROUP]: ['move', 'rotate', 'scale', 'fade', 'blur', 'tilt'],
-  frame_normal: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  frame_card: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip', 'tilt'],
-  [LAYER_TYPES.BACKGROUND]: ['colorChange'],
+  [LAYER_TYPES.SHAPE]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius', 'tilt'],
+  [LAYER_TYPES.TEXT]:      ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'tilt'],
+  [LAYER_TYPES.IMAGE]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.VIDEO]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.GROUP]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'tilt'],
+  frame_normal:            ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  frame_card:              ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip', 'tilt'],
+  [LAYER_TYPES.BACKGROUND]:['colorChange'],
 }
 
 function getLayerDisplayName(layer) {
-  if (!layer) return 'Unknown Element'
+  if (!layer) return 'Unknown'
   switch (layer.type) {
-    case LAYER_TYPES.IMAGE: return 'Image Element'
-    case LAYER_TYPES.VIDEO: return 'Video Element'
-    case LAYER_TYPES.SHAPE: return 'Shape Element'
-    case LAYER_TYPES.TEXT: return 'Text Element'
-    case LAYER_TYPES.GROUP: return 'Group Element'
-    case LAYER_TYPES.BACKGROUND: return 'Canvas Background'
-    case LAYER_TYPES.FRAME:
-      return layer.data?.isCardFrame ? 'Card Frame Element' : 'Frame Element'
+    case LAYER_TYPES.IMAGE:      return 'Image'
+    case LAYER_TYPES.VIDEO:      return 'Video'
+    case LAYER_TYPES.SHAPE:      return 'Shape'
+    case LAYER_TYPES.TEXT:       return 'Text'
+    case LAYER_TYPES.GROUP:      return 'Group'
+    case LAYER_TYPES.BACKGROUND: return 'Background'
+    case LAYER_TYPES.FRAME:      return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
     default: return layer.name || 'Element'
   }
 }
 
-function getAvailableActions(layer, existingActions) {
-  if (!layer) return []
-  let layerKey = layer.type
-  if (layer.type === LAYER_TYPES.FRAME) {
-    layerKey = layer.data?.isCardFrame ? 'frame_card' : 'frame_normal'
-  }
-  let allowed = ACTION_AVAILABILITY[layerKey] || []
-
-  // Filter out cornerRadius for non-rect/square shapes
-  const shapeType = layer.data?.shapeType || 'rect'
-  if (shapeType !== 'rect' && shapeType !== 'square') {
-    allowed = allowed.filter(t => t !== 'cornerRadius')
-  }
-
-  const usedTypes = (existingActions || []).map(a => a.type)
-  return allowed.filter(t => !usedTypes.includes(t))
-}
-
-// Shrink font size so text always fits within the fixed-size preview card
 function getTextFontSize(text) {
   const len = (text || '').length
-  if (len <= 5) return '13px'
+  if (len <= 5)  return '13px'
   if (len <= 12) return '11px'
   if (len <= 22) return '9px'
   if (len <= 40) return '7.5px'
   return '6px'
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+
 function MotionPanel({
   isOpen = false,
   onClose,
   topToolbarHeight = 0,
-  onStepEdit,
   onApplyMotion,
   onCancelMotion,
-  onStartMotionCapture,
   onAddAnimation,
+  onCustomActionValueChange,
   sceneLayers = [],
   selectedLayerIds = [],
   motionControls = null,
   isMotionCaptureActive,
   editingStepId,
   onDeleteCaptureAction,
+  editingStepActionCount = 0,
 }) {
   const dispatch = useDispatch()
-
   const currentSceneId = useSelector(selectCurrentSceneId)
-  const layers = useSelector(selectLayers)
+  const layers        = useSelector(selectLayers)
 
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
   )
-
   const motionFlow = motionFlowData.steps || []
 
-  const [panelWidth, setPanelWidth] = useState(360)
-  const [isResizing, setIsResizing] = useState(false)
-
-  // Context menu state
-  const [addAnimMenuLayerId, setAddAnimMenuLayerId] = useState(null)
-  const [menuDirection, setMenuDirection] = useState('down')
-  const menuRef = useRef(null)
-
-  // Collapsible steps (Set of expanded step IDs; default = all collapsed)
-  const [expandedSteps, setExpandedSteps] = useState(new Set())
-
-  // Collapsible layers (Map<layerId, boolean> for manual overrides)
-  const [manualLayerState, setManualLayerState] = useState(new Map())
+  const PANEL_WIDTH = 300
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024)
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
 
-  // Reset manual layer overrides when editing step changes
-  useEffect(() => { setManualLayerState(new Map()) }, [editingStepId])
-
-  // Close menu on outside click
   useEffect(() => {
-    if (!addAnimMenuLayerId) return
-    const handleClick = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setAddAnimMenuLayerId(null)
+    const onResize = () => setIsMobile(window.innerWidth < 1024)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Normal mode: which moment card is expanded (one at a time)
+  const [expandedStepId, setExpandedStepId] = useState(null)
+
+  // Motion mode
+  const [motionModeState,   setMotionModeState]   = useState('list') // 'list' | 'element'
+  const [selectedLayerId,   setSelectedLayerId]   = useState(null)
+  const [activeTab,         setActiveTab]         = useState('presets')
+  // Which family card is expanded in the presets tab
+  const [expandedFamilyKey, setExpandedFamilyKey] = useState(null)
+  // Per-family selected direction — { [familyKey]: 'left'|'right'|'top'|'bottom'|null }
+  const [familyDirections,  setFamilyDirections]  = useState({})
+  // Per-family selected mode — { [familyKey]: 'IN'|'OUT' }
+  const [familyModes,       setFamilyModes]       = useState({})
+  // Which custom-action row has its inline settings panel expanded (Custom tab)
+  const [expandedActionType, setExpandedActionType] = useState(null)
+
+  // Reset motion state when capture starts/stops
+  useEffect(() => {
+    if (!isMotionCaptureActive) {
+      setMotionModeState('list')
+      setSelectedLayerId(null)
+      setActiveTab('presets')
+      setExpandedFamilyKey(null)
+      setFamilyDirections({})
+      setFamilyModes({})
+      setExpandedActionType(null)
+    }
+  }, [isMotionCaptureActive])
+
+  // Collapse any open inline settings row when the selected element changes
+  useEffect(() => { setExpandedActionType(null) }, [selectedLayerId])
+
+  // Canvas selection → go directly to element view
+  useEffect(() => {
+    if (isMotionCaptureActive && selectedLayerIds && selectedLayerIds.length > 0) {
+      const firstLayerId = selectedLayerIds[0]
+      if (sceneLayers.some(l => l.id === firstLayerId)) {
+        setSelectedLayerId(firstLayerId)
+        setMotionModeState('element')
       }
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [addAnimMenuLayerId])
+  }, [selectedLayerIds, isMotionCaptureActive, sceneLayers])
 
+  // The step currently being edited
+  const step        = isMotionCaptureActive && editingStepId ? motionFlow.find(s => s.id === editingStepId) : null
+  const layerActions = step?.layerActions?.[selectedLayerId] || []
+  const actionsCount = layerActions.length
+
+  // Auto-switch to Custom tab when a canvas action is added
+  const prevActionsCountRef = useRef(actionsCount)
+  const prevLayerIdRef      = useRef(selectedLayerId)
   useEffect(() => {
-    if (!editingStepId || !selectedLayerIds?.length) return
-    const layerId = selectedLayerIds[0]
-    requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-layer-id="${layerId}"]`)
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    })
-  }, [selectedLayerIds, editingStepId])
+    if (selectedLayerId && isMotionCaptureActive) {
+      if (prevLayerIdRef.current !== selectedLayerId) {
+        prevLayerIdRef.current      = selectedLayerId
+        prevActionsCountRef.current = actionsCount
+        return
+      }
+      if (actionsCount > prevActionsCountRef.current) setActiveTab('custom')
+      prevActionsCountRef.current = actionsCount
+    }
+  }, [actionsCount, selectedLayerId, isMotionCaptureActive])
 
   if (!isOpen || !currentSceneId) return null
 
@@ -187,530 +323,798 @@ function MotionPanel({
   // HANDLERS
   // ============================================================================
 
-  const handleDeleteStep = (stepId) => {
-    if (!currentSceneId) return
-    if (editingStepId === stepId) {
-      // Active step: cancel capture mode first (resets editingStepId + isMotionCaptureActive)
-      onCancelMotion?.()
-      // Then ensure step is deleted (idempotent — filter on non-existent ID is a no-op)
-      dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
-    } else {
-      dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
-    }
-  }
-
   const handleDeleteAction = (stepId, layerId, actionId, actionType) => {
     if (!currentSceneId) return
     dispatch(deleteSceneMotionAction({ sceneId: currentSceneId, stepId, layerId, actionId }))
-    if (isMotionCaptureActive && onDeleteCaptureAction) {
-      onDeleteCaptureAction(stepId, layerId, actionType)
+    if (isMotionCaptureActive && onDeleteCaptureAction) onDeleteCaptureAction(stepId, layerId, actionType)
+  }
+
+  const playPresetPreview = (pixiObject, presetId, cleanState) => {
+    if (!pixiObject || pixiObject.destroyed) return
+    const presetDef = PRESET_REGISTRY[presetId]
+    if (!presetDef) return
+
+    console.log(`[Bug 2 Debug] playPresetPreview: playing preset ${presetId}. snap/cleanState coords: x=${cleanState.x.toFixed(2)}, y=${cleanState.y.toFixed(2)}, alpha=${cleanState.alpha.toFixed(2)}, scaleX=${cleanState.scaleX.toFixed(2)}, scaleY=${cleanState.scaleY.toFixed(2)}`)
+
+    if (pixiObject._previewTimeline) { pixiObject._previewTimeline.kill(); pixiObject._previewTimeline = null }
+    const previewEngine = getGlobalMotionEngine()
+    gsap.killTweensOf(previewEngine.masterTimeline, { time: true })
+    previewEngine.masterTimeline.pause()
+
+    const snap = {
+      x: pixiObject.x, y: pixiObject.y, alpha: pixiObject.alpha, rotation: pixiObject.rotation,
+      scaleX: pixiObject.scale?.x ?? 1, scaleY: pixiObject.scale?.y ?? 1,
+      blurStrength: pixiObject._blurFilter?.strength ?? 0,
+      hadBlurFilter: !!(pixiObject.filters && pixiObject._blurFilter && pixiObject.filters.includes(pixiObject._blurFilter)),
+      revealProgress: pixiObject.revealProgress ?? 1,
+    }
+    pixiObject._isPlayingPresetPreview = true
+    const duration = 1.0, ease = 'power2.out'
+    pixiObject.x = cleanState.x; pixiObject.y = cleanState.y
+    pixiObject.alpha = cleanState.alpha; pixiObject.rotation = cleanState.rotation
+    if (pixiObject.scale) pixiObject.scale.set(cleanState.scaleX, cleanState.scaleY)
+    if (pixiObject._blurFilter) {
+      pixiObject._blurFilter.strength = 0
+      if (pixiObject.filters?.includes(pixiObject._blurFilter)) {
+        pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter)
+        if (!pixiObject.filters.length) pixiObject.filters = null
+      }
+    }
+
+    const actions = presetDef.getActions({ ...cleanState, opacity: cleanState.alpha }, duration * 1000)
+    const mainTween = {}, mainFrom = {}
+    let scaleTween = null, blurTween = null, hasTypewriter = false
+    actions.forEach(a => {
+      if (a.type === 'typewriter') {
+        hasTypewriter = true
+      } else if (a.type === 'fade') {
+        if (a.startOffset?.opacity !== undefined) mainFrom.alpha = a.startOffset.opacity
+        if (a.values?.opacity !== undefined) mainTween.alpha = a.values.opacity
+      } else if (a.type === 'move') {
+        if (a.startOffset?.x !== undefined) mainFrom.x = cleanState.x + a.startOffset.x
+        if (a.startOffset?.y !== undefined) mainFrom.y = cleanState.y + a.startOffset.y
+        if (a.values?.dx) mainTween.x = (mainFrom.x ?? cleanState.x) + a.values.dx
+        if (a.values?.dy) mainTween.y = (mainFrom.y ?? cleanState.y) + a.values.dy
+      } else if (a.type === 'scale') {
+        const fx = a.startOffset?.scaleX !== undefined ? cleanState.scaleX * a.startOffset.scaleX : cleanState.scaleX
+        const fy = a.startOffset?.scaleY !== undefined ? cleanState.scaleY * a.startOffset.scaleY : cleanState.scaleY
+        scaleTween = { fromX: fx, fromY: fy, toX: fx * (a.values?.dsx ?? 1), toY: fy * (a.values?.dsy ?? 1) }
+      } else if (a.type === 'rotate') {
+        if (a.startOffset?.rotation !== undefined) mainFrom.rotation = cleanState.rotation + a.startOffset.rotation * Math.PI / 180
+        if (a.values?.dangle) mainTween.rotation = (mainFrom.rotation ?? cleanState.rotation) + a.values.dangle * Math.PI / 180
+      } else if (a.type === 'blur') {
+        blurTween = { from: a.startOffset?.blur ?? 0, to: a.values?.blur ?? 0 }
+      }
+    })
+
+    const hasSpatial = mainTween.x || mainTween.y || scaleTween || mainTween.rotation || blurTween
+    if (hasSpatial && mainFrom.alpha !== undefined && mainFrom.alpha < 0.3) mainFrom.alpha = 0.3
+    Object.entries(mainFrom).forEach(([k, v]) => { pixiObject[k] = v })
+    if (pixiObject.scale) pixiObject.scale.set(scaleTween?.fromX ?? cleanState.scaleX, scaleTween?.fromY ?? cleanState.scaleY)
+    if (blurTween) {
+      if (!pixiObject._blurFilter) pixiObject._blurFilter = new PIXI.BlurFilter({ strength: 0, quality: 4 })
+      pixiObject._blurFilter.strength = blurTween.from
+      if (blurTween.from > 0 && !pixiObject.filters?.includes(pixiObject._blurFilter))
+        pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
+    }
+
+    const restore = () => {
+      if (pixiObject.destroyed) return
+      pixiObject._isPlayingPresetPreview = false; pixiObject._previewTimeline = null
+      pixiObject.x = snap.x; pixiObject.y = snap.y; pixiObject.alpha = snap.alpha; pixiObject.rotation = snap.rotation
+      if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
+      if (hasTypewriter && pixiObject.revealProgress !== undefined) pixiObject.revealProgress = snap.revealProgress
+      if (pixiObject._blurFilter) {
+        pixiObject._blurFilter.strength = snap.blurStrength
+        const has = pixiObject.filters?.includes(pixiObject._blurFilter)
+        if (snap.hadBlurFilter && !has) pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
+        else if (!snap.hadBlurFilter && has) { pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter); if (!pixiObject.filters.length) pixiObject.filters = null }
+      }
+      if (!isMotionCaptureActive) { const eng = getGlobalMotionEngine(); eng.seek(eng.masterTimeline?.time() || 0, { force: true }) }
+    }
+
+    const tl = gsap.timeline({ onComplete: restore })
+    pixiObject._previewTimeline = tl
+    if (pixiObject.scale) tl.to(pixiObject.scale, { x: scaleTween?.toX ?? cleanState.scaleX, y: scaleTween?.toY ?? cleanState.scaleY, duration, ease: scaleTween ? ease : 'none' }, 0)
+    if (blurTween) {
+      const bp = { value: blurTween.from }
+      tl.to(bp, { value: blurTween.to, duration, ease, onUpdate: () => {
+        if (!pixiObject._blurFilter) return
+        pixiObject._blurFilter.strength = bp.value
+        if (bp.value > 0.1) { if (!pixiObject.filters?.includes(pixiObject._blurFilter)) pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter] }
+        else { if (pixiObject.filters?.includes(pixiObject._blurFilter)) { pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter); if (!pixiObject.filters.length) pixiObject.filters = null } }
+      }}, 0)
+    }
+    if (Object.keys(mainTween).length) tl.to(pixiObject, { ...mainTween, duration, ease }, 0)
+    if (hasTypewriter && pixiObject.revealProgress !== undefined) {
+      tl.fromTo(pixiObject, { revealProgress: 0 }, { revealProgress: 1, duration, ease: 'none' }, 0)
     }
   }
 
-  const handleEditStep = (stepId) => {
-    if (onStepEdit) onStepEdit(stepId)
-  }
+  const applyPreset = (presetId, type) => {
+    if (!selectedLayerId || !editingStepId || !currentSceneId) return
 
-  const toggleStepExpand = (stepId) => {
-    setExpandedSteps(prev => {
-      const next = new Set(prev)
-      if (next.has(stepId)) next.delete(stepId)
-      else next.add(stepId)
-      return next
-    })
-  }
+    console.log(`[Bug 2 Debug] applyPreset clicked: presetId=${presetId}, type=${type}, selectedLayerId=${selectedLayerId}, editingStepId=${editingStepId}`)
 
-  const toggleLayerCollapse = (layerId, currentlyExpanded) => {
-    setManualLayerState(prev => {
-      const next = new Map(prev)
-      next.set(layerId, !currentlyExpanded)
-      return next
-    })
+    const activePreset = step?.layerPresets?.[selectedLayerId]
+    if (activePreset?.id === presetId) {
+      dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
+      return
+    }
+    let cleanState = null, pixiObj = null
+    if (motionControls?.layerObjects) {
+      pixiObj = motionControls.layerObjects.get(selectedLayerId)
+      if (pixiObj) {
+        console.log(`[Bug 2 Debug] applyPreset current PIXI values (step start): x=${pixiObj.x.toFixed(2)}, y=${pixiObj.y.toFixed(2)}, alpha=${pixiObj.alpha.toFixed(2)}, rotation=${pixiObj.rotation.toFixed(2)}`)
+
+        const eng = getGlobalMotionEngine()
+        gsap.killTweensOf(eng.masterTimeline, { time: true })
+        eng.masterTimeline.pause()
+        pixiObj._isPlayingPresetPreview = true
+        
+        // Capture the correct step-start visual values from PIXI instead of base scene start coordinates
+        const currentX = pixiObj.x
+        const currentY = pixiObj.y
+        const currentAlpha = pixiObj.alpha
+        const currentRotation = pixiObj.rotation
+        const currentScaleX = pixiObj.scale?.x ?? 1
+        const currentScaleY = pixiObj.scale?.y ?? 1
+
+        cleanState = { 
+          x: currentX, 
+          y: currentY, 
+          alpha: currentAlpha, 
+          rotation: currentRotation, 
+          scaleX: currentScaleX, 
+          scaleY: currentScaleY 
+        }
+      }
+    }
+    dispatch(applyPresetToStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId, presetId, presetType: type }))
+    if (cleanState && pixiObj) playPresetPreview(pixiObj, presetId, cleanState)
   }
 
   // ============================================================================
   // RENDER HELPERS
   // ============================================================================
 
+  const getActionMeta = (t) => actionTypes.find(a => a.id === t)
+
   const renderLayerPreview = (layer) => {
     if (!layer) return null
-
-    // ── IMAGE ────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.IMAGE) {
       const src = layer.data?.url || layer.data?.src
-      return src
-        ? <img src={src} alt="" className="w-full h-full object-contain rounded-md" />
-        : <div className={`w-full h-full rounded-md ${isLight ? 'bg-slate-200' : 'bg-gradient-to-br from-white/20 to-white/5'}`} />
+      return src ? <img src={src} alt="" className="w-full h-full object-contain" /> : <div className={`w-full h-full rounded ${isLight ? 'bg-slate-200' : 'bg-white/10'}`} />
     }
-
-    // ── VIDEO ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.VIDEO) {
       const thumb = layer.data?.thumbnail
       return (
-        <div className={`w-full h-full relative rounded-md overflow-hidden ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
-          {thumb
-            ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-            : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />
-          }
-          <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
-            <Film className={`h-4 w-4 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
-          </div>
+        <div className={`w-full h-full relative overflow-hidden rounded ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
+          {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />}
+          <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}><Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} /></div>
         </div>
       )
     }
-
-    // ── TEXT ──────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.TEXT) {
       const text = layer.data?.content || ''
       const color = layer.data?.color || (isLight ? '#111827' : '#ffffff')
-      const fs = getTextFontSize(text)
-      return (
-        <div className={`w-full h-full rounded-md flex items-center justify-center px-2 overflow-hidden ${isLight ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}>
-          <span
-            style={{ fontSize: fs, color, lineHeight: 1.2, wordBreak: 'break-all' }}
-            className="text-center font-semibold"
-          >
-            {text || <span className={`${isLight ? 'text-slate-300' : 'text-white/30'} italic`}>empty</span>}
-          </span>
-        </div>
-      )
+      return <div className="w-full h-full flex items-center justify-center overflow-hidden rounded"><span style={{ fontSize: getTextFontSize(text), color, lineHeight: 1.2, wordBreak: 'break-all' }} className="text-center font-bold">{text || <span className={`italic ${isLight ? 'text-slate-400' : 'text-white/30'}`}>empty</span>}</span></div>
     }
-
-    // ── SHAPE ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.SHAPE) {
-      const fill = layer.data?.fill
-      const shapeType = layer.data?.shapeType || 'rect'
+      const fill = layer.data?.fill, shapeType = layer.data?.shapeType || 'rect'
       const fillColor = fill && fill !== 'transparent' ? fill : (isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.18)')
-
-      if (shapeType === 'circle') {
-        return (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className={`w-8 h-8 rounded-full border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
-          </div>
-        )
-      }
-      if (shapeType === 'triangle') {
-        return (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="w-0 h-0" style={{
-              borderLeft: '14px solid transparent',
-              borderRight: '14px solid transparent',
-              borderBottom: `24px solid ${fillColor}`,
-            }} />
-          </div>
-        )
-      }
-      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
+      if (shapeType === 'circle') return <div className="w-full h-full flex items-center justify-center"><div className={`w-6 h-6 rounded-full border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} /></div>
+      if (shapeType === 'triangle') return <div className="w-full h-full flex items-center justify-center"><div className="w-0 h-0" style={{ borderLeft: '10px solid transparent', borderRight: '10px solid transparent', borderBottom: `16px solid ${fillColor}` }} /></div>
+      return <div className={`w-full h-full rounded border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
     }
+    if (layer.type === LAYER_TYPES.BACKGROUND) {
+      const color = typeof layer.data?.color === 'number' ? '#' + layer.data.color.toString(16).padStart(6, '0') : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
+      return <div className="w-full h-full rounded" style={{ backgroundColor: color }} />
+    }
+    return <div className={`w-full h-full rounded flex items-center justify-center text-[10px] font-bold ${isLight ? 'text-slate-500' : 'text-white/50'}`}>{(layer.type || 'L').charAt(0).toUpperCase()}</div>
+  }
 
-    // ── FRAME ─────────────────────────────────────────────────────────────────
-    if (layer.type === LAYER_TYPES.FRAME) {
-      const hasFrontAsset = !!layer.data?.assetUrl
-      const isCard = !!layer.data?.isCardFrame
-      const hasBackAsset = isCard && !!layer.data?.backAssetUrl
-      const hasAnyAsset = hasFrontAsset || hasBackAsset
-
-      if (!hasAnyAsset) {
-        return (
-          <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold tracking-wider uppercase ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/5 border border-white/10 text-white/40'}`}>
-            Frame
+  // ============================================================================
+  // HEADER
+  // ============================================================================
+  const renderHeader = () => {
+    let title = '', subtitle = '', showBack = false, onBackClick = null
+    if (!isMotionCaptureActive) {
+      title = 'Moments'
+      subtitle = motionFlow.length === 0 ? 'No moments yet' : `${motionFlow.length} moment${motionFlow.length !== 1 ? 's' : ''}`
+    } else if (motionModeState === 'list') {
+      title = 'Select element'
+      subtitle = 'Choose what to animate'
+    } else {
+      const layer = sceneLayers.find(l => l.id === selectedLayerId)
+      title = getLayerDisplayName(layer)
+      subtitle = 'Animating'
+      showBack = true
+      onBackClick = () => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }
+    }
+    return (
+      <div className={`flex items-center justify-between border-b border-black/5 dark:border-white/5 flex-shrink-0 select-none ${isMobile ? 'px-4 py-3.5' : 'px-4 py-4'}`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          {showBack && (
+            <button onClick={onBackClick} className={`p-1 rounded transition-colors shrink-0 ${isLight ? 'text-slate-500 hover:text-slate-800' : 'text-zinc-400 hover:text-zinc-100'}`}>
+              <ArrowLeft className={isMobile ? 'h-4 w-4' : 'h-[18px] w-[18px]'} strokeWidth={2.5} />
+            </button>
+          )}
+          <div className="min-w-0">
+            <h2 className={`font-semibold tracking-tight leading-tight truncate ${isMobile ? 'text-[14px]' : 'text-base'} ${isLight ? 'text-gray-900' : 'text-white'}`}>{title}</h2>
+            {subtitle && <p className={`mt-0.5 truncate ${isMobile ? 'text-[11px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{subtitle}</p>}
           </div>
-        )
-      }
+        </div>
+        <button onClick={onClose} className={`p-1 rounded transition-colors shrink-0 ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-200'}`} aria-label="Close">
+          {isMobile ? <ChevronDown className="h-5 w-5 text-[#7c4af0]" strokeWidth={2.5} /> : <X className="h-4 w-4" strokeWidth={2} />}
+        </button>
+      </div>
+    )
+  }
 
-      // Helper to render a single frame asset (front or back) inside a half-width or full-width container
-      const renderSingleFrameAsset = (url, isVideo, sideLabel) => {
-        if (!url) {
-          return (
-            <div className={`w-full h-full flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-50 text-slate-350' : 'bg-black/10 text-white/20'}`}>
-              {sideLabel}
-            </div>
-          )
-        }
-
-        if (isVideo) {
-          const thumb = layer.data?.thumbnail
-          return (
-            <div className="w-full h-full relative overflow-hidden bg-black/10">
-              <img src={thumb || url} alt="" className="w-full h-full object-contain" />
-              <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
-                <Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
-              </div>
-            </div>
-          )
-        }
-
-        return (
-          <img src={url} alt="" className="w-full h-full object-contain" />
-        )
-      }
-
-      if (isCard) {
-        return (
-          <div className={`w-full h-full rounded-md flex overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
-            <div className={`w-1/2 h-full border-r ${isLight ? 'border-slate-150' : 'border-white/10'}`}>
-              {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, 'Front')}
-            </div>
-            <div className="w-1/2 h-full">
-              {renderSingleFrameAsset(layer.data.backAssetUrl, layer.data.backAssetIsVideo, 'Back')}
-            </div>
-          </div>
-        )
-      }
-
-      // Standard frame (non-card) with asset
+  // ============================================================================
+  // NORMAL MODE — VIEW-ONLY MOMENT CARDS
+  // ============================================================================
+  const renderNormalMode = () => {
+    if (motionFlow.length === 0) {
       return (
-        <div className={`w-full h-full rounded-md overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
-          {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, '')}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="text-center py-16 px-4">
+            <Zap className="h-9 w-9 mx-auto mb-4 text-[#7c4af0] opacity-80" />
+            <p className={`text-sm font-bold mb-1.5 ${isLight ? 'text-slate-900' : 'text-zinc-200'}`}>No moments yet</p>
+            <p className={`text-xs leading-relaxed max-w-[230px] mx-auto ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+              Click <span className="font-semibold text-[#7c4af0]">Add moment</span> on the canvas to bring this scene to life.
+            </p>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {motionFlow.map((step, stepIndex) => {
+          const isExpanded = expandedStepId === step.id
+          const allLayerIds = new Set([...Object.keys(step.layerActions || {}), ...Object.keys(step.layerPresets || {})])
+          const totalEffects = [...allLayerIds].reduce((sum, lid) => sum + (step.layerActions?.[lid]?.length || 0) + (step.layerPresets?.[lid] ? 1 : 0), 0)
+          const layerCount = allLayerIds.size
+
+          return (
+            <div key={step.id} className={`overflow-hidden border-b transition-all duration-150 ${
+              isExpanded
+                ? (isLight ? 'border-slate-200 bg-slate-50' : 'border-white/[0.08] bg-white/[0.04]')
+                : (isLight ? 'border-slate-100 bg-white' : 'border-white/[0.04] bg-transparent')
+            }`}>
+              {/* Header */}
+              <button
+                onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                className={`w-full flex items-center gap-3 text-left ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`}
+              >
+                <div className={`flex items-center justify-center font-bold shrink-0 ${isMobile ? 'w-5 h-5 text-[10px]' : 'w-6 h-6 text-[11px]'} ${
+                  isExpanded ? 'text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')
+                }`}>
+                  {stepIndex + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className={`font-semibold ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>Moment {stepIndex + 1}</h4>
+                  <p className={`${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+                    {totalEffects > 0 ? `${totalEffects} effect${totalEffects !== 1 ? 's' : ''} · ${layerCount} layer${layerCount !== 1 ? 's' : ''}` : 'No effects'}
+                  </p>
+                </div>
+                <ChevronDown className={`shrink-0 transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-[#7c4af0]' : 'rotate-0'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
+              </button>
+
+              {/* Expanded content — different bg makes it scannable */}
+              {isExpanded && (
+                <div className={`border-t px-3 py-2.5 space-y-1.5 ${
+                  isLight ? 'border-slate-200 bg-slate-100/70' : 'border-white/[0.06] bg-black/30'
+                }`}>
+                  {allLayerIds.size === 0 ? (
+                    <p className={`text-[10px] italic py-1 text-center ${isLight ? 'text-slate-400' : 'text-zinc-600'}`}>No effects in this moment</p>
+                  ) : [...allLayerIds].map((layerId) => {
+                    const layer = sceneLayers.find(l => l.id === layerId) || layers[layerId]
+                    const actions = step.layerActions?.[layerId] || []
+                    const preset = step.layerPresets?.[layerId]
+                    const color = layer?.data?.color || layer?.data?.fill || (isLight ? '#111827' : '#ffffff')
+                    const contrastBg = getContrastCardBg(color, isLight)
+                    return (
+                      <div key={layerId} className={`flex items-start gap-2 px-2 ${isMobile ? 'py-1.5' : 'py-2'}`}>
+                        <div 
+                          style={contrastBg ? { backgroundColor: contrastBg } : undefined}
+                          className={`shrink-0 overflow-hidden flex items-center justify-center rounded ${isMobile ? 'w-6 h-6' : 'w-8 h-8'}`}
+                        >
+                          {renderLayerPreview(layer)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`font-semibold ${isMobile ? 'text-[10px]' : 'text-xs'} ${isLight ? 'text-slate-700' : 'text-zinc-300'}`}>{getLayerDisplayName(layer)}</p>
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {preset && (
+                              <span className={`font-bold px-1.5 py-px rounded ${isMobile ? 'text-[8px]' : 'text-[10px]'} ${isLight ? 'bg-slate-100 text-slate-500' : 'bg-zinc-800/80 text-zinc-400'}`}>
+                                {preset.type === 'IN' ? 'Entrance' : 'Exit'}
+                              </span>
+                            )}
+                            {actions.map((action) => {
+                              const meta = getActionMeta(action.type)
+                              return meta ? (
+                                <span key={action.id} className={`font-bold px-1.5 py-px rounded ${isMobile ? 'text-[8px]' : 'text-[10px]'} ${isLight ? 'bg-slate-100 text-slate-500' : 'bg-zinc-800/80 text-zinc-400'}`}>{meta.label}</span>
+                              ) : null
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ============================================================================
+  // MOTION MODE — STATE 1: ELEMENT LIST
+  // ============================================================================
+  const renderMotionModeList = () => (
+    <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+      {sceneLayers.length === 0 ? (
+        <p className={`text-[11px] italic text-center py-12 ${isLight ? 'text-slate-400' : 'text-zinc-600'}`}>No elements in this scene</p>
+      ) : sceneLayers.map((layer) => {
+        const layerId = layer.id
+        const isSelected = selectedLayerIds?.includes(layerId)
+        const open = () => { setSelectedLayerId(layerId); setMotionModeState('element'); setExpandedFamilyKey(null); dispatch(setSelectedLayer(layerId)) }
+        const color = layer?.data?.color || layer?.data?.fill || (isLight ? '#111827' : '#ffffff')
+        const contrastBg = getContrastCardBg(color, isLight)
+        return (
+          <button key={layerId} onClick={open} 
+            className={`group w-full flex items-center gap-3 border rounded-lg cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${
+            isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
+          }`}>
+            <div 
+              style={contrastBg ? { backgroundColor: contrastBg } : undefined}
+              className={`shrink-0 overflow-hidden flex items-center justify-center rounded ${isMobile ? 'w-8 h-8' : 'w-10 h-10'}`}
+            >
+              {renderLayerPreview(layer)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h4 className={`font-medium truncate ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-200'}`}>{getLayerDisplayName(layer)}</h4>
+              <p className={`truncate ${isMobile ? 'text-[10px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Tap to animate</p>
+            </div>
+            <ChevronRight className={`shrink-0 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isSelected ? 'text-[#7c4af0]' : (isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-zinc-600 group-hover:text-zinc-400')}`} />
+          </button>
+        )
+      })}
+    </div>
+  )
+
+  // ============================================================================
+  // MOTION MODE — STATE 2: ELEMENT CONTROL VIEW
+  // ============================================================================
+  const renderMotionModeElement = () => {
+    const layer = sceneLayers.find(l => l.id === selectedLayerId)
+    if (!layer || !step) return null
+
+    const layerId = layer.id
+    const activePresetInfo  = step?.layerPresets?.[layerId]
+    const activePresetId    = activePresetInfo?.id   || null
+    const activePresetType  = activePresetInfo?.type || null  // 'IN' | 'OUT' | null
+    const activeFamilyKey   = activePresetId ? PRESET_ID_TO_FAMILY[activePresetId] : null
+
+    let layerKey = layer.type
+    if (layer.type === LAYER_TYPES.FRAME) layerKey = layer.data?.isCardFrame ? 'frame_card' : 'frame_normal'
+    let allowedActions = ACTION_AVAILABILITY[layerKey] || []
+    if ((layer.data?.shapeType || 'rect') !== 'rect' && layer.data?.shapeType !== 'square')
+      allowedActions = allowedActions.filter(t => t !== 'cornerRadius')
+
+    // [BACKGROUND PRESETS] Background layers never support entrance/exit presets — only
+    // custom actions (colorChange). Hide the Presets tab entirely and force the Custom tab.
+    const isBackground = layer.type === LAYER_TYPES.BACKGROUND
+    const effectiveTab = isBackground ? 'custom' : activeTab
+
+    const activeActions = layerActions || []
+    const TRANSFORM_IDS = ['move', 'scale', 'rotate']
+    const previewLayer  = layers[layerId] || null
+
+    // ── PRESETS TAB ───────────────────────────────────────────────────────────
+    const renderExpandedRow = (fam) => {
+      const currentMode = familyModes[fam.familyKey] || (activePresetType && activeFamilyKey === fam.familyKey ? activePresetType : 'IN')
+      const currentDir  = familyDirections[fam.familyKey] || (fam.hasDirections ? (fam.inIds[0]?.direction || null) : null)
+      const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+
+      const selectModeAndApply = (newMode) => {
+        setFamilyModes(prev => ({ ...prev, [fam.familyKey]: newMode }))
+        const varList = newMode === 'OUT' ? fam.outIds : fam.inIds
+        const target  = fam.hasDirections ? (varList.find(v => v.direction === currentDir) || varList[0]) : varList[0]
+        if (target) applyPreset(target.id, newMode)
+      }
+
+      const selectDirAndApply = (dir) => {
+        setFamilyDirections(prev => ({ ...prev, [fam.familyKey]: dir }))
+        const target = variantList.find(v => v.direction === dir)
+        if (target) applyPreset(target.id, currentMode)
+      }
+
+      // Same height as a card row: aspect-[2/1] spans both columns at 2:1 ratio = square card height
+      const hasOut = fam.outIds.length > 0
+      return (
+        <div className={`w-full aspect-[2/1] flex flex-col items-start justify-center gap-3 px-3 mb-2.5 ${isLight ? 'bg-slate-50 border border-slate-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
+          {/* ON ENTER / ON EXIT toggle — hidden for families with no exit variant (e.g. Typewriter) */}
+          {hasOut && (
+          <div className={`flex w-full border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'}`}>
+            {[
+              { id: 'IN',  label: 'On Enter' },
+              { id: 'OUT', label: 'On Exit'  },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => selectModeAndApply(opt.id)}
+                className={`flex-1 py-2 text-[11px] font-bold tracking-wide transition-colors ${
+                  currentMode === opt.id
+                    ? 'bg-[#7c4af0] text-white'
+                    : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          )}
+
+          {/* Direction arrows — only for directional families (Slide) */}
+          {fam.hasDirections && (
+            <div className="flex items-center gap-2">
+              {variantList.map(({ direction }) => {
+                const DirIcon  = getDirectionIcon(direction, currentMode)
+                if (!DirIcon) return null
+                const isSelDir = currentDir === direction
+                return (
+                  <button
+                    key={direction}
+                    onClick={() => selectDirAndApply(direction)}
+                    title={direction}
+                    className={`w-8 h-8 flex items-center justify-center border transition-all active:scale-95 ${
+                      isSelDir
+                        ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
+                        : (isLight
+                          ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+                          : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
+                    }`}
+                  >
+                    <DirIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )
     }
 
-    // ── BACKGROUND ────────────────────────────────────────────────────────────
-    if (layer.type === LAYER_TYPES.BACKGROUND) {
-      const color = typeof layer.data?.color === 'number'
-        ? '#' + layer.data.color.toString(16).padStart(6, '0')
-        : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
-      return <div className={`w-full h-full rounded-md border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: color }} />
-    }
+    const renderPresetsTab = () => {
+      // Gate families by layer type: a family with `layerTypes` only shows for
+      // those types (e.g. Typewriter → TEXT only). Families without the field
+      // apply to every layer.
+      const availableFamilies = PRESET_FAMILIES.filter(
+        fam => !fam.layerTypes || fam.layerTypes.includes(layer.type)
+      )
 
-    return (
-      <div className={`w-full h-full rounded-md flex items-center justify-center text-[10px] font-bold ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/10 border border-white/10 text-white/50'}`}>
-        {(layer.type || 'L').charAt(0).toUpperCase()}
-      </div>
-    )
-  }
+      // Split families into rows so we can inject the expanded row immediately after the
+      // row that contains the selected family card. [MOBILE] Use 3 columns on mobile so
+      // the preset cards are smaller; 2 columns on desktop.
+      const cols = isMobile ? 3 : 2
+      const rows = []
+      for (let i = 0; i < availableFamilies.length; i += cols) {
+        rows.push(availableFamilies.slice(i, i + cols))
+      }
 
-  const getActionMeta = (actionType) => actionTypes.find(a => a.id === actionType)
+      return (
+        <div className="space-y-0">
+          {rows.map((rowFams, rowIdx) => {
+            // Does this row contain the currently expanded family?
+            const expandedInRow = expandedFamilyKey
+              ? rowFams.find(f => f.familyKey === expandedFamilyKey)
+              : null
 
-  const renderActionIcon = (actionType) => {
-    const meta = getActionMeta(actionType)
-    if (!meta) return null
-    const Icon = meta.icon
-    return <Icon className="h-3.5 w-3.5" />
-  }
+            return (
+              <div key={rowIdx}>
+                {/* Card row — [MOBILE] 3 smaller columns, [DESKTOP] 2 columns.
+                    [UPDATE #3] tighter on mobile, [UPDATE #4] more generous on desktop. */}
+                <div className={`grid px-0 ${isMobile ? 'grid-cols-3 gap-2 py-1.5' : 'grid-cols-2 gap-3 py-3'}`}>
+                  {rowFams.map((fam) => {
+                    const isActiveFam = activeFamilyKey === fam.familyKey
 
-  const renderActionLabel = (actionType) => {
-    const meta = getActionMeta(actionType)
-    return meta ? meta.label : actionType
-  }
+                    const currentMode = familyModes[fam.familyKey] || (activePresetType && isActiveFam ? activePresetType : 'IN')
+                    const currentDir  = familyDirections[fam.familyKey] || (
+                      isActiveFam && fam.hasDirections
+                        ? (fam.inIds.find(v => v.id === activePresetId)?.direction || fam.outIds.find(v => v.id === activePresetId)?.direction || fam.inIds[0]?.direction)
+                        : (fam.inIds[0]?.direction || null)
+                    )
+                    const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+                    const repVariant  = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
+                    const repPreset   = repVariant ? PRESET_REGISTRY[repVariant.id] : null
+                    if (!repPreset) return null
 
-  const getStepSummary = (step) => {
-    if (!step.layerActions) return { layerCount: 0, actionCount: 0 }
-    const entries = Object.entries(step.layerActions)
-    const layerCount = entries.length
-    const actionCount = entries.reduce((sum, [, actions]) => sum + (actions?.length || 0), 0)
-    return { layerCount, actionCount }
-  }
+                    const isFamExpanded = expandedFamilyKey === fam.familyKey
 
-  // ============================================================================
-  // SHARED: Render action rows (used by both active and read-only views)
-  // ============================================================================
+                    // Families with no exit variant and no directions (e.g.
+                    // Typewriter) have nothing to configure, so the card just
+                    // applies/toggles without opening an (empty) settings row.
+                    const famHasConfig = fam.hasDirections || fam.outIds.length > 0
 
-  const renderActionRow = (action, stepId, layerId, readOnly) => (
-    <div
-      key={action.id}
-      className={`flex items-center gap-2 p-1.5 rounded-lg border text-[11px] group/action ${isLight ? 'bg-white border-slate-100/10 shadow-sm' : 'bg-zinc-900/60 border-zinc-800/20 shadow-none'
-        }`}
-    >
-      <div className={`${isLight ? 'text-slate-400 opacity-80' : 'text-zinc-400 opacity-60'}`}>
-        {renderActionIcon(action.type)}
-      </div>
-      <span className={`flex-1 font-medium ${isLight ? 'text-slate-700' : 'text-zinc-100'}`}>
-        {renderActionLabel(action.type)}
-      </span>
-      {!readOnly && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            handleDeleteAction(stepId, layerId, action.id, action.type)
-          }}
-          className="p-1 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover/action:opacity-100"
-          title="Remove action"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      )}
-    </div>
-  )
-
-  // ============================================================================
-  // SHARED: Render a layer card
-  // ============================================================================
-
-  const renderLayerCard = (layer, step, readOnly) => {
-    if (!layer) return null
-    const layerId = layer.id
-    const layerActions = step.layerActions?.[layerId] || []
-    const available = readOnly ? [] : getAvailableActions(layer, layerActions)
-    const isSelected = selectedLayerIds?.includes(layerId)
-
-    // Collapsible logic (only for active step)
-    const hasAnimations = layerActions.length > 0
-    const manualOverride = manualLayerState.get(layerId)
-    let isLayerExpanded
-    if (readOnly) {
-      // Read-only: always show actions inline (they're compact enough)
-      isLayerExpanded = hasAnimations
-    } else {
-      isLayerExpanded = manualOverride !== undefined
-        ? manualOverride
-        : (!hasAnimations || isSelected)
-    }
-
-    return (
-      <div
-        key={layerId}
-        data-layer-id={layerId}
-        className={`rounded-xl p-2 border transition-all ${isSelected
-            ? (isLight ? 'border-purple-200 bg-purple-50/50 shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03]')
-            : (isLight ? 'border-slate-100 bg-white shadow-sm hover:border-slate-200' : 'border-zinc-800/10 bg-zinc-800/20 hover:border-zinc-800/30')
-          }`}
-      >
-        {/* Layer Header */}
-        <div
-          className={`flex items-center gap-2 px-1 min-w-0 ${!readOnly ? 'cursor-pointer' : ''}`}
-          onClick={!readOnly ? () => {
-            dispatch(setSelectedLayer(layerId))
-            toggleLayerCollapse(layerId, isLayerExpanded)
-          } : undefined}
-          style={{ height: '40px' }}
-        >
-          {!readOnly && (
-            <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isLayerExpanded ? '' : '-rotate-90'}`} />
-          )}
-          
-          {/* Full-width Preview */}
-          <div className="flex-1 h-10 overflow-hidden" style={{ pointerEvents: 'none' }}>
-            {renderLayerPreview(layer)}
-          </div>
-
-          {!isLayerExpanded && hasAnimations && (
-            <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-300 bg-purple-500/15'}`}>
-              {layerActions.length} action{layerActions.length > 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-
-        {/* Expanded content */}
-        {isLayerExpanded && (
-          <>
-            {/* Actions */}
-            {layerActions.length > 0 && (
-              <div className="mt-2 space-y-1">
-                {layerActions.map((action) => renderActionRow(action, step.id, layerId, readOnly))}
-              </div>
-            )}
-
-            {/* + Add Animation (active step only) */}
-            {!readOnly && available.length > 0 && (
-              <div className="mt-2 relative" ref={addAnimMenuLayerId === layerId ? menuRef : undefined}>
-                <button
-                  onClick={(e) => {
-                    if (addAnimMenuLayerId === layerId) {
-                      setAddAnimMenuLayerId(null)
-                    } else {
-                      const rect = e.currentTarget.getBoundingClientRect()
-                      const spaceBelow = window.innerHeight - rect.bottom
-                      setMenuDirection(spaceBelow < 200 ? 'up' : 'down')
-                      setAddAnimMenuLayerId(layerId)
+                    const handleCardClick = () => {
+                      if (isActiveFam) {
+                        // Already selected — deselect immediately (one click)
+                        dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
+                        setExpandedFamilyKey(null)
+                      } else if (isFamExpanded) {
+                        // Expanded but not yet applied — collapse
+                        setExpandedFamilyKey(null)
+                      } else {
+                        // Open settings row (when there's something to configure) and apply the default variant
+                        if (famHasConfig) setExpandedFamilyKey(fam.familyKey)
+                        const mode    = familyModes[fam.familyKey] || 'IN'
+                        const dir     = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
+                        const varList = mode === 'OUT' ? fam.outIds : fam.inIds
+                        const target  = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
+                        if (target) applyPreset(target.id, mode)
+                      }
                     }
-                  }}
-                  className={`flex items-center gap-1.5 text-[10px] transition-colors px-1.5 py-1 rounded-md ${isLight
-                      ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'
-                      : 'text-zinc-500 hover:text-purple-400 hover:bg-white/[0.03]'
-                    }`}
-                >
-                  <Plus className="h-3 w-3" />
-                  Add Animation
-                </button>
 
-                {/* Context Menu */}
-                {addAnimMenuLayerId === layerId && (
-                  <div className={`absolute left-0 ${menuDirection === 'up' ? 'bottom-full mb-1' : 'top-full mt-1'} z-50 border rounded-lg shadow-xl py-1 min-w-[140px] ${isLight ? 'bg-white border-gray-200' : 'bg-zinc-900 border-zinc-700/60'
-                    }`}>
-                    {available.map((actionType) => {
-                      const meta = getActionMeta(actionType)
-                      if (!meta) return null
-                      const Icon = meta.icon
-                      return (
-                        <button
-                          key={actionType}
-                          onClick={() => {
-                            setAddAnimMenuLayerId(null)
-                            onAddAnimation?.(layerId, actionType)
-                          }}
-                          className={`flex items-center gap-2.5 w-full px-3 py-1.5 text-[11px] transition-colors ${isLight ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-50' : 'text-zinc-300 hover:text-white hover:bg-white/[0.06]'
-                            }`}
-                        >
-                          <Icon className={`h-3.5 w-3.5 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
-                          {meta.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                    return (
+                      <PresetPreviewCard
+                        key={fam.familyKey}
+                        preset={repPreset}
+                        layer={previewLayer}
+                        isActive={isActiveFam}
+                        onClick={handleCardClick}
+                        isLight={isLight}
+                        isMobile={isMobile}
+                      />
+                    )
+                  })}
+                  {/* Fill any trailing empty slots so the grid stays aligned */}
+                  {rowFams.length < cols && Array.from({ length: cols - rowFams.length }).map((_, i) => <div key={`empty-${i}`} />)}
+                </div>
+
+                {/* Expanded settings row — only shown directly after the row that has the selected card */}
+                {expandedInRow && renderExpandedRow(expandedInRow)}
               </div>
-            )}
-          </>
+            )
+          })}
+        </div>
+      )
+    }
+
+    // ── CUSTOM TAB ────────────────────────────────────────────────────────────
+    // Custom actions whose settings are edited inline in the panel (instead of needing
+    // the canvas toolbar). Transform actions (move/scale/rotate/crop/flip/typewriter)
+    // are still captured via direct canvas interaction.
+    const SETTINGS_ACTION_TYPES = ['colorChange', 'fade', 'blur', 'tilt', 'cornerRadius']
+    const COLOR_SWATCHES = ['#ffffff', '#000000', '#7c4af0', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#ec4899']
+
+    const getLayerColorHex = () => {
+      const c = previewLayer?.data?.fill ?? previewLayer?.data?.color
+      if (typeof c === 'number') return '#' + c.toString(16).padStart(6, '0')
+      if (typeof c === 'string' && c !== 'transparent') return c
+      return '#ffffff'
+    }
+
+    // Inline settings panel rendered beneath a selected custom action (Color/Opacity/
+    // Blur/3D Tilt/Radius). Adjusting a control commits via onCustomActionValueChange,
+    // which routes through the same capture path the canvas controls use — so the motion
+    // action is created on first change and updated on subsequent changes.
+    const renderActionSettings = (actionType, action) => {
+      const v = action?.values || {}
+      const commit = (updates) => onCustomActionValueChange?.(layerId, updates)
+      const labelCls = `text-[10px] uppercase font-bold tracking-wider shrink-0 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`
+      const valCls   = `text-[11px] font-mono shrink-0 ${isLight ? 'text-slate-600' : 'text-zinc-300'}`
+      const trackCls = `${isLight ? 'bg-slate-200' : 'bg-white/10'} relative grow rounded-full h-1`
+      const rangeCls = `absolute ${isLight ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`
+      const thumbCls = `block w-3.5 h-3.5 rounded-full focus:outline-none cursor-pointer ${isLight ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md'}`
+      const wrap = (children) => (
+        <div className={`px-3 py-3 ${isLight ? 'bg-slate-50 border-t border-slate-100' : 'bg-black/30 border-t border-white/[0.05]'}`}>{children}</div>
+      )
+      const sliderRow = (label, valueLabel, sliderProps) => (
+        <div className="flex items-center gap-3">
+          <span className={`${labelCls} w-12`}>{label}</span>
+          <Slider.Root className="relative flex items-center select-none touch-none grow h-5" {...sliderProps}>
+            <Slider.Track className={trackCls}><Slider.Range className={rangeCls} /></Slider.Track>
+            <Slider.Thumb className={thumbCls} aria-label={label} />
+          </Slider.Root>
+          <span className={`${valCls} w-10 text-right`}>{valueLabel}</span>
+        </div>
+      )
+
+      if (actionType === 'fade') {
+        const opacity = v.opacity ?? previewLayer?.opacity ?? 1
+        return wrap(sliderRow('Opacity', `${Math.round(opacity * 100)}%`, {
+          min: 0, max: 100, step: 1, value: [Math.round(opacity * 100)],
+          onValueChange: (val) => commit({ opacity: (val[0] ?? 0) / 100 }),
+        }))
+      }
+      if (actionType === 'blur') {
+        const blur = v.blur ?? previewLayer?.blur ?? 0
+        return wrap(sliderRow('Blur', `${Math.round(Math.min(BLUR_MAX, blur))}`, {
+          min: 0, max: BLUR_MAX, step: 0.5, value: [Math.min(BLUR_MAX, blur)],
+          onValueChange: (val) => commit({ blur: Math.max(0, Math.min(BLUR_MAX, val[0] ?? 0)) }),
+        }))
+      }
+      if (actionType === 'cornerRadius') {
+        const radius = v.cornerRadius ?? previewLayer?.data?.cornerRadius ?? 0
+        const maxR = Math.max(1, Math.min(200, Math.min(previewLayer?.width || 100, previewLayer?.height || 100) / 2))
+        return wrap(sliderRow('Radius', `${Math.round(radius)}px`, {
+          min: 0, max: maxR, step: 1, value: [Math.min(maxR, radius)],
+          onValueChange: (val) => commit({ cornerRadius: Math.max(0, Math.round(val[0] ?? 0)) }),
+        }))
+      }
+      if (actionType === 'tilt') {
+        const tiltX = v.tiltX ?? previewLayer?.tiltX ?? 0
+        const tiltY = v.tiltY ?? previewLayer?.tiltY ?? 0
+        const T = 60
+        const tiltRow = (label, value, key) => sliderRow(label, `${value.toFixed(1)}°`, {
+          min: -T, max: T, step: 0.5, value: [value],
+          onValueChange: (val) => { let n = val[0] ?? 0; if (Math.abs(n) < 2) n = 0; commit({ [key]: Math.max(-T, Math.min(T, n)) }) },
+        })
+        return wrap(
+          <div className="flex flex-col gap-2">
+            {tiltRow('Tilt H', tiltX, 'tiltX')}
+            {tiltRow('Tilt V', tiltY, 'tiltY')}
+          </div>
+        )
+      }
+      if (actionType === 'colorChange') {
+        const current = v.color ?? getLayerColorHex()
+        const safeCurrent = /^#[0-9a-fA-F]{6}$/.test(String(current)) ? current : '#ffffff'
+        return wrap(
+          <div className="flex flex-col gap-2.5">
+            <span className={labelCls}>Color</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {COLOR_SWATCHES.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => commit({ color: c })}
+                  className={`w-6 h-6 rounded-full border transition-transform hover:scale-110 ${String(current).toLowerCase() === c.toLowerCase() ? 'ring-2 ring-[#7c4af0] border-white' : (isLight ? 'border-slate-200' : 'border-white/10')}`}
+                  style={{ backgroundColor: c }}
+                  title={c}
+                />
+              ))}
+              <label
+                className={`w-6 h-6 rounded-full border cursor-pointer overflow-hidden relative ${isLight ? 'border-slate-200' : 'border-white/10'}`}
+                title="Custom color"
+                style={{ background: 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)' }}
+              >
+                <input
+                  type="color"
+                  value={safeCurrent}
+                  onChange={(e) => commit({ color: e.target.value })}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+              </label>
+            </div>
+          </div>
+        )
+      }
+      return null
+    }
+
+    const renderCustomActionRow = (actionType) => {
+      const meta = getActionMeta(actionType)
+      if (!meta || !allowedActions.includes(actionType)) return null
+      const Icon   = meta.icon
+      const action = activeActions.find(a => a.type === actionType)
+      const isAct  = !!action
+      const hasSettings = SETTINGS_ACTION_TYPES.includes(actionType)
+      const isExpanded = hasSettings && expandedActionType === actionType
+
+      const handleRowClick = () => {
+        if (hasSettings) {
+          // Toggle the inline settings row. The control commits the value (creating the
+          // action on first change) so no separate "add" click is required.
+          setExpandedActionType(isExpanded ? null : actionType)
+        } else if (!isAct) {
+          // Transform actions are captured via canvas interaction (existing behavior).
+          onAddAnimation?.(layerId, actionType)
+        }
+      }
+
+      return (
+        <div key={actionType}>
+          <div
+            onClick={handleRowClick}
+            className={`flex items-center justify-between gap-3 font-medium transition-colors ${isMobile ? 'px-3 py-2.5 text-[11px]' : 'px-3 py-3 text-[13px]'} ${
+              isAct
+                ? (isLight ? 'bg-[#7c4af0]/[0.06]' : 'bg-[#7c4af0]/[0.08]')
+                : (isLight ? 'hover:bg-slate-50 cursor-pointer' : 'hover:bg-white/[0.03] cursor-pointer')
+            } ${hasSettings ? 'cursor-pointer' : ''}`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
+                <Icon className={isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
+              </div>
+              <span className={`font-medium ${isAct ? (isLight ? 'text-slate-900' : 'text-zinc-100') : (isLight ? 'text-slate-600' : 'text-zinc-400')}`}>{meta.label}</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {hasSettings && (
+                <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')}`} />
+              )}
+              {isAct && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteAction(step.id, layerId, action.id, actionType) }}
+                  className={`p-0.5 transition-colors ${isLight ? 'text-slate-300 hover:text-red-500' : 'text-zinc-600 hover:text-red-400'}`}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
+              )}
+            </div>
+          </div>
+          {isExpanded && renderActionSettings(actionType, action)}
+        </div>
+      )
+    }
+
+    const sectionLabelCls = `font-bold uppercase tracking-widest mb-1.5 px-1 ${isMobile ? 'text-[10px]' : 'text-[11px]'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`
+    const renderCustomTab = () => (
+      <div className="space-y-4">
+        <div>
+          <p className={sectionLabelCls}>Transform</p>
+          <div className={`overflow-hidden ${isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}`}>
+            {TRANSFORM_IDS.map(t => renderCustomActionRow(t))}
+          </div>
+        </div>
+        {allowedActions.some(t => !TRANSFORM_IDS.includes(t)) && (
+          <div>
+            <p className={sectionLabelCls}>Effects</p>
+            <div className={`overflow-hidden ${isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}`}>
+              {allowedActions.filter(t => !TRANSFORM_IDS.includes(t)).map(t => renderCustomActionRow(t))}
+            </div>
+          </div>
         )}
       </div>
     )
-  }
 
-  // ============================================================================
-  // RENDER ACTIVE STEP (being edited)
-  // ============================================================================
-
-  const renderActiveStep = (step, stepIndex) => (
-    <div
-      key={step.id}
-      className={`border rounded-xl p-3 transition-all duration-300 ${isLight
-          ? 'border-purple-200 bg-white shadow-[0_4px_12px_rgba(124,74,240,0.08)]'
-          : 'border-[#7c4af0]/40 bg-[#7c4af0]/5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]'
-        }`}
-    >
-      {/* Step Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-purple-500 text-white">
-            {stepIndex + 1}
-          </div>
-          <span className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-            Step {stepIndex + 1}
-          </span>
-          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-300 bg-purple-500/15'}`}>
-            Active
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => onCancelMotion?.()}
-            className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all flex items-center gap-1.5 ${isLight ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-700/50'
-              }`}
-            title="Cancel Step"
-          >
-            <X className="h-3 w-3" />
-            Cancel
-          </button>
-          <button
-            onClick={() => handleDeleteStep(step.id)}
-            className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
-              }`}
-            title="Delete step"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Helper hint */}
-      <div className={`mt-3 px-2 py-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/[0.03] border-white/[0.06]'}`}>
-        <p className={`text-[10px] italic leading-relaxed ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
-          Edit anything on the canvas. Animations will appear here.
-        </p>
-      </div>
-
-      {/* Layer Cards */}
-      <div className="mt-3 space-y-2">
-        {sceneLayers.length > 0 ? (
-          sceneLayers.map((layer) => renderLayerCard(layer, step, false))
-        ) : (
-          <div className="text-center py-4">
-            <p className="text-[10px] text-zinc-600 italic">No layers in this scene</p>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Save Step */}
-      <div className={`mt-3 pt-3 border-t ${isLight ? 'border-slate-100' : 'border-white/[0.06]'}`}>
-        <button
-          onClick={() => onApplyMotion?.()}
-          className={`w-full py-2 text-[11px] font-semibold transition-all duration-300 flex items-center justify-center gap-2 shadow-sm rounded-lg ${getStepSummary(step).actionCount > 0
-              ? 'text-white bg-[#7c4af0] hover:bg-[#8b5cf6]'
-              : (isLight
-                ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-default'
-                : 'text-zinc-500 bg-zinc-800/50 border border-white/5 cursor-default hover:bg-zinc-800/80')
-            }`}
-        >
-          <Check className="h-3.5 w-3.5" strokeWidth={3} />
-          Save Step
-        </button>
-      </div>
-    </div>
-  )
-
-  // ============================================================================
-  // RENDER INACTIVE STEP (collapsed or expanded read-only)
-  // ============================================================================
-
-  const renderInactiveStep = (step, stepIndex) => {
-    const { layerCount, actionCount } = getStepSummary(step)
-    const isSelected = editingStepId === step.id
-    const isExpanded = expandedSteps.has(step.id) || isSelected
+    const presetBadge = (activePresetInfo ? 1 : 0)
+    const customBadge = activeActions.length
 
     return (
-      <div
-        key={step.id}
-        className={`border rounded-xl p-3 transition-all duration-300 ${isSelected
-            ? (isLight ? 'border-purple-200 bg-white shadow-sm' : 'border-purple-500/40 bg-purple-500/[0.03] shadow-[0_2px_10px_rgba(0,0,0,0.1)]')
-            : (isLight ? 'border-slate-100 bg-slate-50 hover:bg-white hover:border-slate-200' : 'border-zinc-800/40 bg-zinc-800/5 hover:border-zinc-700/60')
-          }`}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div
-            className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
-            onClick={() => toggleStepExpand(step.id)}
-          >
-            <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${isLight ? 'text-slate-400' : 'text-zinc-500'} ${isExpanded ? '' : '-rotate-90'}`} />
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isSelected
-                ? 'bg-purple-500 text-white'
-                : (isLight ? 'bg-slate-200 text-slate-500' : 'bg-zinc-800 text-zinc-400')
+      <div className="flex flex-col h-full">
+        {/* Tab bar */}
+        <div className={`flex w-full border-b flex-shrink-0 ${isLight ? 'border-slate-100' : 'border-white/[0.05]'}`}>
+          {(isBackground
+            ? [{ id: 'custom', label: 'Custom', badge: customBadge }]
+            : [
+                { id: 'presets', label: 'Presets', badge: presetBadge },
+                { id: 'custom',  label: 'Custom',  badge: customBadge },
+              ]
+          ).map((tab) => {
+            const isTActive = effectiveTab === tab.id
+            return (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 font-bold tracking-wide transition-colors flex items-center justify-center gap-1.5 ${isMobile ? 'py-2.5 text-[11px]' : 'py-3 text-[13px]'} ${
+                isTActive ? 'bg-[#7c4af0] text-white' : (isLight ? 'text-slate-500 hover:text-slate-800 bg-white' : 'text-zinc-500 hover:text-zinc-200 bg-transparent')
               }`}>
-              {stepIndex + 1}
-            </div>
-            <span className={`text-xs font-semibold ${isSelected ? (isLight ? 'text-slate-900' : 'text-white') : (isLight ? 'text-slate-600' : 'text-zinc-100')}`}>
-              Step {stepIndex + 1}
-            </span>
-            {layerCount > 0 && (
-              <span className={`text-[9px] ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
-                {layerCount} layer{layerCount > 1 ? 's' : ''}, {actionCount} action{actionCount !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => handleEditStep(step.id)}
-              className={`p-2 rounded-lg transition-all ${isSelected
-                  ? (isLight ? 'text-purple-600 bg-purple-50' : 'text-purple-400 bg-purple-500/10')
-                  : (isLight ? 'text-slate-400 hover:text-purple-600 hover:bg-purple-50' : 'text-zinc-500 hover:text-purple-400 hover:bg-purple-500/10')
-                }`}
-              title="Update Step"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => handleDeleteStep(step.id)}
-              className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-600 hover:text-red-400 hover:bg-red-500/10'
-                }`}
-              title="Delete step"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
+                {tab.label}
+                {tab.badge > 0 && (
+                  <span className={`w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold font-mono ${isTActive ? 'bg-white/20 text-white' : (isLight ? 'bg-slate-200 text-slate-600' : 'bg-zinc-800 text-zinc-300')}`}>{tab.badge}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Expanded read-only view */}
-        {isExpanded && step.layerActions && Object.keys(step.layerActions).length > 0 && (
-          <div className={`mt-3 space-y-2 border-t pt-3 ${isLight ? 'border-slate-100' : 'border-zinc-800/50'}`}>
-            {Object.entries(step.layerActions).map(([layerId]) => {
-              const layer = layers[layerId]
-              if (!layer) return null
-              return renderLayerCard(layer, step, true)
-            })}
-          </div>
-        )}
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto p-3 min-h-0">
+          {effectiveTab === 'presets' && renderPresetsTab()}
+          {effectiveTab === 'custom'  && renderCustomTab()}
+        </div>
+
+        {/* Exit element footer */}
+        <div className={`px-3 py-2.5 border-t flex-shrink-0 ${isLight ? 'border-slate-100' : 'border-white/[0.05]'}`}>
+          <button
+            onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
+            className="w-full py-2 text-[12px] font-semibold flex items-center justify-center gap-2 bg-[#7c4af0] text-white hover:bg-[#8b5cf6] active:bg-[#6d3fd6] transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Back to elements
+          </button>
+        </div>
       </div>
     )
   }
@@ -720,160 +1124,29 @@ function MotionPanel({
   // ============================================================================
   return (
     <>
-      {/* Mobile Backdrop Overlay */}
-      {isOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 pointer-events-none"
-          style={{ top: 0 }}
-        />
-      )}
-
+      {isOpen && <div className="lg:hidden fixed inset-0 z-[60] bg-transparent pointer-events-none" />}
       <div
-        className={`fixed z-[61] flex flex-col shadow-2xl ${isResizing ? '' : 'transition-all duration-300'}
-          ${typeof window !== 'undefined' && window.innerWidth < 1024
-            ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in'
-            : 'inset-y-0 right-0 border-l'}`}
+        className={`fixed z-[61] flex flex-col shadow-2xl transition-all duration-300 ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in' : 'inset-y-0 right-0 border-l'}`}
         style={{
-          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
-          height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '42vh' : 'auto',
-          minHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '280px' : 'auto',
-          maxHeight: typeof window !== 'undefined' && window.innerWidth < 1024 ? '45vh' : 'auto',
-          width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100vw' : `${panelWidth}px`,
-          backgroundColor: isLight ? '#f9fafb' : '#090a0d',
-          backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(32px)',
-          WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(32px)',
-          borderColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
+          top: isMobile ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
+          height: isMobile ? '48vh' : 'auto',
+          minHeight: isMobile ? '300px' : 'auto',
+          maxHeight: isMobile ? '60vh' : 'auto',
+          width: isMobile ? '100vw' : `${PANEL_WIDTH}px`,
+          backgroundColor: isLight ? '#ffffff' : '#090a0f',
+          borderColor: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)',
         }}
       >
-        {/* Mobile Top Bar Header with swipe drag handle and click-to-close down arrow */}
-        <div className="lg:hidden relative flex items-center justify-between px-4 py-3 flex-shrink-0 w-full border-b border-black/5 dark:border-white/5">
-          {/* Spacing for symmetry */}
-          <div className="w-8 h-8 flex-shrink-0" />
-
-          {/* Centered Drag Handle */}
-          <div className="absolute inset-0 flex justify-center items-center pointer-events-none">
-            <div className={`w-12 h-1.5 rounded-full ${isLight ? 'bg-black/15' : 'bg-white/30'}`} aria-hidden />
-          </div>
-
-          {/* Down Chevron button on the right */}
-          <button
-            onClick={onClose}
-            className={`relative z-10 flex h-8 w-8 items-center justify-center transition-all duration-200 active:scale-90 ${isLight ? 'text-gray-600 hover:text-gray-900' : 'text-white/60 hover:text-white'}`}
-            aria-label="Close panel"
-          >
-            <ChevronDown className="h-5 w-5" strokeWidth={2.5} />
-          </button>
+        {isMobile && <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0"><div className={`h-1 w-9 rounded-full ${isLight ? 'bg-slate-300' : 'bg-zinc-700'}`} /></div>}
+        {/* [UPDATE #5 / MOBILE] Both desktop and mobile hide the header in the layer (element)
+            view so content begins at the Preset/Custom tabs. Navigation back is handled by the
+            "Back to elements" footer; mobile keeps the drag handle for dismissal. */}
+        {!(isMotionCaptureActive && motionModeState === 'element') && renderHeader()}
+        <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
+          {!isMotionCaptureActive && renderNormalMode()}
+          {isMotionCaptureActive && motionModeState === 'list'    && renderMotionModeList()}
+          {isMotionCaptureActive && motionModeState === 'element' && renderMotionModeElement()}
         </div>
-
-        {/* Header */}
-        <div className="hidden lg:flex items-center justify-between px-5 py-4 flex-shrink-0">
-          <h2 className={`text-sm font-semibold flex items-center gap-2.5 ${isLight ? 'text-gray-900' : 'text-zinc-200'}`}>
-            <Zap className="h-4 w-4 text-[#7c4af0]" />
-            Animation
-          </h2>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onClose}
-              className={`p-1.5 rounded-md transition-all ${isLight ? 'text-slate-400 hover:text-slate-600 hover:bg-slate-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'}`}
-              aria-label="Close panel"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Left resize handle */}
-        <div
-          className={`absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 transition-colors ${isLight ? 'hover:bg-purple-500/10' : 'hover:bg-zinc-700/50'}`}
-          style={{
-            borderLeft: isLight ? '1px solid rgba(0, 0, 0, 0.05)' : '0.5px solid rgba(255, 255, 255, 0.15)',
-          }}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-
-            const dragStartX = e.clientX
-            const dragStartWidth = panelWidth
-
-            const handleMouseMove = (moveEvent) => {
-              const deltaX = moveEvent.clientX - dragStartX
-              const newWidth = Math.min(600, Math.max(280, dragStartWidth - deltaX))
-              setPanelWidth(newWidth)
-              if (!isResizing) setIsResizing(true)
-            }
-
-            const handleMouseUp = () => {
-              document.removeEventListener('mousemove', handleMouseMove)
-              document.removeEventListener('mouseup', handleMouseUp)
-              document.body.style.cursor = ''
-              document.body.style.userSelect = ''
-              setIsResizing(false)
-            }
-
-            document.addEventListener('mousemove', handleMouseMove)
-            document.addEventListener('mouseup', handleMouseUp)
-            document.body.style.cursor = 'ew-resize'
-            document.body.style.userSelect = 'none'
-          }}
-          title="Drag to resize panel width"
-        />
-
-        {/* Step count summary */}
-        <div className="hidden lg:block px-5 pb-3 flex-shrink-0">
-          <div className={`text-[10px] font-bold tracking-widest uppercase ${isLight ? 'text-slate-400' : 'text-zinc-400'}`}>
-            {motionFlow.length === 0 ? 'No animation steps' : `${motionFlow.length} Step${motionFlow.length > 1 ? 's' : ''}`}
-          </div>
-        </div>
-
-        {/* Steps List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {motionFlow.length === 0 && !isMotionCaptureActive ? (
-            <div className="text-center py-12">
-              <Play className={`h-12 w-12 mx-auto mb-4 opacity-50 ${isLight ? 'text-slate-300' : 'text-zinc-600'}`} />
-              <p className={`text-sm mb-2 ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>Start building animation</p>
-              <p className={`text-xs mb-6 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Add your first step to begin</p>
-              <button
-                onClick={() => onStartMotionCapture?.()}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#7c4af0] hover:bg-[#8b5cf6] rounded-lg transition-all shadow-md shadow-purple-500/10"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add Step
-              </button>
-            </div>
-          ) : (
-            <>
-              {motionFlow.map((step, stepIndex) => {
-                const isEditing = isMotionCaptureActive && editingStepId === step.id;
-                return isEditing
-                  ? renderActiveStep(step, stepIndex)
-                  : renderInactiveStep(step, stepIndex);
-              })}
-
-              {/* + Add Step button — only when not currently editing */}
-              {!isMotionCaptureActive && motionFlow.length > 0 && (
-                <button
-                  onClick={() => onStartMotionCapture?.()}
-                  className={`w-full flex items-center justify-center gap-2 py-2.5 text-[11px] font-semibold rounded-xl transition-all border border-dashed ${isLight
-                      ? 'text-slate-400 hover:text-purple-600 border-slate-200 hover:border-purple-300 hover:bg-purple-50/50'
-                      : 'text-zinc-400 hover:text-purple-400 border-zinc-800/60 hover:border-purple-500/30 hover:bg-white/[0.02]'
-                    }`}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Step
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Footer — total duration */}
-        {motionFlow.length > 0 && (
-          <div className={`flex-shrink-0 p-4 border-t ${isLight ? 'border-slate-100 bg-white' : 'border-white/10 bg-black/20'}`}>
-            <div className={`text-xs text-center ${isLight ? 'text-slate-500' : 'text-white/60'}`}>
-              Total Animation Duration: <span className={`font-mono font-bold ${isLight ? 'text-[#7c4af0]' : 'text-white'}`}>{(motionFlowData.pageDuration / 1000).toFixed(1)}s</span>
-            </div>
-          </div>
-        )}
       </div>
     </>
   )

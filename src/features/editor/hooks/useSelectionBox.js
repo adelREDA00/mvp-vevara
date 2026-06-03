@@ -234,6 +234,25 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     latestMotionCaptureModeRef.current = motionCaptureMode
   }, [layer, layerObject, viewport, onUpdate, sceneMotionFlow, motionCaptureMode])
 
+  // [FONT-SIZE FIX] When a text layer's font size / content / family changes from the
+  // panel, the PIXI object is re-measured by a different hook (useCanvasLayers), so on the
+  // render where the selection box would recreate, the object may still report its old
+  // dimensions and the per-frame dimensionsChanged guard skips the redraw. Force an
+  // immediate re-measure + redraw here so the box tracks the new size without requiring a
+  // manual resize/scale interaction. Reuses the existing forceRedraw + requestUpdateLoop path.
+  useEffect(() => {
+    if (layer?.type !== 'text') return
+    const obj = latestLayerObjectRef.current
+    if (!obj || obj.destroyed) return
+    if (obj.isFlowText) {
+      obj.updateText?.()
+    } else {
+      obj.updateText?.(true)
+    }
+    forceRedrawRef.current = true
+    requestUpdateLoop()
+  }, [layer?.data?.fontSize, layer?.data?.content, layer?.data?.fontFamily, layer?.type, requestUpdateLoop])
+
   // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
   // Backgrounds are static elements and should not have interactive handles
   const isBackground = layer?.type === 'background'
@@ -2727,13 +2746,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const isPastBaseStep = Math.abs(currentTime - sceneStartTime) > 0.02
       const firstActionTime = getLayerFirstActionTime(currentLayer?.id, latestSceneMotionFlowRef.current)
 
+      // [PRESET PREVIEW] Hide the selection box & handles entirely while a local
+      // preset preview animation is running on this layer (1s visual confirmation).
+      // The preview ends by clearing _isPlayingPresetPreview, after which the box
+      // automatically reappears on the next ticker tick.
+      const isPlayingPresetPreview = currentLayerObject?._isPlayingPresetPreview === true
+
       // Update visibility rules every frame to handle timeline scrubbing accurately
       updateSelectionBoxVisibility(
         box,
         isMoving,
         !!rs,
         layersContainer,
-        isPlaying,
+        isPlaying || isPlayingPresetPreview,
         !!rotateState,
         latestMotionCaptureModeRef.current,
         latestSceneMotionFlowRef.current,

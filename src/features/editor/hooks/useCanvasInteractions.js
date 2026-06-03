@@ -1527,6 +1527,12 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         const layerObject = layerObjectsMap.get(layerId)
         // Check if object exists and isn't destroyed
         if (layerObject && !layerObject.destroyed) {
+          // [PRESET PREVIEW] Skip enforcement while a local preset preview is animating
+          // this layer. Otherwise this ticker overwrites GSAP's per-frame writes every
+          // tick, freezing the visible position at the captured base (only alpha changes
+          // get through, making every preset look like "fade in").
+          if (layerObject._isPlayingPresetPreview) return
+
           // Check specifically for currentPosition to distinguish from just tracked initial state
           if (data.currentPosition) {
             layerObject.x = data.currentPosition.x

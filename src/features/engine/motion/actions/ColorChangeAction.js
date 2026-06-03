@@ -11,7 +11,7 @@ gsap.registerPlugin(CustomEase);
 /**
  * Decompose a hex color (string "#RRGGBB" or numeric 0xRRGGBB) to { r, g, b }.
  */
-function hexToRgb(hex) {
+export function hexToRgb(hex) {
     let num
     if (typeof hex === 'string') {
         num = parseInt(hex.replace('#', ''), 16)
@@ -31,7 +31,7 @@ function hexToRgb(hex) {
 /**
  * Compose { r, g, b } (0-255) back to a numeric 0xRRGGBB color.
  */
-function rgbToNum(r, g, b) {
+export function rgbToNum(r, g, b) {
     return ((Math.round(r) & 0xFF) << 16) |
            ((Math.round(g) & 0xFF) << 8) |
             (Math.round(b) & 0xFF)
@@ -56,7 +56,7 @@ function parseColor(hexColor) {
  * Handles Text, Background (Container with _backgroundGraphics), and Shape (Graphics).
  * Hot path — called 60fps during GSAP animation. Uses early exit to skip redundant work.
  */
-function applyColor(pixiObject, numericColor) {
+export function applyColor(pixiObject, numericColor) {
     // Early exit: skip if color hasn't changed since last apply
     if (pixiObject._lastAppliedColor === numericColor) return
     pixiObject._lastAppliedColor = numericColor
@@ -257,9 +257,9 @@ export class ColorChangeAction {
             ...options.gsapOptions
         }
 
-        return gsap.fromTo(pixiObject._animatedColorState,
-            { r: startRgb.r, g: startRgb.g, b: startRgb.b },
-            toVars
-        )
+        const tl = gsap.timeline()
+        tl.set(pixiObject._animatedColorState, { r: startRgb.r, g: startRgb.g, b: startRgb.b }, 0)
+        tl.to(pixiObject._animatedColorState, toVars, 0)
+        return tl
     }
 }

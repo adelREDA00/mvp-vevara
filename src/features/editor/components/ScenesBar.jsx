@@ -600,7 +600,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                 }}
               >
                 <span className="truncate px-1 relative z-10">
-                  S{i + 1}
+                  M{i + 1}
                   {isManual && <span className="text-[7px] opacity-40 ml-0.5">*</span>}
                 </span>
               </button>
@@ -633,7 +633,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
 
 
 
-const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
+const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   const scenes = useSelector(selectScenes)
@@ -886,7 +886,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
       }
     }
 
-    if (onMotionStop) onMotionStop()
+    // [PLAYHEAD PRESERVE] Resizing must pause playback in place, NOT reset the
+    // playhead. onMotionStop → stopAll() seeks the engine to 0 and zeroes playheadTime
+    // (the "playhead jumps to project start on resize" bug). onMotionPause only pauses.
+    if (onMotionPause) onMotionPause()
+    else if (onMotionStop) onMotionStop()
     const newDuration = calculateDurationFromWidth(newWidth)
 
     // Batch UI updates
@@ -923,7 +927,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     if (onCardWidthChange) {
       onCardWidthChange(index, newWidth, resizeSideRef.current)
     }
-  }, [minCardWidth, index, calculateDurationFromWidth, onCardWidthChange, onMotionStop, resizeSideRef, resizeState.tooltipPosition])
+  }, [minCardWidth, index, calculateDurationFromWidth, onCardWidthChange, onMotionStop, onMotionPause, resizeSideRef, resizeState.tooltipPosition])
 
   // Resize handlers - support both left and right side resizing (mouse + touch)
   const handleResizeMouseMove = (e) => {
@@ -1557,6 +1561,7 @@ const ScenesBar = React.memo(({
   worldHeight = 1080,
   onSeek,
   onMotionStop,
+  onMotionPause,
   currentTimeStepId = null,
   isMotionCaptureActive,
   onStepClick,
@@ -1668,6 +1673,8 @@ const ScenesBar = React.memo(({
   const handleContextMenu = useCallback((e, sceneId) => {
     e.preventDefault()
     e.stopPropagation()
+    // [MOTION CAPTURE] Suppress scene-card delete/update menus while capturing a moment.
+    if (isMotionCaptureActive) return
     // Explicitly close the other menu type to ensure exclusivity
     setStepContextMenu(prev => ({ ...prev, visible: false }))
 
@@ -1678,11 +1685,13 @@ const ScenesBar = React.memo(({
       y: e.clientY - 120, // Adjusted offset for taller menu
       sceneId
     })
-  }, [])
+  }, [isMotionCaptureActive])
 
   const handleStepContextMenu = useCallback((e, sceneId, stepId) => {
     e.preventDefault()
     e.stopPropagation()
+    // [MOTION CAPTURE] Suppress motion-step delete/update menus while capturing a moment.
+    if (isMotionCaptureActive) return
     // Explicitly close the other menu type to ensure exclusivity
     setContextMenu(prev => ({ ...prev, visible: false }))
 
@@ -1694,7 +1703,7 @@ const ScenesBar = React.memo(({
       sceneId,
       stepId
     })
-  }, [])
+  }, [isMotionCaptureActive])
 
   const handleCutPage = useCallback(() => {
     if (!contextMenu.sceneId) return
@@ -1853,8 +1862,10 @@ const ScenesBar = React.memo(({
   const handleResizeEnd = useCallback(() => {
     resizingSceneIdRef.current = null
     isTimelineInteractingRef.current = false
-    if (onMotionStop) onMotionStop()
-  }, [onMotionStop])
+    // [PLAYHEAD PRESERVE] Pause in place on resize end — do not reset to project start.
+    if (onMotionPause) onMotionPause()
+    else if (onMotionStop) onMotionStop()
+  }, [onMotionStop, onMotionPause])
 
   // Calculate offsets for fast lookups
   const cumulativeOffsets = useMemo(() => {
@@ -2604,6 +2615,7 @@ const ScenesBar = React.memo(({
                   calculateWidthFromDuration={calculateWidthFromDuration}
                   formatDuration={formatDuration}
                   onMotionStop={onMotionStop}
+                  onMotionPause={onMotionPause}
                   hasMotionSteps={sceneMotionFlows?.[scene.id]?.steps?.length > 0}
                   motionStepCount={sceneMotionFlows?.[scene.id]?.steps?.length || 0}
                   motionFlow={sceneMotionFlows?.[scene.id]}

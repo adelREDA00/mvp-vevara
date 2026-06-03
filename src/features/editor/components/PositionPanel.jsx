@@ -3,6 +3,7 @@ import React, { useMemo, useState, useRef, useCallback, useContext } from 'react
 import { GripVertical, X, Film } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import { LAYER_TYPES } from '../../../store/models'
+import { getContrastCardBg } from '../utils/contrast'
 
 // Shrink font size so text always fits within the fixed-size preview card
 function getTextFontSize(text) {
@@ -309,8 +310,14 @@ function PositionPanel({
       const text = layer.data?.content || ''
       const color = layer.data?.color || (isLight ? '#111827' : '#ffffff')
       const fs = getTextFontSize(text)
+      const contrastBg = getContrastCardBg(color, isLight)
       return (
-        <div className={`w-full h-full rounded-md flex items-center justify-center px-2 overflow-hidden ${isLight ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10'}`}>
+        <div
+          className={`w-full h-full rounded-md flex items-center justify-center px-2 overflow-hidden ${
+            contrastBg ? 'border border-transparent' : (isLight ? 'bg-white border border-slate-100' : 'bg-white/5 border border-white/10')
+          }`}
+          style={contrastBg ? { backgroundColor: contrastBg } : undefined}
+        >
           <span
             style={{ fontSize: fs, color, lineHeight: 1.2, wordBreak: 'break-all' }}
             className="text-center font-semibold"
@@ -473,6 +480,9 @@ function PositionPanel({
           const isDragged = draggingId === layer.id
           const isOver = overId === layer.id
 
+          const color = layer.data?.color || layer.data?.fill || (isLight ? '#111827' : '#ffffff')
+          const contrastBg = getContrastCardBg(color, isLight)
+
           return (
             <div
               key={layer.id}
@@ -489,7 +499,10 @@ function PositionPanel({
                 isDragged ? isLight ? 'opacity-40 scale-[0.98] border-dashed border-purple-400/50' : 'opacity-40 scale-[0.98] border-dashed border-purple-500/40' : '',
                 isOver ? isLight ? 'border-purple-400 bg-purple-50/80 scale-[1.01] translate-y-0.5' : 'border-purple-400/70 bg-purple-500/15 scale-[1.01] translate-y-0.5' : '',
               ].join(' ')}
-              style={{ height: '56px', touchAction: 'none' }}
+              style={{ 
+                height: '56px', 
+                touchAction: 'none'
+              }}
             >
               {/* Grip */}
               <div 

@@ -176,10 +176,9 @@ export class CornerRadiusAction {
             overwrite: false,
         }
 
-        return gsap.fromTo(
-            pixiObject,
-            { cornerRadius: startRadius },
-            toVars
-        )
+        const tl = gsap.timeline()
+        tl.set(pixiObject, { cornerRadius: startRadius }, 0)
+        tl.to(pixiObject, toVars, 0)
+        return tl
     }
 }

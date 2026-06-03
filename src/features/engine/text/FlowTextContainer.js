@@ -157,7 +157,6 @@ export class FlowTextContainer extends PIXI.Container {
     }
 
     let charsToShow = Math.floor(this._revealProgress * totalChars)
-    console.log(`[DEBUG] FlowTextContainer._syncLines id=${this.id} reveal=${this._revealProgress.toFixed(2)} total=${totalChars} show=${charsToShow}`)
 
     // Return all active lines to pool
     this._activeLines.forEach(l => l.visible = false)
@@ -264,7 +263,6 @@ export class FlowTextContainer extends PIXI.Container {
   get revealProgress() { return this._revealProgress }
   set revealProgress(val) {
     if (this._revealProgress !== val) {
-      console.log(`[DEBUG] FlowTextContainer.revealProgress set id=${this.id} val=${val.toFixed(3)}`)
       this._revealProgress = Math.max(0, Math.min(1, val))
       if (this._lastLines) {
         this._syncLines(this._lastLines)

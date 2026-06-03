@@ -172,6 +172,16 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     })
 
     if (!force && lastPreparedDataRef.current === currentDataSignature) {
+      // [PRESET BASE FIX] Even on a signature match (no rebuild needed), re-seek to
+      // restore GSAP-managed state (e.g., preset alpha=0 baseline). Without this,
+      // any external force-reset of PIXI properties (from applyTransformInline force=true
+      // triggered by layer edits) permanently clobbers the preset's initial visual state
+      // because GSAP is never told to reapply its .set() baseline tweens.
+      const currentTime = motionEngine.masterTimeline?.time() || 0
+      // force=true: re-seeking to the current time is a GSAP no-op, so without
+      // forcing a render the baseline .set() (e.g. preset alpha=0) is never
+      // re-applied after a direct layer edit clobbered it.
+      motionEngine.seek(currentTime, { force: true })
       return
     }
 
@@ -197,10 +207,11 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             transitionContainer: stageContainer
         })
 
-        if (currentPlayheadTime > 0) {
-            motionEngine.seek(currentPlayheadTime)
-            setPlayheadTime(currentPlayheadTime)
-        }
+        // [FIX] Seek unconditionally to ensure baseline offsets are applied immediately, even at t=0
+        // force=true: after a rebuild the master is fresh at t=0, so seeking to a
+        // currentPlayheadTime of 0 would otherwise be a GSAP no-op and skip the baseline.
+        motionEngine.seek(currentPlayheadTime, { force: true })
+        setPlayheadTime(currentPlayheadTime)
 
         lastPreparedDataRef.current = currentDataSignature
     }, [motionEngine, totalProjectDuration, stageContainer, worldWidth, worldHeight, aspectRatio])
@@ -488,7 +499,25 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         const flowsMap = sceneMotionFlowsRef.current
         const timeline = timelineInfoRef.current
 
-        // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine 
+        // [PRESET PREVIEW SANITIZATION] Kill any local preset preview timelines
+        // that are still running. A leftover preview tween would continue writing
+        // pixiObject.x / .alpha / .scale every frame and fight the engine's
+        // freshly-loaded timeline — producing the "stale / mixed preset" bug
+        // when the user changes a preset and clicks Save before the 1s preview
+        // has finished, or when the engine is otherwise restarted mid-preview.
+        if (objects) {
+            objects.forEach((pixiObject) => {
+                if (pixiObject && !pixiObject.destroyed) {
+                    if (pixiObject._previewTimeline) {
+                        try { pixiObject._previewTimeline.kill() } catch {}
+                        pixiObject._previewTimeline = null
+                    }
+                    pixiObject._isPlayingPresetPreview = false
+                }
+            })
+        }
+
+        // If a flow is provided (e.g. from MotionPanel after an edit), reload the project-wide engine
         // but with the OVERRIDDEN flow for the specific scene.
         if (options.flow && currentSceneIdRef.current) {
 
@@ -546,7 +575,11 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         // Handle optional startTime for precise segment transitions
         if (options.startTime !== undefined) {
-            motionEngine.seek(options.startTime)
+            // force=true: when re-editing a step the playhead is already parked at
+            // the step start, so seeking to that same time would be a GSAP no-op and
+            // the freshly-loaded preset's baseline (.set) would never be applied —
+            // causing the post-save preview to show the stale "old preset" start state.
+            motionEngine.seek(options.startTime, { force: true })
         }
 
         setIsPlaying(true)

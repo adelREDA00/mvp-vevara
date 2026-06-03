@@ -91,7 +91,10 @@ export class ScaleAction {
             gsapVars.y = targetY
         }
 
-        return gsap.fromTo(pixiObject.scale, fromVars, gsapVars)
+        const tl = gsap.timeline()
+        tl.set(pixiObject.scale, fromVars, 0)
+        tl.to(pixiObject.scale, gsapVars, 0)
+        return tl
     }
 
 

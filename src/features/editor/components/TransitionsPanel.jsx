@@ -69,8 +69,18 @@ function TransitionsPanel({ onClose, activeTransitionSceneId, motionControls }) 
   const handleSelectTransition = (transitionId) => {
     if (!activeTransitionSceneId) return
 
-    // 1. Dispatch update to Redux state
-    dispatch(updateScene({ id: activeTransitionSceneId, transition: transitionId }))
+    // 1. Dispatch update to Redux state.
+    // [BUG 2 FIX] Clear any custom colors/direction left over from the previous
+    // transition type. Each transition type expects a different palette length
+    // (Fade=1, LiquidShapes/BubbleWipe=4); carrying a stale 1-color array into a
+    // 4-color transition previously caused "Unable to convert color undefined".
+    // Resetting lets MotionEngine fall back to each type's own default palette.
+    dispatch(updateScene({
+      id: activeTransitionSceneId,
+      transition: transitionId,
+      transitionColors: undefined,
+      transitionDirection: undefined,
+    }))
 
     // 2. Performance-optimized instant preview sequence
     // Using setTimeout to guarantee Redux state has propagated and PIXI has rebuilt

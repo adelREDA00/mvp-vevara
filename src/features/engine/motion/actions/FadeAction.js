@@ -40,6 +40,9 @@ export class FadeAction {
             return gsap.to({}, { duration: animationDuration })
         }
 
-        return gsap.fromTo(pixiObject, fromVars, toVars)
+        const tl = gsap.timeline()
+        tl.set(pixiObject, fromVars, 0)
+        tl.to(pixiObject, toVars, 0)
+        return tl
     }
 }

@@ -2,7 +2,9 @@ import * as PIXI from 'pixi.js'
 import { gsap } from 'gsap'
 import { MotionTimeline } from './MotionTimeline.js'
 import { getActionHandler } from './actions/index.js'
+import { hexToRgb, rgbToNum, applyColor } from './actions/ColorChangeAction.js'
 import { syncTiltedDisplay, markTiltTextureDirty, syncTiltMesh } from '../pixi/perspectiveTilt.js'
+import { PRESET_REGISTRY } from './presets.js'
 
 /**
  * MotionEngine is the main coordinator for all layer animations.
@@ -87,6 +89,12 @@ export class MotionEngine {
     this._lastInteractionTime = 0
     // [PERF] Flag for scrubbing mode - relaxes video sync thresholds during playhead dragging
     this._isScrubbing = false
+
+    // Debug tracking structures
+    this.stepRanges = []
+    this.transitionRanges = []
+    this._lastStepId = null
+    this._lastTransitionState = null
   }
 
   /**
@@ -140,14 +148,14 @@ export class MotionEngine {
       
       // [LIQUID FLOW] Only wrap around Shapes, Images, and Frames.
       const isText = obj.isFlowText || obj instanceof PIXI.Text
-      const isBackground = obj.isBackground === true
-      const isMask = obj.isMask === true
+      const isBackground = obj.isBackground === true || obj.label?.toLowerCase().includes('background')
+      const isMask = obj.isMask === true || obj.label?.toLowerCase().includes('mask') || obj.isMasking === true
       
       // Skip the source container (to avoid text wrapping around itself)
       if (obj.isFlowText) return
       
       // [FILTER] Filter out environment layers (backgrounds, global masks)
-      if (obj.isBackground || obj.isMask) return
+      if (isBackground || isMask) return
 
       const bounds = obj.getBounds()
       
@@ -609,21 +617,38 @@ export class MotionEngine {
       // Use absolute startTime if available, fallback to index-based calculation
       const stepStartTimeMs = step.startTime != null ? step.startTime : (stepIndex * stepDurationMs)
       const stepStartTime = startTimeOffset + stepStartTimeMs / 1000
-      if (!step.layerActions) return
+      const stepDurationMsValue = step.duration || stepDurationMs
+      const stepEndTime = stepStartTime + stepDurationMsValue / 1000
 
-      // Iterate over each layer's actions in this step
-      Object.entries(step.layerActions).forEach(([layerId, originalActions]) => {
+      if (!this.stepRanges) this.stepRanges = []
+      if (!this.stepRanges.some(r => r.stepId === step.id)) {
+        this.stepRanges.push({
+          stepId: step.id,
+          startTime: stepStartTime,
+          endTime: stepEndTime
+        })
+      }
+
+      const stepLayerActions = step.layerActions || {}
+      const stepLayerPresets = step.layerPresets || {}
+
+      // Gather all unique layer IDs in this step containing either custom actions or presets
+      const activeLayerIds = new Set([
+        ...Object.keys(stepLayerActions),
+        ...Object.keys(stepLayerPresets)
+      ])
+
+      activeLayerIds.forEach(layerId => {
         const pixiObject = objectsToUse.get(layerId)
         if (!pixiObject || pixiObject.destroyed) return
 
+        const originalActions = stepLayerActions[layerId] || []
+
         // [FIX] ACTION SANITIZATION: If a single step has BOTH a MoveAction and a CropAction, 
         // they can contain conflicting dx/dy values due to legacy data or concurrent resizing.
-        // The MoveAction is the absolute source of truth for positional translation. 
-        // We strip dx/dy from CropAction here to prevent GSAP from creating two fighting X/Y tweens.
         const hasMove = originalActions.some(a => a.type === 'move')
         const actions = originalActions.map(a => {
           if (a.type === 'crop') {
-            // [DEBUG] Ensure we understand the state of this crop action
             if (hasMove) {
               const safeValues = { ...a.values }
               delete safeValues.dx
@@ -636,6 +661,26 @@ export class MotionEngine {
 
         // Get predicted start state for this layer at this step
         const startState = { ...layerStateTracker.get(layerId) }
+        const stepDurationMsValue = step.duration || stepDurationMs
+
+        // Check if there is an IN preset as the first animation step for this layer
+        const firstStepPreset = stepLayerPresets[layerId]
+        const isFirstStepInPreset = !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
+
+        const cumulativeStartOffset = { x: 0, y: 0, opacity: undefined, scaleX: undefined, scaleY: undefined, rotation: undefined }
+        if (isFirstStepInPreset) {
+          const presetActionsForOffsets = PRESET_REGISTRY[firstStepPreset.id].getActions(startState, stepDurationMsValue)
+          presetActionsForOffsets.forEach(pAction => {
+            if (pAction.startOffset) {
+              if (pAction.startOffset.x !== undefined) cumulativeStartOffset.x += pAction.startOffset.x
+              if (pAction.startOffset.y !== undefined) cumulativeStartOffset.y += pAction.startOffset.y
+              if (pAction.startOffset.opacity !== undefined) cumulativeStartOffset.opacity = pAction.startOffset.opacity
+              if (pAction.startOffset.scaleX !== undefined) cumulativeStartOffset.scaleX = pAction.startOffset.scaleX
+              if (pAction.startOffset.scaleY !== undefined) cumulativeStartOffset.scaleY = pAction.startOffset.scaleY
+              if (pAction.startOffset.rotation !== undefined) cumulativeStartOffset.rotation = pAction.startOffset.rotation
+            }
+          })
+        }
 
         // Initialize timeline builder for this layer if not exists
         if (!layerTimelineBuilders.has(layerId)) {
@@ -649,29 +694,25 @@ export class MotionEngine {
 
           // [GSAP STATE CACHE FIX]
           // Force a 0-duration baseline state into the GSAP timeline exactly at the scene's start time.
-          // This absolutely prevents GSAP's `fromTo` `immediateRender: false` logic from accidentally
-          // caching dirty visual PIXI coordinates if the playhead uses `seek()` to jump over 
-          // the first frame (which happens during Fast Previews, backward scrubbing, and Video Exports).
-          // We use `startState` because the first time this block runs for a layer, `startState` 
-          // perfectly represents the layer's predicted origin state at the beginning of the scene.
           if (startState) {
             timeline.add((gsapTimeline) => {
-              // [TILT] If the layer is tilted at scene start, alpha is owned
-              // by the perspective tilt system (original held at 0, mesh
-              // shows the displayed opacity).  Including alpha in this
-              // baseline `set` would clobber the hide and render the
-              // un-tilted original on top of the tilted mesh — the
-              // "duplicate visual" bug.  We capture the intended opacity
-              // onto _intendedAlpha so syncTiltMesh forwards it to the mesh.
+              // [TILT] If the layer is tilted at scene start, alpha is owned by the perspective tilt system
               const willStartTilted = (
                 Math.abs(startState.tiltX || 0) > 0.01 ||
                 Math.abs(startState.tiltY || 0) > 0.01
               )
 
+              const baselineX = startState.x + cumulativeStartOffset.x
+              const baselineY = startState.y + cumulativeStartOffset.y
+              const baselineRotation = (startState.rotation + (cumulativeStartOffset.rotation !== undefined ? cumulativeStartOffset.rotation : 0)) * (Math.PI / 180)
+              const baselineScaleX = cumulativeStartOffset.scaleX !== undefined ? cumulativeStartOffset.scaleX : startState.scaleX
+              const baselineScaleY = cumulativeStartOffset.scaleY !== undefined ? cumulativeStartOffset.scaleY : startState.scaleY
+              const baselineOpacity = cumulativeStartOffset.opacity !== undefined ? cumulativeStartOffset.opacity : (startState.opacity !== undefined ? startState.opacity : 1)
+
               const baseline = {
-                x: startState.x,
-                y: startState.y,
-                rotation: startState.rotation * (Math.PI / 180),
+                x: baselineX,
+                y: baselineY,
+                rotation: baselineRotation,
                 cropX: startState.cropX !== undefined ? startState.cropX : 0,
                 cropY: startState.cropY !== undefined ? startState.cropY : 0,
                 cropWidth: startState.cropWidth,
@@ -683,11 +724,10 @@ export class MotionEngine {
                 blur: startState.blur !== undefined ? startState.blur : 0,
               }
 
-              const startOpacity = startState.opacity !== undefined ? startState.opacity : 1
               if (willStartTilted) {
-                pixiObject._intendedAlpha = startOpacity
+                pixiObject._intendedAlpha = baselineOpacity
               } else {
-                baseline.alpha = startOpacity
+                baseline.alpha = baselineOpacity
               }
 
               // [TYPEWRITER] Only apply revealProgress if the object supports it
@@ -700,15 +740,12 @@ export class MotionEngine {
               // Scale must be set on the inner .scale object natively
               if (pixiObject.scale) {
                 gsapTimeline.set(pixiObject.scale, {
-                  x: startState.scaleX,
-                  y: startState.scaleY,
+                  x: baselineScaleX,
+                  y: baselineScaleY,
                 }, startTimeOffset)
               }
 
               // [TILT] Anchor perspective tilt baseline so backward scrubs restore correct tilt.
-              // Tween a plain JS proxy object (not the PIXI object) to avoid GSAP
-              // "Invalid property _tiltXDeg / Missing plugin?" warnings, then mirror
-              // proxy values onto the degree props that syncTiltMesh reads.
               pixiObject._tiltXDeg = startState.tiltX ?? 0
               pixiObject._tiltYDeg = startState.tiltY ?? 0
               if (!pixiObject._tiltProxy) pixiObject._tiltProxy = { tiltX: 0, tiltY: 0 }
@@ -724,13 +761,44 @@ export class MotionEngine {
                   if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
                 },
               }, startTimeOffset)
+
+              // [BG COLOR EXPORT FIX] Anchor the BASE color at scene start. The baseline
+              // .set() above can't carry color — color is applied via _animatedColorState +
+              // applyColor(), not a direct GSAP property. Without an anchor, a colorChange
+              // tween is the only thing that ever drives the color, so a deterministic
+              // frame-by-frame export (and a forced backward seek) can leave the colorChange
+              // TARGET showing before the step where the change should occur, while the live
+              // editor looks right because its background container retains its base fill.
+              // Anchoring base here makes export match editor. Gated to background layers so
+              // shapes/text that manage their own fill elsewhere are never redrawn. Mirrors
+              // the tilt-proxy baseline above.
+              const isBackgroundLayer = !!(pixiObject.isBackground || pixiObject._backgroundGraphics)
+              if (isBackgroundLayer && startState.color != null) {
+                const baseRgb = hexToRgb(startState.color)
+                if (!pixiObject._animatedColorState || typeof pixiObject._animatedColorState !== 'object') {
+                  pixiObject._animatedColorState = { r: baseRgb.r, g: baseRgb.g, b: baseRgb.b }
+                }
+                if (!pixiObject._applyAnimatedColor) {
+                  pixiObject._applyAnimatedColor = () => {
+                    if (pixiObject._animatedColorState) {
+                      const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
+                      pixiObject._animatedColorState.numeric = num
+                      applyColor(pixiObject, num)
+                    }
+                  }
+                }
+                gsapTimeline.set(pixiObject._animatedColorState, {
+                  r: baseRgb.r, g: baseRgb.g, b: baseRgb.b,
+                  onUpdate: () => { if (pixiObject._applyAnimatedColor) pixiObject._applyAnimatedColor() }
+                }, startTimeOffset)
+              }
             })
           }
         }
 
         const builder = layerTimelineBuilders.get(layerId)
         // Use the step's effective duration (respects customDuration)
-        const stepDuration = (step.duration || stepDurationMs) / 1000
+        const stepDuration = stepDurationMsValue / 1000
 
         // Add all actions for this layer in this step
         // Scene end boundary in seconds — tweens must not exceed this
@@ -740,22 +808,100 @@ export class MotionEngine {
         // to avoid double-counting if multiple actions has dx/dy/dsx/dsy
         const updatedDeltas = new Set()
 
+        // Resolve Presets vs Custom — COMPOSE rather than filter.
+        //
+        // The user adds custom actions ON TOP of a preset. They expect the
+        // preset's initialization (e.g. slide-in-left starts the layer at
+        // x-150, alpha=0 before the step) to remain intact AND the custom
+        // action's delta to be added to the preset's animation.
+        //
+        // Old behaviour FILTERED the preset action whenever a custom action of
+        // the same type existed. That broke the preset's startOffset for that
+        // property — the custom action's fromVars used `startState`, not the
+        // offset baseline, so the layer either jumped at step start or lost
+        // the preset's pre-step state entirely.
+        //
+        // New behaviour MERGES the preset action and the custom action into a
+        // single action that preserves the preset's startOffset and adds the
+        // custom delta on top of the preset delta.
+        let resolvedActions = []
+        const preset = stepLayerPresets[layerId]
+        if (preset && PRESET_REGISTRY[preset.id]) {
+          const presetActions = PRESET_REGISTRY[preset.id].getActions(startState, stepDurationMsValue)
+          const customByType = new Map()
+          actions.forEach(a => { if (a) customByType.set(a.type, a) })
+
+          const composedFromPreset = presetActions.map(pAction => {
+            const custom = customByType.get(pAction.type)
+            if (!custom) {
+              // No custom override — use the preset action as-is
+              return {
+                id: `preset_${preset.id}_${pAction.type}_${step.id}`,
+                _isPresetAction: true,
+                ...pAction
+              }
+            }
+
+            // Compose: keep preset's startOffset, merge values per-type
+            const pValues = pAction.values || {}
+            const cValues = custom.values || {}
+            const mergedValues = { ...pValues, ...cValues }
+
+            // Per-type delta composition — the preset's delta and the custom
+            // delta should ADD (move/rotate) or MULTIPLY (scale) so the
+            // animation slides from the preset offset to the custom target.
+            if (pAction.type === 'move') {
+              mergedValues.dx = (pValues.dx || 0) + (cValues.dx || 0)
+              mergedValues.dy = (pValues.dy || 0) + (cValues.dy || 0)
+              if (cValues.controlPoints !== undefined) mergedValues.controlPoints = cValues.controlPoints
+            } else if (pAction.type === 'scale') {
+              mergedValues.dsx = (pValues.dsx ?? 1) * (cValues.dsx ?? 1)
+              mergedValues.dsy = (pValues.dsy ?? 1) * (cValues.dsy ?? 1)
+            } else if (pAction.type === 'rotate') {
+              mergedValues.dangle = (pValues.dangle || 0) + (cValues.dangle || 0)
+            }
+            // fade / blur / colorChange / cornerRadius / tilt: custom values
+            // already override via { ...pValues, ...cValues } — preset's
+            // startOffset still gates the pre-step visual state, custom's
+            // final target wins for the post-step state.
+
+            // Custom action's duration overrides if explicitly provided
+            if (cValues.duration !== undefined) mergedValues.duration = cValues.duration
+
+            return {
+              id: custom.id || `preset_${preset.id}_${pAction.type}_${step.id}`,
+              _isPresetAction: true, // keep startOffset state-tracking skip
+              _isComposedAction: true,
+              type: pAction.type,
+              startOffset: pAction.startOffset,
+              values: mergedValues
+            }
+          })
+
+          // Custom actions that don't have a matching preset action of the
+          // same type still run normally.
+          const presetTypes = new Set(presetActions.map(p => p.type))
+          const remainingCustomActions = actions.filter(a => !presetTypes.has(a.type))
+
+          resolvedActions = [...composedFromPreset, ...remainingCustomActions]
+        } else {
+          resolvedActions = [...actions]
+        }
+
         // [FIX] Detect flip+scale co-occurrence to prevent both fighting over scale.x
-        const hasFlip = actions.some(a => a.type === 'flip')
-        const coScaleAction = hasFlip ? actions.find(a => a.type === 'scale') : null
+        const hasFlip = resolvedActions.some(a => a.type === 'flip')
+        const coScaleAction = hasFlip ? resolvedActions.find(a => a.type === 'scale') : null
         const flipTargetScaleX = coScaleAction
           ? startState.scaleX * (coScaleAction.values?.dsx ?? 1)
           : undefined
 
-        actions.forEach((action) => {
+        resolvedActions.forEach((action) => {
           const handler = getActionHandler(action.type)
           if (!handler) return
 
           let actionDuration = action.values?.duration
             ? action.values.duration / 1000
             : stepDuration
-
-
 
           // Clamp: never let a tween extend past the scene boundary
           const maxDuration = sceneEndTime - stepStartTime
@@ -765,13 +911,24 @@ export class MotionEngine {
             return
           }
 
+          // Apply preset startOffsets to startState if present
+          const adjustedStartState = { ...startState }
+          if (action.startOffset) {
+            if (action.startOffset.x !== undefined) adjustedStartState.x += action.startOffset.x
+            if (action.startOffset.y !== undefined) adjustedStartState.y += action.startOffset.y
+            if (action.startOffset.opacity !== undefined) adjustedStartState.opacity = action.startOffset.opacity
+            if (action.startOffset.scaleX !== undefined) adjustedStartState.scaleX = startState.scaleX * action.startOffset.scaleX
+            if (action.startOffset.scaleY !== undefined) adjustedStartState.scaleY = startState.scaleY * action.startOffset.scaleY
+            if (action.startOffset.rotation !== undefined) adjustedStartState.rotation = startState.rotation + action.startOffset.rotation
+          }
+
           // When flip and scale co-exist: flip owns scale.x, scale skips it
           const actionOptions = {
             ...options,
             duration: actionDuration,
             startTime: stepStartTime,
             sceneStartOffset: startTimeOffset,
-            startState
+            startState: adjustedStartState
           }
           if (hasFlip && action.type === 'flip' && flipTargetScaleX !== undefined) {
             actionOptions.flipTargetScaleX = flipTargetScaleX
@@ -783,18 +940,63 @@ export class MotionEngine {
           builder.timeline.add((gsapTimeline) => {
             const tween = handler.execute(pixiObject, action, actionOptions)
             if (tween) {
-
               gsapTimeline.add(tween, stepStartTime)
             }
           })
 
           // UPDATE STATE TRACKER: Predict where the layer will be after this action
-          // This ensures the NEXT step's MoveAction knows the correct start point.
-          // [FIX] Avoid double-counting: only apply deltas once per layer/step
+          // This ensures the NEXT step knows the correct start point.
           const state = layerStateTracker.get(layerId)
           if (!state) return
 
-          if (action.type === 'move' || action.type === 'crop') {
+          // [COMPOSITION FIX] State tracker rules for the three action kinds:
+          //
+          //   1. Custom action (no preset)            – apply delta only.
+          //      Layer ends at startState + dx.
+          //
+          //   2. Pure preset action (e.g. user picked a preset, no custom
+          //      override for this type) – the tween is net-zero (startOffset
+          //      and delta cancel: -150 + 150 = 0). Skip BOTH startOffset and
+          //      delta application; the layer ends where it started.
+          //
+          //   3. Composed action (preset + custom of the same type, merged in
+          //      the resolution step above) – apply BOTH startOffset AND delta.
+          //      For composed move:  startOffset.x = -150,  dx = 150 + custom_dx
+          //      Net change = -150 + 150 + custom_dx = custom_dx, which is what
+          //      the user expects: the preset's slide envelope is preserved
+          //      AND the custom delta is added on top.
+          const isComposed = action._isComposedAction === true
+          const isPureNetZeroPreset = action._isPresetAction && action.startOffset && !isComposed
+          const shouldApplyStartOffset = action.startOffset && (!action._isPresetAction || isComposed)
+
+          if (shouldApplyStartOffset) {
+            if (action.startOffset.x !== undefined && !updatedDeltas.has('position_offset')) {
+              state.x += action.startOffset.x
+              updatedDeltas.add('position_offset')
+            }
+            if (action.startOffset.y !== undefined && !updatedDeltas.has('position_offset_y')) {
+              state.y += action.startOffset.y
+              updatedDeltas.add('position_offset_y')
+            }
+            if (action.startOffset.opacity !== undefined) {
+              state.opacity = action.startOffset.opacity
+            }
+            if (action.startOffset.scaleX !== undefined) {
+              state.scaleX *= action.startOffset.scaleX
+            }
+            if (action.startOffset.scaleY !== undefined) {
+              state.scaleY *= action.startOffset.scaleY
+            }
+            if (action.startOffset.rotation !== undefined) {
+              state.rotation += action.startOffset.rotation
+            }
+          }
+
+          // Use isPureNetZeroPreset (composed = false, custom = false) to gate the
+          // per-type delta block below.
+          const isNetZeroPresetAction = isPureNetZeroPreset
+
+          if ((action.type === 'move' || action.type === 'crop') && !isNetZeroPresetAction) {
             if (!updatedDeltas.has('position')) {
               const dx = action.values?.dx !== undefined ? action.values.dx : 0
               const dy = action.values?.dy !== undefined ? action.values.dy : 0
@@ -815,7 +1017,7 @@ export class MotionEngine {
               if (action.values.trimStart !== undefined) state.trimStart = action.values.trimStart
               if (action.values.trimEnd !== undefined) state.trimEnd = action.values.trimEnd
             }
-          } else if (action.type === 'scale') {
+          } else if (action.type === 'scale' && !isNetZeroPresetAction) {
             if (!updatedDeltas.has('scale')) {
               const dsx = action.values?.dsx !== undefined ? action.values.dsx : 1
               const dsy = action.values?.dsy !== undefined ? action.values.dsy : 1
@@ -823,7 +1025,7 @@ export class MotionEngine {
               state.scaleY *= dsy
               if (dsx !== 1 || dsy !== 1) updatedDeltas.add('scale')
             }
-          } else if (action.type === 'rotate') {
+          } else if (action.type === 'rotate' && !isNetZeroPresetAction) {
             if (!updatedDeltas.has('rotation')) {
               const dangle = action.values?.dangle !== undefined ? action.values.dangle : 0
               state.rotation += dangle
@@ -832,11 +1034,11 @@ export class MotionEngine {
           } else if (action.type === 'typewriter') {
             state.revealProgress = 1
             state.opacity = 1
-          } else if (action.type === 'fade') {
+          } else if (action.type === 'fade' && !isNetZeroPresetAction) {
             if (action.values?.opacity !== undefined) {
               state.opacity = action.values.opacity
             }
-          } else if (action.type === 'blur') {
+          } else if (action.type === 'blur' && !isNetZeroPresetAction) {
             if (action.values?.blur !== undefined) {
               state.blur = action.values.blur
             }
@@ -849,20 +1051,15 @@ export class MotionEngine {
               state.color = action.values.color
             }
           } else if (action.type === 'tilt') {
-            // Update predicted tilt state so the next step knows the correct start values
             if (action.values?.tiltX !== undefined) state.tiltX = action.values.tiltX
             if (action.values?.tiltY !== undefined) state.tiltY = action.values.tiltY
           } else if (action.type === 'flip') {
-            // Store flip metadata on the PIXI object for deterministic seek evaluation.
-            // GSAP nested timeline onUpdate callbacks don't reliably fire during
-            // masterTimeline.pause(time), so we need explicit post-seek evaluation.
             if (!pixiObject._flipActions) pixiObject._flipActions = []
             pixiObject._flipActions.push({
               time: stepStartTime,
               duration: actionDuration,
               wasShowingFront: state.showingFront
             })
-            // Toggle which side is showing for card frames
             state.showingFront = !state.showingFront
           }
         })
@@ -962,6 +1159,9 @@ export class MotionEngine {
 
     parentContainer.addChild(this.transitionContainer)
 
+    this.transitionRanges = []
+    console.log('[Bug 2 Debug] Transition overlay container mounted/re-initialized')
+
     // Build transitions for each scene boundary
     timelineInfo.forEach((sceneInfo, index) => {
       if (index === 0) return
@@ -970,6 +1170,8 @@ export class MotionEngine {
       if (!transitionType || transitionType === 'None') return
 
       const T = sceneInfo.startTime // Boundary time in seconds
+
+      console.log(`[Bug 2 Debug] Mounting transition: Type = ${transitionType}, BoundaryTime = ${T}s`)
 
       if (transitionType === 'Fade') {
         const parseColor = (col) => {
@@ -991,13 +1193,28 @@ export class MotionEngine {
         fadeOverlay.eventMode = 'none'
         this.transitionContainer.addChild(fadeOverlay)
 
-        // Add to GSAP masterTimeline
-        this.masterTimeline.fromTo(fadeOverlay, { alpha: 0 }, { alpha: 1, duration: 0.4, ease: 'power1.in' }, T - 0.4)
-        this.masterTimeline.to(fadeOverlay, { alpha: 0, duration: 0.4, ease: 'power1.out' }, T)
-        
+        this.transitionRanges.push({
+          type: 'Fade',
+          startTime: T - 0.4,
+          endTime: T + 0.4,
+          boundaryTime: T
+        })
+
         // Ensure it is completely hidden outside the transition window
-        this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, 0)
+        this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, T - 0.4)
         this.masterTimeline.set(fadeOverlay, { visible: true }, T - 0.4)
+
+        // Add to GSAP masterTimeline using fromTo with immediateRender: false to avoid dynamic start capture issues
+        this.masterTimeline.fromTo(fadeOverlay, 
+          { alpha: 0 }, 
+          { alpha: 1, duration: 0.4, ease: 'power1.in', immediateRender: false }, 
+          T - 0.4
+        )
+        this.masterTimeline.fromTo(fadeOverlay, 
+          { alpha: 1 }, 
+          { alpha: 0, duration: 0.4, ease: 'power1.out', immediateRender: false }, 
+          T
+        )
         this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, T + 0.4)
       } 
       else if (transitionType === 'LiquidShapes') {
@@ -1013,19 +1230,30 @@ export class MotionEngine {
           return col
         }
 
-        const transitionColors = sceneInfo.transitionColors || ['#5b21b6', '#7c3aed', '#8b5cf6', '#a78bfa']
+        // [BUG 2 FIX] Default palette doubles as a per-index fallback so a stale
+        // shorter transitionColors array (e.g. a 1-color Fade palette left behind
+        // when switching transition type) can never produce an undefined color.
+        const defaultPalette = ['#5b21b6', '#7c3aed', '#8b5cf6', '#a78bfa']
+        const transitionColors = sceneInfo.transitionColors || defaultPalette
         const colors = transitionColors.map(parseColor)
         const direction = sceneInfo.transitionDirection || 'left'
         const width = this.projectWidth
         const height = this.projectHeight
         const rects = []
 
+        this.transitionRanges.push({
+          type: 'LiquidShapes',
+          startTime: T - 0.5,
+          endTime: T + 0.55,
+          boundaryTime: T
+        })
+
         for (let i = 0; i < 4; i++) {
           const rect = new PIXI.Graphics()
           rect.eventMode = 'none'
           rect.clear()
           rect.rect(0, 0, width, height)
-          rect.fill({ color: colors[i] })
+          rect.fill({ color: colors[i] ?? parseColor(defaultPalette[i]) })
           
           let startProps = { x: width, y: 0 }
           let endProps = { x: -width, y: 0 }
@@ -1051,17 +1279,17 @@ export class MotionEngine {
           const endOffset = 0.35 + i * 0.05
 
           this.masterTimeline.fromTo(rect, 
-            startProps, 
-            { ...endProps, duration: 0.9, ease: 'power2.inOut' }, 
+            startProps,
+            { ...endProps, duration: 0.9, ease: 'power2.inOut', immediateRender: false }, 
             T + startOffset
           )
 
-          this.masterTimeline.set(rect, startProps, 0)
+          this.masterTimeline.set(rect, startProps, T - 0.5)
           this.masterTimeline.set(rect, endProps, T + endOffset)
         }
 
         // Ensure the entire liquidContainer is invisible outside the transition window
-        this.masterTimeline.set(liquidContainer, { visible: false }, 0)
+        this.masterTimeline.set(liquidContainer, { visible: false }, T - 0.5)
         this.masterTimeline.set(liquidContainer, { visible: true }, T - 0.5)
         this.masterTimeline.set(liquidContainer, { visible: false }, T + 0.55)
       }
@@ -1078,7 +1306,9 @@ export class MotionEngine {
           return col
         }
 
-        const transitionColors = sceneInfo.transitionColors || ['#ec4899', '#f43f5e', '#d946ef', '#8b5cf6']
+        // [BUG 2 FIX] Default palette doubles as a per-index fallback (see LiquidShapes).
+        const defaultPalette = ['#ec4899', '#f43f5e', '#d946ef', '#8b5cf6']
+        const transitionColors = sceneInfo.transitionColors || defaultPalette
         const colors = transitionColors.map(parseColor)
         const direction = sceneInfo.transitionDirection || 'bottom-left'
         const width = this.projectWidth
@@ -1087,12 +1317,19 @@ export class MotionEngine {
         const maxRadius = Math.sqrt(width * width + height * height) * 0.8
         const circles = []
 
+        this.transitionRanges.push({
+          type: 'BubbleWipe',
+          startTime: T - 0.7,
+          endTime: T + 1.15,
+          boundaryTime: T
+        })
+
         for (let i = 0; i < 4; i++) {
           const circle = new PIXI.Graphics()
           circle.eventMode = 'none'
           circle.clear()
           circle.circle(0, 0, maxRadius)
-          circle.fill({ color: colors[i] })
+          circle.fill({ color: colors[i] ?? parseColor(defaultPalette[i]) })
           
           let startX, startY, exitX, exitY, midX, midY
           
@@ -1130,42 +1367,44 @@ export class MotionEngine {
           circle.x = startX
           circle.y = startY
           
+          // Instrument for debugging transition state desync
+          circle._debugInfo = { index: i, startX, startY, midX, midY, exitX, exitY }
+          
           liquidContainer.addChild(circle)
           circles.push(circle)
 
           const startOffset = -0.65 + i * 0.12
 
-          // Wipe in: diagonal sweep from selected corner towards the center
-          this.masterTimeline.fromTo(circle,
-            { 
-              x: startX, 
-              y: startY 
-            },
-            { 
-              x: midX, 
-              y: midY, 
-              duration: 0.6, 
-              ease: 'power2.in' 
+          // [BUG 1 FIX] Single deterministic tween (start → mid → exit) via GSAP
+          // keyframes instead of two chained fromTo tweens. The previous two-tween
+          // structure left a fragile mid-point boundary between two
+          // immediateRender:false tweens with no trailing anchor, which stranded a
+          // circle at its mid position during backward/forced re-render (scrubbing).
+          // This mirrors the robust single-tween pattern LiquidShapes uses. A
+          // leading zero-duration keyframe anchors the start so the sweep is fully
+          // self-contained (keyframes is the documented .to() form).
+          this.masterTimeline.to(circle,
+            {
+              immediateRender: false,
+              keyframes: [
+                { x: startX, y: startY, duration: 0 },
+                { x: midX,   y: midY,   duration: 0.6, ease: 'power2.in'  },
+                { x: exitX,  y: exitY,  duration: 0.6, ease: 'power2.out' },
+              ],
             },
             T + startOffset
           )
 
-          // Wipe out: exit to the opposite corner off-screen
-          this.masterTimeline.to(circle,
-            { 
-              x: exitX, 
-              y: exitY, 
-              duration: 0.6, 
-              ease: 'power2.out' 
-            },
-            T + startOffset + 0.6
-          )
-
-          this.masterTimeline.set(circle, { x: startX, y: startY }, 0)
+          // Leading anchor: hold at the start corner before the sweep begins.
+          this.masterTimeline.set(circle, { x: startX, y: startY }, T - 0.7)
+          // [BUG 1 FIX] Trailing anchor: hold off-screen at the exit corner after
+          // the sweep completes, exactly like LiquidShapes' end set(). Gives the
+          // forced re-render in seek()/scrub() a well-defined post-exit endpoint.
+          this.masterTimeline.set(circle, { x: exitX, y: exitY }, T + startOffset + 1.2)
         }
 
         // Keep the container visible throughout the entire extended window
-        this.masterTimeline.set(liquidContainer, { visible: false }, 0)
+        this.masterTimeline.set(liquidContainer, { visible: false }, T - 0.7)
         this.masterTimeline.set(liquidContainer, { visible: true }, T - 0.7)
         this.masterTimeline.set(liquidContainer, { visible: false }, T + 1.15)
       }
@@ -1174,6 +1413,7 @@ export class MotionEngine {
 
   clearTransitions() {
     if (this.transitionContainer) {
+      console.log('[Bug 2 Debug] Transition overlay container unmounting')
       try {
         if (!this.transitionContainer.destroyed && this.transitionContainer.parent) {
           this.transitionContainer.parent.removeChild(this.transitionContainer)
@@ -1637,7 +1877,11 @@ export class MotionEngine {
    * Full seek: forces exact video sync, text reflow, and flip state evaluation.
    * Use for programmatic seeks (scene clicks, step navigation, etc).
    */
-  seek(time) {
+  seek(time, options = {}) {
+    // Minimal log on programmatic seek
+    console.log(`[Bug 1 Debug] Programmatic seek to time: ${time.toFixed(3)}s`)
+    // NOTE: `options.force` is now implicit — seek() always forces a re-render
+    // (see the [BASE STATE FIX] note below). The param is kept for call-site compat.
     this._muteVideosForFastPreview = false
     this._lastInteractionTime = Date.now()
     this._isScrubbing = false
@@ -1652,12 +1896,38 @@ export class MotionEngine {
       if (tl.instance) tl.instance.paused(false)
     })
 
-    this.masterTimeline.pause(time)
+    // [PRESET BASE FIX] Use seek(time, false) + pause() instead of pause(time).
+    // GSAP's pause(atTime) can be a no-op when the playhead is already at atTime
+    // (e.g., t=0 after engine rebuild). seek(time, false) always repositions and
+    // applies all tween states — including the .set() baseline tweens that establish
+    // the preset's initial visual state (e.g., alpha=0 for Fade In presets).
+    this.masterTimeline.seek(time, false)
+
+    // [BASE STATE FIX] ALWAYS force a full re-render at the seeked time.
+    // GSAP skips re-rendering a tween whose local time/progress is unchanged — in
+    // particular a 0-duration `.set()` stays at progress 1 for every t past its
+    // position, so GSAP never re-applies it. That breaks several cases:
+    //   1. Scrubbing BACKWARD into the interval before a layer's first tween: the
+    //      baseline .set() (layer base x/y/rotation/scale/alpha/crop/blur/...) is not
+    //      re-applied and `fromTo` tweens (immediateRender:false) don't write before
+    //      their start, so the property sticks at the value the forward tween last
+    //      wrote (e.g. Step 1's end position). Same for transition graphics whose
+    //      visibility/position is anchored by `set(..., 0)` (e.g. BubbleWipe circles).
+    //   2. Re-seeking after a direct layer edit clobbered a PIXI prop, or saving an
+    //      edited step whose playhead is already parked at the step start (GSAP's
+    //      seek() is a no-op when `time` equals the current time).
+    // Forcing the render (suppressEvents=true so we don't double-fire callbacks)
+    // re-applies every tween/.set() at the current time, making GSAP authoritative
+    // for every property and every transition uniformly. Export already gets this
+    // for free because it seeks deterministically frame-by-frame.
+    this.masterTimeline.render(this.masterTimeline.time(), true, true)
+
+    this.masterTimeline.pause()
     this.isPlaying = false
 
     // Apply GSAP-controlled state (color, blur, flip) to PIXI objects after seek.
     // Some properties need an explicit visual update call because onUpdate callbacks
-    // may not reliably fire during masterTimeline.pause(time) in nested timeline configurations.
+    // may not reliably fire during masterTimeline.seek() in nested timeline configurations.
     this.registeredObjects.forEach((obj) => {
       // [FIX] Safety check: skip destroyed objects that may still be in the map
       // (e.g. if unregisterLayerObject was delayed or missed)
@@ -1706,6 +1976,7 @@ export class MotionEngine {
     this.refreshFlows()
 
     this._handleUpdate()
+    this._logScrubState(time)
   }
 
   /**
@@ -1718,6 +1989,9 @@ export class MotionEngine {
    * This makes scrubbing smooth with multiple video layers on mobile/low-end.
    */
   scrub(time) {
+    if (!this._isScrubbing) {
+      console.log(`[Bug 1 Debug] Drag scrub started at time: ${time.toFixed(3)}s`)
+    }
     this._lastInteractionTime = Date.now()
     this._isScrubbing = true
 
@@ -1730,6 +2004,12 @@ export class MotionEngine {
     })
 
     this.masterTimeline.pause(time)
+    // [BASE STATE FIX] Force a full re-render so zero-duration baseline .set() tweens
+    // (layer base transforms + transition graphics visibility/position) re-apply when
+    // scrubbing backward into a pre-tween interval. pause(time) alone leaves unchanged
+    // .set()s un-rendered (GSAP optimization), stranding props at the last forward
+    // value. See seek() for the full rationale. suppressEvents=true avoids double ticks.
+    this.masterTimeline.render(time, true, true)
     this.isPlaying = false
 
     // [PERF] Apply animated state (color/blur/corner) — needed for visual accuracy.
@@ -1773,6 +2053,7 @@ export class MotionEngine {
     }
 
     this._handleUpdate()
+    this._logScrubState(time)
   }
 
   /**
@@ -1821,6 +2102,79 @@ export class MotionEngine {
     })
   }
 
+  _logScrubState(time) {
+    // 1. Step boundary checks
+    if (this.stepRanges && this.stepRanges.length > 0) {
+      const activeStep = this.stepRanges.find(r => time >= r.startTime && time <= r.endTime)
+      const activeStepId = activeStep ? activeStep.stepId : null
+
+      if (activeStepId !== this._lastStepId) {
+        if (activeStepId) {
+          console.log(`[Bug 1 Debug] Scrubbed to step: ${activeStepId} at time: ${time.toFixed(3)}s (Range: ${activeStep.startTime.toFixed(3)}s - ${activeStep.endTime.toFixed(3)}s)`)
+          const layersInfo = []
+          this.registeredObjects.forEach((obj, id) => {
+            if (obj && !obj.destroyed) {
+              const reportedAlpha = obj._tiltHidden && typeof obj._intendedAlpha === 'number'
+                ? obj._intendedAlpha
+                : obj.alpha
+              layersInfo.push(`  Layer ID: ${id} -> x: ${obj.x.toFixed(2)}, y: ${obj.y.toFixed(2)}, scaleX: ${obj.scale?.x.toFixed(2)}, scaleY: ${obj.scale?.y.toFixed(2)}, alpha: ${reportedAlpha.toFixed(2)}${obj._tiltHidden ? ' (tilted)' : ''}`)
+            }
+          })
+          console.log(`[Bug 1 Debug] Layer positions:\n` + (layersInfo.length > 0 ? layersInfo.join('\n') : '  No registered layers'))
+        } else {
+          console.log(`[Bug 1 Debug] Scrubbed out of step boundaries at time: ${time.toFixed(3)}s`)
+        }
+        this._lastStepId = activeStepId
+      }
+    }
+
+    // 2. Transition boundary checks
+    if (this.transitionRanges && this.transitionRanges.length > 0) {
+      const activeTransition = this.transitionRanges.find(r => time >= r.startTime && time <= r.endTime)
+      const activeTransitionType = activeTransition ? activeTransition.type : null
+
+      if (activeTransitionType !== this._lastTransitionState) {
+        const printTransitionContainerChildren = (container, depth = 0) => {
+          if (!container) return []
+          const lines = []
+          const indent = '  '.repeat(depth)
+          const label = container.label || container.constructor.name || 'PIXI Object'
+          
+          let debugStr = ''
+          if (container._debugInfo) {
+            const di = container._debugInfo
+            debugStr = ` [Bubble ${di.index}: start(${di.startX.toFixed(0)}, ${di.startY.toFixed(0)}) -> mid(${di.midX.toFixed(0)}, ${di.midY.toFixed(0)}) -> exit(${di.exitX.toFixed(0)}, ${di.exitY.toFixed(0)})]`
+          }
+          
+          lines.push(`${indent}${label} (visible: ${container.visible}, alpha: ${container.alpha.toFixed(2)}, x: ${container.x.toFixed(2)}, y: ${container.y.toFixed(2)})${debugStr}`)
+          if (container.children && container.children.length > 0) {
+            container.children.forEach(child => {
+              lines.push(...printTransitionContainerChildren(child, depth + 1))
+            })
+          }
+          return lines
+        }
+
+        if (activeTransitionType) {
+          console.log(`[Bug 2 Debug] Transition lifecycle state: Entered (${activeTransitionType}) at time: ${time.toFixed(3)}s (Range: ${activeTransition.startTime.toFixed(3)}s - ${activeTransition.endTime.toFixed(3)}s)`)
+          if (this.transitionContainer) {
+            const childLogs = printTransitionContainerChildren(this.transitionContainer)
+            console.log(`[Bug 2 Debug] Transition Container Children:\n` + childLogs.join('\n'))
+          } else {
+            console.log(`[Bug 2 Debug] Transition Container: null`)
+          }
+        } else {
+          console.log(`[Bug 2 Debug] Transition lifecycle state: Exited at time: ${time.toFixed(3)}s`)
+          if (this.transitionContainer) {
+            const childLogs = printTransitionContainerChildren(this.transitionContainer)
+            console.log(`[Bug 2 Debug] Transition Container Children (after exit):\n` + childLogs.join('\n'))
+          }
+        }
+        this._lastTransitionState = activeTransitionType
+      }
+    }
+  }
+
   /**
    * Smoothly animate the playhead to a specific time over a fixed duration.
    * Useful for "fast-play" transitions.
@@ -1862,6 +2216,25 @@ export class MotionEngine {
       },
       onUpdate: () => {
         this._lastInteractionTime = Date.now()
+        // [FAST-PREVIEW COLOR FLICKER FIX] Apply GSAP-managed visual state each frame,
+        // exactly like seek()/scrub(). The ColorChangeAction (and blur/corner/tilt)
+        // write to a proxy (_animatedColorState / _blurFilter / _tiltProxy) and rely on
+        // a per-frame apply; their nested-timeline onUpdate callbacks don't fire
+        // reliably while the master playhead is tweened by tweenTo(), so without this
+        // the color flickers between the stale proxy value and the target during the
+        // post-save fast preview. This makes fast-preview match normal scrubbing.
+        this.registeredObjects.forEach((obj) => {
+          if (obj.destroyed) return
+          if (obj._applyAnimatedColor) obj._applyAnimatedColor()
+          if (obj._applyAnimatedBlur) obj._applyAnimatedBlur()
+          if (obj._applyAnimatedCornerRadius) obj._applyAnimatedCornerRadius()
+          // Mirror the tilt proxy GSAP advances onto the degree fields before apply.
+          if (obj._tiltProxy) {
+            if (typeof obj._tiltProxy.tiltX === 'number') obj._tiltXDeg = obj._tiltProxy.tiltX
+            if (typeof obj._tiltProxy.tiltY === 'number') obj._tiltYDeg = obj._tiltProxy.tiltY
+          }
+          if (obj._applyAnimatedTilt) obj._applyAnimatedTilt()
+        })
         // Evaluate flip visibility during fast preview
         this._evaluateFlipStates(this.masterTimeline.time())
         // [FLOW TEXT FIX] Ensure continuous word wrap recalculation during fast-preview playback

@@ -89,32 +89,34 @@ export class TiltAction {
 
     // pixiObject._applyAnimatedTilt() - Removed immediate call to prevent premature hiding
 
-    return gsap.fromTo(pixiObject._tiltProxy,
-      { tiltX: startTiltX, tiltY: startTiltY },
-      {
-        duration,
-        ease: easing,
-        immediateRender: false,
-        overwrite: false,
-        tiltX: targetTiltX,
-        tiltY: targetTiltY,
-        onUpdate: () => {
-          pixiObject._tiltXDeg = pixiObject._tiltProxy.tiltX
-          pixiObject._tiltYDeg = pixiObject._tiltProxy.tiltY
-          
-          // [PERF] During export, mark dirty on every update so we capture 
-          // the intermediate frames of the tilt animation.
-          if (options.isExport) pixiObject._tiltTextureDirty = true
+    const toVars = {
+      duration,
+      ease: easing,
+      immediateRender: false,
+      overwrite: false,
+      tiltX: targetTiltX,
+      tiltY: targetTiltY,
+      onUpdate: () => {
+        pixiObject._tiltXDeg = pixiObject._tiltProxy.tiltX
+        pixiObject._tiltYDeg = pixiObject._tiltProxy.tiltY
+        
+        // [PERF] During export, mark dirty on every update so we capture 
+        // the intermediate frames of the tilt animation.
+        if (options.isExport) pixiObject._tiltTextureDirty = true
 
-          if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
-        },
-        onComplete: () => {
-          pixiObject._tiltXDeg = pixiObject._tiltProxy.tiltX
-          pixiObject._tiltYDeg = pixiObject._tiltProxy.tiltY
-          if (options.isExport) pixiObject._tiltTextureDirty = true
-          if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
-        }
+        if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
+      },
+      onComplete: () => {
+        pixiObject._tiltXDeg = pixiObject._tiltProxy.tiltX
+        pixiObject._tiltYDeg = pixiObject._tiltProxy.tiltY
+        if (options.isExport) pixiObject._tiltTextureDirty = true
+        if (pixiObject._applyAnimatedTilt) pixiObject._applyAnimatedTilt()
       }
-    )
+    }
+
+    const tl = gsap.timeline()
+    tl.set(pixiObject._tiltProxy, { tiltX: startTiltX, tiltY: startTiltY }, 0)
+    tl.to(pixiObject._tiltProxy, toVars, 0)
+    return tl
   }
 }

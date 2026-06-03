@@ -226,9 +226,6 @@ const projectSlice = createSlice({
   reducers: {
     // [FIX] Reset project state to initial values for clean editor re-entry
     resetProject: () => initialState,
-    setProjectName: (state, action) => {
-      state.projectName = action.payload
-    },
     // Asset loading management
     setLoadingMode: (state, action) => {
       state.loadingMode = action.payload // 'global' or 'local'
@@ -531,6 +528,16 @@ const projectSlice = createSlice({
               }
             })
             step.layerActions = newLayerActions
+          }
+          if (step.layerPresets) {
+            const newLayerPresets = {}
+            Object.keys(step.layerPresets).forEach(oldLayerId => {
+              const newLayerId = layerIdMap[oldLayerId]
+              if (newLayerId) {
+                newLayerPresets[newLayerId] = { ...step.layerPresets[oldLayerId] }
+              }
+            })
+            step.layerPresets = newLayerPresets
           }
           // Give each step a new ID for the right scene
           step.id = generateId()
@@ -916,6 +923,7 @@ const projectSlice = createSlice({
       steps.push({
         id: stepId || generateId(),
         layerActions: {},
+        layerPresets: {},
         startTime: newStartTime,
         duration: newDuration,
         manual: true
@@ -1040,6 +1048,9 @@ const projectSlice = createSlice({
       if (motionFlow) {
         const step = motionFlow.steps.find(s => s.id === stepId)
         if (step) {
+          if (!step.layerActions) {
+            step.layerActions = {}
+          }
           if (!step.layerActions[layerId]) {
             step.layerActions[layerId] = []
           }
@@ -1107,8 +1118,10 @@ const projectSlice = createSlice({
             delete step.layerActions[layerId]
           }
 
-          // Clean up step if no layers have actions left
-          if (Object.keys(step.layerActions).length === 0) {
+          // Clean up step if no layers have actions or presets left
+          const hasActionsLeft = Object.keys(step.layerActions).length > 0
+          const hasPresetsLeft = step.layerPresets && Object.keys(step.layerPresets).length > 0
+          if (!hasActionsLeft && !hasPresetsLeft) {
             // [FIX] DO NOT delete the step if it's currently being captured/edited!
             // This prevents the step from vanishing while the user is still interacting.
             const isEditingThisStep = state.motionEditingMode.isActive && state.motionEditingMode.stepId === stepId
@@ -1120,6 +1133,41 @@ const projectSlice = createSlice({
         }
         state.isDirty = true
         state.version++
+      }
+    },
+
+    applyPresetToStep: (state, action) => {
+      const { sceneId, stepId, layerId, presetId, presetType } = action.payload
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (motionFlow) {
+        const step = motionFlow.steps.find(s => s.id === stepId)
+        if (step) {
+          if (!step.layerPresets) {
+            step.layerPresets = {}
+          }
+          step.layerPresets[layerId] = {
+            id: presetId,
+            type: presetType
+          }
+          state.isDirty = true
+          state.version++
+        }
+      }
+    },
+
+    clearPresetFromStep: (state, action) => {
+      const { sceneId, stepId, layerId } = action.payload
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (motionFlow) {
+        const step = motionFlow.steps.find(s => s.id === stepId)
+        if (step && step.layerPresets) {
+          delete step.layerPresets[layerId]
+          if (Object.keys(step.layerPresets).length === 0) {
+            delete step.layerPresets
+          }
+          state.isDirty = true
+          state.version++
+        }
       }
     },
 
@@ -1143,9 +1191,14 @@ const projectSlice = createSlice({
             }))
           })
 
+          const duplicatedLayerPresets = stepToDuplicate.layerPresets
+            ? JSON.parse(JSON.stringify(stepToDuplicate.layerPresets))
+            : {}
+
           const duplicatedStep = {
             id: generateId(),
             layerActions: duplicatedLayerActions,
+            layerPresets: duplicatedLayerPresets,
           }
           motionFlow.steps.push(duplicatedStep)
           syncSceneMotionDuration(state, sceneId)
@@ -1299,16 +1352,23 @@ const projectSlice = createSlice({
 
           // Capture motion data for this layer
           const layerActions = {}
+          const layerPresets = {}
           const sceneMotionFlow = state.sceneMotionFlows[layer.sceneId]
           if (sceneMotionFlow && sceneMotionFlow.steps) {
             sceneMotionFlow.steps.forEach(step => {
               if (step.layerActions && step.layerActions[id]) {
                 layerActions[step.id] = step.layerActions[id]
               }
+              if (step.layerPresets && step.layerPresets[id]) {
+                layerPresets[step.id] = step.layerPresets[id]
+              }
             })
           }
           if (Object.keys(layerActions).length > 0) {
             layerData.motionData = layerActions
+          }
+          if (Object.keys(layerPresets).length > 0) {
+            layerData.motionPresets = layerPresets
           }
 
           return layerData
@@ -1479,10 +1539,26 @@ const projectSlice = createSlice({
                 // Duplicate actions for the new layer
                 const originalActions = layerData.motionData[stepId]
                 if (Array.isArray(originalActions)) {
+                  if (!targetStep.layerActions) targetStep.layerActions = {}
                   targetStep.layerActions[newLayer.id] = originalActions.map(action => ({
                     ...action,
                     id: generateId(),
                   }))
+                }
+              }
+            })
+          }
+        }
+        if (layerData.motionPresets && typeof layerData.motionPresets === 'object') {
+          const targetSceneMotionFlow = state.sceneMotionFlows[sceneId]
+          if (targetSceneMotionFlow && targetSceneMotionFlow.steps) {
+            Object.keys(layerData.motionPresets).forEach(stepId => {
+              const targetStep = targetSceneMotionFlow.steps.find(s => s.id === stepId)
+              if (targetStep) {
+                const originalPreset = layerData.motionPresets[stepId]
+                if (originalPreset) {
+                  if (!targetStep.layerPresets) targetStep.layerPresets = {}
+                  targetStep.layerPresets[newLayer.id] = { ...originalPreset }
                 }
               }
             })
@@ -2016,6 +2092,8 @@ export const {
   updateSceneMotionAction,
   deleteSceneMotionAction,
   duplicateSceneMotionStep,
+  applyPresetToStep,
+  clearPresetFromStep,
   clearSceneMotionFlow,
   updateStepTiming,
   startMotionEditing,
@@ -2174,7 +2252,9 @@ export const selectMotionEditingStepId = (state) => state.project.motionEditingM
 // Returns the initial transforms of all layers captured at edit start
 export const selectMotionEditingInitialTransforms = (state) => state.project.motionEditingMode.initialTransforms
 
-// [NEW] Selector to get the action count of the step currently being edited
+// Returns the total number of edits in the currently edited step — counts BOTH
+// custom layer actions AND layer presets so the Save Step button enables as
+// soon as a preset is applied (even with no custom action interactions).
 export const selectEditingStepActionCount = createSelector(
   [
     selectSceneMotionFlows,
@@ -2186,8 +2266,12 @@ export const selectEditingStepActionCount = createSelector(
     const flow = flows[sceneId]
     if (!flow || !flow.steps) return 0
     const step = flow.steps.find(s => s.id === stepId)
-    if (!step || !step.layerActions) return 0
-    return Object.values(step.layerActions).reduce((sum, actions) => sum + (actions?.length || 0), 0)
+    if (!step) return 0
+    const actionsCount = step.layerActions
+      ? Object.values(step.layerActions).reduce((sum, actions) => sum + (actions?.length || 0), 0)
+      : 0
+    const presetsCount = step.layerPresets ? Object.keys(step.layerPresets).length : 0
+    return actionsCount + presetsCount
   }
 )
 
