@@ -1698,14 +1698,15 @@ function EditorPage() {
             entry.initialTransform.rotation = transform.rotation
             entry.initialTransform.scaleX = transform.scaleX
             entry.initialTransform.scaleY = transform.scaleY
-            entry.initialTransform.opacity = transform.alpha !== undefined ? transform.alpha : entry.initialTransform.opacity
+            const cleanAlpha = transform.alpha !== undefined && Math.abs(transform.alpha - 0.000001) < 1e-5 ? 1.0 : transform.alpha;
+            entry.initialTransform.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.initialTransform.opacity
 
             entry.currentPosition.x = transform.x
             entry.currentPosition.y = transform.y
             entry.rotation = transform.rotation
             entry.scaleX = transform.scaleX
             entry.scaleY = transform.scaleY
-            entry.opacity = transform.alpha !== undefined ? transform.alpha : entry.opacity
+            entry.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.opacity
             entry.blur = transform.blur !== undefined ? transform.blur : (transform._blurFilter ? transform._blurFilter.strength : entry.blur)
 
             // [TILT] Preserve the live tilt angles produced by the fast-play
@@ -3197,7 +3198,10 @@ function EditorPage() {
             }
             if (transform.mediaWidth !== undefined) entry.mediaWidth = transform.mediaWidth
             if (transform.mediaHeight !== undefined) entry.mediaHeight = transform.mediaHeight
-            if (transform.alpha !== undefined) entry.opacity = transform.alpha
+             if (transform.alpha !== undefined) {
+              const cleanAlpha = Math.abs(transform.alpha - 0.000001) < 1e-5 ? 1.0 : transform.alpha;
+              entry.opacity = cleanAlpha;
+            }
             if (transform.blur !== undefined) entry.blur = transform.blur
             // [TILT SYNC] Explicitly sync tilt from visual skew property
             if (transform.tiltX !== undefined) entry.tiltX = transform.tiltX

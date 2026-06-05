@@ -334,9 +334,12 @@ function Stage({
       // _intendedAlpha sentinel. Returning obj.alpha=0 here would make capture
       // mode initialise the layer at opacity 0 and immediately hide it on
       // selection. Prefer the intended alpha when the layer is tilt-hidden.
-      const reportedAlpha = obj._tiltHidden && typeof obj._intendedAlpha === 'number'
+      let reportedAlpha = obj._tiltHidden && typeof obj._intendedAlpha === 'number'
         ? obj._intendedAlpha
         : obj.alpha
+      if (reportedAlpha !== undefined && Math.abs(reportedAlpha - 0.000001) < 1e-5) {
+        reportedAlpha = 1.0
+      }
       transforms.set(id, {
         x: obj.x,
         y: obj.y,

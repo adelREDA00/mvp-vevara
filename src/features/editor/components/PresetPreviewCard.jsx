@@ -193,7 +193,7 @@ function getPreviewTextFontSize(text) {
  * Miniature layer visual for inside a preset preview card.
  * Renders the same visual as the layer but scaled down to fit a ~60x60 card area.
  */
-function MiniLayerVisual({ layer, isLight }) {
+function MiniLayerVisual({ layer, showingFront, isLight }) {
   if (!layer) {
     return (
       <div className={`w-[55%] h-[55%] rounded border-2 border-dashed ${
@@ -271,17 +271,23 @@ function MiniLayerVisual({ layer, isLight }) {
     )
   }
 
-  // ── FRAME ──────────────────────────────────────────────────────────────
   if (layer.type === LAYER_TYPES.FRAME) {
-    const hasFrontAsset = !!layer.data?.assetUrl
-    if (hasFrontAsset) {
-      return <img src={layer.data.assetUrl} alt="" className="w-[80%] h-[80%] object-contain rounded-sm" />
+    const isCard = !!layer.data?.isCardFrame
+    const showFrontSide = !isCard || showingFront !== false
+    const assetUrl = showFrontSide ? layer.data?.assetUrl : layer.data?.backAssetUrl
+    const hasAsset = !!assetUrl
+
+    if (hasAsset) {
+      return <img src={assetUrl} alt="" className="w-[80%] h-[80%] object-contain rounded-sm" />
     }
+
     return (
       <div className={`w-[55%] h-[55%] rounded border-2 border-dashed ${
         isLight ? 'border-slate-300' : 'border-zinc-600'
       } flex items-center justify-center`}>
-        <span className={`text-[5px] font-bold ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Frame</span>
+        <span className={`text-[5px] font-bold ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+          {isCard ? (showFrontSide ? 'Front' : 'Back') : 'Frame'}
+        </span>
       </div>
     )
   }
@@ -306,7 +312,7 @@ function MiniLayerVisual({ layer, isLight }) {
  * PresetPreviewCard — renders a preset card with a live looping CSS animation
  * of the selected layer's visual. Lightweight: pure CSS animations, no PixiJS.
  */
-export default function PresetPreviewCard({ preset, layer, isActive, onClick, isLight: isLightProp, isMobile = false }) {
+export default function PresetPreviewCard({ preset, layer, showingFront, isActive, onClick, isLight: isLightProp, isMobile = false }) {
   const themeCtx = useContext(ThemeContext)
   const isLight = isLightProp !== undefined ? isLightProp : themeCtx?.theme === 'light'
 
@@ -346,7 +352,7 @@ export default function PresetPreviewCard({ preset, layer, isActive, onClick, is
           className="flex items-center justify-center w-full h-full"
           style={animationStyle}
         >
-          <MiniLayerVisual layer={layer} isLight={isLight} />
+          <MiniLayerVisual layer={layer} showingFront={showingFront} isLight={isLight} />
         </div>
 
         {/* Active checkmark badge */}

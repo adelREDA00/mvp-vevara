@@ -101,8 +101,8 @@ export class BlurAction {
 
         // [FIX] Only animate blur if it's explicitly changing or provided
         if (values.blur !== undefined) {
-            fromVars._blurLogicalStrength = startBlur
-            toVars._blurLogicalStrength = targetBlur
+            fromVars.blur = startBlur
+            toVars.blur = targetBlur
         } else {
             // Return no-op to maintain duration if no blur
             return gsap.to({}, { duration })

@@ -665,8 +665,7 @@ export class MotionEngine {
 
         // Check if there is an IN preset as the first animation step for this layer
         const firstStepPreset = stepLayerPresets[layerId]
-        const isFirstStepInPreset = !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
-
+        const isFirstStepInPreset = stepIndex === 0 && !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
         const cumulativeStartOffset = { x: 0, y: 0, opacity: undefined, scaleX: undefined, scaleY: undefined, rotation: undefined, blur: undefined }
         if (isFirstStepInPreset) {
           const presetActionsForOffsets = PRESET_REGISTRY[firstStepPreset.id].getActions(startState, stepDurationMsValue)

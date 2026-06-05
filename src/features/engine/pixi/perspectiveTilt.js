@@ -1278,7 +1278,7 @@ export function applyTiltToObject(pixiObject, tiltXDeg, tiltYDeg, renderer, opti
   // preserved when transitioning from non-tilted -> tilted.
   // [SENTINEL FIX] Only capture if we aren't currently using the sentinel.
   if (Math.abs(pixiObject.alpha - TILT_HIDE_SENTINEL) > 1e-7 || pixiObject._intendedAlpha === undefined) {
-    pixiObject._intendedAlpha = pixiObject.alpha
+    pixiObject._intendedAlpha = Math.abs(pixiObject.alpha - TILT_HIDE_SENTINEL) > 1e-7 ? pixiObject.alpha : 1.0
   }
 
   // alpha=TILT_HIDE_SENTINEL instead of visible=false so PIXI hit-testing still works.
@@ -1424,6 +1424,17 @@ export function syncTiltMesh(pixiObject, layer) {
   mesh.visible = pixiObject.visible !== false
 
   ensureMeshParented(pixiObject, mesh)
+
+  // Sync filters (e.g. blur) onto the perspective mesh so animated filters apply to the mesh
+  if (pixiObject.filters) {
+    if (mesh.filters !== pixiObject.filters) {
+      mesh.filters = pixiObject.filters
+    }
+  } else {
+    if (mesh.filters) {
+      mesh.filters = null
+    }
+  }
 
   // Touch the value to avoid IDE warning on unused MIN_TILT_RAD.
   void MIN_TILT_RAD

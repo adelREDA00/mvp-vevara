@@ -26,6 +26,7 @@ import {
 } from '../../../store/slices/projectSlice'
 import { setSelectedLayer } from '../../../store/slices/selectionSlice'
 import { getGlobalMotionEngine } from '../../engine/motion'
+import { syncTiltedDisplay } from '../../engine/pixi/perspectiveTilt.js'
 import * as PIXI from 'pixi.js'
 
 const DEFAULT_MOTION_FLOW = { steps: [], pageDuration: 5000 }
@@ -420,11 +421,19 @@ function MotionPanel({
       blurStrength: pixiObject._blurFilter?.strength ?? 0,
       hadBlurFilter: !!(pixiObject.filters && pixiObject._blurFilter && pixiObject.filters.includes(pixiObject._blurFilter)),
       revealProgress: pixiObject.revealProgress ?? 1,
+      intendedAlpha: pixiObject._intendedAlpha,
     }
+    console.log(`[PresetPreview TiltDebug] START: snap.alpha=${snap.alpha}, snap.intendedAlpha=${snap.intendedAlpha}, pixiObject._tiltHidden=${pixiObject._tiltHidden}, cleanStateAlpha=${cleanState.alpha}`)
     pixiObject._isPlayingPresetPreview = true
     const duration = 1.0, ease = 'power2.out'
     pixiObject.x = cleanState.x; pixiObject.y = cleanState.y
-    pixiObject.alpha = cleanState.alpha; pixiObject.rotation = cleanState.rotation
+    if (pixiObject._tiltHidden) {
+      pixiObject.alpha = 0.000001
+      pixiObject._intendedAlpha = cleanState.alpha
+    } else {
+      pixiObject.alpha = cleanState.alpha
+    }
+    pixiObject.rotation = cleanState.rotation
     if (pixiObject.scale) pixiObject.scale.set(cleanState.scaleX, cleanState.scaleY)
     if (pixiObject._blurFilter) {
       pixiObject._blurFilter.strength = 0
@@ -473,6 +482,7 @@ function MotionPanel({
 
     const restore = () => {
       if (pixiObject.destroyed) return
+      console.log(`[PresetPreview TiltDebug] RESTORE BEFORE: pixiObject.alpha=${pixiObject.alpha}, pixiObject._intendedAlpha=${pixiObject._intendedAlpha}, snap.alpha=${snap.alpha}, snap.intendedAlpha=${snap.intendedAlpha}`)
       pixiObject._isPlayingPresetPreview = false; pixiObject._previewTimeline = null
       pixiObject.x = snap.x; pixiObject.y = snap.y; pixiObject.alpha = snap.alpha; pixiObject.rotation = snap.rotation
       if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
@@ -483,10 +493,24 @@ function MotionPanel({
         if (snap.hadBlurFilter && !has) pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
         else if (!snap.hadBlurFilter && has) { pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter); if (!pixiObject.filters.length) pixiObject.filters = null }
       }
+      if (snap.intendedAlpha !== undefined) {
+        pixiObject._intendedAlpha = snap.intendedAlpha
+      }
+      if (pixiObject._tiltMesh) {
+        syncTiltedDisplay(pixiObject)
+      }
+      console.log(`[PresetPreview TiltDebug] RESTORE AFTER: pixiObject.alpha=${pixiObject.alpha}, pixiObject._intendedAlpha=${pixiObject._intendedAlpha}, meshAlpha=${pixiObject._tiltMesh?.alpha}`)
       if (!isMotionCaptureActive) { const eng = getGlobalMotionEngine(); eng.seek(eng.masterTimeline?.time() || 0, { force: true }) }
     }
 
-    const tl = gsap.timeline({ onComplete: restore })
+    const tl = gsap.timeline({
+      onUpdate: () => {
+        if (pixiObject._tiltMesh) {
+          syncTiltedDisplay(pixiObject)
+        }
+      },
+      onComplete: restore
+    })
     pixiObject._previewTimeline = tl
     if (pixiObject.scale) tl.to(pixiObject.scale, { x: scaleTween?.toX ?? cleanState.scaleX, y: scaleTween?.toY ?? cleanState.scaleY, duration, ease: scaleTween ? ease : 'none' }, 0)
     if (blurTween) {
@@ -528,7 +552,9 @@ function MotionPanel({
         // Capture the correct step-start visual values from PIXI instead of base scene start coordinates
         const currentX = pixiObj.x
         const currentY = pixiObj.y
-        const currentAlpha = pixiObj.alpha
+        const currentAlpha = pixiObj._tiltHidden && typeof pixiObj._intendedAlpha === 'number'
+          ? pixiObj._intendedAlpha
+          : (Math.abs(pixiObj.alpha - 0.000001) < 1e-5 ? 1.0 : pixiObj.alpha)
         const currentRotation = pixiObj.rotation
         const currentScaleX = pixiObj.scale?.x ?? 1
         const currentScaleY = pixiObj.scale?.y ?? 1
@@ -579,6 +605,65 @@ function MotionPanel({
       if (shapeType === 'circle') return <div className="w-full h-full flex items-center justify-center"><div className={`w-6 h-6 rounded-full border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} /></div>
       if (shapeType === 'triangle') return <div className="w-full h-full flex items-center justify-center"><div className="w-0 h-0" style={{ borderLeft: '10px solid transparent', borderRight: '10px solid transparent', borderBottom: `16px solid ${fillColor}` }} /></div>
       return <div className={`w-full h-full rounded border ${isLight ? 'border-slate-200' : 'border-white/10'}`} style={{ backgroundColor: fillColor }} />
+    }
+    if (layer.type === LAYER_TYPES.FRAME) {
+      const hasFrontAsset = !!layer.data?.assetUrl
+      const isCard = !!layer.data?.isCardFrame
+      const hasBackAsset = isCard && !!layer.data?.backAssetUrl
+      const hasAnyAsset = hasFrontAsset || hasBackAsset
+
+      if (!hasAnyAsset) {
+        return (
+          <div className={`w-full h-full rounded flex items-center justify-center text-[10px] font-bold tracking-wider uppercase ${isLight ? 'bg-slate-100 border border-slate-200 text-slate-500' : 'bg-white/5 border border-white/10 text-white/40'}`}>
+            Frame
+          </div>
+        )
+      }
+
+      const renderSingleFrameAsset = (url, isVideo, sideLabel) => {
+        if (!url) {
+          return (
+            <div className={`w-full h-full flex items-center justify-center text-[8px] font-bold ${isLight ? 'bg-slate-50 text-slate-400' : 'bg-black/10 text-white/20'}`}>
+              {sideLabel}
+            </div>
+          )
+        }
+
+        if (isVideo) {
+          const thumb = layer.data?.thumbnail
+          return (
+            <div className="w-full h-full relative overflow-hidden bg-black/10">
+              <img src={thumb || url} alt="" className="w-full h-full object-contain" />
+              <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+                <Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
+              </div>
+            </div>
+          )
+        }
+
+        return (
+          <img src={url} alt="" className="w-full h-full object-contain" />
+        )
+      }
+
+      if (isCard) {
+        return (
+          <div className={`w-full h-full rounded flex overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+            <div className={`w-1/2 h-full border-r ${isLight ? 'border-slate-150' : 'border-white/10'}`}>
+              {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, 'Front')}
+            </div>
+            <div className="w-1/2 h-full">
+              {renderSingleFrameAsset(layer.data.backAssetUrl, layer.data.backAssetIsVideo, 'Back')}
+            </div>
+          </div>
+        )
+      }
+
+      return (
+        <div className={`w-full h-full rounded overflow-hidden border ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-white/5'}`}>
+          {renderSingleFrameAsset(layer.data.assetUrl, layer.data.assetIsVideo, '')}
+        </div>
+      )
     }
     if (layer.type === LAYER_TYPES.BACKGROUND) {
       const color = typeof layer.data?.color === 'number' ? '#' + layer.data.color.toString(16).padStart(6, '0') : (layer.data?.color || (isLight ? '#ffffff' : '#000000'))
@@ -915,6 +1000,11 @@ function MotionPanel({
                       <PresetPreviewCard
                         preset={repPreset}
                         layer={previewLayer}
+                        showingFront={
+                          motionControls?.layerObjects?.get?.(previewLayer?.id)?._showingFront !== undefined
+                            ? motionControls.layerObjects.get(previewLayer.id)._showingFront
+                            : (previewLayer?.data?.showingFront !== false)
+                        }
                         isActive={isActiveFam}
                         onClick={handleCardClick}
                         isLight={isLight}
@@ -1000,6 +1090,11 @@ function MotionPanel({
                         key={fam.familyKey}
                         preset={repPreset}
                         layer={previewLayer}
+                        showingFront={
+                          motionControls?.layerObjects?.get?.(previewLayer?.id)?._showingFront !== undefined
+                            ? motionControls.layerObjects.get(previewLayer.id)._showingFront
+                            : (previewLayer?.data?.showingFront !== false)
+                        }
                         isActive={isActiveFam}
                         onClick={handleCardClick}
                         isLight={isLight}
