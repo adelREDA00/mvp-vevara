@@ -667,7 +667,7 @@ export class MotionEngine {
         const firstStepPreset = stepLayerPresets[layerId]
         const isFirstStepInPreset = !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
 
-        const cumulativeStartOffset = { x: 0, y: 0, opacity: undefined, scaleX: undefined, scaleY: undefined, rotation: undefined }
+        const cumulativeStartOffset = { x: 0, y: 0, opacity: undefined, scaleX: undefined, scaleY: undefined, rotation: undefined, blur: undefined }
         if (isFirstStepInPreset) {
           const presetActionsForOffsets = PRESET_REGISTRY[firstStepPreset.id].getActions(startState, stepDurationMsValue)
           presetActionsForOffsets.forEach(pAction => {
@@ -678,6 +678,7 @@ export class MotionEngine {
               if (pAction.startOffset.scaleX !== undefined) cumulativeStartOffset.scaleX = pAction.startOffset.scaleX
               if (pAction.startOffset.scaleY !== undefined) cumulativeStartOffset.scaleY = pAction.startOffset.scaleY
               if (pAction.startOffset.rotation !== undefined) cumulativeStartOffset.rotation = pAction.startOffset.rotation
+              if (pAction.startOffset.blur !== undefined) cumulativeStartOffset.blur = pAction.startOffset.blur
             }
           })
         }
@@ -721,7 +722,7 @@ export class MotionEngine {
                 mediaHeight: startState.mediaHeight,
                 showingFront: startState.showingFront !== false,
                 cornerRadius: startState.cornerRadius !== undefined ? startState.cornerRadius : 0,
-                blur: startState.blur !== undefined ? startState.blur : 0,
+                blur: cumulativeStartOffset.blur !== undefined ? cumulativeStartOffset.blur : (startState.blur !== undefined ? startState.blur : 0),
               }
 
               if (willStartTilted) {
@@ -920,6 +921,7 @@ export class MotionEngine {
             if (action.startOffset.scaleX !== undefined) adjustedStartState.scaleX = startState.scaleX * action.startOffset.scaleX
             if (action.startOffset.scaleY !== undefined) adjustedStartState.scaleY = startState.scaleY * action.startOffset.scaleY
             if (action.startOffset.rotation !== undefined) adjustedStartState.rotation = startState.rotation + action.startOffset.rotation
+            if (action.startOffset.blur !== undefined) adjustedStartState.blur = action.startOffset.blur
           }
 
           // When flip and scale co-exist: flip owns scale.x, scale skips it

@@ -4055,6 +4055,12 @@ function EditorPage() {
       mode.onPositionUpdate({ layerId, color: updates.color })
       mode.onInteractionEnd(layerId)
     }
+    if (updates.cornerRadius !== undefined) {
+      tracked.didCornerRadius = true
+      const clampedRadius = Math.max(0, Math.min(CORNER_RADIUS_MAX, updates.cornerRadius))
+      mode.onPositionUpdate({ layerId, cornerRadius: clampedRadius })
+      mode.onInteractionEnd(layerId)
+    }
   }, [effectiveMotionCaptureMode])
 
   /**

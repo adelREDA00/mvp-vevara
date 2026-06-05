@@ -92,6 +92,7 @@ const DashboardPage = () => {
     const [bottomFeedback, setBottomFeedback] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
     const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false)
+    const [activeUpdateTab, setActiveUpdateTab] = useState('updates')
     const [isCreateScratchModalOpen, setIsCreateScratchModalOpen] = useState(false)
     const [isProjectConfigModalOpen, setIsProjectConfigModalOpen] = useState(false)
     const [configModalMode, setConfigModalMode] = useState('app')
@@ -399,7 +400,7 @@ const DashboardPage = () => {
                                     className="px-3 py-1.5 flex items-center gap-1.5 rounded-full text-[11px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-card-hover)] transition-all cursor-pointer"
                                 >
                                     <Sparkles size={12} className="text-violet-500 animate-pulse" />
-                                    <span>Upcoming Updates</span>
+                                    <span>Product Updates</span>
                                 </button>
 
                                 <button
@@ -794,7 +795,7 @@ const DashboardPage = () => {
                                 className="hover:text-[var(--dashboard-text)] transition-colors cursor-pointer flex items-center gap-1.5 opacity-80 hover:opacity-100"
                             >
                                 <Sparkles size={12} className="text-violet-500" />
-                                <span>Upcoming Updates</span>
+                                <span>Product Updates</span>
                             </button>
                         </div>
                         <div className="flex items-center gap-2">
@@ -812,44 +813,69 @@ const DashboardPage = () => {
                 maxWidth="max-w-md"
             >
                 <div className="p-1 text-left select-none">
-                    <div className="space-y-4">
-                        {/* Section 1: Templates Collection */}
-                        <div>
-                            <div className="flex items-center gap-1.5 mb-2">
-                                <span className="w-1 h-1 rounded-full bg-violet-500 animate-pulse" />
-                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-violet-500">1. New Templates</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-xl p-2 shadow-sm">
-                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
-                                    <Video size={13} className="text-violet-500 shrink-0" />
-                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">App Walkthroughs</span>
-                                </div>
-                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
-                                    <Play size={13} className="text-emerald-500 shrink-0" />
-                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">Product Demos</span>
-                                </div>
-                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
-                                    <Layers size={13} className="text-pink-500 shrink-0" />
-                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">TikTok & IG Ads</span>
-                                </div>
-                                <div className="flex items-center gap-2 p-1.5 hover:bg-[var(--dashboard-card-hover)]/30 rounded-lg transition-all duration-300">
-                                    <Rocket size={13} className="text-amber-500 shrink-0" />
-                                    <span className="text-[11.5px] font-bold text-[var(--dashboard-text)] truncate">Launch Videos</span>
-                                </div>
-                            </div>
-                        </div>
+                    {/* Tab Switcher */}
+                    <div className="flex border-b border-[var(--dashboard-border)] mb-4">
+                        <button
+                            onClick={() => setActiveUpdateTab('updates')}
+                            className={`flex-1 py-2 text-center text-[12px] font-bold border-b-2 transition-all ${
+                                activeUpdateTab === 'updates'
+                                    ? 'border-[var(--dashboard-accent)] text-[var(--dashboard-text)]'
+                                    : 'border-transparent text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
+                            }`}
+                        >
+                            Updates
+                        </button>
+                        <button
+                            onClick={() => setActiveUpdateTab('upcoming')}
+                            className={`flex-1 py-2 text-center text-[12px] font-bold border-b-2 transition-all ${
+                                activeUpdateTab === 'upcoming'
+                                    ? 'border-[var(--dashboard-accent)] text-[var(--dashboard-text)]'
+                                    : 'border-transparent text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
+                            }`}
+                        >
+                            Upcoming
+                        </button>
+                    </div>
 
-                        {/* Section 2: Motion Presentations */}
-                        <div>
-                            <div className="flex items-center gap-1.5 mb-2">
-                                <span className="w-1 h-1 rounded-full bg-pink-500 animate-pulse" />
-                                <span className="text-[10px] font-extrabold uppercase tracking-wider text-pink-500">2. Interactive Engine</span>
+                    {/* Content */}
+                    <div className="min-h-[180px] py-1">
+                        {activeUpdateTab === 'updates' ? (
+                            <ul className="space-y-3">
+                                <li className="flex items-start gap-2.5 text-[12.5px] font-semibold text-[var(--dashboard-text)]">
+                                    <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-500 mt-0.5 shrink-0">
+                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </span>
+                                    <span>transition between pages</span>
+                                </li>
+                                <li className="flex items-start gap-2.5 text-[12.5px] font-semibold text-[var(--dashboard-text)]">
+                                    <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-500 mt-0.5 shrink-0">
+                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </span>
+                                    <span>preset animation for text and all elements</span>
+                                </li>
+                            </ul>
+                        ) : (
+                            <div className="relative pl-4 border-l-2 border-[var(--dashboard-border)] ml-2 space-y-5 py-1">
+                                {[
+                                    "templates system",
+                                    "drag & drop ready motion videos for app walkthrough and launches",
+                                    "color gradient support",
+                                    "audio support",
+                                    "device mockups",
+                                    "presentation mode"
+                                ].map((item, idx) => (
+                                    <div key={idx} className="relative group">
+                                        {/* Dot on line */}
+                                        <div className="absolute -left-[21px] top-1.5 w-2 h-2 rounded-full bg-[var(--dashboard-accent)] border border-[var(--dashboard-bg)]" />
+                                        <p className="text-[12.5px] font-semibold text-[var(--dashboard-text)]">{item}</p>
+                                    </div>
+                                ))}
                             </div>
-                            <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-xl p-2.5 shadow-sm flex items-center gap-2.5 hover:bg-[var(--dashboard-card-hover)]/30 transition-all duration-300">
-                                <Presentation size={13} className="text-pink-500 shrink-0" />
-                                <span className="text-[11.5px] font-bold text-[var(--dashboard-text)]">Animated Presentation Mode</span>
-                            </div>
-                        </div>
+                        )}
                     </div>
 
                     <div className="mt-5 pt-3 border-t border-[var(--dashboard-border)] flex justify-end">
@@ -857,7 +883,7 @@ const DashboardPage = () => {
                             onClick={() => setIsUpdatesModalOpen(false)}
                             className="px-3.5 py-1.5 bg-[var(--dashboard-accent)] text-white rounded-lg text-[11px] font-bold shadow-md hover:opacity-90 transition-all cursor-pointer"
                         >
-                            Awesome
+                            Close
                         </button>
                     </div>
                 </div>

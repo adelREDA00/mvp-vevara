@@ -216,6 +216,66 @@ function getTextFontSize(text) {
   return '6px'
 }
 
+function getInheritedStepValues(motionFlow, editingStepId, selectedLayerId, previewLayer) {
+  const state = {
+    opacity: previewLayer?.opacity ?? 1,
+    blur: previewLayer?.blur ?? 0,
+    cornerRadius: previewLayer?.data?.cornerRadius ?? 0,
+    tiltX: previewLayer?.tiltX ?? 0,
+    tiltY: previewLayer?.tiltY ?? 0,
+    color: previewLayer?.data?.fill ?? previewLayer?.data?.color ?? null,
+  }
+
+  if (!motionFlow || !editingStepId || !selectedLayerId) return state
+
+  const editingStepIndex = motionFlow.findIndex(s => s.id === editingStepId)
+  if (editingStepIndex <= 0) return state
+
+  for (let i = 0; i < editingStepIndex; i++) {
+    const step = motionFlow[i]
+    const stepLayerActions = step.layerActions?.[selectedLayerId] || []
+    const stepPreset = step.layerPresets?.[selectedLayerId]
+
+    let resolvedActions = [...stepLayerActions]
+    if (stepPreset && PRESET_REGISTRY[stepPreset.id]) {
+      const presetActions = PRESET_REGISTRY[stepPreset.id].getActions(state, step.duration || 2000)
+      const customByType = new Map()
+      stepLayerActions.forEach(a => { if (a) customByType.set(a.type, a) })
+
+      const composedActions = presetActions.map(pAction => {
+        const custom = customByType.get(pAction.type)
+        if (!custom) return pAction
+        return {
+          ...pAction,
+          values: { ...pAction.values, ...custom.values }
+        }
+      })
+
+      const presetTypes = new Set(presetActions.map(p => p.type))
+      const remainingCustom = stepLayerActions.filter(a => !presetTypes.has(a.type))
+      resolvedActions = [...composedActions, ...remainingCustom]
+    }
+
+    resolvedActions.forEach(action => {
+      const v = action.values || {}
+      if (action.type === 'fade' && v.opacity !== undefined) {
+        state.opacity = v.opacity
+      } else if (action.type === 'blur' && v.blur !== undefined) {
+        state.blur = v.blur
+      } else if (action.type === 'cornerRadius' && v.cornerRadius !== undefined) {
+        state.cornerRadius = v.cornerRadius
+      } else if (action.type === 'tilt') {
+        if (v.tiltX !== undefined) state.tiltX = v.tiltX
+        if (v.tiltY !== undefined) state.tiltY = v.tiltY
+      } else if (action.type === 'colorChange' && v.color !== undefined) {
+        state.color = v.color
+      }
+    })
+  }
+
+  return state
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 function MotionPanel({
@@ -285,6 +345,19 @@ function MotionPanel({
 
   // Collapse any open inline settings row when the selected element changes
   useEffect(() => { setExpandedActionType(null) }, [selectedLayerId])
+
+  const scrollContainerRef = useRef(null)
+
+  useEffect(() => {
+    if (isMobile && (expandedFamilyKey || expandedActionType) && scrollContainerRef.current) {
+      setTimeout(() => {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth'
+        })
+      }, 120)
+    }
+  }, [expandedFamilyKey, expandedActionType, isMobile])
 
   // Canvas selection → go directly to element view
   useEffect(() => {
@@ -715,92 +788,155 @@ function MotionPanel({
     const previewLayer  = layers[layerId] || null
 
     // ── PRESETS TAB ───────────────────────────────────────────────────────────
-    const renderExpandedRow = (fam) => {
-      const currentMode = familyModes[fam.familyKey] || (activePresetType && activeFamilyKey === fam.familyKey ? activePresetType : 'IN')
-      const currentDir  = familyDirections[fam.familyKey] || (fam.hasDirections ? (fam.inIds[0]?.direction || null) : null)
-      const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+      const renderExpandedRow = (fam) => {
+        const currentMode = familyModes[fam.familyKey] || (activePresetType && activeFamilyKey === fam.familyKey ? activePresetType : 'IN')
+        const currentDir  = familyDirections[fam.familyKey] || (fam.hasDirections ? (fam.inIds[0]?.direction || null) : null)
+        const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
 
-      const selectModeAndApply = (newMode) => {
-        setFamilyModes(prev => ({ ...prev, [fam.familyKey]: newMode }))
-        const varList = newMode === 'OUT' ? fam.outIds : fam.inIds
-        const target  = fam.hasDirections ? (varList.find(v => v.direction === currentDir) || varList[0]) : varList[0]
-        if (target) applyPreset(target.id, newMode)
-      }
+        const selectModeAndApply = (newMode) => {
+          setFamilyModes(prev => ({ ...prev, [fam.familyKey]: newMode }))
+          const varList = newMode === 'OUT' ? fam.outIds : fam.inIds
+          const target  = fam.hasDirections ? (varList.find(v => v.direction === currentDir) || varList[0]) : varList[0]
+          if (target) applyPreset(target.id, newMode)
+        }
 
-      const selectDirAndApply = (dir) => {
-        setFamilyDirections(prev => ({ ...prev, [fam.familyKey]: dir }))
-        const target = variantList.find(v => v.direction === dir)
-        if (target) applyPreset(target.id, currentMode)
-      }
+        const selectDirAndApply = (dir) => {
+          setFamilyDirections(prev => ({ ...prev, [fam.familyKey]: dir }))
+          const target = variantList.find(v => v.direction === dir)
+          if (target) applyPreset(target.id, currentMode)
+        }
 
-      // Same height as a card row: aspect-[2/1] spans both columns at 2:1 ratio = square card height
-      const hasOut = fam.outIds.length > 0
-      return (
-        <div className={`w-full aspect-[2/1] flex flex-col items-start justify-center gap-3 px-3 mb-2.5 ${isLight ? 'bg-slate-50 border border-slate-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
-          {/* ON ENTER / ON EXIT toggle — hidden for families with no exit variant (e.g. Typewriter) */}
-          {hasOut && (
-          <div className={`flex w-full border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'}`}>
-            {[
-              { id: 'IN',  label: 'On Enter' },
-              { id: 'OUT', label: 'On Exit'  },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => selectModeAndApply(opt.id)}
-                className={`flex-1 py-2 text-[11px] font-bold tracking-wide transition-colors ${
-                  currentMode === opt.id
-                    ? 'bg-[#7c4af0] text-white'
-                    : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          )}
+        const hasOut = fam.outIds.length > 0
+        const isMobileRow = isMobile && (hasOut || fam.hasDirections)
 
-          {/* Direction arrows — only for directional families (Slide) */}
-          {fam.hasDirections && (
-            <div className="flex items-center gap-2">
-              {variantList.map(({ direction }) => {
-                const DirIcon  = getDirectionIcon(direction, currentMode)
-                if (!DirIcon) return null
-                const isSelDir = currentDir === direction
-                return (
-                  <button
-                    key={direction}
-                    onClick={() => selectDirAndApply(direction)}
-                    title={direction}
-                    className={`w-8 h-8 flex items-center justify-center border transition-all active:scale-95 ${
-                      isSelDir
-                        ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
-                        : (isLight
-                          ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
-                          : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
-                    }`}
-                  >
-                    <DirIcon className="h-3.5 w-3.5" strokeWidth={2} />
-                  </button>
-                )
-              })}
+        return (
+          <div className={`w-full flex ${
+            isMobileRow ? 'flex-row items-center justify-between gap-3 px-3 py-1.5 mb-1.5' : 'flex-col items-start justify-center gap-2 px-2.5 py-2.5 mb-2'
+          } ${
+            isMobile ? 'rounded-xl border border-black/5 dark:border-white/5' : 'aspect-[2/1]'
+          } ${isLight ? 'bg-slate-50 border border-slate-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
+            {/* ON ENTER / ON EXIT toggle */}
+            {hasOut && (
+            <div className={`flex border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'} rounded-lg overflow-hidden ${
+              isMobileRow ? (fam.hasDirections ? 'w-[130px]' : 'mx-auto w-[160px]') : 'w-full'
+            }`}>
+              {[
+                { id: 'IN',  label: 'On Enter' },
+                { id: 'OUT', label: 'On Exit'  },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => selectModeAndApply(opt.id)}
+                  className={`flex-1 ${isMobile ? 'py-1 text-[10px]' : 'py-2 text-[11px]'} font-bold tracking-wide transition-colors ${
+                    currentMode === opt.id
+                      ? 'bg-[#7c4af0] text-white'
+                      : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
-      )
-    }
+            )}
 
-    const renderPresetsTab = () => {
-      // Gate families by layer type: a family with `layerTypes` only shows for
-      // those types (e.g. Typewriter → TEXT only). Families without the field
-      // apply to every layer.
-      const availableFamilies = PRESET_FAMILIES.filter(
-        fam => !fam.layerTypes || fam.layerTypes.includes(layer.type)
-      )
+            {/* Direction arrows */}
+            {fam.hasDirections && (
+              <div className="flex items-center gap-1.5">
+                {variantList.map(({ direction }) => {
+                  const DirIcon  = getDirectionIcon(direction, currentMode)
+                  if (!DirIcon) return null
+                  const isSelDir = currentDir === direction
+                  return (
+                    <button
+                      key={direction}
+                      onClick={() => selectDirAndApply(direction)}
+                      title={direction}
+                      className={`${isMobile ? 'w-7 h-7' : 'w-8 h-8'} flex items-center justify-center border transition-all active:scale-95 rounded-md ${
+                        isSelDir
+                          ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
+                          : (isLight
+                            ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+                            : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
+                      }`}
+                    >
+                      <DirIcon className={`${isMobile ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5'}`} strokeWidth={2.5} />
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      const renderPresetsTab = () => {
+        const availableFamilies = PRESET_FAMILIES.filter(
+          fam => !fam.layerTypes || fam.layerTypes.includes(layer.type)
+        )
+
+        if (isMobile) {
+          return (
+            <div className="space-y-3">
+              <div className="flex flex-row gap-3 overflow-x-auto pb-3 px-1 scrollbar-none snap-x snap-mandatory">
+                {availableFamilies.map((fam) => {
+                  const isActiveFam = activeFamilyKey === fam.familyKey
+                  const isFamExpanded = expandedFamilyKey === fam.familyKey
+                  const famHasConfig = fam.hasDirections || fam.outIds.length > 0
+
+                  const currentMode = familyModes[fam.familyKey] || (activePresetType && isActiveFam ? activePresetType : 'IN')
+                  const currentDir  = familyDirections[fam.familyKey] || (
+                    isActiveFam && fam.hasDirections
+                      ? (fam.inIds.find(v => v.id === activePresetId)?.direction || fam.outIds.find(v => v.id === activePresetId)?.direction || fam.inIds[0]?.direction)
+                      : (fam.inIds[0]?.direction || null)
+                  )
+                  const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+                  const repVariant  = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
+                  const repPreset   = repVariant ? PRESET_REGISTRY[repVariant.id] : null
+                  if (!repPreset) return null
+
+                  const handleCardClick = () => {
+                    if (isActiveFam) {
+                      dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
+                      setExpandedFamilyKey(null)
+                    } else if (isFamExpanded) {
+                      setExpandedFamilyKey(null)
+                    } else {
+                      if (famHasConfig) setExpandedFamilyKey(fam.familyKey)
+                      const mode    = familyModes[fam.familyKey] || 'IN'
+                      const dir     = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
+                      const varList = mode === 'OUT' ? fam.outIds : fam.inIds
+                      const target  = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
+                      if (target) applyPreset(target.id, mode)
+                    }
+                  }
+
+                  return (
+                    <div key={fam.familyKey} className="snap-center shrink-0 w-[136px]">
+                      <PresetPreviewCard
+                        preset={repPreset}
+                        layer={previewLayer}
+                        isActive={isActiveFam}
+                        onClick={handleCardClick}
+                        isLight={isLight}
+                        isMobile={true}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              {expandedFamilyKey && (
+                <div className="px-1">
+                  {renderExpandedRow(availableFamilies.find(f => f.familyKey === expandedFamilyKey))}
+                </div>
+              )}
+            </div>
+          )
+        }
 
       // Split families into rows so we can inject the expanded row immediately after the
       // row that contains the selected family card. [MOBILE] Use 3 columns on mobile so
       // the preset cards are smaller; 2 columns on desktop.
-      const cols = isMobile ? 3 : 2
+      const cols = 2
       const rows = []
       for (let i = 0; i < availableFamilies.length; i += cols) {
         rows.push(availableFamilies.slice(i, i + cols))
@@ -818,7 +954,7 @@ function MotionPanel({
               <div key={rowIdx}>
                 {/* Card row — [MOBILE] 3 smaller columns, [DESKTOP] 2 columns.
                     [UPDATE #3] tighter on mobile, [UPDATE #4] more generous on desktop. */}
-                <div className={`grid px-0 ${isMobile ? 'grid-cols-3 gap-2 py-1.5' : 'grid-cols-2 gap-3 py-3'}`}>
+                <div className={`grid px-0 grid-cols-2 gap-3 py-3`}>
                   {rowFams.map((fam) => {
                     const isActiveFam = activeFamilyKey === fam.familyKey
 
@@ -910,9 +1046,10 @@ function MotionPanel({
       const trackCls = `${isLight ? 'bg-slate-200' : 'bg-white/10'} relative grow rounded-full h-1`
       const rangeCls = `absolute ${isLight ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`
       const thumbCls = `block w-3.5 h-3.5 rounded-full focus:outline-none cursor-pointer ${isLight ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md'}`
-      const wrap = (children) => (
-        <div className={`px-3 py-3 ${isLight ? 'bg-slate-50 border-t border-slate-100' : 'bg-black/30 border-t border-white/[0.05]'}`}>{children}</div>
-      )
+      const wrap = (children) => {
+        if (isMobile) return <div className="w-full">{children}</div>
+        return <div className={`px-3 py-3 ${isLight ? 'bg-slate-50 border-t border-slate-100' : 'bg-black/30 border-t border-white/[0.05]'}`}>{children}</div>
+      }
       const sliderRow = (label, valueLabel, sliderProps) => (
         <div className="flex items-center gap-3">
           <span className={`${labelCls} w-12`}>{label}</span>
@@ -924,22 +1061,24 @@ function MotionPanel({
         </div>
       )
 
+      const inherited = getInheritedStepValues(motionFlow, editingStepId, selectedLayerId, previewLayer)
+
       if (actionType === 'fade') {
-        const opacity = v.opacity ?? previewLayer?.opacity ?? 1
+        const opacity = v.opacity ?? inherited.opacity
         return wrap(sliderRow('Opacity', `${Math.round(opacity * 100)}%`, {
           min: 0, max: 100, step: 1, value: [Math.round(opacity * 100)],
           onValueChange: (val) => commit({ opacity: (val[0] ?? 0) / 100 }),
         }))
       }
       if (actionType === 'blur') {
-        const blur = v.blur ?? previewLayer?.blur ?? 0
+        const blur = v.blur ?? inherited.blur
         return wrap(sliderRow('Blur', `${Math.round(Math.min(BLUR_MAX, blur))}`, {
           min: 0, max: BLUR_MAX, step: 0.5, value: [Math.min(BLUR_MAX, blur)],
           onValueChange: (val) => commit({ blur: Math.max(0, Math.min(BLUR_MAX, val[0] ?? 0)) }),
         }))
       }
       if (actionType === 'cornerRadius') {
-        const radius = v.cornerRadius ?? previewLayer?.data?.cornerRadius ?? 0
+        const radius = v.cornerRadius ?? inherited.cornerRadius
         const maxR = Math.max(1, Math.min(200, Math.min(previewLayer?.width || 100, previewLayer?.height || 100) / 2))
         return wrap(sliderRow('Radius', `${Math.round(radius)}px`, {
           min: 0, max: maxR, step: 1, value: [Math.min(maxR, radius)],
@@ -947,8 +1086,8 @@ function MotionPanel({
         }))
       }
       if (actionType === 'tilt') {
-        const tiltX = v.tiltX ?? previewLayer?.tiltX ?? 0
-        const tiltY = v.tiltY ?? previewLayer?.tiltY ?? 0
+        const tiltX = v.tiltX ?? inherited.tiltX
+        const tiltY = v.tiltY ?? inherited.tiltY
         const T = 60
         const tiltRow = (label, value, key) => sliderRow(label, `${value.toFixed(1)}°`, {
           min: -T, max: T, step: 0.5, value: [value],
@@ -962,13 +1101,13 @@ function MotionPanel({
         )
       }
       if (actionType === 'colorChange') {
-        const current = v.color ?? getLayerColorHex()
+        const current = v.color ?? inherited.color ?? getLayerColorHex()
         const safeCurrent = /^#[0-9a-fA-F]{6}$/.test(String(current)) ? current : '#ffffff'
         return wrap(
           <div className="flex flex-col gap-2.5">
             <span className={labelCls}>Color</span>
             <div className="flex items-center gap-2 flex-wrap">
-              {COLOR_SWATCHES.map((c) => (
+              {COLOR_SWATCHES.slice(0, isMobile ? 6 : 8).map((c) => (
                 <button
                   key={c}
                   onClick={() => commit({ color: c })}
@@ -1052,24 +1191,94 @@ function MotionPanel({
     }
 
     const sectionLabelCls = `font-bold uppercase tracking-widest mb-1.5 px-1 ${isMobile ? 'text-[10px]' : 'text-[11px]'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`
-    const renderCustomTab = () => (
-      <div className="space-y-4">
-        <div>
-          <p className={sectionLabelCls}>Transform</p>
-          <div className={`overflow-hidden ${isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}`}>
-            {TRANSFORM_IDS.map(t => renderCustomActionRow(t))}
+    const renderCustomTab = () => {
+      if (isMobile) {
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-row gap-3 overflow-x-auto pb-3 px-1 scrollbar-none snap-x snap-mandatory">
+              {allowedActions.map((actionType) => {
+                const meta = getActionMeta(actionType)
+                if (!meta) return null
+                const Icon = meta.icon
+                const action = activeActions.find(a => a.type === actionType)
+                const isAct = !!action
+                const hasSettings = SETTINGS_ACTION_TYPES.includes(actionType)
+
+                const handleRowClick = () => {
+                  if (hasSettings) {
+                    setExpandedActionType(expandedActionType === actionType ? null : actionType)
+                  } else if (!isAct) {
+                    onAddAnimation?.(layerId, actionType)
+                  }
+                }
+
+                return (
+                  <div key={actionType} className="snap-center shrink-0 w-[136px]">
+                    <div
+                      onClick={handleRowClick}
+                      className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-200 relative ${
+                        isAct
+                          ? 'border-2 border-[#7c4af0] bg-[#7c4af0]/5 shadow-sm shadow-[#7c4af0]/15'
+                          : (isLight ? 'bg-slate-100 hover:bg-slate-200/85 border border-transparent' : 'bg-zinc-900/40 hover:bg-zinc-900/80 border border-white/[0.04]')
+                      }`}
+                    >
+                      <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
+                        <Icon className="h-6 w-6" strokeWidth={2} />
+                      </div>
+                      {isAct && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteAction(step.id, layerId, action.id, actionType)
+                            if (expandedActionType === actionType) {
+                              setExpandedActionType(null)
+                            }
+                          }}
+                          className={`absolute top-1.5 right-1.5 p-0.5 rounded-full transition-colors ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-slate-200' : 'text-zinc-500 hover:text-red-400 hover:bg-white/5'}`}
+                        >
+                          <X className="h-3 w-3" strokeWidth={2.5} />
+                        </button>
+                      )}
+                    </div>
+                    <span className={`block font-medium text-center transition-colors truncate max-w-full px-0.5 text-[8px] mt-1 ${
+                      isAct
+                        ? 'text-[#7c4af0]'
+                        : (isLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-400 hover:text-zinc-200')
+                    }`}>
+                      {meta.label}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            {expandedActionType && (
+              <div className="px-1">
+                {renderActionSettings(expandedActionType, activeActions.find(a => a.type === expandedActionType))}
+              </div>
+            )}
           </div>
-        </div>
-        {allowedActions.some(t => !TRANSFORM_IDS.includes(t)) && (
+        )
+      }
+
+      return (
+        <div className="space-y-4">
           <div>
-            <p className={sectionLabelCls}>Effects</p>
+            <p className={sectionLabelCls}>Transform</p>
             <div className={`overflow-hidden ${isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}`}>
-              {allowedActions.filter(t => !TRANSFORM_IDS.includes(t)).map(t => renderCustomActionRow(t))}
+              {TRANSFORM_IDS.map(t => renderCustomActionRow(t))}
             </div>
           </div>
-        )}
-      </div>
-    )
+          {allowedActions.some(t => !TRANSFORM_IDS.includes(t)) && (
+            <div>
+              <p className={sectionLabelCls}>Effects</p>
+              <div className={`overflow-hidden ${isLight ? 'divide-y divide-slate-100' : 'divide-y divide-white/[0.04]'}`}>
+                {allowedActions.filter(t => !TRANSFORM_IDS.includes(t)).map(t => renderCustomActionRow(t))}
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
 
     const presetBadge = (activePresetInfo ? 1 : 0)
     const customBadge = activeActions.length
@@ -1100,7 +1309,7 @@ function MotionPanel({
         </div>
 
         {/* Tab content */}
-        <div className="flex-1 overflow-y-auto p-3 min-h-0">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-3 min-h-0">
           {effectiveTab === 'presets' && renderPresetsTab()}
           {effectiveTab === 'custom'  && renderCustomTab()}
         </div>
@@ -1129,9 +1338,9 @@ function MotionPanel({
         className={`fixed z-[61] flex flex-col shadow-2xl transition-all duration-300 ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in' : 'inset-y-0 right-0 border-l'}`}
         style={{
           top: isMobile ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
-          height: isMobile ? '48vh' : 'auto',
-          minHeight: isMobile ? '300px' : 'auto',
-          maxHeight: isMobile ? '60vh' : 'auto',
+          height: isMobile ? '36vh' : 'auto',
+          minHeight: isMobile ? '230px' : 'auto',
+          maxHeight: isMobile ? '48vh' : 'auto',
           width: isMobile ? '100vw' : `${PANEL_WIDTH}px`,
           backgroundColor: isLight ? '#ffffff' : '#090a0f',
           borderColor: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)',
