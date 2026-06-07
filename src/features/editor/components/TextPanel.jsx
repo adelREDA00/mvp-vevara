@@ -9,7 +9,6 @@ function TextPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
   const [searchQuery, setSearchQuery] = useState('')
-  const [width, setWidth] = useState(320)
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
 
@@ -147,14 +146,13 @@ function TextPanel({ onClose, aspectRatio }) {
     <div
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
-        width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : `${width}px`,
+        width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
         backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : 'blur(20px)',
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
 
       <div className={`hidden lg:block px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="flex items-center justify-between mb-4">
@@ -168,7 +166,7 @@ function TextPanel({ onClose, aspectRatio }) {
             </button>
           )}
         </div>
-
+        {/* 
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
           <input
@@ -182,7 +180,7 @@ function TextPanel({ onClose, aspectRatio }) {
                     : 'bg-white/5 border-white/10 text-white placeholder-zinc-600 focus:border-white/20 focus:ring-white/20'
             }`}
           />
-        </div>
+        </div> */}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
@@ -191,25 +189,24 @@ function TextPanel({ onClose, aspectRatio }) {
             <button
               key={element.id}
               onClick={element.onClick}
-              className={`w-full text-left px-5 py-6 rounded-[16px] transition-all duration-300 border group shadow-sm active:scale-[0.98] ${
-                  isLight 
-                      ? 'bg-gray-50/50 hover:bg-gray-100 border-gray-200 hover:border-gray-300' 
-                      : 'hover:bg-white/5 border-white/5 hover:border-white/10'
-              }`}
+              className={`w-full text-left px-5 py-6 rounded-[16px] transition-all duration-300 border group shadow-sm active:scale-[0.98] ${isLight
+                  ? 'bg-gray-50/50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
+                  : 'hover:bg-white/5 border-white/5 hover:border-white/10'
+                }`}
             >
               <div className="flex flex-col gap-2">
                 <span className={`text-[10px] uppercase font-bold tracking-widest transition-colors ${isLight ? 'text-gray-500 group-hover:text-gray-700' : 'text-white/40 group-hover:text-white/60'}`}>{element.name}</span>
                 <span
                   className={isLight ? 'text-gray-900' : 'text-white'}
                   style={{
-                    fontSize: element.id === 'title' ? '28px' : 
-                             element.id === 'cartoon' ? '32px' :
-                             element.id === 'premium' ? '24px' :
-                             element.id === 'poster' ? '28px' :
-                             element.id === 'retro' ? '14px' :
-                             element.id === 'subtitle' ? '20px' : '16px',
-                    fontWeight: element.id === 'title' ? '700' : 
-                               element.id === 'subtitle' ? '600' : '500',
+                    fontSize: element.id === 'title' ? '28px' :
+                      element.id === 'cartoon' ? '32px' :
+                        element.id === 'premium' ? '24px' :
+                          element.id === 'poster' ? '28px' :
+                            element.id === 'retro' ? '14px' :
+                              element.id === 'subtitle' ? '20px' : '16px',
+                    fontWeight: element.id === 'title' ? '700' :
+                      element.id === 'subtitle' ? '600' : '500',
                     lineHeight: '1.2',
                     fontFamily: 'Inter'
                   }}

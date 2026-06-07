@@ -1,5 +1,5 @@
 import { useContext } from 'react'
-import { Play, Pause, Scissors, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { Play, Pause, Scissors, Loader2, Pencil, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 
 function PlaybackControls({
@@ -14,6 +14,8 @@ function PlaybackControls({
   onDeleteStep,
   isMotionCaptureActive = false,
   shiftLeft = false,
+  onZoomIn,
+  onZoomOut,
 }) {
   const { theme } = useContext(ThemeContext)
   const formatTime = (seconds) => {
@@ -109,6 +111,43 @@ function PlaybackControls({
                 Delete step
               </span>
             )}
+          </button>
+        </div>
+      )}
+
+      {/* Right controls: Zoom Out + Zoom In (Mobile only) */}
+      {!isMotionCaptureActive && (
+        <div className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 z-20 flex lg:hidden items-center gap-0.5">
+          {/* Timeline Zoom Out (Mobile only) */}
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (onZoomOut) onZoomOut()
+            }}
+            className={`p-1.5 rounded-md transition-all ${theme === 'light' 
+              ? 'hover:bg-gray-200 text-gray-400 hover:text-gray-700' 
+              : 'hover:bg-white/8 active:bg-white/15 text-white/40 hover:text-white/80'}`}
+            title="Zoom out timeline"
+            type="button"
+          >
+            <ZoomOut className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          </button>
+
+          {/* Timeline Zoom In (Mobile only) */}
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (onZoomIn) onZoomIn()
+            }}
+            className={`p-1.5 rounded-md transition-all ${theme === 'light' 
+              ? 'hover:bg-gray-200 text-gray-400 hover:text-gray-700' 
+              : 'hover:bg-white/8 active:bg-white/15 text-white/40 hover:text-white/80'}`}
+            title="Zoom in timeline"
+            type="button"
+          >
+            <ZoomIn className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </button>
         </div>
       )}

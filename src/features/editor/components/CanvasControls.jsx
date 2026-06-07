@@ -7,7 +7,7 @@ import {
   Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
   Plus, Rotate3d, Check, Eye, EyeOff, Waves,
   AlignLeft, AlignCenter, AlignRight, RotateCcw,
-  ArrowLeftRight, ArrowUpDown
+  ArrowLeftRight, ArrowUpDown, Undo2, Redo2
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -16,6 +16,7 @@ import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import { useSelector, useDispatch } from 'react-redux'
 import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
+import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
 
 const DEFAULT_COLORS = [
   '#6367FF', '#8494FF', '#C9BEFF', '#FFDBFD', '#ffffff',
@@ -83,11 +84,15 @@ function CanvasControls({
   onSubmenuChange,
   showStarterHint = false,
   starterHintText = '',
-  onHideStarterHint
+  onHideStarterHint,
+  onUndo,
+  onRedo
 }) {
   const { theme } = useContext(ThemeContext)
   const dispatch = useDispatch()
   const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
+  const canUndo = useSelector(selectCanUndo)
+  const canRedo = useSelector(selectCanRedo)
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)
@@ -364,6 +369,38 @@ function CanvasControls({
   // always anchored to the right edge and never pushed by the scrollable left.
   const renderMotionControls = () => (
     <div className="flex items-center gap-1 flex-shrink-0">
+      {/* Undo / Redo in Motion Capture Mode */}
+      {isMotionCaptureActive && (
+        <div className="flex items-center gap-0.5 mr-2 pr-2 border-r border-black/10 dark:border-white/10">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
+              theme === 'light'
+                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
+                : 'text-white hover:bg-white/10 active:bg-white/20'
+            }`}
+            title="Undo (Ctrl+Z)"
+            type="button"
+          >
+            <Undo2 className="h-4 w-4" strokeWidth={2} />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
+              theme === 'light'
+                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
+                : 'text-white hover:bg-white/10 active:bg-white/20'
+            }`}
+            title="Redo (Ctrl+Shift+Z)"
+            type="button"
+          >
+            <Redo2 className="h-4 w-4" strokeWidth={2} />
+          </button>
+        </div>
+      )}
+
       {/* Cancel — only visible in capture mode */}
       {isMotionCaptureActive && (
         <button

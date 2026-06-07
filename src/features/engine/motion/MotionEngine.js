@@ -128,7 +128,7 @@ export class MotionEngine {
   refreshFlows() {
     // 1. Gather all potential obstacles (non-text layers in the current screen)
     const obstacles = []
-    
+
     // [AUTOMATIC BOUNDARY DETECTION] Use the background layer to find true project dimensions
     // fallback to standard 1080p if background not yet registered.
     let screenWidth = 1920
@@ -145,41 +145,41 @@ export class MotionEngine {
     this.registeredObjects.forEach((obj, id) => {
       // Skip destroyed objects or those without bounds
       if (!obj || obj.destroyed || !obj.getBounds) return
-      
+
       // [LIQUID FLOW] Only wrap around Shapes, Images, and Frames.
       const isText = obj.isFlowText || obj instanceof PIXI.Text
       const isBackground = obj.isBackground === true || obj.label?.toLowerCase().includes('background')
       const isMask = obj.isMask === true || obj.label?.toLowerCase().includes('mask') || obj.isMasking === true
-      
+
       // Skip the source container (to avoid text wrapping around itself)
       if (obj.isFlowText) return
-      
+
       // [FILTER] Filter out environment layers (backgrounds, global masks)
       if (isBackground || isMask) return
 
       const bounds = obj.getBounds()
-      
+
       // Hybrid Occupancy Filter: Skip layers that cover >95% of the screen
       if (screenWidth > 0 && screenHeight > 0) {
         const occupancyX = bounds.width / screenWidth
         const occupancyY = bounds.height / screenHeight
-        
+
         if (occupancyX > 0.95 && occupancyY > 0.95) {
-           return
+          return
         }
 
         // [POLYGON WRAP FIX] Harvest exact geometric path for perfect hugging
         let localPath = obj._storedShapeData?.shapePath
         if (!localPath && obj._storedShapeData?.shapeType !== 'circle' && obj.shapeType !== 'circle') {
-           const lb = obj.getLocalBounds()
-           localPath = [
-             {x: lb.x, y: lb.y},
-             {x: lb.x + lb.width, y: lb.y},
-             {x: lb.x + lb.width, y: lb.y + lb.height},
-             {x: lb.x, y: lb.y + lb.height}
-           ]
+          const lb = obj.getLocalBounds()
+          localPath = [
+            { x: lb.x, y: lb.y },
+            { x: lb.x + lb.width, y: lb.y },
+            { x: lb.x + lb.width, y: lb.y + lb.height },
+            { x: lb.x, y: lb.y + lb.height }
+          ]
         }
-        
+
         // Convert to absolute world space
         const worldPath = localPath ? localPath.map(p => obj.worldTransform.apply(p)) : null
 
@@ -264,14 +264,14 @@ export class MotionEngine {
     if (!pixiObject || pixiObject.destroyed || pixiObject._hasGSAPProperties) return
 
     const properties = [
-      'cropX', 'cropY', 'cropWidth', 'cropHeight', 
-      'mediaWidth', 'mediaHeight', 'showingFront', 
+      'cropX', 'cropY', 'cropWidth', 'cropHeight',
+      'mediaWidth', 'mediaHeight', 'showingFront',
       'cornerRadius', 'blur'
     ]
 
     properties.forEach(prop => {
       const privateProp = `_${prop}`
-      
+
       // Initialize private storage if not already there (prefixed with _)
       if (pixiObject[privateProp] === undefined) {
         let defaultValue = 0
@@ -281,7 +281,7 @@ export class MotionEngine {
         if (prop === 'mediaHeight') defaultValue = pixiObject._originalHeight || pixiObject.height || 100
         if (prop === 'showingFront') defaultValue = true // Default to showing front
         if (prop === 'blur') defaultValue = -1 // Use -1 as sentinel so setter always fires for 0!
-        
+
         pixiObject[privateProp] = defaultValue
       }
 
@@ -296,7 +296,7 @@ export class MotionEngine {
               if (this._updateCropVisuals) {
                 this._updateCropVisuals()
               }
-              
+
               if (this._applyAnimatedCornerRadius) {
                 this._applyAnimatedCornerRadius()
               }
@@ -313,13 +313,13 @@ export class MotionEngine {
                 markTiltTextureDirty(this)
                 syncTiltMesh(this, null)
               }
-              
+
               // Special case for card frames - toggle visibility when showingFront changes
               if (prop === 'showingFront' && this._isCardFrame) {
                 const isShowing = val !== false
                 if (this._imageSprite) this._imageSprite.visible = isShowing && !!this._frameHasAsset
                 if (this._backSprite) this._backSprite.visible = !isShowing && !!this._frameHasBackAsset
-                
+
                 // Update placeholder if no asset
                 const activeHasAsset = isShowing ? this._frameHasAsset : this._frameHasBackAsset
                 if (this._framePlaceholder) {
@@ -327,7 +327,7 @@ export class MotionEngine {
                   if (!isDropTarget) {
                     this._framePlaceholder.visible = !activeHasAsset
                   }
-                  
+
                   // [UX] Update placeholder label for empty card frames
                   if (!activeHasAsset && this._frameLabel) {
                     const customLabel = (this._frameData?.label || '').trim()
@@ -363,7 +363,7 @@ export class MotionEngine {
     const obj = this.registeredObjects.get(layerId)
     if (obj) {
       if (obj._videoElement) {
-        
+
         // [SCENE CUT FIX] Explicitly check if this video element is still being used 
         // by another registered layer before pausing it. If it's shared (e.g. split segments),
         // let the other layer manage its playback and muted state to avoid audio glitches.
@@ -379,7 +379,7 @@ export class MotionEngine {
             obj._videoElement.pause()
             obj._videoElement.muted = true
             this._activeVideoElements.delete(obj._videoElement)
-          } catch (e) {}
+          } catch (e) { }
         }
 
         this._videoObjects.delete(layerId)
@@ -1161,7 +1161,6 @@ export class MotionEngine {
     parentContainer.addChild(this.transitionContainer)
 
     this.transitionRanges = []
-    console.log('[Bug 2 Debug] Transition overlay container mounted/re-initialized')
 
     // Build transitions for each scene boundary
     timelineInfo.forEach((sceneInfo, index) => {
@@ -1171,8 +1170,6 @@ export class MotionEngine {
       if (!transitionType || transitionType === 'None') return
 
       const T = sceneInfo.startTime // Boundary time in seconds
-
-      console.log(`[Bug 2 Debug] Mounting transition: Type = ${transitionType}, BoundaryTime = ${T}s`)
 
       if (transitionType === 'Fade') {
         const parseColor = (col) => {
@@ -1206,18 +1203,18 @@ export class MotionEngine {
         this.masterTimeline.set(fadeOverlay, { visible: true }, T - 0.4)
 
         // Add to GSAP masterTimeline using fromTo with immediateRender: false to avoid dynamic start capture issues
-        this.masterTimeline.fromTo(fadeOverlay, 
-          { alpha: 0 }, 
-          { alpha: 1, duration: 0.4, ease: 'power1.in', immediateRender: false }, 
+        this.masterTimeline.fromTo(fadeOverlay,
+          { alpha: 0 },
+          { alpha: 1, duration: 0.4, ease: 'power1.in', immediateRender: false },
           T - 0.4
         )
-        this.masterTimeline.fromTo(fadeOverlay, 
-          { alpha: 1 }, 
-          { alpha: 0, duration: 0.4, ease: 'power1.out', immediateRender: false }, 
+        this.masterTimeline.fromTo(fadeOverlay,
+          { alpha: 1 },
+          { alpha: 0, duration: 0.4, ease: 'power1.out', immediateRender: false },
           T
         )
         this.masterTimeline.set(fadeOverlay, { alpha: 0, visible: false }, T + 0.4)
-      } 
+      }
       else if (transitionType === 'LiquidShapes') {
         const liquidContainer = new PIXI.Container()
         liquidContainer.visible = false
@@ -1255,10 +1252,10 @@ export class MotionEngine {
           rect.clear()
           rect.rect(0, 0, width, height)
           rect.fill({ color: colors[i] ?? parseColor(defaultPalette[i]) })
-          
+
           let startProps = { x: width, y: 0 }
           let endProps = { x: -width, y: 0 }
-          
+
           if (direction === 'right') {
             startProps = { x: -width, y: 0 }
             endProps = { x: width, y: 0 }
@@ -1269,19 +1266,19 @@ export class MotionEngine {
             startProps = { x: 0, y: -height }
             endProps = { x: 0, y: height }
           }
-          
+
           rect.x = startProps.x
           rect.y = startProps.y
-          
+
           liquidContainer.addChild(rect)
           rects.push(rect)
 
           const startOffset = -0.5 + i * 0.05
           const endOffset = 0.35 + i * 0.05
 
-          this.masterTimeline.fromTo(rect, 
+          this.masterTimeline.fromTo(rect,
             startProps,
-            { ...endProps, duration: 0.9, ease: 'power2.inOut', immediateRender: false }, 
+            { ...endProps, duration: 0.9, ease: 'power2.inOut', immediateRender: false },
             T + startOffset
           )
 
@@ -1314,7 +1311,7 @@ export class MotionEngine {
         const direction = sceneInfo.transitionDirection || 'bottom-left'
         const width = this.projectWidth
         const height = this.projectHeight
-        
+
         const maxRadius = Math.sqrt(width * width + height * height) * 0.8
         const circles = []
 
@@ -1331,9 +1328,9 @@ export class MotionEngine {
           circle.clear()
           circle.circle(0, 0, maxRadius)
           circle.fill({ color: colors[i] ?? parseColor(defaultPalette[i]) })
-          
+
           let startX, startY, exitX, exitY, midX, midY
-          
+
           if (direction === 'bottom-right') {
             startX = -maxRadius
             startY = -maxRadius
@@ -1364,13 +1361,13 @@ export class MotionEngine {
             midX = width * (0.7 - i * 0.08)
             midY = height * (0.6 + i * 0.08)
           }
-          
+
           circle.x = startX
           circle.y = startY
-          
+
           // Instrument for debugging transition state desync
           circle._debugInfo = { index: i, startX, startY, midX, midY, exitX, exitY }
-          
+
           liquidContainer.addChild(circle)
           circles.push(circle)
 
@@ -1389,8 +1386,8 @@ export class MotionEngine {
               immediateRender: false,
               keyframes: [
                 { x: startX, y: startY, duration: 0 },
-                { x: midX,   y: midY,   duration: 0.6, ease: 'power2.in'  },
-                { x: exitX,  y: exitY,  duration: 0.6, ease: 'power2.out' },
+                { x: midX, y: midY, duration: 0.6, ease: 'power2.in' },
+                { x: exitX, y: exitY, duration: 0.6, ease: 'power2.out' },
               ],
             },
             T + startOffset
@@ -1414,7 +1411,6 @@ export class MotionEngine {
 
   clearTransitions() {
     if (this.transitionContainer) {
-      console.log('[Bug 2 Debug] Transition overlay container unmounting')
       try {
         if (!this.transitionContainer.destroyed && this.transitionContainer.parent) {
           this.transitionContainer.parent.removeChild(this.transitionContainer)
@@ -1501,7 +1497,7 @@ export class MotionEngine {
         const startTime = range.startTime
         const endTime = range.endTime
         const inRange = currentTime >= startTime - 0.001 && currentTime < endTime
-        
+
 
 
         if (inRange) {
@@ -1660,11 +1656,11 @@ export class MotionEngine {
               if (err.name === 'NotAllowedError') {
                 console.warn(`[MotionEngine] Autoplay blocked for ${intent.layerId}. Falling back to muted.`)
                 videoElement.muted = true
-                videoElement.play().catch(() => {}) // Try again muted
+                videoElement.play().catch(() => { }) // Try again muted
               }
             })
           } else {
-             videoElement._playPending = false
+            videoElement._playPending = false
           }
         }
         const shouldMute = intent.layerMuted !== false
@@ -1879,8 +1875,8 @@ export class MotionEngine {
    * Use for programmatic seeks (scene clicks, step navigation, etc).
    */
   seek(time, options = {}) {
-    // Minimal log on programmatic seek
-    console.log(`[Bug 1 Debug] Programmatic seek to time: ${time.toFixed(3)}s`)
+
+
     // NOTE: `options.force` is now implicit — seek() always forces a re-render
     // (see the [BASE STATE FIX] note below). The param is kept for call-site compat.
     this._muteVideosForFastPreview = false
@@ -1990,9 +1986,7 @@ export class MotionEngine {
    * This makes scrubbing smooth with multiple video layers on mobile/low-end.
    */
   scrub(time) {
-    if (!this._isScrubbing) {
-      console.log(`[Bug 1 Debug] Drag scrub started at time: ${time.toFixed(3)}s`)
-    }
+
     this._lastInteractionTime = Date.now()
     this._isScrubbing = true
 
@@ -2111,7 +2105,7 @@ export class MotionEngine {
 
       if (activeStepId !== this._lastStepId) {
         if (activeStepId) {
-          console.log(`[Bug 1 Debug] Scrubbed to step: ${activeStepId} at time: ${time.toFixed(3)}s (Range: ${activeStep.startTime.toFixed(3)}s - ${activeStep.endTime.toFixed(3)}s)`)
+
           const layersInfo = []
           this.registeredObjects.forEach((obj, id) => {
             if (obj && !obj.destroyed) {
@@ -2121,9 +2115,6 @@ export class MotionEngine {
               layersInfo.push(`  Layer ID: ${id} -> x: ${obj.x.toFixed(2)}, y: ${obj.y.toFixed(2)}, scaleX: ${obj.scale?.x.toFixed(2)}, scaleY: ${obj.scale?.y.toFixed(2)}, alpha: ${reportedAlpha.toFixed(2)}${obj._tiltHidden ? ' (tilted)' : ''}`)
             }
           })
-          console.log(`[Bug 1 Debug] Layer positions:\n` + (layersInfo.length > 0 ? layersInfo.join('\n') : '  No registered layers'))
-        } else {
-          console.log(`[Bug 1 Debug] Scrubbed out of step boundaries at time: ${time.toFixed(3)}s`)
         }
         this._lastStepId = activeStepId
       }
@@ -2140,13 +2131,13 @@ export class MotionEngine {
           const lines = []
           const indent = '  '.repeat(depth)
           const label = container.label || container.constructor.name || 'PIXI Object'
-          
+
           let debugStr = ''
           if (container._debugInfo) {
             const di = container._debugInfo
             debugStr = ` [Bubble ${di.index}: start(${di.startX.toFixed(0)}, ${di.startY.toFixed(0)}) -> mid(${di.midX.toFixed(0)}, ${di.midY.toFixed(0)}) -> exit(${di.exitX.toFixed(0)}, ${di.exitY.toFixed(0)})]`
           }
-          
+
           lines.push(`${indent}${label} (visible: ${container.visible}, alpha: ${container.alpha.toFixed(2)}, x: ${container.x.toFixed(2)}, y: ${container.y.toFixed(2)})${debugStr}`)
           if (container.children && container.children.length > 0) {
             container.children.forEach(child => {
@@ -2157,18 +2148,12 @@ export class MotionEngine {
         }
 
         if (activeTransitionType) {
-          console.log(`[Bug 2 Debug] Transition lifecycle state: Entered (${activeTransitionType}) at time: ${time.toFixed(3)}s (Range: ${activeTransition.startTime.toFixed(3)}s - ${activeTransition.endTime.toFixed(3)}s)`)
           if (this.transitionContainer) {
             const childLogs = printTransitionContainerChildren(this.transitionContainer)
-            console.log(`[Bug 2 Debug] Transition Container Children:\n` + childLogs.join('\n'))
-          } else {
-            console.log(`[Bug 2 Debug] Transition Container: null`)
           }
         } else {
-          console.log(`[Bug 2 Debug] Transition lifecycle state: Exited at time: ${time.toFixed(3)}s`)
           if (this.transitionContainer) {
             const childLogs = printTransitionContainerChildren(this.transitionContainer)
-            console.log(`[Bug 2 Debug] Transition Container Children (after exit):\n` + childLogs.join('\n'))
           }
         }
         this._lastTransitionState = activeTransitionType

@@ -99,6 +99,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
   // REFS AND STATE MANAGEMENT
   // =============================================================================
   const dragStartRef = useRef(null)
+  const shiftLockAxisRef = useRef(null) // 'x' or 'y' or null
   const initialPositionsRef = useRef(new Map()) // Map of layerId -> initial { x, y } position
   const dragOffsetsRef = useRef(new Map()) // Map of layerId -> offset from drag start position for multi-select
   const multiSelectBoundsCenterRef = useRef(null) // Original bounding box center at drag start for multi-select
@@ -2498,7 +2499,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // This ensures the path is always drawn relative to the "start" of the scene.
     // [DRAG-SYNC FIX] Exception: when actively interacting (dragging, resizing, rotating), use the PIXI
     // object's live properties minus animOffset so the path origin follows the interaction smoothly.
-    const isInteractingNow = !currentMotionCaptureMode?.isActive && (dragStateAPI.isLayerDragging(layerId) || layerObject._isInteracting)
+    const isInteractingNow = !currentMotionCaptureMode?.isActive && dragStateAPI.isLayerDragging(layerId)
     
     let currentState = {
       x: layer.x || 0,
@@ -3490,9 +3491,30 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         }
 
         // Calculate the new bounding box center based on mouse movement
+        const isShiftPressed = !!(origMoveEvent?.shiftKey)
         const { dragScale } = getViewportScale()
-        const dragDeltaX = (screenPos.x - dragStartRef.current.x) * dragScale
-        const dragDeltaY = (screenPos.y - dragStartRef.current.y) * dragScale
+        let dragDeltaX = (screenPos.x - dragStartRef.current.x) * dragScale
+        let dragDeltaY = (screenPos.y - dragStartRef.current.y) * dragScale
+
+        if (isShiftPressed) {
+          if (!shiftLockAxisRef.current) {
+            if (Math.abs(dragDeltaX) > 2 || Math.abs(dragDeltaY) > 2) {
+              if (Math.abs(dragDeltaX) >= Math.abs(dragDeltaY)) {
+                shiftLockAxisRef.current = 'x'
+              } else {
+                shiftLockAxisRef.current = 'y'
+              }
+            }
+          }
+          if (shiftLockAxisRef.current === 'x') {
+            dragDeltaY = 0
+          } else if (shiftLockAxisRef.current === 'y') {
+            dragDeltaX = 0
+          }
+        } else {
+          shiftLockAxisRef.current = null
+        }
+
         const newBoundsCenterX = originalBoundsCenter.x + dragDeltaX
         const newBoundsCenterY = originalBoundsCenter.y + dragDeltaY
 
@@ -3581,6 +3603,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         } else {
           hideSpacingGuides()
           hideAlignmentGuides()
+        }
+
+        if (isShiftPressed) {
+          if (shiftLockAxisRef.current === 'x') {
+            snappedCenterY = newBoundsCenterY
+            centerSnapResult.showHGuide = false
+          } else if (shiftLockAxisRef.current === 'y') {
+            snappedCenterX = newBoundsCenterX
+            centerSnapResult.showVGuide = false
+          }
         }
 
         // Update layers and selection box
@@ -3801,11 +3833,34 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       // Calculate new position - scale by inverse zoom level for proper drag speed
+      const isShiftPressed = !!(origMoveEvent?.shiftKey)
       const { dragScale } = getViewportScale()
-
       const initialPos = initialPositionsRef.current.get(selectedLayerId)
-      let newX = initialPos ? initialPos.x + (screenPos.x - dragStartRef.current.x) * dragScale : screenPos.x
-      let newY = initialPos ? initialPos.y + (screenPos.y - dragStartRef.current.y) * dragScale : screenPos.y
+
+      let dragDeltaX = initialPos ? (screenPos.x - dragStartRef.current.x) * dragScale : 0
+      let dragDeltaY = initialPos ? (screenPos.y - dragStartRef.current.y) * dragScale : 0
+
+      if (isShiftPressed) {
+        if (!shiftLockAxisRef.current) {
+          if (Math.abs(dragDeltaX) > 2 || Math.abs(dragDeltaY) > 2) {
+            if (Math.abs(dragDeltaX) >= Math.abs(dragDeltaY)) {
+              shiftLockAxisRef.current = 'x'
+            } else {
+              shiftLockAxisRef.current = 'y'
+            }
+          }
+        }
+        if (shiftLockAxisRef.current === 'x') {
+          dragDeltaY = 0
+        } else if (shiftLockAxisRef.current === 'y') {
+          dragDeltaX = 0
+        }
+      } else {
+        shiftLockAxisRef.current = null
+      }
+
+      let newX = initialPos ? initialPos.x + dragDeltaX : screenPos.x
+      let newY = initialPos ? initialPos.y + dragDeltaY : screenPos.y
 
       const layerObject = layerObjectsMap.get(selectedLayerId)
 
@@ -3938,6 +3993,28 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         newX = snapResult.x
         newY = snapResult.y
+
+        if (isShiftPressed) {
+          if (shiftLockAxisRef.current === 'x') {
+            newY = originalY
+            snapResult.showHGuide = false
+            if (snapResult.spacingGuides) {
+              snapResult.spacingGuides = snapResult.spacingGuides.filter(g => g.type !== 'vertical')
+            }
+            if (snapResult.alignmentGuides) {
+              snapResult.alignmentGuides = snapResult.alignmentGuides.filter(g => g.isVertical)
+            }
+          } else if (shiftLockAxisRef.current === 'y') {
+            newX = originalX
+            snapResult.showVGuide = false
+            if (snapResult.spacingGuides) {
+              snapResult.spacingGuides = snapResult.spacingGuides.filter(g => g.type !== 'horizontal')
+            }
+            if (snapResult.alignmentGuides) {
+              snapResult.alignmentGuides = snapResult.alignmentGuides.filter(g => !g.isVertical)
+            }
+          }
+        }
 
         // Update guides - Moved OUTSIDE shouldRunSnapping to ensure consistency during throttled frames
         if (snapResult.spacingGuides && snapResult.spacingGuides.length > 0) {
@@ -4385,6 +4462,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       dragStateAPI.setDragState(false)
       pointerIsDownRef.current = false
       dragStartRef.current = null
+      shiftLockAxisRef.current = null
       initialPositionsRef.current.clear()
       dragOffsetsRef.current.clear()
       multiSelectBoundsCenterRef.current = null

@@ -13,7 +13,7 @@ import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setS
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
 import { exportVideo, initFFmpeg } from '../utils/videoExport'
-import { Loader2, ChevronDown, User } from 'lucide-react'
+import { Loader2, ChevronDown, User, ZoomIn, ZoomOut } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import TopToolbar from '../components/TopToolbar'
@@ -86,6 +86,7 @@ function EditorPage() {
   const projectVersion = useSelector(selectProjectVersion)
   const isSavingRedux = useSelector(selectIsSavingRedux)
   const [isSaving, setIsSaving] = useState(false)
+  const timelineControlRef = useRef(null)
   const [isNavigating, setIsNavigating] = useState(false)
   const editingStepActionCount = useSelector(selectEditingStepActionCount)
   const aspectRatio = useSelector(selectAspectRatio)
@@ -121,6 +122,7 @@ function EditorPage() {
   const [lastSaved, setLastSaved] = useState(Date.now())
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
+  const currentSidebarWidth = typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth
   const [showPasteboard, setShowPasteboard] = useState(isAuthenticated)
 
   // Set default pasteboard visibility based on auth status
@@ -128,6 +130,7 @@ function EditorPage() {
     setShowPasteboard(isAuthenticated)
   }, [isAuthenticated])
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
+  const isMotionCaptureActive = !!motionCaptureMode?.isActive
   const [motionControls, setMotionControls] = useState(null)
   const hasInitializedScene = useRef(false)
   const stageRef = useRef(null)
@@ -145,6 +148,48 @@ function EditorPage() {
 
   // Calculate world dimensions
   const { worldWidth, worldHeight } = useWorldDimensions(aspectRatio)
+
+  // Editor Sidebar controls
+  const {
+    activeSidebarItem,
+    setActiveSidebarItem,
+    handleSidebarItemClick,
+    handleClosePanel,
+  } = useEditorSidebar()
+
+  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
+  const [requestOpenControl, setRequestOpenControl] = useState(null)
+
+  const {
+    playheadTime,
+    setPlayheadTime,
+    playheadTimeRef,
+    isPlaying,
+    setIsPlaying,
+    segments,
+    totalTime,
+    formatTime,
+    handleAddSegment,
+    handleUpdateSegment,
+    handleDeleteSegment,
+    handleDuplicateSegment,
+    handleToggleSegmentBypass,
+  } = useEditorPlayback(scenes)
+
+  const {
+    topToolbarRef,
+    topControlsRef,
+    canvasScrollRef,
+    bottomSectionRef,
+    playbackControlsRef,
+    scenesBarRef,
+    bottomControlsRef,
+    bottomSectionHeight,
+    topToolbarHeight,
+    customBottomHeight,
+    isResizingBottom,
+    handleBottomResizeMouseDown,
+  } = useEditorLayout({ aspectRatio, selectedLayerIds })
 
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
@@ -329,10 +374,13 @@ function EditorPage() {
     const needsV = totalWorldHeight > (sh + 2)
     const needsH = totalWorldWidth > (sw + 2)
 
-    if (vTrackRef.current) vTrackRef.current.style.display = needsV ? 'block' : 'none'
-    if (hTrackRef.current) hTrackRef.current.style.display = needsH ? 'block' : 'none'
+    // Show both scrollbars if either is needed
+    const showBoth = needsV || needsH
 
-    if (needsV && vThumbRef.current) {
+    if (vTrackRef.current) vTrackRef.current.style.display = showBoth ? 'block' : 'none'
+    if (hTrackRef.current) hTrackRef.current.style.display = showBoth ? 'block' : 'none'
+
+    if (showBoth && vThumbRef.current) {
       const vTrackH = sh - 23 // top 8 + bottom 15
       const thumbH = Math.max(40, Math.min(vTrackH, (sh / totalWorldHeight) * vTrackH))
       const maxT = wh - sh / scale
@@ -343,7 +391,7 @@ function EditorPage() {
       vThumbRef.current.style.top = `${pos}px`
     }
 
-    if (needsH && hThumbRef.current) {
+    if (showBoth && hThumbRef.current) {
       const hTrackW = sw - 23 // left 8 + right 15
       const thumbW = Math.max(40, Math.min(hTrackW, (sw / totalWorldWidth) * hTrackW))
       const maxL = ww - sw / scale
@@ -354,6 +402,12 @@ function EditorPage() {
       hThumbRef.current.style.left = `${pos}px`
     }
   }, [worldWidth, worldHeight])
+
+  useEffect(() => {
+    if (viewportDataRef.current) {
+      handleViewportChange(viewportDataRef.current)
+    }
+  }, [handleViewportChange])
 
   const handleScrollbarMouseDown = useCallback((e, type) => {
     e.preventDefault()
@@ -573,10 +627,10 @@ function EditorPage() {
   }, [])
 
   const handleExport = useCallback(async (options) => {
-    console.log('[EditorPage] handleExport invoked with options:', options)
+
     // 1. Pause editor playback
     if (motionControls?.isPlaying) {
-      console.log('[EditorPage] Pausing active editor playback')
+
       try { motionControls.pauseAll() } catch (e) { /* ignore */ }
     }
 
@@ -589,12 +643,10 @@ function EditorPage() {
     const gifOptions = opts.gifOptions || { width: 480, fps: 15, loop: 0 }
 
     // 3. Pre-open blank tab synchronously (user gesture) -> 100% bypasses Safari/iOS popup blockers
-    console.log('[EditorPage] Pre-opening blank window')
     const exportWindow = window.open('about:blank', '_blank')
 
     // 4. Create snapshot of the state
     const exportId = `export_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
-    console.log('[EditorPage] Created unique exportId:', exportId)
     const projectState = {
       projectName,
       scenes,
@@ -602,12 +654,7 @@ function EditorPage() {
       sceneMotionFlows,
       aspectRatio: aspectRatio || '16:9'
     }
-    console.log('[EditorPage] Constructed projectState snapshot:', {
-      projectName: projectState.projectName,
-      scenesCount: projectState.scenes?.length,
-      layersCount: Object.keys(projectState.layers || {}).length,
-      aspectRatio: projectState.aspectRatio
-    })
+
 
     // 5. Asynchronously save snapshot to IndexedDB (virtually unlimited quota!)
     try {
@@ -727,12 +774,7 @@ function EditorPage() {
   // =============================================================================
   // SIDEBAR AND PLAYBACK CONTROLS
   // =============================================================================
-  const {
-    activeSidebarItem,
-    setActiveSidebarItem,
-    handleSidebarItemClick,
-    handleClosePanel,
-  } = useEditorSidebar()
+
 
   const [activeTransitionSceneId, setActiveTransitionSceneId] = useState(null)
   const handleOpenTransitionsPanel = useCallback((sceneId) => {
@@ -810,8 +852,7 @@ function EditorPage() {
     }
   }, [setActiveSidebarItem])
 
-  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
-  const [requestOpenControl, setRequestOpenControl] = useState(null)
+
 
   // Automatically switch colorPickerType to 'canvas' when canvas is selected
   // and ensure it switches back to a valid layer mode when a layer is selected.
@@ -824,36 +865,7 @@ function EditorPage() {
     }
   }, [selectedCanvas, selectedLayerIds, activeSidebarItem, colorPickerType])
 
-  const {
-    playheadTime,
-    setPlayheadTime,
-    playheadTimeRef,
-    isPlaying,
-    setIsPlaying,
-    segments,
-    totalTime,
-    formatTime,
-    handleAddSegment,
-    handleUpdateSegment,
-    handleDeleteSegment,
-    handleDuplicateSegment,
-    handleToggleSegmentBypass,
-  } = useEditorPlayback(scenes)
 
-  const {
-    topToolbarRef,
-    topControlsRef,
-    canvasScrollRef,
-    bottomSectionRef,
-    playbackControlsRef,
-    scenesBarRef,
-    bottomControlsRef,
-    bottomSectionHeight,
-    topToolbarHeight,
-    customBottomHeight,
-    isResizingBottom,
-    handleBottomResizeMouseDown,
-  } = useEditorLayout({ aspectRatio, selectedLayerIds })
 
   // [LAYOUT FIX] Capture initial bottom section height for stable canvas centering
   // The user wants the canvas to be centered based on the INITIAL layout,
@@ -1217,10 +1229,7 @@ function EditorPage() {
   }, [timelineInfo, currentSceneId])
   const startTimeOffset = currentSceneTimelineInfo?.startTime || 0
 
-  // Check if motion capture is active
-  const isMotionCaptureActive = !!motionCaptureMode?.isActive
 
-  const currentSidebarWidth = typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth
 
   // Handle Step 1 -> 2 transition (Clicking Animate)
 
@@ -1698,7 +1707,7 @@ function EditorPage() {
             entry.initialTransform.rotation = transform.rotation
             entry.initialTransform.scaleX = transform.scaleX
             entry.initialTransform.scaleY = transform.scaleY
-            const cleanAlpha = transform.alpha !== undefined && Math.abs(transform.alpha - 0.000001) < 1e-5 ? 1.0 : transform.alpha;
+            const cleanAlpha = transform.alpha !== undefined && Math.abs(transform.alpha - 0.000001) < 1e-7 ? 1.0 : transform.alpha;
             entry.initialTransform.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.initialTransform.opacity
 
             entry.currentPosition.x = transform.x
@@ -2009,7 +2018,7 @@ function EditorPage() {
               tiltY: tracked.tiltY ?? initialTiltY,
               easing: 'power4.out'
             }
-            console.log(`[TILT DEBUG] onInteractionEnd update for layer ${layerId}:`, tiltValues, existingId ? 'UPDATING' : 'ADDING')
+
             if (existingId) {
               dispatch(updateSceneMotionAction({
                 sceneId, stepId, layerId, actionId: existingId,
@@ -2285,13 +2294,7 @@ function EditorPage() {
     const currentFlow = freshFlow || currentSceneMotionFlow || { steps: [] }
 
     const isMeaningfulSession = hasAnyInteraction || hasAnyActionsInRedux || hasAnyPresetsInRedux
-    console.log('[PRESETS DEBUG] handleApplyMotion session validity check:', {
-      stepId,
-      hasAnyInteraction,
-      hasAnyActionsInRedux,
-      hasAnyPresetsInRedux,
-      isMeaningfulSession
-    })
+
 
     if (!isMeaningfulSession) {
       // Nothing was changed and no previous actions exist — restore original flow or delete new step
@@ -2578,12 +2581,11 @@ function EditorPage() {
                 easing: 'power4.out'
               }
             }
-            console.log(`[TILT DEBUG] handleApplyMotion target layer ${layerId}:`, action.values)
+
             if (tiltIdx !== -1) actions[tiltIdx] = action; else actions.push(action)
           } else if (layerData.didTilt) {
             const tiltIdx = actions.findIndex(a => a.type === 'tilt')
             if (tiltIdx !== -1) {
-              console.log(`[TILT DEBUG] handleApplyMotion removing tilt for layer ${layerId}`)
               actions.splice(tiltIdx, 1)
             }
           }
@@ -3158,11 +3160,7 @@ function EditorPage() {
         didTilt: !!currentStepActions.find(a => a.type === 'tilt'),
         interactionType: null
       })
-      console.log(`[TILT DEBUG] handleEditStep initialized layer ${layerId}:`, {
-        initialTiltX: sessionStartTransform.tiltX,
-        currentTiltX: initialTrackedLayers.get(layerId).tiltX,
-        didTilt: initialTrackedLayers.get(layerId).didTilt
-      })
+
     })
 
     // 2. Prepare capture session
@@ -3198,8 +3196,8 @@ function EditorPage() {
             }
             if (transform.mediaWidth !== undefined) entry.mediaWidth = transform.mediaWidth
             if (transform.mediaHeight !== undefined) entry.mediaHeight = transform.mediaHeight
-             if (transform.alpha !== undefined) {
-              const cleanAlpha = Math.abs(transform.alpha - 0.000001) < 1e-5 ? 1.0 : transform.alpha;
+            if (transform.alpha !== undefined) {
+              const cleanAlpha = Math.abs(transform.alpha - 0.000001) < 1e-7 ? 1.0 : transform.alpha;
               entry.opacity = cleanAlpha;
             }
             if (transform.blur !== undefined) entry.blur = transform.blur
@@ -3405,7 +3403,7 @@ function EditorPage() {
               tiltY: tracked.tiltY ?? initialTiltY,
               easing: 'power4.out'
             }
-            console.log(`[TILT DEBUG] onInteractionEnd (Edit) update for layer ${layerId}:`, tiltValues, existingId ? 'UPDATING' : 'ADDING')
+
             if (existingId) {
               dispatch(updateSceneMotionAction({
                 sceneId, stepId: captureStepId, layerId, actionId: existingId,
@@ -4566,10 +4564,13 @@ function EditorPage() {
           <div className="relative">
             {/* Desktop Panels */}
             {activeSidebarItem && (
-              <div className={`hidden lg:block absolute z-40 shadow-2xl transition-all duration-300 ${isMotionCaptureActive ? 'left-0' : 'left-20'}`} style={{
+              <div className={`hidden lg:block absolute transition-all duration-300 ${isMotionCaptureActive ? 'left-0' : 'left-20'} editor-panel-container`} style={{
+                zIndex: 35,
                 top: isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`,
-                height: isMotionCaptureActive ? '100vh' : `calc(100vh - ${topToolbarHeight}px)`,
-                borderRight: `1px solid ${theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`
+                height: isMotionCaptureActive
+                  ? `calc(100vh - ${(bottomSectionHeight || 140)}px)`
+                  : `calc(100vh - ${topToolbarHeight}px - ${(bottomSectionHeight || 140)}px)`,
+                '--bottom-section-height': `${(bottomSectionHeight || 140)}px`
               }}>
                 {activeSidebarItem === 'Design' && (
                   <DesignPanel onClose={handleClosePanel} />
@@ -4755,7 +4756,7 @@ function EditorPage() {
                 />
                 <div
                   ref={mobileSheetRef}
-                  className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t shadow-2xl mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
+                  className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
                   style={{
                     height: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '50vh' : '42vh',
                     minHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '320px' : '280px',
@@ -4976,6 +4977,14 @@ function EditorPage() {
                 selectedCanvas={selectedCanvas}
                 currentScene={currentSceneData}
                 editingStepActionCount={editingStepActionCount}
+                onUndo={() => {
+                  if (isMotionCaptureActive) captureUndoSyncRef.current = true
+                  dispatch(undo())
+                }}
+                onRedo={() => {
+                  if (isMotionCaptureActive) captureUndoSyncRef.current = true
+                  dispatch(redo())
+                }}
                 onLayerUpdate={(updates) => {
                   if (selectedLayerIds[0]) {
                     const layerId = selectedLayerIds[0]
@@ -5175,11 +5184,12 @@ function EditorPage() {
               {/* Vertical Scrollbar Container */}
               <div
                 ref={vTrackRef}
-                className="absolute right-1.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
+                className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
                 style={{
                   top: 8,
-                  bottom: 15, // Clear vertical overlap even more
-                  width: '6px',
+                  bottom: `calc(${Math.max(0, (bottomSectionHeight || 0) - (initialBottomHeight || 0))}px + ${isMotionCaptureActive ? 15 : 55}px)`,
+                  right: '6px',
+                  width: '8px',
                   border: '1px solid rgba(255, 255, 255, 0.15)',
                   display: 'none',
                   pointerEvents: 'none'
@@ -5199,11 +5209,12 @@ function EditorPage() {
               {/* Horizontal Scrollbar Container */}
               <div
                 ref={hTrackRef}
-                className="absolute bottom-2.5 z-40 bg-black/60 backdrop-blur-md rounded-full"
+                className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
                 style={{
                   left: 8,
-                  right: 15, // Clear horizontal overlap even more
-                  height: '6px',
+                  right: 15,
+                  bottom: `calc(${Math.max(0, (bottomSectionHeight || 0) - (initialBottomHeight || 0))}px + ${isMotionCaptureActive ? 10 : 50}px)`,
+                  height: '8px',
                   border: '1px solid rgba(255, 255, 255, 0.15)',
                   display: 'none',
                   pointerEvents: 'none',
@@ -5227,10 +5238,12 @@ function EditorPage() {
           {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
           {!isMotionCaptureActive && (
             <div
-              className={`absolute right-0 z-30 pointer-events-auto items-center justify-center py-1 ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
+              className={`absolute right-0 pointer-events-auto flex items-center justify-center ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
               style={{
+                zIndex: 30,
                 left: currentSidebarWidth,
                 bottom: `${bottomSectionHeight || 140}px`,
+                height: '40px',
                 backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
                 borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
               }}
@@ -5265,6 +5278,8 @@ function EditorPage() {
                     }
                   }}
                   isMotionCaptureActive={isMotionCaptureActive}
+                  onZoomIn={() => timelineControlRef.current?.zoomIn()}
+                  onZoomOut={() => timelineControlRef.current?.zoomOut()}
                 />
               </div>
             </div>
@@ -5273,8 +5288,9 @@ function EditorPage() {
           {/* Bottom Sections - Overlay at bottom with glass effect */}
           <div
             ref={bottomSectionRef}
-            className={`absolute bottom-0 right-0 z-30 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
+            className={`absolute bottom-0 right-0 z-45 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
             style={{
+              zIndex: 45,
               left: currentSidebarWidth,
               backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
               backdropFilter: 'blur(20px)',
@@ -5325,6 +5341,7 @@ function EditorPage() {
                   }}
                 >
                   <ScenesBar
+                    ref={timelineControlRef}
                     currentTime={Math.min(playheadTime, totalTime)}
                     totalTime={totalTime}
                     worldWidth={worldWidth}
@@ -5342,30 +5359,56 @@ function EditorPage() {
                 </div>
               </div>
 
-              {/* Zoom slider - fixed at bottom, outside scroll; minimal height */}
-              {/* Log scale with narrow range (10-200%) and fine step for smooth, controlled feel */}
-              <div className="pointer-events-auto flex-shrink-0 hidden lg:flex justify-end items-center gap-2 px-4 py-1" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  value={(() => {
-                    // Convert zoom (10-200) to slider position (0-100) using log scale
-                    const z = zoom === -1 ? 100 : Math.min(200, Math.max(10, zoom))
-                    return ((Math.log(z) - Math.log(10)) / (Math.log(200) - Math.log(10))) * 100
-                  })()}
-                  onChange={(e) => {
-                    // Convert slider position (0-100) to zoom (10-200) using exp scale
-                    const t = Number(e.target.value) / 100
-                    const newZoom = 10 * Math.pow(200 / 10, t)
-                    setZoom(Math.max(10, Math.min(200, newZoom)))
-                  }}
-                  className={`w-28 sm:w-32 lg:w-36 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
-                />
-                <span className={`text-[10px] font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
-                  {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
-                </span>
+              {/* Zoom controls - fixed at bottom, outside scroll; minimal height */}
+              <div className="pointer-events-auto flex-shrink-0 hidden lg:grid grid-cols-3 items-center px-4 py-1.5" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
+                {/* Left side empty placeholder */}
+                <div></div>
+
+                {/* Center - Canvas Zoom Slider */}
+                <div className="flex justify-center items-center gap-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={(() => {
+                      // Convert zoom (10-200) to slider position (0-100) using log scale
+                      const z = zoom === -1 ? 100 : Math.min(200, Math.max(10, zoom))
+                      return ((Math.log(z) - Math.log(10)) / (Math.log(200) - Math.log(10))) * 100
+                    })()}
+                    onChange={(e) => {
+                      // Convert slider position (0-100) to zoom (10-200) using exp scale
+                      const t = Number(e.target.value) / 100
+                      const newZoom = 10 * Math.pow(200 / 10, t)
+                      setZoom(Math.max(10, Math.min(200, newZoom)))
+                    }}
+                    className={`w-32 sm:w-36 lg:w-40 h-1.5 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
+                  />
+                  <span className={`text-xs font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
+                    {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
+                  </span>
+                </div>
+
+                {/* Right side - Timeline Zoom Buttons */}
+                <div className="flex justify-end items-center gap-1.5">
+                  <span className={`text-xs font-medium tracking-wide mr-1 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Timeline:</span>
+                  <button
+                    onClick={() => timelineControlRef.current?.zoomOut()}
+                    className={`p-2 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    title="Zoom out timeline"
+                    type="button"
+                  >
+                    <ZoomOut className="h-[18px] w-[18px]" />
+                  </button>
+                  <button
+                    onClick={() => timelineControlRef.current?.zoomIn()}
+                    className={`p-2 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    title="Zoom in timeline"
+                    type="button"
+                  >
+                    <ZoomIn className="h-[18px] w-[18px]" />
+                  </button>
+                </div>
               </div>
 
               {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens.
@@ -5380,6 +5423,14 @@ function EditorPage() {
                   selectedCanvas={selectedCanvas}
                   currentScene={currentSceneData}
                   editingStepActionCount={editingStepActionCount}
+                  onUndo={() => {
+                    if (isMotionCaptureActive) captureUndoSyncRef.current = true
+                    dispatch(undo())
+                  }}
+                  onRedo={() => {
+                    if (isMotionCaptureActive) captureUndoSyncRef.current = true
+                    dispatch(redo())
+                  }}
                   onLayerUpdate={(updates) => {
                     if (selectedLayerIds[0]) {
                       const layerId = selectedLayerIds[0]
@@ -5485,7 +5536,7 @@ function EditorPage() {
                   onHideStarterHint={() => {
                     setShowStarterHint(false)
                     if (isStarterCopy) {
-                      localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
+                      localStorage.setItem('vevara_starter_autoplay_done_' + (urlProjectId || projectId), 'true')
                     }
                   }}
                 />
@@ -5493,27 +5544,29 @@ function EditorPage() {
             </div>
 
           </div>
-        </div>
 
-        {/* Motion Panel - Right side overlay */}
-        <MotionPanel
-          isOpen={isMotionPanelOpen}
-          onClose={() => setIsMotionPanelOpen(false)}
-          topToolbarHeight={topToolbarHeight}
-          motionControls={motionControls}
-          onStepEdit={handleEditStep}
-          onApplyMotion={handleApplyMotion}
-          onCancelMotion={handleCancelMotion}
-          onStartMotionCapture={handleStartMotionCapture}
-          onAddAnimation={handleAddAnimation}
-          onCustomActionValueChange={handleMotionPanelValueChange}
-          onDeleteCaptureAction={handleDeleteCaptureAction}
-          sceneLayers={sceneLayersForMotion}
-          selectedLayerIds={selectedLayerIds}
-          isMotionCaptureActive={isMotionCaptureActive}
-          editingStepId={editingStepId}
-          editingStepActionCount={editingStepActionCount}
-        />
+          {/* Motion Panel - Right side overlay */}
+          <MotionPanel
+            isOpen={isMotionPanelOpen}
+            onClose={() => setIsMotionPanelOpen(false)}
+            topToolbarHeight={topToolbarHeight}
+            bottomSectionHeight={bottomSectionHeight}
+            motionControls={motionControls}
+            onStepEdit={handleEditStep}
+            onApplyMotion={handleApplyMotion}
+            onCancelMotion={handleCancelMotion}
+            onStartMotionCapture={handleStartMotionCapture}
+            onAddAnimation={handleAddAnimation}
+            onCustomActionValueChange={handleMotionPanelValueChange}
+            onDeleteCaptureAction={handleDeleteCaptureAction}
+            sceneLayers={sceneLayersForMotion}
+            selectedLayerIds={selectedLayerIds}
+            isMotionCaptureActive={isMotionCaptureActive}
+            editingStepId={editingStepId}
+            editingStepActionCount={editingStepActionCount}
+          />
+
+        </div>
 
 
         {/* Project Status Loading Modal */}

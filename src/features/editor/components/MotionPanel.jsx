@@ -62,15 +62,15 @@ const actionTypes = [
 //   IN  — element travels from the named side toward center (e.g. 'bottom' rises → ↑)
 //   OUT — element travels toward the named side          (e.g. 'bottom' exits down → ↓)
 const DIRECTION_ICONS_IN = {
-  left:   ArrowRight,
-  right:  ArrowLeft,
-  top:    ArrowDown,
+  left: ArrowRight,
+  right: ArrowLeft,
+  top: ArrowDown,
   bottom: ArrowUp,
 }
 const DIRECTION_ICONS_OUT = {
-  left:   ArrowLeft,
-  right:  ArrowRight,
-  top:    ArrowUp,
+  left: ArrowLeft,
+  right: ArrowRight,
+  top: ArrowUp,
   bottom: ArrowDown,
 }
 const getDirectionIcon = (direction, mode) =>
@@ -86,7 +86,7 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'fade',
     label: 'Fade',
-    inIds:  [{ id: 'fade_in',  direction: null }],
+    inIds: [{ id: 'fade_in', direction: null }],
     outIds: [{ id: 'fade_out', direction: null }],
     hasDirections: false,
   },
@@ -95,15 +95,15 @@ const PRESET_FAMILIES = [
     familyKey: 'slide',
     label: 'Slide',
     inIds: [
-      { id: 'slide_in_left',   direction: 'left'   },
-      { id: 'slide_in_right',  direction: 'right'  },
-      { id: 'slide_in_top',    direction: 'top'    },
+      { id: 'slide_in_left', direction: 'left' },
+      { id: 'slide_in_right', direction: 'right' },
+      { id: 'slide_in_top', direction: 'top' },
       { id: 'slide_in_bottom', direction: 'bottom' },
     ],
     outIds: [
-      { id: 'slide_out_left',   direction: 'left'   },
-      { id: 'slide_out_right',  direction: 'right'  },
-      { id: 'slide_out_top',    direction: 'top'    },
+      { id: 'slide_out_left', direction: 'left' },
+      { id: 'slide_out_right', direction: 'right' },
+      { id: 'slide_out_top', direction: 'top' },
       { id: 'slide_out_bottom', direction: 'bottom' },
     ],
     hasDirections: true,
@@ -112,14 +112,14 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'grow',
     label: 'Grow',
-    inIds:  [{ id: 'grow_in',  direction: null }],
+    inIds: [{ id: 'grow_in', direction: null }],
     outIds: [{ id: 'grow_out', direction: null }],
     hasDirections: false,
   },
   {
     familyKey: 'shrink',
     label: 'Shrink',
-    inIds:  [{ id: 'shrink_in',  direction: null }],
+    inIds: [{ id: 'shrink_in', direction: null }],
     outIds: [{ id: 'shrink_out', direction: null }],
     hasDirections: false,
   },
@@ -127,7 +127,7 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'spin',
     label: 'Spin',
-    inIds:  [{ id: 'spin_in',  direction: null }],
+    inIds: [{ id: 'spin_in', direction: null }],
     outIds: [{ id: 'spin_out', direction: null }],
     hasDirections: false,
   },
@@ -135,7 +135,7 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'blur',
     label: 'Blur',
-    inIds:  [{ id: 'blur_in',  direction: null }],
+    inIds: [{ id: 'blur_in', direction: null }],
     outIds: [{ id: 'blur_out', direction: null }],
     hasDirections: false,
   },
@@ -143,15 +143,15 @@ const PRESET_FAMILIES = [
     familyKey: 'blur_slide',
     label: 'Blur Slide',
     inIds: [
-      { id: 'blur_slide_in_left',   direction: 'left'   },
-      { id: 'blur_slide_in_right',  direction: 'right'  },
-      { id: 'blur_slide_in_top',    direction: 'top'    },
+      { id: 'blur_slide_in_left', direction: 'left' },
+      { id: 'blur_slide_in_right', direction: 'right' },
+      { id: 'blur_slide_in_top', direction: 'top' },
       { id: 'blur_slide_in_bottom', direction: 'bottom' },
     ],
     outIds: [
-      { id: 'blur_slide_out_left',   direction: 'left'   },
-      { id: 'blur_slide_out_right',  direction: 'right'  },
-      { id: 'blur_slide_out_top',    direction: 'top'    },
+      { id: 'blur_slide_out_left', direction: 'left' },
+      { id: 'blur_slide_out_right', direction: 'right' },
+      { id: 'blur_slide_out_top', direction: 'top' },
       { id: 'blur_slide_out_bottom', direction: 'bottom' },
     ],
     hasDirections: true,
@@ -159,7 +159,7 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'blur_scale',
     label: 'Blur Scale',
-    inIds:  [{ id: 'blur_scale_in',  direction: null }],
+    inIds: [{ id: 'blur_scale_in', direction: null }],
     outIds: [{ id: 'blur_scale_out', direction: null }],
     hasDirections: false,
   },
@@ -169,7 +169,7 @@ const PRESET_FAMILIES = [
   {
     familyKey: 'typewriter',
     label: 'Typewriter',
-    inIds:  [{ id: 'typewriter_in', direction: null }],
+    inIds: [{ id: 'typewriter_in', direction: null }],
     outIds: [],
     hasDirections: false,
     layerTypes: [LAYER_TYPES.TEXT],
@@ -184,33 +184,33 @@ PRESET_FAMILIES.forEach(fam => {
 })
 
 const ACTION_AVAILABILITY = {
-  [LAYER_TYPES.SHAPE]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius', 'tilt'],
-  [LAYER_TYPES.TEXT]:      ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'tilt'],
-  [LAYER_TYPES.IMAGE]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  [LAYER_TYPES.VIDEO]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  [LAYER_TYPES.GROUP]:     ['move', 'rotate', 'scale', 'fade', 'blur', 'tilt'],
-  frame_normal:            ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
-  frame_card:              ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip', 'tilt'],
-  [LAYER_TYPES.BACKGROUND]:['colorChange'],
+  [LAYER_TYPES.SHAPE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'cornerRadius', 'tilt'],
+  [LAYER_TYPES.TEXT]: ['move', 'rotate', 'scale', 'fade', 'blur', 'colorChange', 'tilt'],
+  [LAYER_TYPES.IMAGE]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.VIDEO]: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  [LAYER_TYPES.GROUP]: ['move', 'rotate', 'scale', 'fade', 'blur', 'tilt'],
+  frame_normal: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'tilt'],
+  frame_card: ['move', 'rotate', 'scale', 'fade', 'blur', 'crop', 'flip', 'tilt'],
+  [LAYER_TYPES.BACKGROUND]: ['colorChange'],
 }
 
 function getLayerDisplayName(layer) {
   if (!layer) return 'Unknown'
   switch (layer.type) {
-    case LAYER_TYPES.IMAGE:      return 'Image'
-    case LAYER_TYPES.VIDEO:      return 'Video'
-    case LAYER_TYPES.SHAPE:      return 'Shape'
-    case LAYER_TYPES.TEXT:       return 'Text'
-    case LAYER_TYPES.GROUP:      return 'Group'
+    case LAYER_TYPES.IMAGE: return 'Image'
+    case LAYER_TYPES.VIDEO: return 'Video'
+    case LAYER_TYPES.SHAPE: return 'Shape'
+    case LAYER_TYPES.TEXT: return 'Text'
+    case LAYER_TYPES.GROUP: return 'Group'
     case LAYER_TYPES.BACKGROUND: return 'Background'
-    case LAYER_TYPES.FRAME:      return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
+    case LAYER_TYPES.FRAME: return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
     default: return layer.name || 'Element'
   }
 }
 
 function getTextFontSize(text) {
   const len = (text || '').length
-  if (len <= 5)  return '13px'
+  if (len <= 5) return '13px'
   if (len <= 12) return '11px'
   if (len <= 22) return '9px'
   if (len <= 40) return '7.5px'
@@ -283,6 +283,7 @@ function MotionPanel({
   isOpen = false,
   onClose,
   topToolbarHeight = 0,
+  bottomSectionHeight = 140,
   onApplyMotion,
   onCancelMotion,
   onAddAnimation,
@@ -297,7 +298,7 @@ function MotionPanel({
 }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
-  const layers        = useSelector(selectLayers)
+  const layers = useSelector(selectLayers)
 
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
@@ -319,15 +320,15 @@ function MotionPanel({
   const [expandedStepId, setExpandedStepId] = useState(null)
 
   // Motion mode
-  const [motionModeState,   setMotionModeState]   = useState('list') // 'list' | 'element'
-  const [selectedLayerId,   setSelectedLayerId]   = useState(null)
-  const [activeTab,         setActiveTab]         = useState('presets')
+  const [motionModeState, setMotionModeState] = useState('list') // 'list' | 'element'
+  const [selectedLayerId, setSelectedLayerId] = useState(null)
+  const [activeTab, setActiveTab] = useState('presets')
   // Which family card is expanded in the presets tab
   const [expandedFamilyKey, setExpandedFamilyKey] = useState(null)
   // Per-family selected direction — { [familyKey]: 'left'|'right'|'top'|'bottom'|null }
-  const [familyDirections,  setFamilyDirections]  = useState({})
+  const [familyDirections, setFamilyDirections] = useState({})
   // Per-family selected mode — { [familyKey]: 'IN'|'OUT' }
-  const [familyModes,       setFamilyModes]       = useState({})
+  const [familyModes, setFamilyModes] = useState({})
   // Which custom-action row has its inline settings panel expanded (Custom tab)
   const [expandedActionType, setExpandedActionType] = useState(null)
 
@@ -372,17 +373,17 @@ function MotionPanel({
   }, [selectedLayerIds, isMotionCaptureActive, sceneLayers])
 
   // The step currently being edited
-  const step        = isMotionCaptureActive && editingStepId ? motionFlow.find(s => s.id === editingStepId) : null
+  const step = isMotionCaptureActive && editingStepId ? motionFlow.find(s => s.id === editingStepId) : null
   const layerActions = step?.layerActions?.[selectedLayerId] || []
   const actionsCount = layerActions.length
 
   // Auto-switch to Custom tab when a canvas action is added
   const prevActionsCountRef = useRef(actionsCount)
-  const prevLayerIdRef      = useRef(selectedLayerId)
+  const prevLayerIdRef = useRef(selectedLayerId)
   useEffect(() => {
     if (selectedLayerId && isMotionCaptureActive) {
       if (prevLayerIdRef.current !== selectedLayerId) {
-        prevLayerIdRef.current      = selectedLayerId
+        prevLayerIdRef.current = selectedLayerId
         prevActionsCountRef.current = actionsCount
         return
       }
@@ -408,8 +409,6 @@ function MotionPanel({
     const presetDef = PRESET_REGISTRY[presetId]
     if (!presetDef) return
 
-    console.log(`[Bug 2 Debug] playPresetPreview: playing preset ${presetId}. snap/cleanState coords: x=${cleanState.x.toFixed(2)}, y=${cleanState.y.toFixed(2)}, alpha=${cleanState.alpha.toFixed(2)}, scaleX=${cleanState.scaleX.toFixed(2)}, scaleY=${cleanState.scaleY.toFixed(2)}`)
-
     if (pixiObject._previewTimeline) { pixiObject._previewTimeline.kill(); pixiObject._previewTimeline = null }
     const previewEngine = getGlobalMotionEngine()
     gsap.killTweensOf(previewEngine.masterTimeline, { time: true })
@@ -423,7 +422,7 @@ function MotionPanel({
       revealProgress: pixiObject.revealProgress ?? 1,
       intendedAlpha: pixiObject._intendedAlpha,
     }
-    console.log(`[PresetPreview TiltDebug] START: snap.alpha=${snap.alpha}, snap.intendedAlpha=${snap.intendedAlpha}, pixiObject._tiltHidden=${pixiObject._tiltHidden}, cleanStateAlpha=${cleanState.alpha}`)
+
     pixiObject._isPlayingPresetPreview = true
     const duration = 1.0, ease = 'power2.out'
     pixiObject.x = cleanState.x; pixiObject.y = cleanState.y
@@ -482,7 +481,6 @@ function MotionPanel({
 
     const restore = () => {
       if (pixiObject.destroyed) return
-      console.log(`[PresetPreview TiltDebug] RESTORE BEFORE: pixiObject.alpha=${pixiObject.alpha}, pixiObject._intendedAlpha=${pixiObject._intendedAlpha}, snap.alpha=${snap.alpha}, snap.intendedAlpha=${snap.intendedAlpha}`)
       pixiObject._isPlayingPresetPreview = false; pixiObject._previewTimeline = null
       pixiObject.x = snap.x; pixiObject.y = snap.y; pixiObject.alpha = snap.alpha; pixiObject.rotation = snap.rotation
       if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
@@ -499,7 +497,6 @@ function MotionPanel({
       if (pixiObject._tiltMesh) {
         syncTiltedDisplay(pixiObject)
       }
-      console.log(`[PresetPreview TiltDebug] RESTORE AFTER: pixiObject.alpha=${pixiObject.alpha}, pixiObject._intendedAlpha=${pixiObject._intendedAlpha}, meshAlpha=${pixiObject._tiltMesh?.alpha}`)
       if (!isMotionCaptureActive) { const eng = getGlobalMotionEngine(); eng.seek(eng.masterTimeline?.time() || 0, { force: true }) }
     }
 
@@ -515,12 +512,14 @@ function MotionPanel({
     if (pixiObject.scale) tl.to(pixiObject.scale, { x: scaleTween?.toX ?? cleanState.scaleX, y: scaleTween?.toY ?? cleanState.scaleY, duration, ease: scaleTween ? ease : 'none' }, 0)
     if (blurTween) {
       const bp = { value: blurTween.from }
-      tl.to(bp, { value: blurTween.to, duration, ease, onUpdate: () => {
-        if (!pixiObject._blurFilter) return
-        pixiObject._blurFilter.strength = bp.value
-        if (bp.value > 0.1) { if (!pixiObject.filters?.includes(pixiObject._blurFilter)) pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter] }
-        else { if (pixiObject.filters?.includes(pixiObject._blurFilter)) { pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter); if (!pixiObject.filters.length) pixiObject.filters = null } }
-      }}, 0)
+      tl.to(bp, {
+        value: blurTween.to, duration, ease, onUpdate: () => {
+          if (!pixiObject._blurFilter) return
+          pixiObject._blurFilter.strength = bp.value
+          if (bp.value > 0.1) { if (!pixiObject.filters?.includes(pixiObject._blurFilter)) pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter] }
+          else { if (pixiObject.filters?.includes(pixiObject._blurFilter)) { pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter); if (!pixiObject.filters.length) pixiObject.filters = null } }
+        }
+      }, 0)
     }
     if (Object.keys(mainTween).length) tl.to(pixiObject, { ...mainTween, duration, ease }, 0)
     if (hasTypewriter && pixiObject.revealProgress !== undefined) {
@@ -531,7 +530,7 @@ function MotionPanel({
   const applyPreset = (presetId, type) => {
     if (!selectedLayerId || !editingStepId || !currentSceneId) return
 
-    console.log(`[Bug 2 Debug] applyPreset clicked: presetId=${presetId}, type=${type}, selectedLayerId=${selectedLayerId}, editingStepId=${editingStepId}`)
+
 
     const activePreset = step?.layerPresets?.[selectedLayerId]
     if (activePreset?.id === presetId) {
@@ -542,30 +541,29 @@ function MotionPanel({
     if (motionControls?.layerObjects) {
       pixiObj = motionControls.layerObjects.get(selectedLayerId)
       if (pixiObj) {
-        console.log(`[Bug 2 Debug] applyPreset current PIXI values (step start): x=${pixiObj.x.toFixed(2)}, y=${pixiObj.y.toFixed(2)}, alpha=${pixiObj.alpha.toFixed(2)}, rotation=${pixiObj.rotation.toFixed(2)}`)
 
         const eng = getGlobalMotionEngine()
         gsap.killTweensOf(eng.masterTimeline, { time: true })
         eng.masterTimeline.pause()
         pixiObj._isPlayingPresetPreview = true
-        
+
         // Capture the correct step-start visual values from PIXI instead of base scene start coordinates
         const currentX = pixiObj.x
         const currentY = pixiObj.y
         const currentAlpha = pixiObj._tiltHidden && typeof pixiObj._intendedAlpha === 'number'
           ? pixiObj._intendedAlpha
-          : (Math.abs(pixiObj.alpha - 0.000001) < 1e-5 ? 1.0 : pixiObj.alpha)
+          : (Math.abs(pixiObj.alpha - 0.000001) < 1e-7 ? 1.0 : pixiObj.alpha)
         const currentRotation = pixiObj.rotation
         const currentScaleX = pixiObj.scale?.x ?? 1
         const currentScaleY = pixiObj.scale?.y ?? 1
 
-        cleanState = { 
-          x: currentX, 
-          y: currentY, 
-          alpha: currentAlpha, 
-          rotation: currentRotation, 
-          scaleX: currentScaleX, 
-          scaleY: currentScaleY 
+        cleanState = {
+          x: currentX,
+          y: currentY,
+          alpha: currentAlpha,
+          rotation: currentRotation,
+          scaleX: currentScaleX,
+          scaleY: currentScaleY
         }
       }
     }
@@ -736,19 +734,17 @@ function MotionPanel({
           const layerCount = allLayerIds.size
 
           return (
-            <div key={step.id} className={`overflow-hidden border-b transition-all duration-150 ${
-              isExpanded
-                ? (isLight ? 'border-slate-200 bg-slate-50' : 'border-white/[0.08] bg-white/[0.04]')
-                : (isLight ? 'border-slate-100 bg-white' : 'border-white/[0.04] bg-transparent')
-            }`}>
+            <div key={step.id} className={`overflow-hidden border rounded-xl transition-all duration-150 ${isExpanded
+              ? (isLight ? 'border-[#7c4af0]/30 bg-white shadow-sm' : 'border-white/[0.08] bg-white/[0.05]')
+              : (isLight ? 'border-slate-200 bg-white hover:border-slate-300' : 'border-white/[0.04] bg-white/[0.02] hover:border-white/[0.08]')
+              }`}>
               {/* Header */}
               <button
                 onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
                 className={`w-full flex items-center gap-3 text-left ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`}
               >
-                <div className={`flex items-center justify-center font-bold shrink-0 ${isMobile ? 'w-5 h-5 text-[10px]' : 'w-6 h-6 text-[11px]'} ${
-                  isExpanded ? 'text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')
-                }`}>
+                <div className={`flex items-center justify-center font-bold shrink-0 ${isMobile ? 'w-5 h-5 text-[10px]' : 'w-6 h-6 text-[11px]'} ${isExpanded ? 'text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')
+                  }`}>
                   {stepIndex + 1}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -760,11 +756,9 @@ function MotionPanel({
                 <ChevronDown className={`shrink-0 transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-[#7c4af0]' : 'rotate-0'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
               </button>
 
-              {/* Expanded content — different bg makes it scannable */}
               {isExpanded && (
-                <div className={`border-t px-3 py-2.5 space-y-1.5 ${
-                  isLight ? 'border-slate-200 bg-slate-100/70' : 'border-white/[0.06] bg-black/30'
-                }`}>
+                <div className={`border-t px-3 py-2.5 space-y-1.5 ${isLight ? 'border-slate-150 bg-slate-50/70' : 'border-white/[0.05] bg-black/25'
+                  }`}>
                   {allLayerIds.size === 0 ? (
                     <p className={`text-[10px] italic py-1 text-center ${isLight ? 'text-slate-400' : 'text-zinc-600'}`}>No effects in this moment</p>
                   ) : [...allLayerIds].map((layerId) => {
@@ -775,7 +769,7 @@ function MotionPanel({
                     const contrastBg = getContrastCardBg(color, isLight)
                     return (
                       <div key={layerId} className={`flex items-start gap-2 px-2 ${isMobile ? 'py-1.5' : 'py-2'}`}>
-                        <div 
+                        <div
                           style={contrastBg ? { backgroundColor: contrastBg } : undefined}
                           className={`shrink-0 overflow-hidden flex items-center justify-center rounded ${isMobile ? 'w-6 h-6' : 'w-8 h-8'}`}
                         >
@@ -823,11 +817,10 @@ function MotionPanel({
         const color = layer?.data?.color || layer?.data?.fill || (isLight ? '#111827' : '#ffffff')
         const contrastBg = getContrastCardBg(color, isLight)
         return (
-          <button key={layerId} onClick={open} 
-            className={`group w-full flex items-center gap-3 border rounded-lg cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${
-            isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
-          }`}>
-            <div 
+          <button key={layerId} onClick={open}
+            className={`group w-full flex items-center gap-3 border rounded-lg cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
+              }`}>
+            <div
               style={contrastBg ? { backgroundColor: contrastBg } : undefined}
               className={`shrink-0 overflow-hidden flex items-center justify-center rounded ${isMobile ? 'w-8 h-8' : 'w-10 h-10'}`}
             >
@@ -852,10 +845,10 @@ function MotionPanel({
     if (!layer || !step) return null
 
     const layerId = layer.id
-    const activePresetInfo  = step?.layerPresets?.[layerId]
-    const activePresetId    = activePresetInfo?.id   || null
-    const activePresetType  = activePresetInfo?.type || null  // 'IN' | 'OUT' | null
-    const activeFamilyKey   = activePresetId ? PRESET_ID_TO_FAMILY[activePresetId] : null
+    const activePresetInfo = step?.layerPresets?.[layerId]
+    const activePresetId = activePresetInfo?.id || null
+    const activePresetType = activePresetInfo?.type || null  // 'IN' | 'OUT' | null
+    const activeFamilyKey = activePresetId ? PRESET_ID_TO_FAMILY[activePresetId] : null
 
     let layerKey = layer.type
     if (layer.type === LAYER_TYPES.FRAME) layerKey = layer.data?.isCardFrame ? 'frame_card' : 'frame_normal'
@@ -870,158 +863,153 @@ function MotionPanel({
 
     const activeActions = layerActions || []
     const TRANSFORM_IDS = ['move', 'scale', 'rotate']
-    const previewLayer  = layers[layerId] || null
+    const previewLayer = layers[layerId] || null
 
     // ── PRESETS TAB ───────────────────────────────────────────────────────────
-      const renderExpandedRow = (fam) => {
-        const currentMode = familyModes[fam.familyKey] || (activePresetType && activeFamilyKey === fam.familyKey ? activePresetType : 'IN')
-        const currentDir  = familyDirections[fam.familyKey] || (fam.hasDirections ? (fam.inIds[0]?.direction || null) : null)
-        const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+    const renderExpandedRow = (fam) => {
+      const currentMode = familyModes[fam.familyKey] || (activePresetType && activeFamilyKey === fam.familyKey ? activePresetType : 'IN')
+      const currentDir = familyDirections[fam.familyKey] || (fam.hasDirections ? (fam.inIds[0]?.direction || null) : null)
+      const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
 
-        const selectModeAndApply = (newMode) => {
-          setFamilyModes(prev => ({ ...prev, [fam.familyKey]: newMode }))
-          const varList = newMode === 'OUT' ? fam.outIds : fam.inIds
-          const target  = fam.hasDirections ? (varList.find(v => v.direction === currentDir) || varList[0]) : varList[0]
-          if (target) applyPreset(target.id, newMode)
-        }
+      const selectModeAndApply = (newMode) => {
+        setFamilyModes(prev => ({ ...prev, [fam.familyKey]: newMode }))
+        const varList = newMode === 'OUT' ? fam.outIds : fam.inIds
+        const target = fam.hasDirections ? (varList.find(v => v.direction === currentDir) || varList[0]) : varList[0]
+        if (target) applyPreset(target.id, newMode)
+      }
 
-        const selectDirAndApply = (dir) => {
-          setFamilyDirections(prev => ({ ...prev, [fam.familyKey]: dir }))
-          const target = variantList.find(v => v.direction === dir)
-          if (target) applyPreset(target.id, currentMode)
-        }
+      const selectDirAndApply = (dir) => {
+        setFamilyDirections(prev => ({ ...prev, [fam.familyKey]: dir }))
+        const target = variantList.find(v => v.direction === dir)
+        if (target) applyPreset(target.id, currentMode)
+      }
 
-        const hasOut = fam.outIds.length > 0
-        const isMobileRow = isMobile && (hasOut || fam.hasDirections)
+      const hasOut = fam.outIds.length > 0
+      const isMobileRow = isMobile && (hasOut || fam.hasDirections)
 
-        return (
-          <div className={`w-full flex ${
-            isMobileRow ? 'flex-row items-center justify-between gap-3 px-3 py-1.5 mb-1.5' : 'flex-col items-start justify-center gap-2 px-2.5 py-2.5 mb-2'
-          } ${
-            isMobile ? 'rounded-xl border border-black/5 dark:border-white/5' : 'aspect-[2/1]'
+      return (
+        <div className={`w-full flex ${isMobileRow ? 'flex-row items-center justify-between gap-3 px-3 py-1.5 mb-1.5' : 'flex-col items-start justify-center gap-2 px-2.5 py-2.5 mb-2'
+          } ${isMobile ? 'rounded-xl border border-black/5 dark:border-white/5' : 'aspect-[2/1]'
           } ${isLight ? 'bg-slate-50 border border-slate-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
-            {/* ON ENTER / ON EXIT toggle */}
-            {hasOut && (
-            <div className={`flex border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'} rounded-lg overflow-hidden ${
-              isMobileRow ? (fam.hasDirections ? 'w-[130px]' : 'mx-auto w-[160px]') : 'w-full'
-            }`}>
+          {/* ON ENTER / ON EXIT toggle */}
+          {hasOut && (
+            <div className={`flex border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'} rounded-lg overflow-hidden ${isMobileRow ? (fam.hasDirections ? 'w-[130px]' : 'mx-auto w-[160px]') : 'w-full'
+              }`}>
               {[
-                { id: 'IN',  label: 'On Enter' },
-                { id: 'OUT', label: 'On Exit'  },
+                { id: 'IN', label: 'On Enter' },
+                { id: 'OUT', label: 'On Exit' },
               ].map((opt) => (
                 <button
                   key={opt.id}
                   onClick={() => selectModeAndApply(opt.id)}
-                  className={`flex-1 ${isMobile ? 'py-1 text-[10px]' : 'py-2 text-[11px]'} font-bold tracking-wide transition-colors ${
-                    currentMode === opt.id
-                      ? 'bg-[#7c4af0] text-white'
-                      : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
-                  }`}
+                  className={`flex-1 ${isMobile ? 'py-1 text-[10px]' : 'py-2 text-[11px]'} font-bold tracking-wide transition-colors ${currentMode === opt.id
+                    ? 'bg-[#7c4af0] text-white'
+                    : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
+                    }`}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
-            )}
+          )}
 
-            {/* Direction arrows */}
-            {fam.hasDirections && (
-              <div className="flex items-center gap-1.5">
-                {variantList.map(({ direction }) => {
-                  const DirIcon  = getDirectionIcon(direction, currentMode)
-                  if (!DirIcon) return null
-                  const isSelDir = currentDir === direction
-                  return (
-                    <button
-                      key={direction}
-                      onClick={() => selectDirAndApply(direction)}
-                      title={direction}
-                      className={`${isMobile ? 'w-7 h-7' : 'w-8 h-8'} flex items-center justify-center border transition-all active:scale-95 rounded-md ${
-                        isSelDir
-                          ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
-                          : (isLight
-                            ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
-                            : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
+          {/* Direction arrows */}
+          {fam.hasDirections && (
+            <div className="flex items-center gap-1.5">
+              {variantList.map(({ direction }) => {
+                const DirIcon = getDirectionIcon(direction, currentMode)
+                if (!DirIcon) return null
+                const isSelDir = currentDir === direction
+                return (
+                  <button
+                    key={direction}
+                    onClick={() => selectDirAndApply(direction)}
+                    title={direction}
+                    className={`${isMobile ? 'w-7 h-7' : 'w-8 h-8'} flex items-center justify-center border transition-all active:scale-95 rounded-md ${isSelDir
+                      ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
+                      : (isLight
+                        ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+                        : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
                       }`}
-                    >
-                      <DirIcon className={`${isMobile ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5'}`} strokeWidth={2.5} />
-                    </button>
-                  )
-                })}
+                  >
+                    <DirIcon className={`${isMobile ? 'h-3.5 w-3.5' : 'h-3.5 w-3.5'}`} strokeWidth={2.5} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    const renderPresetsTab = () => {
+      const availableFamilies = PRESET_FAMILIES.filter(
+        fam => !fam.layerTypes || fam.layerTypes.includes(layer.type)
+      )
+
+      if (isMobile) {
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-row gap-3 overflow-x-auto pb-3 px-1 scrollbar-none snap-x snap-mandatory">
+              {availableFamilies.map((fam) => {
+                const isActiveFam = activeFamilyKey === fam.familyKey
+                const isFamExpanded = expandedFamilyKey === fam.familyKey
+                const famHasConfig = fam.hasDirections || fam.outIds.length > 0
+
+                const currentMode = familyModes[fam.familyKey] || (activePresetType && isActiveFam ? activePresetType : 'IN')
+                const currentDir = familyDirections[fam.familyKey] || (
+                  isActiveFam && fam.hasDirections
+                    ? (fam.inIds.find(v => v.id === activePresetId)?.direction || fam.outIds.find(v => v.id === activePresetId)?.direction || fam.inIds[0]?.direction)
+                    : (fam.inIds[0]?.direction || null)
+                )
+                const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
+                const repVariant = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
+                const repPreset = repVariant ? PRESET_REGISTRY[repVariant.id] : null
+                if (!repPreset) return null
+
+                const handleCardClick = () => {
+                  if (isActiveFam) {
+                    dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
+                    setExpandedFamilyKey(null)
+                  } else if (isFamExpanded) {
+                    setExpandedFamilyKey(null)
+                  } else {
+                    if (famHasConfig) setExpandedFamilyKey(fam.familyKey)
+                    const mode = familyModes[fam.familyKey] || 'IN'
+                    const dir = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
+                    const varList = mode === 'OUT' ? fam.outIds : fam.inIds
+                    const target = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
+                    if (target) applyPreset(target.id, mode)
+                  }
+                }
+
+                return (
+                  <div key={fam.familyKey} className="snap-center shrink-0 w-[136px]">
+                    <PresetPreviewCard
+                      preset={repPreset}
+                      layer={previewLayer}
+                      showingFront={
+                        motionControls?.layerObjects?.get?.(previewLayer?.id)?._showingFront !== undefined
+                          ? motionControls.layerObjects.get(previewLayer.id)._showingFront
+                          : (previewLayer?.data?.showingFront !== false)
+                      }
+                      isActive={isActiveFam}
+                      onClick={handleCardClick}
+                      isLight={isLight}
+                      isMobile={true}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            {expandedFamilyKey && (
+              <div className="px-1">
+                {renderExpandedRow(availableFamilies.find(f => f.familyKey === expandedFamilyKey))}
               </div>
             )}
           </div>
         )
       }
-
-      const renderPresetsTab = () => {
-        const availableFamilies = PRESET_FAMILIES.filter(
-          fam => !fam.layerTypes || fam.layerTypes.includes(layer.type)
-        )
-
-        if (isMobile) {
-          return (
-            <div className="space-y-3">
-              <div className="flex flex-row gap-3 overflow-x-auto pb-3 px-1 scrollbar-none snap-x snap-mandatory">
-                {availableFamilies.map((fam) => {
-                  const isActiveFam = activeFamilyKey === fam.familyKey
-                  const isFamExpanded = expandedFamilyKey === fam.familyKey
-                  const famHasConfig = fam.hasDirections || fam.outIds.length > 0
-
-                  const currentMode = familyModes[fam.familyKey] || (activePresetType && isActiveFam ? activePresetType : 'IN')
-                  const currentDir  = familyDirections[fam.familyKey] || (
-                    isActiveFam && fam.hasDirections
-                      ? (fam.inIds.find(v => v.id === activePresetId)?.direction || fam.outIds.find(v => v.id === activePresetId)?.direction || fam.inIds[0]?.direction)
-                      : (fam.inIds[0]?.direction || null)
-                  )
-                  const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
-                  const repVariant  = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
-                  const repPreset   = repVariant ? PRESET_REGISTRY[repVariant.id] : null
-                  if (!repPreset) return null
-
-                  const handleCardClick = () => {
-                    if (isActiveFam) {
-                      dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
-                      setExpandedFamilyKey(null)
-                    } else if (isFamExpanded) {
-                      setExpandedFamilyKey(null)
-                    } else {
-                      if (famHasConfig) setExpandedFamilyKey(fam.familyKey)
-                      const mode    = familyModes[fam.familyKey] || 'IN'
-                      const dir     = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
-                      const varList = mode === 'OUT' ? fam.outIds : fam.inIds
-                      const target  = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
-                      if (target) applyPreset(target.id, mode)
-                    }
-                  }
-
-                  return (
-                    <div key={fam.familyKey} className="snap-center shrink-0 w-[136px]">
-                      <PresetPreviewCard
-                        preset={repPreset}
-                        layer={previewLayer}
-                        showingFront={
-                          motionControls?.layerObjects?.get?.(previewLayer?.id)?._showingFront !== undefined
-                            ? motionControls.layerObjects.get(previewLayer.id)._showingFront
-                            : (previewLayer?.data?.showingFront !== false)
-                        }
-                        isActive={isActiveFam}
-                        onClick={handleCardClick}
-                        isLight={isLight}
-                        isMobile={true}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-              {expandedFamilyKey && (
-                <div className="px-1">
-                  {renderExpandedRow(availableFamilies.find(f => f.familyKey === expandedFamilyKey))}
-                </div>
-              )}
-            </div>
-          )
-        }
 
       // Split families into rows so we can inject the expanded row immediately after the
       // row that contains the selected family card. [MOBILE] Use 3 columns on mobile so
@@ -1049,14 +1037,14 @@ function MotionPanel({
                     const isActiveFam = activeFamilyKey === fam.familyKey
 
                     const currentMode = familyModes[fam.familyKey] || (activePresetType && isActiveFam ? activePresetType : 'IN')
-                    const currentDir  = familyDirections[fam.familyKey] || (
+                    const currentDir = familyDirections[fam.familyKey] || (
                       isActiveFam && fam.hasDirections
                         ? (fam.inIds.find(v => v.id === activePresetId)?.direction || fam.outIds.find(v => v.id === activePresetId)?.direction || fam.inIds[0]?.direction)
                         : (fam.inIds[0]?.direction || null)
                     )
                     const variantList = currentMode === 'OUT' ? fam.outIds : fam.inIds
-                    const repVariant  = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
-                    const repPreset   = repVariant ? PRESET_REGISTRY[repVariant.id] : null
+                    const repVariant = fam.hasDirections ? (variantList.find(v => v.direction === currentDir) || variantList[0]) : variantList[0]
+                    const repPreset = repVariant ? PRESET_REGISTRY[repVariant.id] : null
                     if (!repPreset) return null
 
                     const isFamExpanded = expandedFamilyKey === fam.familyKey
@@ -1077,10 +1065,10 @@ function MotionPanel({
                       } else {
                         // Open settings row (when there's something to configure) and apply the default variant
                         if (famHasConfig) setExpandedFamilyKey(fam.familyKey)
-                        const mode    = familyModes[fam.familyKey] || 'IN'
-                        const dir     = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
+                        const mode = familyModes[fam.familyKey] || 'IN'
+                        const dir = familyDirections[fam.familyKey] || (fam.hasDirections ? fam.inIds[0].direction : null)
                         const varList = mode === 'OUT' ? fam.outIds : fam.inIds
-                        const target  = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
+                        const target = fam.hasDirections ? (varList.find(v => v.direction === dir) || varList[0]) : varList[0]
                         if (target) applyPreset(target.id, mode)
                       }
                     }
@@ -1137,7 +1125,7 @@ function MotionPanel({
       const v = action?.values || {}
       const commit = (updates) => onCustomActionValueChange?.(layerId, updates)
       const labelCls = `text-[10px] uppercase font-bold tracking-wider shrink-0 ${isLight ? 'text-slate-400' : 'text-zinc-500'}`
-      const valCls   = `text-[11px] font-mono shrink-0 ${isLight ? 'text-slate-600' : 'text-zinc-300'}`
+      const valCls = `text-[11px] font-mono shrink-0 ${isLight ? 'text-slate-600' : 'text-zinc-300'}`
       const trackCls = `${isLight ? 'bg-slate-200' : 'bg-white/10'} relative grow rounded-full h-1`
       const rangeCls = `absolute ${isLight ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`
       const thumbCls = `block w-3.5 h-3.5 rounded-full focus:outline-none cursor-pointer ${isLight ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md'}`
@@ -1233,9 +1221,9 @@ function MotionPanel({
     const renderCustomActionRow = (actionType) => {
       const meta = getActionMeta(actionType)
       if (!meta || !allowedActions.includes(actionType)) return null
-      const Icon   = meta.icon
+      const Icon = meta.icon
       const action = activeActions.find(a => a.type === actionType)
-      const isAct  = !!action
+      const isAct = !!action
       const hasSettings = SETTINGS_ACTION_TYPES.includes(actionType)
       const isExpanded = hasSettings && expandedActionType === actionType
 
@@ -1254,11 +1242,10 @@ function MotionPanel({
         <div key={actionType}>
           <div
             onClick={handleRowClick}
-            className={`flex items-center justify-between gap-3 font-medium transition-colors ${isMobile ? 'px-3 py-2.5 text-[11px]' : 'px-3 py-3 text-[13px]'} ${
-              isAct
-                ? (isLight ? 'bg-[#7c4af0]/[0.06]' : 'bg-[#7c4af0]/[0.08]')
-                : (isLight ? 'hover:bg-slate-50 cursor-pointer' : 'hover:bg-white/[0.03] cursor-pointer')
-            } ${hasSettings ? 'cursor-pointer' : ''}`}
+            className={`flex items-center justify-between gap-3 font-medium transition-colors ${isMobile ? 'px-3 py-2.5 text-[11px]' : 'px-3 py-3 text-[13px]'} ${isAct
+              ? (isLight ? 'bg-[#7c4af0]/[0.06]' : 'bg-[#7c4af0]/[0.08]')
+              : (isLight ? 'hover:bg-slate-50 cursor-pointer' : 'hover:bg-white/[0.03] cursor-pointer')
+              } ${hasSettings ? 'cursor-pointer' : ''}`}
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
@@ -1311,11 +1298,10 @@ function MotionPanel({
                   <div key={actionType} className="snap-center shrink-0 w-[136px]">
                     <div
                       onClick={handleRowClick}
-                      className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-200 relative ${
-                        isAct
-                          ? 'border-2 border-[#7c4af0] bg-[#7c4af0]/5 shadow-sm shadow-[#7c4af0]/15'
-                          : (isLight ? 'bg-slate-100 hover:bg-slate-200/85 border border-transparent' : 'bg-zinc-900/40 hover:bg-zinc-900/80 border border-white/[0.04]')
-                      }`}
+                      className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-200 relative ${isAct
+                        ? 'border-2 border-[#7c4af0] bg-[#7c4af0]/5 shadow-sm shadow-[#7c4af0]/15'
+                        : (isLight ? 'bg-slate-100 hover:bg-slate-200/85 border border-transparent' : 'bg-zinc-900/40 hover:bg-zinc-900/80 border border-white/[0.04]')
+                        }`}
                     >
                       <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
                         <Icon className="h-6 w-6" strokeWidth={2} />
@@ -1335,11 +1321,10 @@ function MotionPanel({
                         </button>
                       )}
                     </div>
-                    <span className={`block font-medium text-center transition-colors truncate max-w-full px-0.5 text-[8px] mt-1 ${
-                      isAct
-                        ? 'text-[#7c4af0]'
-                        : (isLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-400 hover:text-zinc-200')
-                    }`}>
+                    <span className={`block font-medium text-center transition-colors truncate max-w-full px-0.5 text-[8px] mt-1 ${isAct
+                      ? 'text-[#7c4af0]'
+                      : (isLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-400 hover:text-zinc-200')
+                      }`}>
                       {meta.label}
                     </span>
                   </div>
@@ -1385,15 +1370,14 @@ function MotionPanel({
           {(isBackground
             ? [{ id: 'custom', label: 'Custom', badge: customBadge }]
             : [
-                { id: 'presets', label: 'Presets', badge: presetBadge },
-                { id: 'custom',  label: 'Custom',  badge: customBadge },
-              ]
+              { id: 'presets', label: 'Presets', badge: presetBadge },
+              { id: 'custom', label: 'Custom', badge: customBadge },
+            ]
           ).map((tab) => {
             const isTActive = effectiveTab === tab.id
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 font-bold tracking-wide transition-colors flex items-center justify-center gap-1.5 ${isMobile ? 'py-2.5 text-[11px]' : 'py-3 text-[13px]'} ${
-                isTActive ? 'bg-[#7c4af0] text-white' : (isLight ? 'text-slate-500 hover:text-slate-800 bg-white' : 'text-zinc-500 hover:text-zinc-200 bg-transparent')
-              }`}>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 font-bold tracking-wide transition-colors flex items-center justify-center gap-1.5 ${isMobile ? 'py-2.5 text-[11px]' : 'py-3 text-[13px]'} ${isTActive ? 'bg-[#7c4af0] text-white' : (isLight ? 'text-slate-500 hover:text-slate-800 bg-white' : 'text-zinc-500 hover:text-zinc-200 bg-transparent')
+                }`}>
                 {tab.label}
                 {tab.badge > 0 && (
                   <span className={`w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold font-mono ${isTActive ? 'bg-white/20 text-white' : (isLight ? 'bg-slate-200 text-slate-600' : 'bg-zinc-800 text-zinc-300')}`}>{tab.badge}</span>
@@ -1406,7 +1390,7 @@ function MotionPanel({
         {/* Tab content */}
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-3 min-h-0">
           {effectiveTab === 'presets' && renderPresetsTab()}
-          {effectiveTab === 'custom'  && renderCustomTab()}
+          {effectiveTab === 'custom' && renderCustomTab()}
         </div>
 
         {/* Exit element footer */}
@@ -1430,15 +1414,21 @@ function MotionPanel({
     <>
       {isOpen && <div className="lg:hidden fixed inset-0 z-[60] bg-transparent pointer-events-none" />}
       <div
-        className={`fixed z-[61] flex flex-col shadow-2xl transition-all duration-300 ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in' : 'inset-y-0 right-0 border-l'}`}
+        className={`fixed flex flex-col transition-all duration-300 editor-panel-container ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in' : 'inset-y-0 right-0 border-l'}`}
         style={{
+          zIndex: isMobile ? 61 : (isMotionCaptureActive ? 50 : 35),
           top: isMobile ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
-          height: isMobile ? '36vh' : 'auto',
+          height: isMobile
+            ? '36vh'
+            : (isMotionCaptureActive
+              ? '100vh'
+              : `calc(100vh - ${topToolbarHeight}px - ${(bottomSectionHeight || 140)}px)`),
+          '--bottom-section-height': `${(bottomSectionHeight || 140)}px`,
           minHeight: isMobile ? '230px' : 'auto',
           maxHeight: isMobile ? '48vh' : 'auto',
           width: isMobile ? '100vw' : `${PANEL_WIDTH}px`,
-          backgroundColor: isLight ? '#ffffff' : '#090a0f',
-          borderColor: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)',
+          backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+          borderLeft: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
         }}
       >
         {isMobile && <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0"><div className={`h-1 w-9 rounded-full ${isLight ? 'bg-slate-300' : 'bg-zinc-700'}`} /></div>}
@@ -1448,7 +1438,7 @@ function MotionPanel({
         {!(isMotionCaptureActive && motionModeState === 'element') && renderHeader()}
         <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
           {!isMotionCaptureActive && renderNormalMode()}
-          {isMotionCaptureActive && motionModeState === 'list'    && renderMotionModeList()}
+          {isMotionCaptureActive && motionModeState === 'list' && renderMotionModeList()}
           {isMotionCaptureActive && motionModeState === 'element' && renderMotionModeElement()}
         </div>
       </div>

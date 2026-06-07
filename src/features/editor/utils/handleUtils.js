@@ -239,7 +239,7 @@ export function createRotateHandle({
   const background = new PIXI.Graphics()
   background.circle(0, 0, radius)
   background.fill({ color: 0xffffff })
-  background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
+  background.stroke({ color: 0xD1D5DB, width: 1 })
   handle.addChild(background)
 
   // Create icon container
@@ -250,12 +250,13 @@ export function createRotateHandle({
   const drawArrows = (graphics, color, size) => {
     graphics.clear()
     const s = size / 2
-    const r = s * 0.85
-    const arrowSize = s * 0.5
+    const r = s * 0.75
+    const arrowSize = s * 0.35
+    const strokeWidth = Math.max(1, 1.5 * baseScale)
 
     // Arc angles (in radians)
-    const arcLength = Math.PI * 0.6
-    const gap = Math.PI * 0.4
+    const arcLength = Math.PI * 0.65
+    const gap = Math.PI * 0.35
 
     // Top Arc
     const topStart = -Math.PI * 0.5 - arcLength / 2
@@ -268,18 +269,18 @@ export function createRotateHandle({
     // Draw Arcs
     graphics.beginPath()
     graphics.arc(0, 0, r, topStart, topEnd)
-    graphics.stroke({ color, width: 2, cap: 'round' })
+    graphics.stroke({ color, width: strokeWidth, cap: 'round' })
 
     graphics.beginPath()
     graphics.arc(0, 0, r, bottomStart, bottomEnd)
-    graphics.stroke({ color, width: 2, cap: 'round' })
+    graphics.stroke({ color, width: strokeWidth, cap: 'round' })
 
     // Helper to draw a sharp arrowhead at a specific point on the circle
     const drawHead = (angle, isClockwise = true) => {
       const x = Math.cos(angle) * r
       const y = Math.sin(angle) * r
       const tangent = angle + (isClockwise ? Math.PI / 2 : -Math.PI / 2)
-      const spread = 0.8 // ~45 degrees
+      const spread = 0.7 // ~40 degrees
 
       const x1 = x - arrowSize * Math.cos(tangent - spread)
       const y1 = y - arrowSize * Math.sin(tangent - spread)
@@ -292,9 +293,10 @@ export function createRotateHandle({
       graphics.lineTo(x2, y2)
     }
 
+    graphics.beginPath()
     drawHead(topEnd, true)
     drawHead(bottomEnd, true)
-    graphics.stroke({ color, width: 2, cap: 'round' })
+    graphics.stroke({ color, width: strokeWidth, cap: 'round' })
   }
 
   const iconSize = 24 * baseScale
@@ -328,7 +330,7 @@ export function createRotateHandle({
     background.clear()
     background.circle(0, 0, radius)
     background.fill({ color: 0xffffff })
-    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
+    background.stroke({ color: 0xD1D5DB, width: 1 })
     drawArrows(icon, 0x000000, iconSize)
     handle.cursor = 'grab'
   })

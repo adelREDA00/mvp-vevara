@@ -74,7 +74,6 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
   const [selectedIds, setSelectedIds] = useState([])
   const [activeTab, setActiveTab] = useState('All')
-  const [width, setWidth] = useState(320)
   const [isDragOver, setIsDragOver] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null })
@@ -289,14 +288,13 @@ function UploadsPanel({ onClose, aspectRatio }) {
     <div
       className="flex flex-col h-full relative transition-all duration-300"
       style={{
-        width: isMobile ? '100%' : `${width}px`,
+        width: isMobile ? '100%' : '320px',
         backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: isMobile ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
         borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
       <div className={`px-6 lg:pt-6 pt-0 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         <div className="hidden lg:flex items-center justify-between mb-4">

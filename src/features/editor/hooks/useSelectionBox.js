@@ -143,13 +143,21 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
   const isLocked = isPastBaseStep
 
   if (isLocked) {
-    // Show outline-only locked state: show the purple outline, hide all handles
+    // Show outline, Move, and Rotation handles
     selectionBox.visible = true
     for (let i = 0; i < selectionBox.children.length; i++) {
       const child = selectionBox.children[i]
-      // Only keep the selection outline visible — hide all handles and hit areas
       const isOutline = child.label === 'selection-outline'
-      child.visible = isOutline
+      const isRotation = child.label === 'rotation-handle'
+      const isMove = child.label === 'move-handle'
+
+      if (isOutline || isRotation) {
+        child.visible = true
+      } else if (isMove) {
+        child.visible = !!selectionBox._showMoveHandle
+      } else {
+        child.visible = false
+      }
       child.alpha = 1.0
     }
     if (!selectionBox.parent && layersContainer) {
@@ -165,7 +173,11 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     selectionBox.visible = true
     for (let i = 0; i < selectionBox.children.length; i++) {
       const child = selectionBox.children[i]
-      child.visible = true
+      if (child.label === 'move-handle') {
+        child.visible = !!selectionBox._showMoveHandle
+      } else {
+        child.visible = true
+      }
       child.alpha = 1.0 // Fully visible for static layers
     }
     if (!selectionBox.parent && layersContainer) {
@@ -184,8 +196,12 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
   // Show all handles/border
   for (let i = 0; i < selectionBox.children.length; i++) {
     const child = selectionBox.children[i]
-    // Show everything by default
-    child.visible = true
+    // Show everything by default (except move handle if not small)
+    if (child.label === 'move-handle') {
+      child.visible = !!selectionBox._showMoveHandle
+    } else {
+      child.visible = true
+    }
     child.alpha = 1.0 // Reset alpha to full opacity in normal state
   }
 
@@ -1053,23 +1069,24 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const background = new PIXI.Graphics()
     background.circle(0, 0, radius)
     background.fill({ color: 0xffffff })
-    background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
+    background.stroke({ color: 0xD1D5DB, width: 1 })
     rotationHandle.addChild(background)
 
     // Create icon container
     const icon = new PIXI.Graphics()
     rotationHandle.addChild(icon)
 
-    // Helper to draw the "two curved arrows" icon (Canva style)
+    // Helper to draw the rotation icon (two curved arrows)
     const drawArrows = (graphics, color, size) => {
       graphics.clear()
       const s = size / 2
-      const r = s * 0.85
-      const arrowSize = s * 0.5
+      const r = s * 0.75
+      const arrowSize = s * 0.35
+      const strokeWidth = Math.max(1, 1.5 * scaledBase)
 
       // Arc angles (in radians)
-      const arcLength = Math.PI * 0.6
-      const gap = Math.PI * 0.4
+      const arcLength = Math.PI * 0.65
+      const gap = Math.PI * 0.35
 
       // Top Arc
       const topStart = -Math.PI * 0.5 - arcLength / 2
@@ -1082,11 +1099,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       // Draw Arcs
       graphics.beginPath()
       graphics.arc(0, 0, r, topStart, topEnd)
-      graphics.stroke({ color, width: 2, cap: 'round' })
+      graphics.stroke({ color, width: strokeWidth, cap: 'round' })
 
       graphics.beginPath()
       graphics.arc(0, 0, r, bottomStart, bottomEnd)
-      graphics.stroke({ color, width: 2, cap: 'round' })
+      graphics.stroke({ color, width: strokeWidth, cap: 'round' })
 
       // Helper to draw a sharp arrowhead at a specific point on the circle
       const drawHead = (angle, isClockwise = true) => {
@@ -1094,11 +1111,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         const y = Math.sin(angle) * r
 
         // The tangent angle at this point on the circle
-        // For clockwise movement, tangent is angle + PI/2
         const tangent = angle + (isClockwise ? Math.PI / 2 : -Math.PI / 2)
 
         // Arrow "wings" angle (how wide the head is)
-        const spread = 0.8 // ~45 degrees
+        const spread = 0.7 // ~40 degrees
 
         const x1 = x - arrowSize * Math.cos(tangent - spread)
         const y1 = y - arrowSize * Math.sin(tangent - spread)
@@ -1112,9 +1128,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       // Draw arrowheads at the ends of the arcs
+      graphics.beginPath()
       drawHead(topEnd, true)
       drawHead(bottomEnd, true)
-      graphics.stroke({ color, width: 2, cap: 'round' })
+      graphics.stroke({ color, width: strokeWidth, cap: 'round' })
     }
 
     const iconSize = Math.max(16, 24 * baseScale)
@@ -1135,7 +1152,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       background.clear()
       background.circle(0, 0, radius)
-      background.fill({ color: 0xffffff })
+      background.fill({ color: 0x8B5CF6 })
       background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
 
       drawArrows(icon, 0xffffff, iconSize)
@@ -1150,7 +1167,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       background.clear()
       background.circle(0, 0, radius)
       background.fill({ color: 0xffffff })
-      background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.5 * baseScale) })
+      background.stroke({ color: 0xD1D5DB, width: 1 })
 
       drawArrows(icon, 0x000000, iconSize)
 
@@ -1193,6 +1210,118 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     })
 
     return rotationHandle
+  }, [])
+
+  // Create move handle with icon
+  const createMoveHandle = useCallback((localBoundsX, localBoundsY, scaledWidth, scaledHeight, zoomScale = 1, isLocked = false) => {
+    const moveHandle = new PIXI.Container()
+    moveHandle.alpha = isLocked ? 0.4 : 1.0
+    const layerSizeRef = Math.min(scaledWidth, scaledHeight)
+    const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
+
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
+    // Draw white circle background at calculated size
+    const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
+    const scaledBase = baseScale * smallLayerScale
+    const radius = Math.max(14, 22 * scaledBase)
+
+    const background = new PIXI.Graphics()
+    background.circle(0, 0, radius)
+    background.fill({ color: 0xffffff })
+    background.stroke({ color: 0xD1D5DB, width: 1 })
+    moveHandle.addChild(background)
+
+    // Create icon container
+    const icon = new PIXI.Graphics()
+    moveHandle.addChild(icon)
+
+    // Helper to draw the move icon (crosshair style)
+    const drawMoveIcon = (graphics, color, size) => {
+      graphics.clear()
+      const s = size / 2
+      const arrowSize = s * 0.4
+
+      // Draw horizontal and vertical lines
+      graphics.beginPath()
+      graphics.moveTo(-s, 0)
+      graphics.lineTo(s, 0)
+      graphics.moveTo(0, -s)
+      graphics.lineTo(0, s)
+      graphics.stroke({ color, width: Math.max(1, 1.5 * scaledBase), cap: 'round' })
+
+      // Draw arrow heads
+      // Left
+      graphics.beginPath()
+      graphics.moveTo(-s, 0)
+      graphics.lineTo(-s + arrowSize, -arrowSize)
+      graphics.moveTo(-s, 0)
+      graphics.lineTo(-s + arrowSize, arrowSize)
+
+      // Right
+      graphics.moveTo(s, 0)
+      graphics.lineTo(s - arrowSize, -arrowSize)
+      graphics.moveTo(s, 0)
+      graphics.lineTo(s - arrowSize, arrowSize)
+
+      // Top
+      graphics.moveTo(0, -s)
+      graphics.lineTo(-arrowSize, -s + arrowSize)
+      graphics.moveTo(0, -s)
+      graphics.lineTo(arrowSize, -s + arrowSize)
+
+      // Bottom
+      graphics.moveTo(0, s)
+      graphics.lineTo(-arrowSize, s - arrowSize)
+      graphics.moveTo(0, s)
+      graphics.lineTo(arrowSize, s - arrowSize)
+
+      graphics.stroke({ color, width: Math.max(1, 1.5 * scaledBase), cap: 'round' })
+    }
+
+    const iconSize = Math.max(14, 20 * baseScale)
+    drawMoveIcon(icon, 0x000000, iconSize)
+
+    // Default position (centered) - will be overridden by layout logic
+    const distanceFromBottom = radius + (30 * scaledBase)
+    moveHandle.x = localBoundsX + scaledWidth / 2
+    moveHandle.y = localBoundsY + scaledHeight + distanceFromBottom
+    moveHandle.label = 'move-handle'
+    moveHandle.eventMode = 'static'
+    moveHandle.cursor = 'grab'
+    moveHandle.zIndex = 10001
+
+    // Sync hit area with visual radius
+    moveHandle.hitArea = new PIXI.Circle(0, 0, radius)
+
+    moveHandle.on('pointerenter', () => {
+      if (interactionStateRef.current.resize || interactionStateRef.current.rotate) return
+
+      background.clear()
+      background.circle(0, 0, radius)
+      background.fill({ color: 0x8B5CF6 })
+      background.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * baseScale) })
+
+      drawMoveIcon(icon, 0xffffff, iconSize)
+
+      const canvasEl = canvasRef.current
+      if (canvasEl) canvasEl.style.cursor = 'grab'
+    })
+
+    moveHandle.on('pointerleave', () => {
+      if (interactionStateRef.current.resize || interactionStateRef.current.rotate) return
+
+      background.clear()
+      background.circle(0, 0, radius)
+      background.fill({ color: 0xffffff })
+      background.stroke({ color: 0xD1D5DB, width: 1 })
+
+      drawMoveIcon(icon, 0x000000, iconSize)
+
+      const canvasEl = canvasRef.current
+      if (canvasEl) canvasEl.style.cursor = 'default'
+    })
+
+    return moveHandle
   }, [])
 
 
@@ -1411,15 +1540,38 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           else if (type === 's') { child.x = localBoundsX + scaledWidth / 2; child.y = localBoundsY + scaledHeight }
           else if (type === 'w') { child.x = localBoundsX; child.y = localBoundsY + scaledHeight / 2 }
           else if (type === 'e') { child.x = localBoundsX + scaledWidth; child.y = localBoundsY + scaledHeight / 2 }
-        } else if (child.label === 'rotation-handle') {
+        } else if (child.label === 'rotation-handle' || child.label === 'move-handle') {
           const baseScale = calculateAdaptedScale(zoomScale)
           // Use the same small layer logic as creation for perfect sync
           const layerSizeRef = Math.min(scaledWidth, scaledHeight)
           const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
           const radius = Math.max(14, 22 * baseScale * smallLayerScale)
+          const distanceFromBottom = radius + (30 * baseScale)
+          const handleY = localBoundsY + scaledHeight + distanceFromBottom
+          const centerX = localBoundsX + scaledWidth / 2
 
-          child.x = localBoundsX + scaledWidth / 2
-          child.y = localBoundsY + scaledHeight + radius + (30 * baseScale)
+          const screenWidth = scaledWidth * viewportScale
+          const screenHeight = scaledHeight * viewportScale
+          const isSmall = screenWidth < 80 || screenHeight < 80
+
+          if (child.label === 'rotation-handle') {
+            if (isSmall) {
+              const offset = radius + 6 * baseScale
+              child.x = centerX - offset
+            } else {
+              child.x = centerX
+            }
+            child.y = handleY
+          } else if (child.label === 'move-handle') {
+            if (isSmall) {
+              const offset = radius + 6 * baseScale
+              child.x = centerX + offset
+            } else {
+              child.x = centerX
+            }
+            child.y = handleY
+            box._showMoveHandle = isSmall
+          }
         }
       })
     }
@@ -1447,7 +1599,12 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const currentMotionCaptureMode = latestMotionCaptureModeRef.current
     const isCaptureMode = currentMotionCaptureMode?.isActive
 
-    const maintainAspectRatio = (shiftKey && isCornerHandle) || (state.isTextElement && isCornerHandle) || (isCaptureMode && isCornerHandle) || (state.isMediaElement && isCornerHandle)
+    let maintainAspectRatio;
+    if (currentLayer.type === LAYER_TYPES.SHAPE && !isCaptureMode) {
+      maintainAspectRatio = isCornerHandle && !shiftKey;
+    } else {
+      maintainAspectRatio = (shiftKey && isCornerHandle) || (state.isTextElement && isCornerHandle) || (isCaptureMode && isCornerHandle) || (state.isMediaElement && isCornerHandle);
+    }
 
     const transformFunc = handleTransformCache.current[state.handleType]
     if (!transformFunc) return
@@ -2479,12 +2636,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     const startWorldPos = currentViewport.toWorld(startEvent.data.global.x, startEvent.data.global.y)
     const layerId = currentLayer.id
-    const currentMotionCaptureMode = latestMotionCaptureModeRef.current
-    const capturedLayer = currentMotionCaptureMode?.isActive && currentMotionCaptureMode.trackedLayers?.get(layerId)
 
-    const layerCenterX = capturedLayer?.currentPosition?.x ?? (currentLayer.x || 0)
-    const layerCenterY = capturedLayer?.currentPosition?.y ?? (currentLayer.y || 0)
-    const startRotation = capturedLayer?.rotation ?? (currentLayer.rotation || 0)
+    // Authoritative visual state coordinates, scales, and rotation
+    const position = getCurrentLayerPosition(currentLayer, currentLayerObject)
+    const layerCenterX = position.x
+    const layerCenterY = position.y
+    const startRotation = getCurrentLayerRotation(currentLayer, currentLayerObject)
+    const { scaleX, scaleY } = getCurrentLayerScale(currentLayer, currentLayerObject)
+    const rotationDims = getCurrentLayerDimensions(currentLayer, currentLayerObject)
+    const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
 
     const dx = startWorldPos.x - layerCenterX
     const dy = startWorldPos.y - layerCenterY
@@ -2492,28 +2652,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     dragStateAPI.setInteractionState(false, true, currentLayer.id)
 
-    const isMediaElement = currentLayer.type === LAYER_TYPES.IMAGE || currentLayer.type === LAYER_TYPES.VIDEO || currentLayer.type === LAYER_TYPES.FRAME
-    let rotationDims
-    if (currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) {
-      if (currentLayerObject.isFlowText) {
-        rotationDims = { width: currentLayer.width || 100, height: currentLayerObject._actualHeight || 100 }
-      } else {
-        rotationDims = calculateTextDimensions(currentLayerObject, currentLayer)
-      }
-    } else {
-      rotationDims = {
-        width: capturedLayer?.cropWidth ?? (isMediaElement ? (currentLayer.cropWidth ?? currentLayer.width ?? 100) : (currentLayer.width ?? 100)),
-        height: capturedLayer?.cropHeight ?? (isMediaElement ? (currentLayer.cropHeight ?? currentLayer.height ?? 100) : (currentLayer.height ?? 100))
-      }
-    }
-
-    const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
-
     updateHoverBox(
       layerCenterX, layerCenterY, rotationDims.width, rotationDims.height,
       startRotation, anchorX, anchorY,
-      capturedLayer?.scaleX ?? currentLayer.scaleX ?? 1,
-      capturedLayer?.scaleY ?? currentLayer.scaleY ?? 1,
+      scaleX, scaleY,
       1 / currentViewport.scale.x
     )
 
@@ -2597,20 +2739,25 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       const isCapture = latestMotionCaptureModeRef.current?.isActive
-      const captured = isCapture && latestMotionCaptureModeRef.current.trackedLayers?.get(latestL.id)
 
       if (hoverBoxRef.current?.visible && latestObj && !latestObj.destroyed) {
-        const isMedia = latestL.type === LAYER_TYPES.IMAGE || latestL.type === LAYER_TYPES.VIDEO || latestL.type === LAYER_TYPES.FRAME
-        const effectiveDims = isMedia
-          ? getEffectiveLayerDimensions(latestL, latestObj, latestMotionCaptureModeRef.current)
-          : null
-        const dims = effectiveDims ?? {
-          width: captured?.cropWidth ?? (latestL.cropWidth ?? latestL.width ?? 100),
-          height: (latestObj?.isFlowText && latestObj._actualHeight !== undefined)
-            ? latestObj._actualHeight
-            : (captured?.cropHeight ?? (latestL.cropHeight ?? latestL.height ?? 100))
-        }
-        updateHoverBox(latestObj.x, latestObj.y, dims.width, dims.height, newRotation, 0.5, 0.5, captured?.scaleX ?? latestL.scaleX ?? 1, captured?.scaleY ?? latestL.scaleY ?? 1, 1 / v.scale.x)
+        const dims = getCurrentLayerDimensions(latestL, latestObj)
+        const { anchorX, anchorY } = resolveAnchors(latestL, latestObj)
+        const { scaleX, scaleY } = getCurrentLayerScale(latestL, latestObj)
+        const currentPos = getCurrentLayerPosition(latestL, latestObj)
+
+        updateHoverBox(
+          currentPos.x,
+          currentPos.y,
+          dims.width,
+          dims.height,
+          newRotation,
+          anchorX,
+          anchorY,
+          scaleX,
+          scaleY,
+          1 / v.scale.x
+        )
       }
 
       if (isCapture) {
@@ -3237,9 +3384,42 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const sideHitAreas = isTextElement ? textSideHitAreas : shapeSideHitAreas
     sideHitAreas.forEach(hitArea => selectionBox.addChild(hitArea))
 
+    // Calculate if it's small (Move Handle should be visible)
+    const screenWidth = scaledWidth * viewportScale
+    const screenHeight = scaledHeight * viewportScale
+    const isSmall = screenWidth < 80 || screenHeight < 80
+    selectionBox._showMoveHandle = isSmall
+
     // Add rotation handle
     const rotationHandle = createRotationHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, handleRotateStart, zoomScale, false)
     selectionBox.addChild(rotationHandle)
+
+    // Add move handle
+    const moveHandle = createMoveHandle(localBoundsX, localBoundsY, scaledWidth, scaledHeight, zoomScale, false)
+    selectionBox.addChild(moveHandle)
+
+    // Position handles
+    const centerX = localBoundsX + scaledWidth / 2
+    const baseScale = calculateAdaptedScale(zoomScale)
+    const layerSizeRef = Math.min(scaledWidth, scaledHeight)
+    const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
+    const radius = Math.max(14, 22 * baseScale * smallLayerScale)
+    const handleY = localBoundsY + scaledHeight + radius + (30 * baseScale)
+
+    if (isSmall) {
+      const offset = radius + 6 * baseScale
+      rotationHandle.x = centerX - offset
+      rotationHandle.y = handleY
+
+      moveHandle.x = centerX + offset
+      moveHandle.y = handleY
+      moveHandle.visible = true
+    } else {
+      rotationHandle.x = centerX
+      rotationHandle.y = handleY
+
+      moveHandle.visible = false
+    }
 
     // [FIX] IMMEDIATELY apply visibility rules to avoid flickering handles when past base step
     // We call this after adding all children to ensure they are properly hidden if necessary.

@@ -1,7 +1,7 @@
 import { Plus, Zap, ChevronDown, Pencil, Scissors, Trash2 } from 'lucide-react'
 import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
-import React, { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useContext, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming } from '../../../store/slices/projectSlice'
@@ -1554,7 +1554,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   )
 })
 
-const ScenesBar = React.memo(({
+const ScenesBar = React.memo(React.forwardRef(({
   currentTime = 0,
   totalTime = 12,
   worldWidth = 1920,
@@ -1570,7 +1570,7 @@ const ScenesBar = React.memo(({
   onPlay, // Optional: to resume playback after split
   onPause, // Optional: to pause during split
   onOpenTransitionsPanel
-}) => {
+}, ref) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   const dispatch = useDispatch()
@@ -1600,6 +1600,14 @@ const ScenesBar = React.memo(({
   const dragScrollTimerRef = useRef(null)
   const playheadScrollTimerRef = useRef(null)
 
+  const ghostPlayheadRef = useRef(null)
+  const ghostTooltipRef = useRef(null)
+  const ghostTooltipTextRef = useRef(null)
+
+  // Timeline zoom state (default to 1.0, max 30.0)
+  const [timelineZoom, setTimelineZoom] = useState(1.0)
+  const zoomScrollRef = useRef(null)
+
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
     if (typeof window === 'undefined') return 180
@@ -1612,15 +1620,15 @@ const ScenesBar = React.memo(({
   const calculateDurationFromWidth = useCallback((width) => {
     const defaultWidth = getDefaultCardWidth()
     const defaultDuration = 5.0 // 5 seconds for default width
-    return (width / defaultWidth) * defaultDuration
-  }, [getDefaultCardWidth])
+    return (width / timelineZoom / defaultWidth) * defaultDuration
+  }, [getDefaultCardWidth, timelineZoom])
 
   // Calculate width from duration (default width = 5 seconds)
   const calculateWidthFromDuration = useCallback((duration) => {
     const defaultWidth = getDefaultCardWidth()
     const defaultDuration = 5.0 // 5 seconds for default width
-    return (duration / defaultDuration) * defaultWidth
-  }, [getDefaultCardWidth])
+    return (duration / defaultDuration) * defaultWidth * timelineZoom
+  }, [getDefaultCardWidth, timelineZoom])
 
   const getDefaultCardHeight = useCallback(() => {
     if (typeof window === 'undefined') return 72
@@ -1634,8 +1642,15 @@ const ScenesBar = React.memo(({
     if (seconds === 0) return '0'
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
+    const tenths = Math.round((seconds % 1) * 10)
     if (mins === 0) {
+      if (tenths > 0) {
+        return `0:${secs.toString().padStart(2, '0')}.${tenths}`
+      }
       return `0:${secs.toString().padStart(2, '0')}`
+    }
+    if (tenths > 0) {
+      return `${mins}:${secs.toString().padStart(2, '0')}.${tenths}`
     }
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }, [])
@@ -1925,6 +1940,41 @@ const ScenesBar = React.memo(({
     return Math.min(playheadPositionPx, totalCardsWidth)
   }, [playheadPositionPx, totalCardsWidth])
 
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => {
+      const container = timelineRef.current?.parentElement?.parentElement
+      if (!container) return
+      const oldZoom = timelineZoom
+      const newZoom = Math.min(30.0, oldZoom * 1.4)
+      if (newZoom !== oldZoom) {
+        const scrollLeft = container.scrollLeft
+        const xPlayhead = calculatePlayheadPosition(currentTime)
+        zoomScrollRef.current = {
+          xClient: xPlayhead - scrollLeft,
+          scrollLeft,
+          oldZoom
+        }
+        setTimelineZoom(newZoom)
+      }
+    },
+    zoomOut: () => {
+      const container = timelineRef.current?.parentElement?.parentElement
+      if (!container) return
+      const oldZoom = timelineZoom
+      const newZoom = Math.max(1.0, oldZoom / 1.4)
+      if (newZoom !== oldZoom) {
+        const scrollLeft = container.scrollLeft
+        const xPlayhead = calculatePlayheadPosition(currentTime)
+        zoomScrollRef.current = {
+          xClient: xPlayhead - scrollLeft,
+          scrollLeft,
+          oldZoom
+        }
+        setTimelineZoom(newZoom)
+      }
+    }
+  }), [timelineZoom, currentTime, calculatePlayheadPosition])
+
   // Calculate pixel position for a given time
   const calculateTimePosition = useCallback((time) => {
     return calculatePlayheadPosition(time)
@@ -1934,9 +1984,18 @@ const ScenesBar = React.memo(({
   const markersData = useMemo(() => {
     const major = []
     const minor = []
+    
+    const secondWidth = calculateWidthFromDuration(1.0)
+    const majorInterval = secondWidth > 120 ? 1 : 5
+    
+    let minorInterval = 1
+    if (majorInterval === 1) {
+      minorInterval = secondWidth > 300 ? 0.1 : 0.5
+    }
+
     const maxMarkersTime = Math.max(Math.ceil(totalTime / 5) * 5, 5)
 
-    for (let i = 0; i <= maxMarkersTime; i += 5) {
+    for (let i = 0; i <= maxMarkersTime; i += majorInterval) {
       if (i > totalTime) break
 
       const pos = calculateTimePosition(i)
@@ -1948,18 +2007,18 @@ const ScenesBar = React.memo(({
 
       // Add minor markers for this major interval
       if (i < totalTime) {
-        for (let j = 1; j <= 4; j++) {
-          const mTime = i + j
-          if (mTime >= totalTime) break
+        const nextMajor = i + majorInterval
+        for (let t = i + minorInterval; t < nextMajor && t < totalTime; t += minorInterval) {
+          const roundedTime = Math.round(t * 10) / 10
           minor.push({
-            time: mTime,
-            position: calculateTimePosition(mTime)
+            time: roundedTime,
+            position: calculateTimePosition(roundedTime)
           })
         }
       }
     }
     return { major, minor }
-  }, [totalTime, calculateTimePosition, formatTimeLabel])
+  }, [totalTime, calculateTimePosition, formatTimeLabel, calculateWidthFromDuration])
 
   const majorMarkers = markersData.major
   const minorMarkers = markersData.minor
@@ -1996,6 +2055,51 @@ const ScenesBar = React.memo(({
     }
 
     onSeek(seekTime)
+  }
+
+  const handleSeekMouseEnter = (e) => {
+    if (isDraggingPlayhead || !cardsContainerRef.current) return
+    if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'block'
+    if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'block'
+  }
+
+  const handleSeekMouseMove = (e) => {
+    if (isDraggingPlayhead || !cardsContainerRef.current || !ghostPlayheadRef.current) return
+
+    const containerRect = cardsContainerRef.current.getBoundingClientRect()
+    const mouseX = e.clientX - containerRect.left
+    const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+
+    // Position ghost playhead
+    ghostPlayheadRef.current.style.left = `${16 + clampedX}px`
+
+    // Compute ghost time
+    const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
+    let seekTime = 0
+
+    const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+    const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+    if (targetScene) {
+      const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+      const progressInCard = Math.min(1, positionInCard / targetScene.width)
+      seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+    } else {
+      seekTime = tTime
+    }
+
+    // Position ghost tooltip
+    if (ghostTooltipRef.current && ghostTooltipTextRef.current && timelineRef.current) {
+      const timelineRect = timelineRef.current.getBoundingClientRect()
+      ghostTooltipRef.current.style.left = `${timelineRect.left + 16 + clampedX}px`
+      ghostTooltipRef.current.style.top = `${timelineRect.top - 16 - 28}px`
+      ghostTooltipTextRef.current.textContent = formatTime(seekTime)
+    }
+  }
+
+  const handleSeekMouseLeave = (e) => {
+    if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
+    if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
   }
 
   const handlePlayheadMouseDown = (e) => {
@@ -2074,7 +2178,7 @@ const ScenesBar = React.memo(({
       triggerSeek(e.clientX)
 
       // Find nearest scrollable container
-      const scrollContainer = timelineRef.current?.parentElement
+      const scrollContainer = timelineRef.current?.parentElement?.parentElement
       if (scrollContainer) {
         checkAutoScroll(e.clientX, scrollContainer, playheadScrollTimerRef, () => {
           if (lastClientX !== null) triggerSeek(lastClientX)
@@ -2234,7 +2338,7 @@ const ScenesBar = React.memo(({
       }
 
       // Auto-scroll the timeline if dragging near the edge
-      const scrollContainer = timelineRef.current?.parentElement
+      const scrollContainer = timelineRef.current?.parentElement?.parentElement
       if (scrollContainer) {
         checkAutoScroll(clientX, scrollContainer, dragScrollTimerRef, () => {
           if (lastClientX !== null) {
@@ -2344,6 +2448,57 @@ const ScenesBar = React.memo(({
     setInsertionIndex(null)
   }
 
+  // Handle wheel events on the timeline container for zooming
+  useEffect(() => {
+    const container = timelineRef.current?.parentElement?.parentElement
+    if (!container) return
+
+    const handleWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        const rect = container.getBoundingClientRect()
+        const xClient = e.clientX - rect.left
+        const scrollLeft = container.scrollLeft
+
+        // Continuous zoom calculation based on scroll delta
+        const scaleFactor = 1.15
+        const delta = -e.deltaY / 100
+        const newZoom = Math.max(1.0, Math.min(30.0, timelineZoom * Math.pow(scaleFactor, delta)))
+
+        if (newZoom !== timelineZoom) {
+          zoomScrollRef.current = {
+            xClient,
+            scrollLeft,
+            oldZoom: timelineZoom
+          }
+          setTimelineZoom(newZoom)
+        }
+      }
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+    }
+  }, [timelineZoom])
+
+  // Adjust container scrollLeft after zoom level changes to keep cursor position centered
+  useLayoutEffect(() => {
+    if (zoomScrollRef.current) {
+      const { xClient, scrollLeft, oldZoom } = zoomScrollRef.current
+      zoomScrollRef.current = null
+
+      const container = timelineRef.current?.parentElement?.parentElement
+      if (container && oldZoom !== timelineZoom) {
+        const ratio = timelineZoom / oldZoom
+        const newScrollLeft = (scrollLeft + xClient) * ratio - xClient
+        container.scrollLeft = newScrollLeft
+      }
+    }
+  }, [timelineZoom])
+
   return (
     <div
       className="relative block px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
@@ -2419,6 +2574,9 @@ const ScenesBar = React.memo(({
           <div
             className="absolute top-0 left-0 right-0 cursor-pointer"
             onClick={handleTimelineClick}
+            onMouseEnter={handleSeekMouseEnter}
+            onMouseMove={handleSeekMouseMove}
+            onMouseLeave={handleSeekMouseLeave}
             onTouchStart={(e) => {
               if (isTimelineInteractingRef.current) return
               const touch = e.touches[0]
@@ -2504,6 +2662,31 @@ const ScenesBar = React.memo(({
               ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)') 
               : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
             transition: 'width 0.1s, box-shadow 0.1s',
+          }}
+        />
+      </div>
+
+      {/* Ghost Playhead */}
+      <div
+        ref={ghostPlayheadRef}
+        className="absolute bottom-0 pointer-events-none"
+        style={{
+          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
+          left: '16px',
+          transform: 'translateX(-50%)',
+          zIndex: 45,
+          width: '16px',
+          display: 'none',
+          willChange: 'left',
+        }}
+      >
+        {/* Ghost Playhead line */}
+        <div
+          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
+          style={{
+            borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
+            width: '0px',
+            top: '8px',
           }}
         />
       </div>
@@ -2746,6 +2929,40 @@ const ScenesBar = React.memo(({
         )
         : null}
 
+      {/* Ghost Playhead time tooltip */}
+      {typeof document !== 'undefined' && createPortal(
+        <div
+          ref={ghostTooltipRef}
+          className="fixed pointer-events-none"
+          style={{
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            display: 'none',
+          }}
+        >
+          <div
+            ref={ghostTooltipTextRef}
+            className={`${isLight ? 'text-gray-600' : 'text-zinc-300'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
+            style={{
+              backgroundColor: isLight ? 'rgba(243,244,246,0.95)' : 'rgba(31,41,55,0.95)',
+              border: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid rgba(255,255,255,0.1)',
+              fontFamily: 'Inter, system-ui, sans-serif',
+            }}
+          />
+          <div
+            className="absolute left-1/2 top-full transform -translate-x-1/2"
+            style={{
+              width: '0',
+              height: '0',
+              borderLeft: '4px solid transparent',
+              borderRight: '4px solid transparent',
+              borderTop: `4px solid ${isLight ? 'rgba(243,244,246,0.95)' : 'rgba(31,41,55,0.95)'}`,
+            }}
+          />
+        </div>,
+        document.body
+      )}
+
       {/* Context Menu for Scene Cards */}
       {contextMenu.visible && createPortal(
         <div
@@ -2852,6 +3069,6 @@ const ScenesBar = React.memo(({
       )}
     </div>
   )
-})
+}))
 
 export default ScenesBar

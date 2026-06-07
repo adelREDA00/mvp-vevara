@@ -13,9 +13,9 @@ function SkeletonGrid({ isLight }) {
         <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className={`aspect-square rounded-xl overflow-hidden relative ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
-                    <div 
-                        className={`absolute inset-0 bg-gradient-to-r from-transparent to-transparent animate-[shimmer_1.5s_ease-in-out_infinite] ${isLight ? 'via-black/5' : 'via-white/5'}`} 
-                        style={{ transform: 'translateX(-100%)', animation: `shimmer 1.5s ease-in-out infinite ${i * 200}ms` }} 
+                    <div
+                        className={`absolute inset-0 bg-gradient-to-r from-transparent to-transparent animate-[shimmer_1.5s_ease-in-out_infinite] ${isLight ? 'via-black/5' : 'via-white/5'}`}
+                        style={{ transform: 'translateX(-100%)', animation: `shimmer 1.5s ease-in-out infinite ${i * 200}ms` }}
                     />
                 </div>
             ))}
@@ -33,7 +33,6 @@ function ImagesPanel({ onClose, aspectRatio }) {
     const dispatch = useDispatch()
     const [searchQuery, setSearchQuery] = useState('')
     const [activeTab, setActiveTab] = useState('All')
-    const [width, setWidth] = useState(320)
 
     const [sharedAssets, setSharedAssets] = useState([])
     const [isFetching, setIsFetching] = useState(true)
@@ -156,21 +155,20 @@ function ImagesPanel({ onClose, aspectRatio }) {
         <div
             className="flex flex-col h-full relative transition-all duration-300"
             style={{
-                width: isMobile ? '100%' : `${width}px`,
+                width: isMobile ? '100%' : '320px',
                 backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
                 backdropFilter: isMobile ? 'none' : 'blur(20px)',
                 WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
                 borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
             }}
         >
-            {!isMobile && <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />}
 
             <div className={`hidden lg:block px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
                 <div className="flex items-center justify-between mb-4">
                     <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Media</h2>
                     {onClose && (
-                        <button 
-                            onClick={onClose} 
+                        <button
+                            onClick={onClose}
                             className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
                         >
                             <X className="h-5 w-5" strokeWidth={2} />
@@ -178,7 +176,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                     )}
                 </div>
 
-                <div className="relative">
+                {/* <div className="relative">
                     <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
                     <input
                         type="text"
@@ -191,7 +189,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
                                 : 'bg-white/5 border-white/10 text-white placeholder-zinc-600 focus:border-white/20 focus:ring-white/20'
                         }`}
                     />
-                </div>
+                </div> */}
             </div>
 
             {fetchError && (
