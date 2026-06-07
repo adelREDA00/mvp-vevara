@@ -35,7 +35,7 @@ function PlaybackControls({
     >
       {/* Left controls: Split + Update Step + Delete Step */}
       {!isMotionCaptureActive && (
-        <div className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 z-20 flex items-center gap-0.5">
+        <div className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 z-20 flex items-center gap-0.5 sm:gap-1">
           <button
             onClick={(e) => {
               e.preventDefault()
@@ -48,7 +48,7 @@ function PlaybackControls({
             title="Split page at playhead (S)"
             type="button"
           >
-            <Scissors className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <Scissors className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-[18px] lg:w-[18px]" />
           </button>
 
           {/* Update Step button */}
@@ -59,10 +59,10 @@ function PlaybackControls({
               if (canUpdateStep && onUpdateStep) onUpdateStep(playheadStepId)
             }}
             disabled={!canUpdateStep}
-            className={`rounded-md relative group text-purple-400 hover:text-purple-300 hover:bg-purple-500/15 active:bg-purple-500/25 flex items-center justify-center flex-shrink-0`}
+            className={`rounded-md relative group text-purple-400 hover:text-purple-300 hover:bg-purple-500/15 active:bg-purple-500/25 flex items-center justify-center flex-shrink-0 w-7 h-7 lg:w-8 lg:h-8`}
             style={{
-              width: canUpdateStep ? '28px' : '0px',
-              height: '28px',
+              width: canUpdateStep ? undefined : '0px',
+              height: canUpdateStep ? undefined : '0px',
               padding: '0px',
               opacity: canUpdateStep ? 1 : 0,
               transform: canUpdateStep ? 'scale(1)' : 'scale(0.8)',
@@ -73,7 +73,7 @@ function PlaybackControls({
             title={canUpdateStep ? 'Update step at playhead' : ''}
             type="button"
           >
-            <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+            <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-[18px] lg:w-[18px] flex-shrink-0" />
             {/* Tooltip */}
             {canUpdateStep && (
               <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">
@@ -90,10 +90,10 @@ function PlaybackControls({
               if (canUpdateStep && onDeleteStep) onDeleteStep(playheadStepId)
             }}
             disabled={!canUpdateStep}
-            className={`rounded-md relative group text-red-400/70 hover:text-red-400 hover:bg-red-500/15 active:bg-red-500/25 flex items-center justify-center flex-shrink-0`}
+            className={`rounded-md relative group text-red-400/70 hover:text-red-400 hover:bg-red-500/15 active:bg-red-500/25 flex items-center justify-center flex-shrink-0 w-7 h-7 lg:w-8 lg:h-8`}
             style={{
-              width: canUpdateStep ? '28px' : '0px',
-              height: '28px',
+              width: canUpdateStep ? undefined : '0px',
+              height: canUpdateStep ? undefined : '0px',
               padding: '0px',
               opacity: canUpdateStep ? 1 : 0,
               transform: canUpdateStep ? 'scale(1)' : 'scale(0.8)',
@@ -104,7 +104,7 @@ function PlaybackControls({
             title={canUpdateStep ? 'Delete step at playhead' : ''}
             type="button"
           >
-            <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+            <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-[18px] lg:w-[18px] flex-shrink-0" />
             {/* Tooltip */}
             {canUpdateStep && (
               <span className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap pointer-events-none z-50 border border-white/10">

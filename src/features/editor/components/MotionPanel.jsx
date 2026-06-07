@@ -385,6 +385,7 @@ function MotionPanel({
       if (prevLayerIdRef.current !== selectedLayerId) {
         prevLayerIdRef.current = selectedLayerId
         prevActionsCountRef.current = actionsCount
+        setActiveTab('presets') // Default to preset tab on layer selection change
         return
       }
       if (actionsCount > prevActionsCountRef.current) setActiveTab('custom')

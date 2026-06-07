@@ -367,7 +367,15 @@ function EditorPage() {
 
 
     if (sw <= 0 || sh <= 0) return
-
+    
+    // Hide scrollbars on mobile devices
+    const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth < 1024 || 'ontouchstart' in window)
+    if (isMobileDevice) {
+      if (vTrackRef.current) vTrackRef.current.style.display = 'none'
+      if (hTrackRef.current) hTrackRef.current.style.display = 'none'
+      return
+    }
+    
     const totalWorldWidth = ww * scale
     const totalWorldHeight = wh * scale
 
@@ -5365,7 +5373,7 @@ function EditorPage() {
                 <div></div>
 
                 {/* Center - Canvas Zoom Slider */}
-                <div className="flex justify-center items-center gap-2">
+                <div className="flex justify-center items-center gap-2.5">
                   <input
                     type="range"
                     min={0}
@@ -5382,23 +5390,23 @@ function EditorPage() {
                       const newZoom = 10 * Math.pow(200 / 10, t)
                       setZoom(Math.max(10, Math.min(200, newZoom)))
                     }}
-                    className={`w-32 sm:w-36 lg:w-40 h-1.5 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
+                    className={`w-32 sm:w-36 lg:w-44 h-1.5 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 lg:[&::-webkit-slider-thumb]:w-[18px] lg:[&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 lg:[&::-moz-range-thumb]:w-[18px] lg:[&::-moz-range-thumb]:h-[18px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
                   />
-                  <span className={`text-xs font-mono tabular-nums w-8 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
+                  <span className={`text-xs lg:text-sm font-mono tabular-nums w-10 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
                     {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
                   </span>
                 </div>
 
                 {/* Right side - Timeline Zoom Buttons */}
-                <div className="flex justify-end items-center gap-1.5">
-                  <span className={`text-xs font-medium tracking-wide mr-1 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Timeline:</span>
+                <div className="flex justify-end items-center gap-2">
+                  <span className={`text-xs lg:text-sm font-medium tracking-wide mr-1 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Timeline:</span>
                   <button
                     onClick={() => timelineControlRef.current?.zoomOut()}
                     className={`p-2 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
                     title="Zoom out timeline"
                     type="button"
                   >
-                    <ZoomOut className="h-[18px] w-[18px]" />
+                    <ZoomOut className="h-[18px] w-[18px] lg:h-[19px] lg:w-[19px]" />
                   </button>
                   <button
                     onClick={() => timelineControlRef.current?.zoomIn()}
@@ -5406,7 +5414,7 @@ function EditorPage() {
                     title="Zoom in timeline"
                     type="button"
                   >
-                    <ZoomIn className="h-[18px] w-[18px]" />
+                    <ZoomIn className="h-[18px] w-[18px] lg:h-[19px] lg:w-[19px]" />
                   </button>
                 </div>
               </div>

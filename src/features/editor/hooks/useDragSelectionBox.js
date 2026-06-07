@@ -122,11 +122,17 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
     const renderer = viewport.parent?.parent?.renderer || viewport.parent?.renderer
 
     const handlePointerDown = (event) => {
+      // Deactivate drag selection box on mobile to not interfere with panning
+      const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth < 1024 || 'ontouchstart' in window)
+      if (isMobileDevice) {
+        return
+      }
+
       // Ignore right clicks for custom dragging (allow viewport panning to handle it)
       if (event.data?.button === 2 || event.button === 2 || event.data?.originalEvent?.button === 2) {
         return
       }
-
+      
       // Don't work if playing
       if (isPlaying) {
         return

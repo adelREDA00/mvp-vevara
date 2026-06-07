@@ -298,7 +298,8 @@ export async function createApp(config = {}) {
     })
   }
 
-  viewport.drag({ pressDrag: false, wheel: false }).pinch().decelerate()
+  const isMobileDevice = isMobile || (typeof window !== 'undefined' && (window.innerWidth < 1024 || 'ontouchstart' in window))
+  viewport.drag({ pressDrag: isMobileDevice, wheel: false }).pinch().decelerate()
   updateViewportClamp()
   viewport.on('zoomed', updateViewportClamp)
   viewport.clampZoom({ minScale: 0.1, maxScale: 4.0 })
