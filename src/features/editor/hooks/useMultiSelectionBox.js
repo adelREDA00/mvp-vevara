@@ -351,22 +351,8 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         return handle
       }
 
-      // Create all handles using object pooling
-      // [PERFORMANCE] Reuse isMotionCapture variable from above
-      const handles = isMotionCapture ? [] : [
-        createHandle(0, 0, 0, 'nw-resize', 'nw'),
-        createHandle(1, width, 0, 'ne-resize', 'ne'),
-        createHandle(2, 0, height, 'sw-resize', 'sw'),
-        createHandle(3, width, height, 'se-resize', 'se'),
-        createHandle(4, width / 2, 0, 'n-resize', 'n'),
-        createHandle(5, width / 2, height, 's-resize', 's'),
-        createHandle(6, 0, height / 2, 'w-resize', 'w'),
-        createHandle(7, width, height / 2, 'e-resize', 'e'),
-      ]
-
-      if (!isMotionCapture) {
-        handles.forEach(handle => box.addChild(handle))
-      }
+      // Create all handles using object pooling - DISABLED for multi-selection box
+      const handles = []
 
       if (!resizeStateRef.current && !rotateStateRef.current) {
         const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)

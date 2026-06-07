@@ -2780,7 +2780,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         .filter(id => latestLayersRef.current[id]?.sceneId === currentSceneId)
 
       // Check if we have multiple layers selected - this affects how we handle selection boxes
-      const hasMultiSelect = currentSelectedLayerIds && currentSelectedLayerIds.length > 1
+      let hasMultiSelect = currentSelectedLayerIds && currentSelectedLayerIds.length > 1
 
 
       // Check if clicked on selection box or its handles
@@ -3034,6 +3034,29 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         }
       }
 
+      // Shift + Select: Multi-select toggle
+      const isShiftPressed = !!(event.data?.originalEvent?.shiftKey || event.nativeEvent?.shiftKey)
+      if (isShiftPressed) {
+        if (currentSelectedLayerIds.includes(layerId)) {
+          // Deselect the clicked layer
+          const nextSelectedIds = currentSelectedLayerIds.filter(id => id !== layerId)
+          currentSelectedLayerIds = nextSelectedIds
+          hasMultiSelect = nextSelectedIds.length > 1
+          selectedLayerIdsRef.current = nextSelectedIds
+          dispatch(setSelectedLayers(nextSelectedIds))
+          // Clean up and return, don't drag a deselected layer
+          return
+        } else {
+          // Add the clicked layer to the selection
+          const nextSelectedIds = [...currentSelectedLayerIds, layerId]
+          currentSelectedLayerIds = nextSelectedIds
+          hasMultiSelect = nextSelectedIds.length > 1
+          selectedLayerIdsRef.current = nextSelectedIds
+          dispatch(setSelectedLayers(nextSelectedIds))
+          // Proceed with multi-selection drag setup
+        }
+      }
+
       // Check if the clicked layer is part of the multi-select
       // Also treat clicks on selection boxes in multi-select mode as clicking on a selected element
       const clickedLayerInMultiSelect = hasMultiSelect && (currentSelectedLayerIds.includes(layerId) || clickedOnSelectionBox)
@@ -3139,6 +3162,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           // Clicking on an unselected element while multi-select is active
           // Change selection to just this element (user wants to select different element)
           // CRITICAL FIX for Arrow Visibility: Optimistically update the ref so immediate drag sees correct state
+          currentSelectedLayerIds = [layerId]
+          hasMultiSelect = false
           selectedLayerIdsRef.current = [layerId]
           dispatch(setSelectedLayer(layerId))
           // Continue with single-select drag logic below
