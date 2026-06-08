@@ -207,8 +207,12 @@ function Stage({
 
   // Initial zoom calculation moved to consolidated effect
 
-  // Memoize effectiveZoom to prevent recalculation on every render
-  const effectiveZoom = useMemo(() => zoom === -1 ? fitZoom : zoom, [zoom, fitZoom])
+  // Memoize effectiveZoom to prevent recalculation on every render.
+  // [PREVIEW MODE] In preview we always track the live fit zoom so the artboard
+  // stays "closer to full screen" regardless of the user's pre-preview zoom. This
+  // also fixes mobile, where the one-shot re-fit could freeze on a stale container
+  // size: forcing fitZoom here re-applies the fit on every container resize.
+  const effectiveZoom = useMemo(() => (previewMode || zoom === -1) ? fitZoom : zoom, [previewMode, zoom, fitZoom])
 
   // Memoize zoom scale for performance - used in multiple places
   const zoomScale = useMemo(() => effectiveZoom / 100, [effectiveZoom])

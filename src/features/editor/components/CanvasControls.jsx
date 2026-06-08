@@ -82,9 +82,6 @@ function CanvasControls({
   editingStepActionCount = 0,
   isMobileBottom = false,
   onSubmenuChange,
-  showStarterHint = false,
-  starterHintText = '',
-  onHideStarterHint,
   onUndo,
   onRedo
 }) {
@@ -131,7 +128,6 @@ function CanvasControls({
     selectedLayer?.id,
     selectedCanvas,
     stepsCount,
-    showStarterHint,
     showAddStepHint,
     isMotionCaptureActive,
     isMobileBottom
@@ -1965,7 +1961,7 @@ function CanvasControls({
       )}
 
       {/* Add Step Hint Modal */}
-      {(showAddStepHint || showStarterHint) && (
+      {showAddStepHint && (
         <div
           className={`absolute ${isMobileBottom ? 'bottom-full mb-3' : 'top-full mt-2.5'} z-[100] animate-in fade-in ${isMobileBottom ? 'slide-in-from-bottom-2' : 'slide-in-from-top-2'} duration-300`}
           style={{
@@ -1984,23 +1980,19 @@ function CanvasControls({
             />
 
             <span className="text-[11px] sm:text-[12.5px] font-semibold leading-normal opacity-95">
-              {showStarterHint ? starterHintText : "Now change anything, move, scale, rotate, blur or edit, it will animate."}
+              Now change anything, move, scale, rotate, blur or edit, it will animate.
             </span>
 
             <button
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                if (showStarterHint) {
-                  onHideStarterHint?.()
-                } else {
-                  setShowAddStepHint(false)
-                  setHasShownAddStepHint(true)
-                  try {
-                    localStorage.setItem('vevara_hint_add_step_shown', 'true')
-                  } catch (e) {
-                    // Ignore localStorage errors
-                  }
+                setShowAddStepHint(false)
+                setHasShownAddStepHint(true)
+                try {
+                  localStorage.setItem('vevara_hint_add_step_shown', 'true')
+                } catch (e) {
+                  // Ignore localStorage errors
                 }
               }}
               className="text-[11px] font-bold opacity-80 hover:opacity-100 transition-opacity underline decoration-white/40 underline-offset-4 text-purple-200 whitespace-nowrap self-center"

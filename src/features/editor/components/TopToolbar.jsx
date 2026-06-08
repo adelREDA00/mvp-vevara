@@ -241,6 +241,20 @@ function TopToolbar({
             </span>
           </button>
 
+          {/* Preview Button — enters minimal playback mode.
+              Placed before the mobile 3-dots menu so the mobile nav reads:
+              eye → preview → 3 dots → menu. */}
+          {onEnterPreview && (
+            <button
+              onClick={onEnterPreview}
+              className="text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
+              title="Preview"
+            >
+              <Play className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
+              <span className="hidden md:inline">Preview</span>
+            </button>
+          )}
+
           {/* Mobile Only: 3 Dots Menu */}
           <div className="md:hidden">
             <DropdownMenu
@@ -283,18 +297,6 @@ function TopToolbar({
 
             </DropdownMenu>
           </div>
-
-             {/* Preview Button — enters minimal playback mode */}
-          {onEnterPreview && (
-            <button
-              onClick={onEnterPreview}
-              className="text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
-              title="Preview"
-            >
-              <Play className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
-              <span className="hidden md:inline">Preview</span>
-            </button>
-          )}
 
           {/* Desktop Only: Export Button */}
           {!hideExport && (

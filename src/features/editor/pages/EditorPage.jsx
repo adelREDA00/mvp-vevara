@@ -96,8 +96,6 @@ function EditorPage() {
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
   const [manualTutorialRect, setManualTutorialRect] = useState(null);
-  const [showStarterHint, setShowStarterHint] = useState(false)
-  const [starterHintText, setStarterHintText] = useState('')
   const isInitialVertical = aspectRatio === '9:16'
   const [zoom, setZoom] = useState(isInitialVertical ? 10 : 24)
   const [showGuestModal, setShowGuestModal] = useState(false)
@@ -1061,37 +1059,6 @@ function EditorPage() {
     }
   }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
 
-  // Starter project copy onboarding on load.
-  // [UX] No autoplay: on first open of a pre-config/starter copy we keep the scene
-  // paused at frame 0 and only show the onboarding hint. The editor stays fully
-  // interactive (no interaction lock, no forced playback).
-  useEffect(() => {
-    if (projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
-      if (isStarterCopy) {
-        const targetProjId = urlProjectId || projectId;
-        if (!targetProjId) return;
-
-        // Show the onboarding hint only once per project.
-        const isOnboardingDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
-        if (isOnboardingDone) {
-          return;
-        }
-
-        if (!hasTriggeredInitialAutoPlay.current) {
-          hasTriggeredInitialAutoPlay.current = true;
-          // Park the playhead at the start; do NOT play.
-          dispatch(setAutoPlayState('none'));
-          seek(0);
-          // Mark onboarding as shown so it won't reappear on reload.
-          localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
-          // Show the hint / hand indicator immediately.
-          setShowStarterHint(true);
-          setStarterHintText("Animate this scene");
-        }
-      }
-    }
-  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, dispatch]);
-
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);
   useEffect(() => {
@@ -1488,10 +1455,6 @@ function EditorPage() {
     // and isPlaying=true (from tweenTo) but motionCaptureMode.isActive is still false
     // (set in onComplete), so it calls pausePlayback() killing the tween.
     dispatch(clearLayerSelection())
-    setShowStarterHint(false)
-    if (isStarterCopy) {
-      localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
-    }
 
     // [NEW] Auto-open motion panel on desktop and mobile when adding a step
     if (isAuthenticated) {
@@ -5200,14 +5163,6 @@ function EditorPage() {
                 onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
                 requestOpenControl={requestOpenControl}
                 stepsCount={currentSceneMotionFlow?.steps?.length || 0}
-                showStarterHint={showStarterHint}
-                starterHintText={starterHintText}
-                onHideStarterHint={() => {
-                  setShowStarterHint(false)
-                  if (isStarterCopy) {
-                    localStorage.setItem(`vevara_starter_autoplay_done_${urlProjectId || projectId}`, 'true')
-                  }
-                }}
               />
             </div>
 
@@ -5639,14 +5594,6 @@ function EditorPage() {
                   stepsCount={currentSceneMotionFlow?.steps?.length || 0}
                   isMobileBottom={true}
                   onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
-                  showStarterHint={showStarterHint}
-                  starterHintText={starterHintText}
-                  onHideStarterHint={() => {
-                    setShowStarterHint(false)
-                    if (isStarterCopy) {
-                      localStorage.setItem('vevara_starter_autoplay_done_' + (urlProjectId || projectId), 'true')
-                    }
-                  }}
                 />
               </div>
             </div>
