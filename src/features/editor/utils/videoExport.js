@@ -989,7 +989,7 @@ export const exportVideo = async ({
                                 let blobToRevoke = null;
 
                                 const isVideoUrl = (side === 'front' ? !!layer.data?.assetIsVideo : !!layer.data?.backAssetIsVideo) ||
-                                                   (typeof url === 'string' && (!!url.toLowerCase().match(/\.(mp4|webm|ogg|mov|m4v)/) || url.includes('/uploads/')));
+                                                   (typeof url === 'string' && !!url.toLowerCase().match(/\.(mp4|webm|ogg|mov|m4v)/));
                                 if (isVideoUrl && ffmpegInst) {
                                     try {
                                         const optResult = await optimizeVideoForSeeking(url, layer, ffmpegInst, sessionId);
