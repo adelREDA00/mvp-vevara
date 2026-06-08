@@ -5,7 +5,7 @@
 import { useEffect, useRef, useMemo, useLayoutEffect, useState } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
-import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, createFrameLayer, attachAssetToFrame, redrawFramePlaceholder, drawShapePath, releaseVideoElement } from '../../engine/pixi/createLayer'
+import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, createFrameLayer, attachAssetToFrame, attachBackAssetToFrame, showFramePlaceholderFallback, redrawFramePlaceholder, drawShapePath, releaseVideoElement } from '../../engine/pixi/createLayer'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { LAYER_TYPES } from '../../../store/models'
 import { updateLayer, selectScenes, selectProjectTimelineInfo, selectLoadingMode, startPreparingLayer, finishPreparingLayer } from '../../../store/slices/projectSlice'
@@ -427,6 +427,9 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // 4. Width/Height/Style Synchronization (for Graphics/Text/Containers)
   if (force || capturedLayer || !isActuallyPlaying) {
     if (displayObject instanceof PIXI.Text) {
+      // Sync data and _fullContent references to prevent stale references in revealProgress
+      displayObject.data = layer.data
+      displayObject._fullContent = layer.data?.content || ''
       const isResizing = displayObject._isResizing === true
       const style = displayObject.style
       if (!isResizing && style) {
@@ -1090,7 +1093,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }).catch((error) => {
           asyncLoadCounterRef.current--
           _destroyPlaceholder(_placeholder, stageContainer)
-          createdLayers.delete(layerId)
+          // Keep in createdLayers to prevent infinite loop of failed retries
           checkReadiness()
         })
 
@@ -1151,7 +1154,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         }).catch((error) => {
           asyncLoadCounterRef.current--
           _destroyPlaceholder(_videoPlaceholder, stageContainer)
-          createdLayers.delete(layerId)
+          // Keep in createdLayers to prevent infinite loop of failed retries
           checkReadiness()
         })
 
@@ -1162,7 +1165,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             asyncLoadCounterRef.current--
             dispatch(finishPreparingLayer(layerId))
             _destroyPlaceholder(_videoPlaceholder, stageContainer)
-            createdLayers.delete(layerId)
+            // Keep in createdLayers to prevent infinite loop of failed retries
             checkReadiness()
           })
         }
@@ -1187,6 +1190,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               loadTextureRobust(assetUrl, layer.data?.assetIsVideo).then(texture => {
                 if (texture && !pixiObject.destroyed) {
                   attachAssetToFrame(pixiObject, texture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
+                } else if (!pixiObject.destroyed) {
+                  showFramePlaceholderFallback(pixiObject, 'front')
+                }
+              }).catch(() => {
+                if (!pixiObject.destroyed) {
+                  showFramePlaceholderFallback(pixiObject, 'front')
                 }
               })
             )
@@ -1197,6 +1206,12 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               loadTextureRobust(backAssetUrl, layer.data?.backAssetIsVideo).then(texture => {
                 if (texture && !pixiObject.destroyed) {
                   attachBackAssetToFrame(pixiObject, texture, layer.cropWidth ?? layer.width, layer.cropHeight ?? layer.height)
+                } else if (!pixiObject.destroyed) {
+                  showFramePlaceholderFallback(pixiObject, 'back')
+                }
+              }).catch(() => {
+                if (!pixiObject.destroyed) {
+                  showFramePlaceholderFallback(pixiObject, 'back')
                 }
               })
             )
@@ -1422,10 +1437,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
               : (fd.color || '#000000')
             if (pixiObject._color !== liveColor) pixiObject.updateColor(liveColor)
           } else {
-          // [SYNC FIX] Remove scrubbing/scene-start skip.
-          // We always want to sync text if the timeline is paused so Redux truth is visible.
-          // Only update text content if it actually changed
-          if (pixiObject.text !== layer.data.content) {
+            // Sync data and _fullContent references to prevent stale references in revealProgress
+            pixiObject.data = layer.data
+            pixiObject._fullContent = layer.data.content || ''
+            // [SYNC FIX] Remove scrubbing/scene-start skip.
+            // We always want to sync text if the timeline is paused so Redux truth is visible.
+            // Only update text content if it actually changed
+            if (pixiObject.text !== layer.data.content) {
             // console.log(`[useCanvasLayers] Text content changed for ${layerId}: "${pixiObject.text}" -> "${layer.data.content}"`)
             pixiObject.text = layer.data.content || ''
 

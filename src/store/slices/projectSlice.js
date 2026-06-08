@@ -683,10 +683,19 @@ const projectSlice = createSlice({
             // Remove empty steps
             motionFlow.steps = motionFlow.steps.filter(step => {
               if (step.layerActions && step.layerActions[layerId]) {
+
                 delete step.layerActions[layerId]
               }
-              // Keep step only if it still has other layer actions
-              return Object.keys(step.layerActions || {}).length > 0
+              if (step.layerPresets && step.layerPresets[layerId]) {
+
+                delete step.layerPresets[layerId]
+              }
+              // Keep step only if it still has other layer actions or presets
+              const hasActionsLeft = Object.keys(step.layerActions || {}).length > 0
+              const hasPresetsLeft = step.layerPresets && Object.keys(step.layerPresets).length > 0
+              const keep = hasActionsLeft || hasPresetsLeft
+
+              return keep
             })
           }
         })
@@ -1812,17 +1821,25 @@ const projectSlice = createSlice({
     // Attach an image/video asset to a frame layer (cover-fit crop)
     // For card frames, `side` param ('front'|'back') determines which side receives the asset
     attachAssetToFrame: (state, action) => {
-      const { layerId, assetUrl, assetWidth, assetHeight, side, assetIsVideo, muted, duration, sourceStartTime, sourceEndTime } = action.payload
+      const { layerId, assetUrl, assetWidth, assetHeight, side, assetIsVideo, muted, duration, sourceStartTime, sourceEndTime, thumbnail } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
 
+      const frameW = layer.width
+      const frameH = layer.height
+
       // Card frame back-side attachment: store separately, no crop changes
       if (layer.data?.isCardFrame && side === 'back') {
+        const scale = Math.min(frameW / assetWidth, frameH / assetHeight)
+        const mediaW = assetWidth * scale
+        const mediaH = assetHeight * scale
+
         layer.data = {
           ...layer.data,
           backAssetUrl: assetUrl,
           backAssetWidth: assetWidth,
           backAssetHeight: assetHeight,
+          backThumbnail: thumbnail || null,
           // [VIDEO-IN-FRAME FIX] Preserve back-side video metadata
           ...(assetIsVideo ? {
             backAssetIsVideo: true,
@@ -1834,15 +1851,23 @@ const projectSlice = createSlice({
             backAssetIsVideo: false
           })
         }
+
+        // If currently showing the back side, update active crop/media dimensions
+        const currentShowingFront = layer.data.showingFront !== false
+        if (!currentShowingFront) {
+          layer.mediaWidth = mediaW
+          layer.mediaHeight = mediaH
+          layer.cropX = 0
+          layer.cropY = 0
+          layer.cropWidth = mediaW
+          layer.cropHeight = mediaH
+        }
+
         layer.updatedAt = Date.now()
         state.isDirty = true
         state.version++
         return
       }
-
-      const frameW = layer.cropWidth ?? layer.width
-      const frameH = layer.cropHeight ?? layer.height
-
 
       // Store old media dimensions for remapping existing motion crop actions
       const oldMediaW = layer.mediaWidth ?? frameW
@@ -1852,14 +1877,13 @@ const projectSlice = createSlice({
       const scale = Math.min(frameW / assetWidth, frameH / assetHeight)
       const mediaW = assetWidth * scale
       const mediaH = assetHeight * scale
-      const cropX = (mediaW - frameW) / 2
-      const cropY = (mediaH - frameH) / 2
 
       layer.data = {
         ...layer.data,
         assetUrl,
         assetWidth,
         assetHeight,
+        thumbnail: thumbnail || null,
         originalPlaceholderWidth: layer.mediaWidth || layer.width,
         originalPlaceholderHeight: layer.mediaHeight || layer.height,
         // [VIDEO-IN-FRAME FIX] Preserve video metadata so splitScene, mute/unmute,
@@ -1874,10 +1898,10 @@ const projectSlice = createSlice({
       }
       layer.mediaWidth = mediaW
       layer.mediaHeight = mediaH
-      layer.cropX = cropX
-      layer.cropY = cropY
-      layer.cropWidth = frameW
-      layer.cropHeight = frameH
+      layer.cropX = 0
+      layer.cropY = 0
+      layer.cropWidth = mediaW
+      layer.cropHeight = mediaH
       layer.updatedAt = Date.now()
 
 
@@ -1886,8 +1910,6 @@ const projectSlice = createSlice({
       const sceneId = layer.sceneId
       const motionFlow = state.sceneMotionFlows[sceneId]
       if (motionFlow?.steps) {
-        const scaleX = mediaW / oldMediaW
-        const scaleY = mediaH / oldMediaH
         for (const step of motionFlow.steps) {
           const actions = step.layerActions?.[layerId]
           if (!actions) continue
@@ -1897,8 +1919,8 @@ const projectSlice = createSlice({
 
               // [FIX] Remap based on the STEP'S OWN DIMENSIONS to maintain fit
               // instead of using a static offset from the base state.
-              const stepCropW = v.cropWidth ?? frameW
-              const stepCropH = v.cropHeight ?? frameH
+              const stepCropW = v.cropWidth ?? mediaW
+              const stepCropH = v.cropHeight ?? mediaH
 
               // If it was centered before (or empty), keep it centered
               // For frames, we almost always want to force-center unless user manually panned
@@ -1924,7 +1946,48 @@ const projectSlice = createSlice({
       const layer = state.layers[layerId]
       if (!layer || !layer.data?.isCardFrame) return
       const current = layer.data.showingFront !== false
-      layer.data.showingFront = !current
+      const nextShowingFront = !current
+      layer.data.showingFront = nextShowingFront
+
+      // Update cropWidth/cropHeight to match the target side's asset contain-fit size
+      if (nextShowingFront) {
+        // Front side
+        if (layer.data.assetUrl && layer.data.assetWidth && layer.data.assetHeight) {
+          const scale = Math.min(layer.width / layer.data.assetWidth, layer.height / layer.data.assetHeight)
+          const mediaW = layer.data.assetWidth * scale
+          const mediaH = layer.data.assetHeight * scale
+          layer.cropWidth = mediaW
+          layer.cropHeight = mediaH
+          layer.mediaWidth = mediaW
+          layer.mediaHeight = mediaH
+          layer.cropX = 0
+          layer.cropY = 0
+        } else {
+          layer.cropWidth = layer.width
+          layer.cropHeight = layer.height
+          layer.cropX = 0
+          layer.cropY = 0
+        }
+      } else {
+        // Back side
+        if (layer.data.backAssetUrl && layer.data.backAssetWidth && layer.data.backAssetHeight) {
+          const scale = Math.min(layer.width / layer.data.backAssetWidth, layer.height / layer.data.backAssetHeight)
+          const mediaW = layer.data.backAssetWidth * scale
+          const mediaH = layer.data.backAssetHeight * scale
+          layer.cropWidth = mediaW
+          layer.cropHeight = mediaH
+          layer.mediaWidth = mediaW
+          layer.mediaHeight = mediaH
+          layer.cropX = 0
+          layer.cropY = 0
+        } else {
+          layer.cropWidth = layer.width
+          layer.cropHeight = layer.height
+          layer.cropX = 0
+          layer.cropY = 0
+        }
+      }
+
       layer.updatedAt = Date.now()
       state.isDirty = true
       state.version++
@@ -2285,15 +2348,15 @@ export const selectIsAssetPreparing = createSelector(
   [selectLayers, selectPreparingLayers, (state, assetUrl) => assetUrl],
   (layers, preparingLayers, assetUrl) => {
     if (!assetUrl) return false
-    
+
     // Convert to absolute path or standardized format if needed for matching
     const normalize = (url) => typeof url === 'string' ? url.split('?')[0].split('#')[0] : url;
     const target = normalize(assetUrl);
-    
+
     return Object.keys(preparingLayers).some(layerId => {
       const layer = layers[layerId]
       if (!layer || !layer.data) return false
-      
+
       const layerUrl = normalize(layer.data.url || layer.data.src);
       return layerUrl === target;
     })

@@ -484,18 +484,45 @@ function collectAudioSources(scenes, layers, timelineInfo) {
 
         for (const layerId of scene.layers) {
             const layer = layers[layerId];
-            if (layer?.type !== 'video') continue;
-            if (layer.data?.muted !== false) continue;
+            if (!layer) continue;
 
-            const videoUrl = layer.data?.url || layer.data?.src;
-            if (!videoUrl) continue;
+            if (layer.type === 'video') {
+                if (layer.data?.muted !== false) continue;
+                const videoUrl = layer.data?.url || layer.data?.src;
+                if (!videoUrl) continue;
 
-            sources.push({
-                videoUrl,
-                sourceStartTime: layer.data.sourceStartTime || 0,
-                duration: sceneInfo.duration,
-                globalStartTime: sceneInfo.startTime,
-            });
+                sources.push({
+                    videoUrl,
+                    sourceStartTime: layer.data.sourceStartTime || 0,
+                    duration: sceneInfo.duration,
+                    globalStartTime: sceneInfo.startTime,
+                });
+            } else if (layer.type === 'frame') {
+                // Front side check
+                if (layer.data?.assetIsVideo && layer.data?.muted === false) {
+                    const videoUrl = layer.data?.assetUrl;
+                    if (videoUrl) {
+                        sources.push({
+                            videoUrl,
+                            sourceStartTime: layer.data.sourceStartTime || 0,
+                            duration: sceneInfo.duration,
+                            globalStartTime: sceneInfo.startTime,
+                        });
+                    }
+                }
+                // Back side check
+                if (layer.data?.backAssetIsVideo && layer.data?.backMuted === false) {
+                    const videoUrl = layer.data?.backAssetUrl;
+                    if (videoUrl) {
+                        sources.push({
+                            videoUrl,
+                            sourceStartTime: layer.data.backSourceStartTime || 0,
+                            duration: sceneInfo.duration,
+                            globalStartTime: sceneInfo.startTime,
+                        });
+                    }
+                }
+            }
         }
     }
     return sources;
@@ -961,7 +988,8 @@ export const exportVideo = async ({
                                 let optimizedDuration = 0;
                                 let blobToRevoke = null;
 
-                                const isVideoUrl = url.toLowerCase().match(/\.(mp4|webm|ogg|mov|m4v)/) || url.includes('/uploads/');
+                                const isVideoUrl = (side === 'front' ? !!layer.data?.assetIsVideo : !!layer.data?.backAssetIsVideo) ||
+                                                   (typeof url === 'string' && (!!url.toLowerCase().match(/\.(mp4|webm|ogg|mov|m4v)/) || url.includes('/uploads/')));
                                 if (isVideoUrl && ffmpegInst) {
                                     try {
                                         const optResult = await optimizeVideoForSeeking(url, layer, ffmpegInst, sessionId);
@@ -996,8 +1024,12 @@ export const exportVideo = async ({
 
                                 // Apply Media Fragment Fallback to frame layer URL if unoptimized
                                 if (!isOptimized && isVideoUrl) {
-                                    const srcStart = layer.data?.sourceStartTime || 0;
-                                    const srcEnd = layer.data?.sourceEndTime || (layer.data?.duration || 0);
+                                    const srcStart = side === 'front' 
+                                        ? (layer.data?.sourceStartTime || 0) 
+                                        : (layer.data?.backSourceStartTime || 0);
+                                    const srcEnd = side === 'front' 
+                                        ? (layer.data?.sourceEndTime || (layer.data?.duration || 0)) 
+                                        : (layer.data?.backSourceEndTime || (layer.data?.backDuration || 0));
                                     const duration = srcEnd - srcStart;
                                     if (duration > 0) {
                                         targetUrl = `${url}#t=${srcStart.toFixed(3)},${srcEnd.toFixed(3)}`;
@@ -1009,8 +1041,37 @@ export const exportVideo = async ({
                                     return;
                                 }
 
-                                const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
-                                const texture = await loadTextureRobust(targetUrl);
+                                let texture;
+                                if (isVideoUrl) {
+                                    const video = await createExportVideoElement(targetUrl, exportCtx);
+                                    if (!exportCtx.active) {
+                                        try { video.pause(); video.src = ''; video.load(); } catch (e) { }
+                                        if (blobToRevoke) try { URL.revokeObjectURL(blobToRevoke); } catch (e) { }
+                                        return;
+                                    }
+                                    if (isOptimized) {
+                                        video._isOptimized = true;
+                                        video._optimizedDuration = optimizedDuration;
+                                        video._blobToRevoke = blobToRevoke;
+                                    }
+                                    
+                                    const srcStart = side === 'front' 
+                                        ? (layer.data?.sourceStartTime || 0) 
+                                        : (layer.data?.backSourceStartTime || 0);
+                                    const srcEnd = side === 'front' 
+                                        ? (layer.data?.sourceEndTime || (layer.data?.duration || 0)) 
+                                        : (layer.data?.backSourceEndTime || (layer.data?.backDuration || 0));
+
+                                    video._layerSourceStartTime = srcStart;
+                                    video._layerSourceEndTime = srcEnd;
+
+                                    texture = PIXI.Texture.from(video, {
+                                        resourceOptions: { autoPlay: false, autoUpdate: false, muted: true, loop: false, playsinline: true }
+                                    });
+                                } else {
+                                    const { loadTextureRobust } = await import('../../engine/pixi/textureUtils.js');
+                                    texture = await loadTextureRobust(targetUrl, false);
+                                }
 
                                 if (!exportCtx.active) {
                                     if (blobToRevoke) try { URL.revokeObjectURL(blobToRevoke); } catch (e) { }
@@ -1056,8 +1117,15 @@ export const exportVideo = async ({
                                         exportVideoElements.push(video);
                                     }
 
-                                    video._layerSourceStartTime = layer.data?.sourceStartTime || 0;
-                                    video._layerSourceEndTime = layer.data?.sourceEndTime || (layer.data?.duration || 0);
+                                    const srcStart = side === 'front' 
+                                        ? (layer.data?.sourceStartTime || 0) 
+                                        : (layer.data?.backSourceStartTime || 0);
+                                    const srcEnd = side === 'front' 
+                                        ? (layer.data?.sourceEndTime || (layer.data?.duration || 0)) 
+                                        : (layer.data?.backSourceEndTime || (layer.data?.backDuration || 0));
+
+                                    video._layerSourceStartTime = srcStart;
+                                    video._layerSourceEndTime = srcEnd;
                                     video._parentLayer = pixiObject;
 
                                     if (isOptimized) {
@@ -1195,7 +1263,7 @@ export const exportVideo = async ({
         const sceneVideoLayersMap = new Map();
         for (const [layerId, obj] of layerObjects.entries()) {
             if (!obj || obj.destroyed) continue;
-            const isVideoLayer = !!(obj._videoElements || obj._videoElement);
+            const isVideoLayer = !!(obj._videoElements || obj._videoElement || obj._frontVideoElement || obj._backVideoElement);
             if (!isVideoLayer) continue;
 
             const sceneId = obj._sceneId;

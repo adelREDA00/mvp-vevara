@@ -54,6 +54,7 @@ export function AssetCard({
           width: image.metadata?.width || 300,
           height: image.metadata?.height || 200,
           type: isVideo ? 'video' : 'image',
+          thumbnail: image.metadata?.thumbnail || image.thumbnail || null
         }))
         e.dataTransfer.effectAllowed = 'copy'
       }}

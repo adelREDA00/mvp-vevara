@@ -49,21 +49,72 @@ export const loadTextureRobust = async (imageUrl, isVideo = false) => {
                 return originalPlay.apply(this, arguments)
             }
 
-            // Wait for video load metadata
-            await new Promise((resolve) => {
+            // Wait for video load metadata or error
+            await new Promise((resolve, reject) => {
                 const onMetadata = () => {
-                    videoElement.removeEventListener('loadedmetadata', onMetadata)
-                    resolve()
+                    cleanup()
+                    if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+                        reject(new Error('Video has 0 dimensions'))
+                    } else {
+                        resolve()
+                    }
                 }
-                if (videoElement.readyState >= 1) {
+                const onError = (e) => {
+                    cleanup()
+                    reject(new Error(videoElement.error ? videoElement.error.message : 'Failed to load video source'))
+                }
+                const cleanup = () => {
+                    videoElement.removeEventListener('loadedmetadata', onMetadata)
+                    videoElement.removeEventListener('error', onError)
+                }
+
+                if (videoElement.readyState >= 1 && videoElement.videoWidth > 0) {
                     resolve()
                 } else {
                     videoElement.addEventListener('loadedmetadata', onMetadata)
+                    videoElement.addEventListener('error', onError)
                     // Safety timeout (5s)
-                    setTimeout(resolve, 5000)
+                    setTimeout(() => {
+                        cleanup()
+                        if (videoElement.readyState >= 1 && videoElement.videoWidth > 0) {
+                            resolve()
+                        } else {
+                            reject(new Error('Video load timed out (5s) without metadata'))
+                        }
+                    }, 5000)
                 }
             })
             videoElement.pause()
+
+            // [WEBGL FIX] glCopySubTextureCHROMIUM: ensure a decoded frame exists at level 0
+            // by explicitly seeking to t=0 and waiting for 'seeked' before creating the texture.
+            // This prevents the black-box bug on hard reload or revisit.
+            await new Promise((resolve) => {
+                if (videoElement.readyState >= 2) {
+                    // Already has frame data — seek to 0 still needed
+                    videoElement.currentTime = 0
+                    const onSeeked = () => {
+                        videoElement.removeEventListener('seeked', onSeeked)
+                        resolve()
+                    }
+                    videoElement.addEventListener('seeked', onSeeked)
+                    // Safety: resolve after 1s if seeked never fires
+                    setTimeout(resolve, 1000)
+                } else {
+                    const onReady = () => {
+                        videoElement.removeEventListener('canplay', onReady)
+                        videoElement.currentTime = 0
+                        const onSeeked = () => {
+                            videoElement.removeEventListener('seeked', onSeeked)
+                            resolve()
+                        }
+                        videoElement.addEventListener('seeked', onSeeked)
+                        setTimeout(resolve, 1000)
+                    }
+                    videoElement.addEventListener('canplay', onReady)
+                    setTimeout(resolve, 2000)
+                }
+            })
 
             const texture = PIXI.Texture.from(videoElement, {
                 resourceOptions: {
@@ -75,6 +126,12 @@ export const loadTextureRobust = async (imageUrl, isVideo = false) => {
                 }
             })
             texture._nativeVideo = videoElement
+            
+            // Disable mipmapping for dynamic video textures
+            if (texture.source) {
+                texture.source.autoGenerateMipmaps = false
+                texture.source.mipMap = 'off'
+            }
             
             // Cache the video texture
             PIXI.Assets.cache.set(imageUrl, texture)

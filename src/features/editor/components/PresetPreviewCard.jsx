@@ -213,11 +213,12 @@ function MiniLayerVisual({ layer, showingFront, isLight }) {
   // ── VIDEO ──────────────────────────────────────────────────────────────
   if (layer.type === LAYER_TYPES.VIDEO) {
     const thumb = layer.data?.thumbnail
+    const assetUrl = layer.data?.url || layer.data?.src
     return (
       <div className="w-[80%] h-[80%] relative overflow-hidden rounded-sm">
         {thumb
           ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-          : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-800'}`} />
+          : (assetUrl ? <video src={assetUrl} className="w-full h-full object-cover" preload="metadata" muted playsInline /> : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-800'}`} />)
         }
         <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
           <Film className="h-2.5 w-2.5 text-white/60" />
@@ -276,8 +277,23 @@ function MiniLayerVisual({ layer, showingFront, isLight }) {
     const showFrontSide = !isCard || showingFront !== false
     const assetUrl = showFrontSide ? layer.data?.assetUrl : layer.data?.backAssetUrl
     const hasAsset = !!assetUrl
+    const isVideo = showFrontSide ? !!layer.data?.assetIsVideo : !!layer.data?.backAssetIsVideo
 
     if (hasAsset) {
+      if (isVideo) {
+        const thumb = showFrontSide ? layer.data?.thumbnail : layer.data?.backThumbnail
+        return (
+          <div className="w-[80%] h-[80%] relative overflow-hidden rounded-sm bg-black/5">
+            {thumb
+              ? <img src={thumb} alt="" className="w-full h-full object-cover" />
+              : <video src={assetUrl} className="w-full h-full object-cover" preload="metadata" muted playsInline />
+            }
+            <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
+              <Film className="h-2.5 w-2.5 text-white/60" />
+            </div>
+          </div>
+        )
+      }
       return <img src={assetUrl} alt="" className="w-[80%] h-[80%] object-contain rounded-sm" />
     }
 

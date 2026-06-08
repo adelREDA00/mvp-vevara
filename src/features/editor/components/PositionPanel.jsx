@@ -292,11 +292,12 @@ function PositionPanel({
     // ── VIDEO ─────────────────────────────────────────────────────────────────
     if (layer.type === LAYER_TYPES.VIDEO) {
       const thumb = layer.data?.thumbnail
+      const url = layer.data?.url || layer.data?.src
       return (
         <div className={`w-full h-full relative rounded-md overflow-hidden ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
           {thumb
             ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-            : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />
+            : (url ? <video src={url} className="w-full h-full object-cover" preload="metadata" muted playsInline /> : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />)
           }
           <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
             <Film className={`h-4 w-4 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
@@ -381,10 +382,14 @@ function PositionPanel({
         }
 
         if (isVideo) {
-          const thumb = layer.data?.thumbnail
+          const thumb = sideLabel === 'Back' ? layer.data?.backThumbnail : layer.data?.thumbnail
           return (
             <div className="w-full h-full relative overflow-hidden bg-black/10">
-              <img src={thumb || url} alt="" className="w-full h-full object-contain" />
+              {thumb ? (
+                <img src={thumb} alt="" className="w-full h-full object-contain" />
+              ) : (
+                <video src={url} className="w-full h-full object-contain" preload="metadata" muted playsInline />
+              )}
               <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}>
                 <Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} />
               </div>

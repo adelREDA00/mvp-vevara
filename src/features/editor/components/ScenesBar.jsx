@@ -336,6 +336,19 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 
               if (!imageUrl && layer.type === LAYER_TYPES.VIDEO) {
                 // Placeholder/Fallback for video without thumbnail
+                const videoUrl = layer.data?.url || layer.data?.src
+                if (videoUrl) {
+                  return (
+                    <video
+                      key={layer.id}
+                      src={videoUrl}
+                      style={{ ...style, objectFit: 'cover' }}
+                      preload="metadata"
+                      muted
+                      playsInline
+                    />
+                  )
+                }
                 return (
                   <div
                     key={layer.id}
@@ -383,7 +396,7 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 // Detect touch device for adaptive interaction sizing
 const isTouchDevice = () => typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId, onMotionPause }) => {
   const containerRef = useRef(null)
   const dispatch = useDispatch()
   const dragRef = useRef(null)
@@ -403,6 +416,11 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
     e.preventDefault()
     didDragRef.current = false
     setIsDragging(true)
+
+    // UX: Pause playback when user starts dragging/resizing a step block
+    if (typeof onMotionPause === 'function') {
+      onMotionPause()
+    }
 
     const startX = getClientX(e)
 
@@ -451,7 +469,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
 
     document.addEventListener('pointermove', handlePointerMove)
     document.addEventListener('pointerup', handlePointerUp)
-  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX])
+  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX, onMotionPause])
 
   return (
     <div
@@ -1393,6 +1411,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           cardWidth={actualWidth}
           pageDuration={calculateDurationFromWidth(actualWidth) * 1000}
           sceneId={scene.id}
+          onMotionPause={onMotionPause}
         />
       </div>
 

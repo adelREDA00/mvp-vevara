@@ -151,7 +151,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     // Create a signature of the project-wide data
     const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
       const l = layersRef.current[layerId]
-      return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront}` : ''
+      return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront},${l.data?.url},${l.data?.src},${l.data?.assetUrl},${l.data?.backAssetUrl},${l.data?.assetIsVideo},${l.data?.backAssetIsVideo}` : ''
     }).join('|')
 
     const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
@@ -231,7 +231,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         // Create hash matching prepareEngine's format: only scene layers, same property order
         return timelineInfo?.flatMap(s => s.layers || []).map(layerId => {
             const l = layers[layerId]
-            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront}` : ''
+            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront},${l.data?.url},${l.data?.src},${l.data?.assetUrl},${l.data?.backAssetUrl},${l.data?.assetIsVideo},${l.data?.backAssetIsVideo}` : ''
         }).join('|')
     }, [layers, timelineInfo])
 

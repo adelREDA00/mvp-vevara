@@ -35,8 +35,9 @@ function getVideoDimensions(file) {
     }
 
     video.onloadedmetadata = () => {
-      // Seek to 0.1s to avoid black start frame
-      video.currentTime = 0.1
+      // Seek to 1.0s (or 10% of duration if shorter) to avoid black start frame
+      const seekTime = video.duration ? Math.min(1.0, video.duration * 0.1) : 1.0
+      video.currentTime = seekTime
     }
 
     video.onseeked = () => {

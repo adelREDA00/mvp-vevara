@@ -497,8 +497,10 @@ export async function createImageLayer(config) {
 
   // Calculate the display size (may differ from media if user provided explicit dimensions)
   // This represents the "logical" full size of the uncropped image in the canvas
+  const texW = texture.width || 1
+  const texH = texture.height || 1
   const finalWidth = width || texture.width || 300
-  const finalHeight = height || (width && texture.width ? (texture.height / texture.width) * width : (texture.height || 200))
+  const finalHeight = height || (width ? (texH / texW) * width : (texture.height || 200))
 
   // CROP SYSTEM: Store LOGICAL media dimensions, not raw texture pixels
   // This solves the top-left zoom bug when GSAP tries to animate from base states
@@ -713,6 +715,38 @@ export function createFrameLayer(config) {
             const activeHasAsset = val ? this._frameHasAsset : this._frameHasBackAsset
             this._framePlaceholder.visible = !activeHasAsset
           }
+
+          // Update active crop dimensions from the front/back caches
+          const fw = val ? (this._frontCropWidth ?? this._cropWidth ?? this.width) : (this._backCropWidth ?? this._cropWidth ?? this.width)
+          const fh = val ? (this._frontCropHeight ?? this._cropHeight ?? this.height) : (this._backCropHeight ?? this._cropHeight ?? this.height)
+          const fx = val ? (this._frontCropX ?? this._cropX ?? 0) : (this._backCropX ?? 0)
+          const fy = val ? (this._frontCropY ?? this._cropY ?? 0) : (this._backCropY ?? 0)
+
+          if (this._hasReactiveCropProperties) {
+            this.cropWidth = fw
+            this.cropHeight = fh
+            this.cropX = fx
+            this.cropY = fy
+          } else {
+            this._cropWidth = fw
+            this._cropHeight = fh
+            this._cropX = fx
+            this._cropY = fy
+            
+            const anchorX = this.anchorX !== undefined ? this.anchorX : 0.5
+            const anchorY = this.anchorY !== undefined ? this.anchorY : 0.5
+            this.pivot.set(fw * anchorX, fh * anchorY)
+          }
+          this._storedCropWidth = fw
+          this._storedCropHeight = fh
+
+          // Update crop mask
+          const cropMask = this._cropMask
+          if (cropMask) {
+            cropMask.clear()
+            cropMask.rect(0, 0, fw, fh)
+            cropMask.fill(0xffffff)
+          }
         }
       },
       configurable: true
@@ -736,35 +770,69 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   if (!sprite) return null
 
   // Compute contain-fit: scale asset so it fits within the frame
-  const texW = texture.width
-  const texH = texture.height
-  const scale = Math.min(frameWidth / texW, frameHeight / texH)
+  const texW = texture.width || 1
+  const texH = texture.height || 1
+  let scale = Math.min(frameWidth / texW, frameHeight / texH)
+  if (isNaN(scale) || !isFinite(scale)) {
+    scale = 1
+  }
   const mediaW = texW * scale
   const mediaH = texH * scale
-
-  // Center the asset within the frame (crop offsets)
-  const cropX = (mediaW - frameWidth) / 2
-  const cropY = (mediaH - frameHeight) / 2
 
   sprite.texture = texture
   sprite.width = mediaW
   sprite.height = mediaH
   sprite.anchor.set(0, 0)
-  sprite.x = -cropX
-  sprite.y = -cropY
+  sprite.x = 0
+  sprite.y = 0
   sprite.alpha = 1
   sprite.visible = true // [FIX] Ensure immediate visibility after texture load
 
   // Enable mipmapping
-  if (!_isMobileDevice && texture.source) {
-    texture.source.autoGenerateMipmaps = true
-    texture.source.mipMap = 'on'
+  if (texture.source) {
+    const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
+    if (videoElement) {
+      texture.source.autoGenerateMipmaps = false
+      texture.source.mipMap = 'off'
+    } else if (!_isMobileDevice) {
+      texture.source.autoGenerateMipmaps = true
+      texture.source.mipMap = 'on'
+    } else {
+      texture.source.autoGenerateMipmaps = false
+    }
     texture.source.scaleMode = 'linear'
   }
 
   // Update container metadata
   container._mediaWidth = mediaW
   container._mediaHeight = mediaH
+
+  // Set our caches
+  container._frontMediaWidth = mediaW
+  container._frontMediaHeight = mediaH
+  container._frontCropX = 0
+  container._frontCropY = 0
+  container._frontCropWidth = mediaW
+  container._frontCropHeight = mediaH
+
+  // Update active crop dimensions directly on the container
+  if (container._hasReactiveCropProperties) {
+    container.cropWidth = mediaW
+    container.cropHeight = mediaH
+    container.cropX = 0
+    container.cropY = 0
+  } else {
+    container._cropWidth = mediaW
+    container._cropHeight = mediaH
+    container._cropX = 0
+    container._cropY = 0
+
+    const anchorX = container.anchorX !== undefined ? container.anchorX : 0.5
+    const anchorY = container.anchorY !== undefined ? container.anchorY : 0.5
+    container.pivot.set(mediaW * anchorX, mediaH * anchorY)
+  }
+  container._storedCropWidth = mediaW
+  container._storedCropHeight = mediaH
 
   // [VIDEO-IN-FRAME FIX] Set _frontVideoElement and register/sync with MotionEngine
   const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
@@ -789,7 +857,7 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   const cropMask = container._cropMask
   if (cropMask) {
     cropMask.clear()
-    cropMask.rect(0, 0, frameWidth, frameHeight)
+    cropMask.rect(0, 0, mediaW, mediaH)
     cropMask.fill(0xffffff)
   }
 
@@ -802,7 +870,7 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   }
   container._frameHasAsset = true
 
-  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX, cropY, cropWidth: frameWidth, cropHeight: frameHeight }
+  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX: 0, cropY: 0, cropWidth: mediaW, cropHeight: mediaH }
 }
 
 /**
@@ -816,28 +884,35 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
   if (!sprite) return null
 
   // Compute contain-fit: scale asset so it fits within the frame
-  const texW = texture.width
-  const texH = texture.height
-  const scale = Math.min(frameWidth / texW, frameHeight / texH)
+  const texW = texture.width || 1
+  const texH = texture.height || 1
+  let scale = Math.min(frameWidth / texW, frameHeight / texH)
+  if (isNaN(scale) || !isFinite(scale)) {
+    scale = 1
+  }
   const mediaW = texW * scale
   const mediaH = texH * scale
-
-  // Center the asset within the frame (crop offsets)
-  const cropX = (mediaW - frameWidth) / 2
-  const cropY = (mediaH - frameHeight) / 2
 
   sprite.texture = texture
   sprite.width = mediaW
   sprite.height = mediaH
   sprite.anchor.set(0, 0)
-  sprite.x = -cropX
-  sprite.y = -cropY
+  sprite.x = 0
+  sprite.y = 0
   sprite.alpha = 1
 
   // Enable mipmapping
-  if (!_isMobileDevice && texture.source) {
-    texture.source.autoGenerateMipmaps = true
-    texture.source.mipMap = 'on'
+  if (texture.source) {
+    const videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
+    if (videoElement) {
+      texture.source.autoGenerateMipmaps = false
+      texture.source.mipMap = 'off'
+    } else if (!_isMobileDevice) {
+      texture.source.autoGenerateMipmaps = true
+      texture.source.mipMap = 'on'
+    } else {
+      texture.source.autoGenerateMipmaps = false
+    }
     texture.source.scaleMode = 'linear'
   }
 
@@ -869,13 +944,43 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
   }
 
   // Store back-specific cover-fit dimensions on the container
-  // so the sync loop can size the back sprite independently of the front
   container._backMediaWidth = mediaW
   container._backMediaHeight = mediaH
-  container._backCropX = cropX
-  container._backCropY = cropY
+  container._backCropX = 0
+  container._backCropY = 0
+  container._backCropWidth = mediaW
+  container._backCropHeight = mediaH
 
-  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX, cropY, cropWidth: frameWidth, cropHeight: frameHeight }
+  // If currently showing the back side, update active crop dimensions
+  if (container.showingFront === false) {
+    if (container._hasReactiveCropProperties) {
+      container.cropWidth = mediaW
+      container.cropHeight = mediaH
+      container.cropX = 0
+      container.cropY = 0
+    } else {
+      container._cropWidth = mediaW
+      container._cropHeight = mediaH
+      container._cropX = 0
+      container._cropY = 0
+
+      const anchorX = container.anchorX !== undefined ? container.anchorX : 0.5
+      const anchorY = container.anchorY !== undefined ? container.anchorY : 0.5
+      container.pivot.set(mediaW * anchorX, mediaH * anchorY)
+    }
+    container._storedCropWidth = mediaW
+    container._storedCropHeight = mediaH
+
+    // Update crop mask to frame dimensions
+    const cropMask = container._cropMask
+    if (cropMask) {
+      cropMask.clear()
+      cropMask.rect(0, 0, mediaW, mediaH)
+      cropMask.fill(0xffffff)
+    }
+  }
+
+  return { mediaWidth: mediaW, mediaHeight: mediaH, cropX: 0, cropY: 0, cropWidth: mediaW, cropHeight: mediaH }
 }
 
 /**
@@ -984,6 +1089,39 @@ export function unhighlightFrameDropTarget(container, width, height) {
     : container._frameHasAsset
   if (activeHasAsset && container._framePlaceholder) {
     container._framePlaceholder.visible = false
+  }
+}
+
+/**
+ * Fallback helper when a frame asset fails to load.
+ * Restores the placeholder visibility and hides the failed sprite.
+ */
+export function showFramePlaceholderFallback(container, side = 'front') {
+  if (!container) return
+
+  if (side === 'front') {
+    container._frameHasAsset = false
+    if (container._imageSprite) {
+      container._imageSprite.alpha = 0
+      container._imageSprite.visible = false
+    }
+  } else {
+    container._frameHasBackAsset = false
+    if (container._backSprite) {
+      container._backSprite.alpha = 0
+      container._backSprite.visible = false
+    }
+  }
+
+  // If the failed asset matches the currently visible side, restore placeholder
+  const showingFront = container._showingFront !== false
+  const failedSideActive = (side === 'front' && showingFront) || (side === 'back' && !showingFront)
+
+  if (failedSideActive && container._framePlaceholder) {
+    container._framePlaceholder.visible = true
+    const w = container._storedCropWidth || container.width || 200
+    const h = container._storedCropHeight || container.height || 200
+    redrawFramePlaceholder(container, w, h)
   }
 }
 
@@ -1142,7 +1280,11 @@ export async function createVideoLayer(config) {
             timeoutId = setTimeout(() => {
               console.warn(`[createVideoLayer] readiness timeout (${timeoutMs / 1000}s) for: ${videoUrl}`)
               cleanup()
-              resolve()
+              if (videoElement.videoWidth > 0) {
+                resolve()
+              } else {
+                reject(new Error(`Video load timed out with 0 dimensions: ${videoUrl}`))
+              }
             }, timeoutMs)
           }
         })
@@ -1205,15 +1347,10 @@ export async function createVideoLayer(config) {
   const sprite = new PIXI.Sprite(texture)
   videoElement = texture._nativeVideo || (texture.source?.resource instanceof HTMLVideoElement ? texture.source.resource : null)
 
-  // PERFORMANCE: Enable mipmapping for videos if possible
-  // [MOBILE FIX] Disable mipmapping on mobile to save ~3x GPU memory per texture
+  // PERFORMANCE: Disable mipmapping for video textures as dynamic video sources do not support it in WebGL
   if (texture.source) {
-    if (!_isMobileDevice) {
-      texture.source.autoGenerateMipmaps = true
-      texture.source.mipMap = 'on'
-    } else {
-      texture.source.autoGenerateMipmaps = false
-    }
+    texture.source.autoGenerateMipmaps = false
+    texture.source.mipMap = 'off'
     texture.source.scaleMode = 'linear'
   }
 
@@ -1227,7 +1364,7 @@ export async function createVideoLayer(config) {
   const texHeight = videoElement?.videoHeight || texture.height || data.height || 200
 
   const finalWidth = width || texWidth
-  const finalHeight = height || (width ? (texHeight / texWidth) * width : texHeight)
+  const finalHeight = height || (width ? ((texHeight || 200) / (texWidth || 300)) * width : texHeight)
 
   // CROP SYSTEM: Store LOGICAL media dimensions, not raw texture pixels
   container._mediaWidth = config.mediaWidth ?? finalWidth

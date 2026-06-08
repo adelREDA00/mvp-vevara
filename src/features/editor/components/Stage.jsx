@@ -40,7 +40,7 @@ import { isLayerCompletelyOutside, getEffectiveLayerDimensions } from '../utils/
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock } from '../../../store/slices/projectSlice'
-import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget } from '../../engine/pixi/createLayer'
+import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget, showFramePlaceholderFallback } from '../../engine/pixi/createLayer'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
@@ -319,7 +319,7 @@ function Stage({
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering, prepareEngine } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -375,7 +375,7 @@ function Stage({
 
 
   // Handle dropping an asset (image/video URL) onto a frame layer
-  const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight, assetIsVideo = false) => {
+  const handleDropAssetOnFrame = useCallback((frameLayerId, assetUrl, assetWidth, assetHeight, assetIsVideo = false, thumbnail = null) => {
     // [BLOCK DROP IN CAPTURE MODE] Block drops during motion capture
     if (motionCaptureMode?.isActive) {
       return
@@ -403,35 +403,57 @@ function Stage({
       return
     }
 
+    // Compute contain-fit dimensions locally
+    const frameW = frameLayer.width
+    const frameH = frameLayer.height
+    const scale = Math.min(frameW / (assetWidth || 300), frameH / (assetHeight || 200))
+    const newFrameW = (assetWidth || 300) * scale
+    const newFrameH = (assetHeight || 200) * scale
+
     // 1. Update Redux state
-    dispatch(attachAssetToFrame({ layerId: frameLayerId, assetUrl, assetWidth: assetWidth || 300, assetHeight: assetHeight || 200, side, assetIsVideo }))
+    dispatch(attachAssetToFrame({
+      layerId: frameLayerId,
+      assetUrl,
+      assetWidth: assetWidth || 300,
+      assetHeight: assetHeight || 200,
+      side,
+      assetIsVideo,
+      thumbnail
+    }))
 
     // 2. Update PIXI object immediately for visual feedback
     if (frameObj) {
-      const dims = getEffectiveLayerDimensions(frameLayer, frameObj, motionCaptureMode)
-      const frameW = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
-      const frameH = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
-
       // Clear drop target highlight so the sync loop is not blocked
-      unhighlightFrameDropTarget(frameObj, frameW, frameH)
+      unhighlightFrameDropTarget(frameObj, newFrameW, newFrameH)
 
       loadTextureRobust(assetUrl, assetIsVideo).then(texture => {
-        if (!texture || frameObj.destroyed) return
+        if (frameObj.destroyed) return
+        if (!texture) {
+          showFramePlaceholderFallback(frameObj, side)
+          return
+        }
         if (side === 'back') {
-          attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+          attachBackAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
           // Immediately show back sprite since we know the back side is facing the user
           if (frameObj._backSprite) frameObj._backSprite.visible = true
           if (frameObj._imageSprite) frameObj._imageSprite.visible = false
         } else {
-          attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+          attachAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
         }
         if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = false
 
         // Force sync loop to pick up the new asset visibility (critical for scenes 2+)
         frameObj._forceNextSync = true
-      }).catch(() => { })
+
+        // Re-trigger prepareEngine(true) to rebuild GSAP timelines with new asset details/dimensions!
+        prepareEngine(true)
+      }).catch(() => {
+        if (frameObj && !frameObj.destroyed) {
+          showFramePlaceholderFallback(frameObj, side)
+        }
+      })
     }
-  }, [layers, layerObjects, dispatch, motionCaptureMode])
+  }, [layers, layerObjects, dispatch, motionCaptureMode, prepareEngine])
 
   // Native canvas drag-and-drop listeners (React synthetic events don't reach the canvas)
   useEffect(() => {
@@ -494,7 +516,7 @@ function Stage({
       }
 
       if (targetId) {
-        handleDropAssetOnFrame(targetId, asset.url, asset.width || 300, asset.height || 200, asset.type === 'video')
+        handleDropAssetOnFrame(targetId, asset.url, asset.width || 300, asset.height || 200, asset.type === 'video', asset.thumbnail || null)
       }
     }
 
@@ -774,8 +796,9 @@ function Stage({
     effectiveZoom,
     sceneMotionFlows,
     sceneStartOffset: currentSceneMotionFlow?.sceneStartOffset || 0,
-    currentSceneId
-  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow])
+    currentSceneId,
+    prepareEngine
+  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow, prepareEngine])
 
   // Set up interactions (selection, drag)
   const interactionsAPI = useCanvasInteractions(
@@ -864,7 +887,8 @@ function Stage({
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
     interactionsAPI?.updateMotionArrowVisibility, // Pass arrow sync callback for live resize/rotate updates
     effectiveZoom, // Pass zoom for handle scaling
-    layerObjectsVersion // [Bug 2 Fix] Force re-initialization when layer PIXI instances change
+    layerObjectsVersion, // [Bug 2 Fix] Force re-initialization when layer PIXI instances change
+    pausePlayback // UX: Pause playback when resize/rotate starts
   )
 
   // =============================================================================

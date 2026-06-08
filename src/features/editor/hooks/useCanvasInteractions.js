@@ -92,7 +92,7 @@ const cancelIdleCallback = (typeof window !== 'undefined' && window.cancelIdleCa
  * @param {number} [zoom=100] - Current zoom level (percentage, e.g., 100 = 100%)
  */
 export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, layerObjectsVersion = 0) {
-  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0 } = interactionParams
+  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0, prepareEngine } = interactionParams
   const dispatch = useDispatch()
 
   // =============================================================================
@@ -2716,6 +2716,14 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     hideDragHoverBox()
   }, [dragStateAPI.isDragging(), hideHoverBox, hideDragHoverBox])
 
+  // UX: Immediately hide hover outlines when playback starts
+  useEffect(() => {
+    if (isPlaying) {
+      hideHoverBox()
+      hideDragHoverBox()
+    }
+  }, [isPlaying, hideHoverBox, hideDragHoverBox])
+
   // =============================================================================
   // PERFORMANCE: DECOUPLED GUIDE CLEANUP
   // =============================================================================
@@ -3339,6 +3347,10 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         }
         // Start dragging! Animated elements are always draggable (move = base state update)
         const dragLayerId = dragStartRef.current.layerId
+        // UX: Pause playback when user starts dragging a layer
+        if (isPlaying && typeof pausePlayback === 'function') {
+          pausePlayback()
+        }
         dragStateAPI.setDragState(true, dragLayerId)
 
         // Show drag hover box when dragging starts
@@ -4371,11 +4383,19 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               return
             }
 
+            const frameW = frameLayer.width
+            const frameH = frameLayer.height
+            const assetW = draggedLayer.mediaWidth || draggedLayer.width
+            const assetH = draggedLayer.mediaHeight || draggedLayer.height
+            const scale = Math.min(frameW / assetW, frameH / assetH)
+            const newFrameW = assetW * scale
+            const newFrameH = assetH * scale
+
             dispatch(attachAssetToFrame({
               layerId: frameId,
               assetUrl,
-              assetWidth: draggedLayer.mediaWidth || draggedLayer.width,
-              assetHeight: draggedLayer.mediaHeight || draggedLayer.height,
+              assetWidth: assetW,
+              assetHeight: assetH,
               side,
               // [VIDEO-IN-FRAME FIX] Forward video metadata so the frame layer
               // carries muted state, duration, and source timing for splitScene & syncMedia.
@@ -4384,30 +4404,30 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               duration: draggedLayer.data?.duration,
               sourceStartTime: draggedLayer.data?.sourceStartTime,
               sourceEndTime: draggedLayer.data?.sourceEndTime,
+              thumbnail: draggedLayer.data?.thumbnail || null
             }))
             if (frameObj) {
-              const dims = getEffectiveLayerDimensions(frameLayer, frameObj, motionCaptureMode)
-              const frameW = dims?.width ?? (frameLayer.cropWidth ?? frameLayer.width)
-              const frameH = dims?.height ?? (frameLayer.cropHeight ?? frameLayer.height)
-
               // [FIX] Clear the drop target flag so the sync loop is not blocked
-              unhighlightFrameDropTarget(frameObj, frameW, frameH)
+              unhighlightFrameDropTarget(frameObj, newFrameW, newFrameH)
 
               loadTextureRobust(assetUrl, draggedLayer.type === 'video').then(texture => {
                 if (!texture || frameObj.destroyed) return
 
                 if (side === 'back') {
-                  attachBackAssetToFramePixi(frameObj, texture, frameW, frameH)
+                  attachBackAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
                   // Immediately show back sprite since we know the back side is facing the user
                   if (frameObj._backSprite) frameObj._backSprite.visible = true
                   if (frameObj._imageSprite) frameObj._imageSprite.visible = false
                 } else {
-                  attachAssetToFramePixi(frameObj, texture, frameW, frameH)
+                  attachAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
                 }
                 if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = false
 
                 // Force sync loop to pick up the new asset visibility (critical for scenes 2+)
                 frameObj._forceNextSync = true
+
+                // Re-trigger prepareEngine(true) to rebuild GSAP timelines!
+                if (prepareEngine) prepareEngine(true)
               }).catch(() => { })
             }
             dispatch(deleteLayer(draggedLayerId))

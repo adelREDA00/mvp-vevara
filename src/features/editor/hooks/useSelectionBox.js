@@ -218,7 +218,7 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
 // =============================================================================
 
 
-export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, updateMotionArrowVisibility = null, zoom = 1, layerObjectsVersion = 0) {
+export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, updateMotionArrowVisibility = null, zoom = 1, layerObjectsVersion = 0, pausePlayback = null) {
   // ===========================================================================
   // STATE MANAGEMENT - React refs and state variables for tracking interactions
   // ===========================================================================
@@ -268,6 +268,20 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     forceRedrawRef.current = true
     requestUpdateLoop()
   }, [layer?.data?.fontSize, layer?.data?.content, layer?.data?.fontFamily, layer?.type, requestUpdateLoop])
+
+  // [FRAME ASSET REPLACE FIX] When a frame's asset or showing side changes, force a redraw
+  // of the selection box so it immediately matches the new bounds.
+  useEffect(() => {
+    if (layer?.type !== LAYER_TYPES.FRAME) return
+    forceRedrawRef.current = true
+    requestUpdateLoop()
+  }, [
+    layer?.data?.assetUrl,
+    layer?.data?.backAssetUrl,
+    layer?.data?.showingFront,
+    layer?.type,
+    requestUpdateLoop
+  ])
 
   // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
   // Backgrounds are static elements and should not have interactive handles
@@ -2512,6 +2526,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     interactionStateRef.current.resize = initialState
     requestUpdateLoop()
 
+    // UX: Pause playback when user starts resizing a layer
+    if (isPlaying && typeof pausePlayback === 'function') {
+      pausePlayback()
+    }
     dragStateAPI.setInteractionState(true, false, currentLayer.id)
 
     let initialDims
@@ -2650,6 +2668,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const dy = startWorldPos.y - layerCenterY
     const startAngle = Math.atan2(dy, dx)
 
+    // UX: Pause playback when user starts rotating a layer
+    if (isPlaying && typeof pausePlayback === 'function') {
+      pausePlayback()
+    }
     dragStateAPI.setInteractionState(false, true, currentLayer.id)
 
     updateHoverBox(
