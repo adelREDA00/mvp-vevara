@@ -16,6 +16,7 @@ import {
   Undo2,
   Redo2,
   Home,
+  Play,
 } from 'lucide-react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
@@ -29,6 +30,7 @@ function TopToolbar({
   onExport,
   onRequestGifOptions,
   onPreview,
+  onEnterPreview,
   onProjectNameChange,
   onSave,
   isSaving,
@@ -282,6 +284,18 @@ function TopToolbar({
             </DropdownMenu>
           </div>
 
+             {/* Preview Button — enters minimal playback mode */}
+          {onEnterPreview && (
+            <button
+              onClick={onEnterPreview}
+              className="text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
+              title="Preview"
+            >
+              <Play className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
+              <span className="hidden md:inline">Preview</span>
+            </button>
+          )}
+
           {/* Desktop Only: Export Button */}
           {!hideExport && (
             <div className="hidden md:block">
@@ -324,7 +338,7 @@ function TopToolbar({
 
 
 
-
+      
 
           {/* Mobile Panel Toggle - Always ends right on mobile */}
           <button
@@ -334,6 +348,9 @@ function TopToolbar({
           >
             <Menu className="h-4 w-4" strokeWidth={1.5} />
           </button>
+
+
+ 
         </div>
       </div>
 

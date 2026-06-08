@@ -19,7 +19,7 @@ import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/view
  * @param {string[]} selectedLayerIds - Currently selected layer IDs
  * @param {string} activeTool - Current tool ('select', 'move', etc.)
  */
-export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, viewport, selectedLayerIds, activeTool, isPlaying = false, motionCaptureMode = null, currentSceneId = null) {
+export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, viewport, selectedLayerIds, activeTool, isPlaying = false, motionCaptureMode = null, currentSceneId = null, previewMode = false) {
   const dispatch = useDispatch()
   const selectionBoxRef = useRef(null)
   const isDraggingRef = useRef(false)
@@ -135,6 +135,11 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
       
       // Don't work if playing
       if (isPlaying) {
+        return
+      }
+
+      // [PREVIEW MODE] View-only: no marquee drag-selection.
+      if (previewMode) {
         return
       }
 
@@ -433,7 +438,7 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
 
       destroySelectionBox()
     }
-  }, [stageContainer, viewport, isPlaying, motionCaptureMode, currentSceneId]) // Re-run when stageContainer, viewport, isPlaying, motionCaptureMode, or currentSceneId changes
+  }, [stageContainer, viewport, isPlaying, motionCaptureMode, currentSceneId, previewMode]) // Re-run when stageContainer, viewport, isPlaying, motionCaptureMode, currentSceneId, or previewMode changes
 
   // Cleanup on unmount
   useEffect(() => {

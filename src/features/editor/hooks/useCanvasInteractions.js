@@ -100,6 +100,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
   // =============================================================================
   const dragStartRef = useRef(null)
   const shiftLockAxisRef = useRef(null) // 'x' or 'y' or null
+  const pendingShiftToggleRef = useRef(null) // Deferred shift+click selection toggle, resolved on pointerup if no drag occurred
   const initialPositionsRef = useRef(new Map()) // Map of layerId -> initial { x, y } position
   const dragOffsetsRef = useRef(new Map()) // Map of layerId -> offset from drag start position for multi-select
   const multiSelectBoundsCenterRef = useRef(null) // Original bounding box center at drag start for multi-select
@@ -2755,6 +2756,9 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // =========================================================================
 
     const handlePointerDown = (event) => {
+      // [PREVIEW MODE] View-only: never select or start dragging layers.
+      if (latestParamsRef.current?.previewMode) return
+
       // Ignore right clicks for custom dragging (allow viewport panning to handle it)
       if (event.data?.button === 2 || event.button === 2 || event.data?.originalEvent?.button === 2) {
         return
@@ -3046,14 +3050,17 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       const isShiftPressed = !!(event.data?.originalEvent?.shiftKey || event.nativeEvent?.shiftKey)
       if (isShiftPressed) {
         if (currentSelectedLayerIds.includes(layerId)) {
-          // Deselect the clicked layer
-          const nextSelectedIds = currentSelectedLayerIds.filter(id => id !== layerId)
-          currentSelectedLayerIds = nextSelectedIds
-          hasMultiSelect = nextSelectedIds.length > 1
-          selectedLayerIdsRef.current = nextSelectedIds
-          dispatch(setSelectedLayers(nextSelectedIds))
-          // Clean up and return, don't drag a deselected layer
-          return
+          // [SHIFT-DRAG FIX] The layer is already selected. Previously we deselected
+          // it and returned here, which aborted the drag entirely — the "layer gets
+          // stuck" bug — and also blocked group shift-drag (the pressed layer was
+          // removed from the selection before the group drag could start). Instead,
+          // defer the deselect to pointerup-without-movement and fall through so a
+          // constrained (axis-locked) drag can begin on the existing selection.
+          pendingShiftToggleRef.current = {
+            layerId,
+            wasSelected: true
+          }
+          // Fall through to normal drag setup; selection is left intact.
         } else {
           // Add the clicked layer to the selection
           const nextSelectedIds = [...currentSelectedLayerIds, layerId]
@@ -4338,6 +4345,21 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       // Check if there was an active drag before processing
       const wasDragging = dragStateAPI.isDragging()
 
+      // [SHIFT-DRAG FIX] Resolve a deferred shift+click selection toggle. If the
+      // pointer never dragged, treat it as a shift+click: toggle the layer in/out
+      // of the selection. If it dragged, the user performed a constrained move, so
+      // leave the selection untouched. Runs before any early-return below.
+      if (pendingShiftToggleRef.current && !wasDragging) {
+        const { layerId, wasSelected } = pendingShiftToggleRef.current
+        const sel = selectedLayerIdsRef.current || []
+        const next = wasSelected
+          ? sel.filter(id => id !== layerId)
+          : (sel.includes(layerId) ? sel : [...sel, layerId])
+        selectedLayerIdsRef.current = next
+        dispatch(setSelectedLayers(next))
+      }
+      pendingShiftToggleRef.current = null
+
       // --- Frame drop: attach media layer to highlighted frame ---
       if (wasDragging && highlightedFrameRef.current) {
         const isMotionCaptureActive = latestMotionCaptureModeRef.current?.isActive
@@ -4508,6 +4530,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       pointerIsDownRef.current = false
       dragStartRef.current = null
       shiftLockAxisRef.current = null
+      pendingShiftToggleRef.current = null
       initialPositionsRef.current.clear()
       dragOffsetsRef.current.clear()
       multiSelectBoundsCenterRef.current = null
@@ -4617,6 +4640,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         // Add hover effect for layer objects
         const handleLayerHoverEnter = () => {
+          // [PREVIEW MODE] View-only: no hover outline.
+          if (latestParamsRef.current?.previewMode) return
           // Hide drag hover box when entering hover state to avoid conflicts
           hideDragHoverBox()
 

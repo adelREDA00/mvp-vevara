@@ -22,6 +22,7 @@ import Modal from '../components/Modal'
 import ScenesBar from '../components/ScenesBar'
 import CanvasControls from '../components/CanvasControls'
 import PlaybackControls from '../components/PlaybackControls'
+import PreviewControls from '../components/PreviewControls'
 import ElementsPanel from '../components/ElementsPanel'
 import DesignPanel from '../components/DesignPanel'
 import ProfilePanel from '../components/ProfilePanel'
@@ -160,6 +161,71 @@ function EditorPage() {
   const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
   const [requestOpenControl, setRequestOpenControl] = useState(null)
 
+  // [PREVIEW MODE] Minimal, distraction-free playback view. Hides all editor
+  // chrome and shows only the canvas + a floating play/pause + scrub bar. Reuses
+  // the existing renderer / playback engine / timeline state — this is a pure UI
+  // visibility toggle, no new playback logic.
+  const [previewMode, setPreviewMode] = useState(false)
+  const previewModeRef = useRef(false)          // mirror for non-React callbacks (scrollbars)
+  const previewPrevZoomRef = useRef(null)       // editor zoom to restore on exit
+  const previewPrevPasteboardRef = useRef(null) // workspace visibility to restore on exit
+  const previewPrevCenterRef = useRef(null)     // viewport center to restore on exit
+
+  const enterPreviewMode = useCallback(() => {
+    // Remember the current view state so we can restore it exactly on exit.
+    previewPrevZoomRef.current = zoom
+    previewPrevPasteboardRef.current = showPasteboard
+    // Capture the current viewport center so we can restore the exact pan on exit.
+    const vp = stageRef.current?.getViewportData?.()
+    previewPrevCenterRef.current = vp
+      ? { x: (vp.left + vp.right) / 2, y: (vp.top + vp.bottom) / 2 }
+      : null
+    // Hide the workspace (clip layers outside the canvas) — reuse the existing
+    // pasteboard toggle. Only change it if it isn't already hidden.
+    if (showPasteboard) setShowPasteboard(false)
+    // Close editor chrome and clear any active selection so no selection
+    // handles linger and keyboard shortcuts can't act on a selected layer.
+    setActiveSidebarItem(null)
+    setIsMotionPanelOpen(false)
+    dispatch(clearLayerSelection())
+    // Fit the canvas to the (now larger) preview viewport. The auto-fit effect
+    // below re-asserts this once the expanded layout has settled.
+    setZoom(-1)
+    previewModeRef.current = true
+    setPreviewMode(true)
+  }, [zoom, showPasteboard, setActiveSidebarItem, dispatch])
+
+  const exitPreviewMode = useCallback(() => {
+    previewModeRef.current = false
+    setPreviewMode(false)
+    // Restore the exact pre-preview view state.
+    if (previewPrevPasteboardRef.current !== null) setShowPasteboard(previewPrevPasteboardRef.current)
+    if (previewPrevZoomRef.current !== null) setZoom(previewPrevZoomRef.current)
+  }, [])
+
+  // Re-fit the canvas after the preview layout (expanded canvas) has settled, so
+  // we zoom to the LARGEST safe size for the fullscreen viewport — not the
+  // smaller editor viewport that was active at the moment of entering.
+  useEffect(() => {
+    if (!previewMode) return
+    const raf = requestAnimationFrame(() => setZoom(-1))
+    const t = setTimeout(() => setZoom(-1), 180)
+    return () => { cancelAnimationFrame(raf); clearTimeout(t) }
+  }, [previewMode])
+
+  // Exit Preview Mode on Escape.
+  useEffect(() => {
+    if (!previewMode) return
+    const handleKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        exitPreviewMode()
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [previewMode, exitPreviewMode])
+
   const {
     playheadTime,
     setPlayheadTime,
@@ -175,6 +241,37 @@ function EditorPage() {
     handleDuplicateSegment,
     handleToggleSegmentBypass,
   } = useEditorPlayback(scenes)
+
+  // On exit from Preview Mode: pause playback (leaving preview should never keep
+  // the editor "playing") and re-center/re-fit the canvas. The latter is needed
+  // because Stage only recenters the viewport when the zoom *scale* changes — on
+  // the bottom-section restore the scale is unchanged, so the artboard would
+  // otherwise stay vertically off until the user nudges the zoom. We restore the
+  // exact pre-preview viewport center once the restored layout has settled.
+  const wasPreviewRef = useRef(false)
+  useEffect(() => {
+    if (previewMode) {
+      wasPreviewRef.current = true
+      return
+    }
+    if (!wasPreviewRef.current) return // ignore the initial (never-entered) state
+    wasPreviewRef.current = false
+
+    // Pause playback on exit.
+    if (isPlaying && motionControls) {
+      motionControls.pauseAll()
+      setIsPlaying(false)
+    }
+
+    // Restore the viewport center after the editor layout (bottom section +
+    // restored zoom) has settled, so the canvas sits at its correct position.
+    const center = previewPrevCenterRef.current
+    if (!center) return
+    const restoreCenter = () => stageRef.current?.setViewportPosition?.(center.x, center.y)
+    const raf = requestAnimationFrame(restoreCenter)
+    const t = setTimeout(restoreCenter, 220)
+    return () => { cancelAnimationFrame(raf); clearTimeout(t) }
+  }, [previewMode, isPlaying, motionControls, setIsPlaying])
 
   const {
     topToolbarRef,
@@ -355,6 +452,13 @@ function EditorPage() {
   const handleViewportChange = useCallback((data) => {
     if (!data) return
     viewportDataRef.current = data
+
+    // Preview Mode: never show scrollbars (the canvas is fit to the viewport).
+    if (previewModeRef.current) {
+      if (vTrackRef.current) vTrackRef.current.style.display = 'none'
+      if (hTrackRef.current) hTrackRef.current.style.display = 'none'
+      return
+    }
 
     // Use values from data with reliable fallbacks
     const scale = data.scale || 1
@@ -957,64 +1061,36 @@ function EditorPage() {
     }
   }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
 
-  // Starter project copy initial autoplay on load (with 500ms delay to let the user see the first glance)
+  // Starter project copy onboarding on load.
+  // [UX] No autoplay: on first open of a pre-config/starter copy we keep the scene
+  // paused at frame 0 and only show the onboarding hint. The editor stays fully
+  // interactive (no interaction lock, no forced playback).
   useEffect(() => {
     if (projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
       if (isStarterCopy) {
         const targetProjId = urlProjectId || projectId;
         if (!targetProjId) return;
 
-        const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
-
-        // If they have already done autoplay, do not trigger autoplay
-        if (isAutoplayDone) {
+        // Show the onboarding hint only once per project.
+        const isOnboardingDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
+        if (isOnboardingDone) {
           return;
         }
 
         if (!hasTriggeredInitialAutoPlay.current) {
           hasTriggeredInitialAutoPlay.current = true;
-          dispatch(setAutoPlayState('initial'));
-          dispatch(setInteractionLock(true));
-          // Seek exactly to 0
+          // Park the playhead at the start; do NOT play.
+          dispatch(setAutoPlayState('none'));
           seek(0);
-
-          // Delay autoplay by 500ms so user has time to digest the initial frame
-          const timer = setTimeout(() => {
-            motionControls.playAll();
-            setIsPlaying(true);
-          }, 500);
-          return () => clearTimeout(timer);
+          // Mark onboarding as shown so it won't reappear on reload.
+          localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
+          // Show the hint / hand indicator immediately.
+          setShowStarterHint(true);
+          setStarterHintText("Animate this scene");
         }
       }
     }
-  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, setIsPlaying, dispatch]);
-
-  // Auto-pause at the start of Scene 2 (end of first scene duration) and trigger starter tooltip
-  useEffect(() => {
-    if (isStarterCopy && isPlaying && motionControls) {
-      const targetProjId = urlProjectId || projectId;
-      if (!targetProjId) return;
-
-      const isAutoplayDone = localStorage.getItem(`vevara_starter_autoplay_done_${targetProjId}`) === 'true';
-      const firstSceneDuration = scenes?.[0]?.duration || 2.0;
-
-      if (!isAutoplayDone && playheadTime >= firstSceneDuration) {
-        // Pause playback
-        motionControls.pauseAll();
-        setIsPlaying(false);
-        // Seek exactly to the end of scene 1 / start of scene 2
-        seek(firstSceneDuration);
-        // Set autoplay as done for this project ID so it won't trigger again
-        localStorage.setItem(`vevara_starter_autoplay_done_${targetProjId}`, 'true');
-        // Clear autoplay state and interaction lock
-        dispatch(setAutoPlayState('none'));
-        dispatch(setInteractionLock(false));
-        // Trigger the custom tooltip
-        setShowStarterHint(true);
-        setStarterHintText("Animate this scene");
-      }
-    }
-  }, [isStarterCopy, isPlaying, playheadTime, motionControls, projectId, urlProjectId, seek, setIsPlaying, dispatch, scenes]);
+  }, [projectStatus, isStageReady, isPreloading, minTimeElapsed, isStarterCopy, projectId, urlProjectId, motionControls, seek, dispatch]);
 
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);
@@ -2336,6 +2412,10 @@ function EditorPage() {
     // This ensures the last interaction's snapshot is committed to history.
     dispatch({ type: 'history/flushPending' })
 
+    // [CANCEL FIX] We are committing this edit, so drop the pre-edit snapshot to
+    // prevent a later unrelated Cancel from restoring stale step state.
+    savedStepTimingsRef.current = null
+
     // Redux updates are synchronous, but React re-renders are async, so currentSceneMotionFlow
     // might be from a previous render. We'll build the preview optimistically anyway.
     const step = currentFlow.steps?.find(s => s.id === stepId)
@@ -2678,22 +2758,21 @@ function EditorPage() {
     dispatch({ type: 'history/flushPending' })
 
     if (editingStepId && currentSceneId) {
-      if (isNewStepRef.current) {
-        // Restore the saved step timings snapshot from BEFORE addSceneMotionStep was dispatched.
-        // This removes the new step AND undoes the duration redistribution in one operation,
-        // so existing steps return to their original durations.
-        if (savedStepTimingsRef.current) {
-          dispatch(updateSceneMotionFlow({
-            sceneId: currentSceneId,
-            steps: savedStepTimingsRef.current
-          }))
-          savedStepTimingsRef.current = null
-        } else {
-          dispatch(deleteSceneMotionStep({
-            sceneId: currentSceneId,
-            stepId: editingStepId
-          }))
-        }
+      // [CANCEL FIX] Restore the pre-edit steps snapshot whenever one exists.
+      // For a NEW step this is the array from BEFORE addSceneMotionStep (removing
+      // the new step and undoing duration redistribution); for an EXISTING step
+      // this is the array captured on edit-entry (reverting all live edits).
+      if (savedStepTimingsRef.current) {
+        dispatch(updateSceneMotionFlow({
+          sceneId: currentSceneId,
+          steps: savedStepTimingsRef.current
+        }))
+        savedStepTimingsRef.current = null
+      } else if (isNewStepRef.current) {
+        dispatch(deleteSceneMotionStep({
+          sceneId: currentSceneId,
+          stepId: editingStepId
+        }))
       }
     }
 
@@ -2891,6 +2970,11 @@ function EditorPage() {
     // INSTANT FEEDBACK: Glow the block immediately regardless of state
     setEditingStepId(stepId)
 
+    // [UX] Auto-open the motion panel when editing a step, same as Create Step.
+    if (stepId !== 'base' && isAuthenticated) {
+      setIsMotionPanelOpen(true)
+    }
+
     // [SYNC FIX] Inform Redux that we are starting to edit this specific step
     // This allows projectSlice to prevent auto-deleting this step if it becomes empty during interaction.
     dispatch(startMotionEditing({
@@ -2916,6 +3000,14 @@ function EditorPage() {
 
     // Mark as EXISTING step being edited
     isNewStepRef.current = false
+
+    // [CANCEL FIX] Snapshot the full pre-edit steps array so Cancel can fully
+    // revert live edits. In-capture edits (add/update/delete action, preset
+    // apply/clear) dispatch live to Redux, so restoring this snapshot on Cancel
+    // undoes every modification made during this edit session.
+    savedStepTimingsRef.current = currentSceneMotionFlow?.steps
+      ? JSON.parse(JSON.stringify(currentSceneMotionFlow.steps))
+      : []
 
     const motionFlow = currentSceneMotionFlow?.steps || []
     const stepIndex = motionFlow.findIndex(s => s.id === stepId)
@@ -4510,8 +4602,9 @@ function EditorPage() {
           ref={topToolbarRef}
           className="absolute top-0 left-0 right-0 z-50"
           style={{
-            transform: isMotionCaptureActive ? 'translateY(-100%)' : 'translateY(0)',
-            transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+            transform: (isMotionCaptureActive || previewMode) ? 'translateY(-100%)' : 'translateY(0)',
+            transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            pointerEvents: previewMode ? 'none' : undefined,
           }}
         >
           <TopToolbar
@@ -4538,6 +4631,7 @@ function EditorPage() {
             sidebarWidth={typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth}
             showPasteboard={showPasteboard}
             onTogglePasteboard={() => setShowPasteboard(!showPasteboard)}
+            onEnterPreview={enterPreviewMode}
           />
         </div>
 
@@ -4546,7 +4640,7 @@ function EditorPage() {
           style={{
             top: `${topToolbarHeight}px`,
             height: `calc(100vh - ${topToolbarHeight}px)`,
-            transform: isMotionCaptureActive ? 'translateX(-100%)' : 'translateX(0)',
+            transform: (isMotionCaptureActive || previewMode) ? 'translateX(-100%)' : 'translateX(0)',
             transition: isResizingBottom
               ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
               : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), height 0.3s ease',
@@ -4571,7 +4665,7 @@ function EditorPage() {
           {/* Side Panels - Desktop: normal, Mobile: full overlay */}
           <div className="relative">
             {/* Desktop Panels */}
-            {activeSidebarItem && (
+            {!previewMode && activeSidebarItem && (
               <div className={`hidden lg:block absolute transition-all duration-300 ${isMotionCaptureActive ? 'left-0' : 'left-20'} editor-panel-container`} style={{
                 zIndex: 35,
                 top: isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`,
@@ -4755,7 +4849,7 @@ function EditorPage() {
             )}
 
             {/* Mobile: bottom sheet (~40% height) with horizontal nav at bottom */}
-            {activeSidebarItem && (
+            {!previewMode && activeSidebarItem && (
               <>
                 <div
                   className="lg:hidden fixed inset-0 z-[60] bg-transparent transition-opacity duration-200 mobile-sheet-backdrop pointer-events-none"
@@ -4971,7 +5065,7 @@ function EditorPage() {
             {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
             <div
               ref={topControlsRef}
-              className={`absolute z-30 pointer-events-none flex justify-center ${isAutoPlaying ? 'hidden' : (isMotionCaptureActive ? 'flex' : 'lg:flex hidden')}`}
+              className={`absolute z-30 pointer-events-none flex justify-center ${(isAutoPlaying || previewMode) ? 'hidden' : (isMotionCaptureActive ? 'flex' : 'lg:flex hidden')}`}
               style={{
                 top: isMotionCaptureActive ? '8px' : `${topToolbarHeight + 8}px`,
                 left: currentSidebarWidth,
@@ -5124,11 +5218,15 @@ function EditorPage() {
               className="absolute flex-1 overflow-hidden select-none"
               style={{
                 top: 0,
-                bottom: initialBottomHeight || 0,
+                bottom: previewMode ? 0 : (initialBottomHeight || 0),
                 left: 0,
                 right: 0,
                 backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
                 zIndex: 10,
+                // Preview Mode is view-only: block all canvas interaction (hover,
+                // select, drag, zoom/pan). The floating play/exit controls are
+                // fixed-position siblings, so they remain interactive.
+                pointerEvents: previewMode ? 'none' : undefined,
               }}
             >
               {/* Canvas skeleton — same readiness gate as the global FullScreenLoading,
@@ -5174,6 +5272,7 @@ function EditorPage() {
                 onStartTextEditing={startTextEditing}
                 totalTime={totalTime}
                 showPasteboard={showPasteboard}
+                previewMode={previewMode}
               />
 
               {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
@@ -5244,7 +5343,7 @@ function EditorPage() {
           </div>
 
           {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-          {!isMotionCaptureActive && (
+          {!isMotionCaptureActive && !previewMode && (
             <div
               className={`absolute right-0 pointer-events-auto flex items-center justify-center ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
               style={{
@@ -5299,6 +5398,7 @@ function EditorPage() {
             className={`absolute bottom-0 right-0 z-45 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
             style={{
               zIndex: 45,
+              display: previewMode ? 'none' : undefined,
               left: currentSidebarWidth,
               backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
               backdropFilter: 'blur(20px)',
@@ -5554,6 +5654,7 @@ function EditorPage() {
           </div>
 
           {/* Motion Panel - Right side overlay */}
+          {!previewMode && (
           <MotionPanel
             isOpen={isMotionPanelOpen}
             onClose={() => setIsMotionPanelOpen(false)}
@@ -5573,6 +5674,30 @@ function EditorPage() {
             editingStepId={editingStepId}
             editingStepActionCount={editingStepActionCount}
           />
+          )}
+
+          {/* Preview Mode — minimal floating play/pause + scrub bar over the canvas */}
+          {previewMode && (
+            <PreviewControls
+              isPlaying={isPlaying}
+              isBuffering={motionControls?.isBuffering || false}
+              currentTime={playheadTime}
+              totalTime={totalTime}
+              onPlayPause={() => {
+                if (motionControls) {
+                  if (isPlaying) {
+                    motionControls.pauseAll()
+                    setIsPlaying(false)
+                  } else {
+                    motionControls.playAll()
+                    setIsPlaying(true)
+                  }
+                }
+              }}
+              onSeek={seek}
+              onExit={exitPreviewMode}
+            />
+          )}
 
         </div>
 

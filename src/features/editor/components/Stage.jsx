@@ -132,6 +132,7 @@ function Stage({
   onStartTextEditing,
   totalTime = 0,
   showPasteboard = true,
+  previewMode = false, // View-only Preview Mode: disable all canvas interaction
   onError, // Callback for fatal graphics errors
 }, ref) { // Add ref parameter
   // =============================================================================
@@ -297,6 +298,24 @@ function Stage({
     getApp: () => pixiApp,
     getLayersContainer: () => layersContainer,
   }), [viewport, worldWidth, worldHeight, onViewportChange, getViewportData, triggerViewportChange, pixiApp, layersContainer])
+
+  // [PREVIEW MODE] View-only: disable ALL canvas interaction at the PIXI level.
+  // Interactions are bound through PixiJS' event system (layer eventMode='static',
+  // selection handles, viewport pan/zoom plugins), so a CSS pointer-events block on
+  // the container isn't sufficient. Turning off the viewport's child hit-testing
+  // stops hover/select/handles, and pausing the viewport disables pan/zoom.
+  useEffect(() => {
+    if (!viewport || !isReady) return
+    viewport.interactiveChildren = !previewMode
+    viewport.pause = previewMode
+    return () => {
+      // Restore interactivity if the viewport survives a previewMode change.
+      if (viewport && !viewport.destroyed) {
+        viewport.interactiveChildren = true
+        viewport.pause = false
+      }
+    }
+  }, [viewport, isReady, previewMode])
 
   // Create shared drag state API for both canvas interactions and selection box
   const dragStateAPI = useDragState()
@@ -797,8 +816,9 @@ function Stage({
     sceneMotionFlows,
     sceneStartOffset: currentSceneMotionFlow?.sceneStartOffset || 0,
     currentSceneId,
-    prepareEngine
-  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow, prepareEngine])
+    prepareEngine,
+    previewMode // View-only: gate selection/hover handlers
+  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow, prepareEngine, previewMode])
 
   // Set up interactions (selection, drag)
   const interactionsAPI = useCanvasInteractions(
@@ -831,7 +851,8 @@ function Stage({
     activeTool,
     isPlaying, // Pass playing state to hide drag selection during playback
     motionCaptureMode, // Pass motion capture mode for real-time updates
-    currentSceneId // Pass current scene ID for filtering
+    currentSceneId, // Pass current scene ID for filtering
+    previewMode // View-only: disable marquee drag-selection
   )
 
   // =============================================================================

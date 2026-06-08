@@ -663,9 +663,15 @@ export class MotionEngine {
         const startState = { ...layerStateTracker.get(layerId) }
         const stepDurationMsValue = step.duration || stepDurationMs
 
-        // Check if there is an IN preset as the first animation step for this layer
+        // Check if there is an IN preset as the FIRST animation for this layer.
+        // [FIX] "First animation boundary" must depend on whether the layer has been
+        // animated yet (`!layerTimelineBuilders.has(layerId)`), NOT on the scene's
+        // step index. A static layer whose first animation is an IN preset on a later
+        // step (e.g. step 3) is still that layer's first animation boundary and must
+        // have its pre-step offset anchored correctly — see the deferred-anchor logic
+        // in the baseline .set() block below.
         const firstStepPreset = stepLayerPresets[layerId]
-        const isFirstStepInPreset = stepIndex === 0 && !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
+        const isFirstStepInPreset = !layerTimelineBuilders.has(layerId) && firstStepPreset && firstStepPreset.type === 'IN' && PRESET_REGISTRY[firstStepPreset.id]
         const cumulativeStartOffset = { x: 0, y: 0, opacity: undefined, scaleX: undefined, scaleY: undefined, rotation: undefined, blur: undefined }
         if (isFirstStepInPreset) {
           const presetActionsForOffsets = PRESET_REGISTRY[firstStepPreset.id].getActions(startState, stepDurationMsValue)
@@ -735,6 +741,16 @@ export class MotionEngine {
                 baseline.revealProgress = startState.revealProgress !== undefined ? startState.revealProgress : 1
               }
 
+              // [FIRST-PRESET PRE-STEP STATE]
+              // Anchor the layer's baseline at the scene start. When this is the layer's
+              // FIRST animation and that animation is an IN preset (isFirstStepInPreset),
+              // `baseline` already carries the preset's pre-step offset (e.g. alpha 0,
+              // x-150) via cumulativeStartOffset. Baking it in at the scene start means the
+              // layer holds its pre-step state for the ENTIRE time before the preset's step
+              // — so scrubbing anywhere before that step shows the correct "before" visual
+              // (e.g. opacity 0), regardless of which step the preset lives on. This matches
+              // the per-layer animation history: earlier scene steps that animate OTHER
+              // layers never make this layer "already animated".
               gsapTimeline.set(pixiObject, baseline, startTimeOffset) // Anchor explicitly at the beginning of the scene
 
               // Scale must be set on the inner .scale object natively
@@ -1808,6 +1824,21 @@ export class MotionEngine {
       // has become zero. Destroying here caused visible tilt loss on every slider
       // update because layersBaseStateHash includes tiltX/tiltY.
       delete obj._applyAnimatedTilt
+
+      // [BLUR FIX] Detach the animated blur filter on full engine restart.
+      // Without this, deleting a blur preset/step leaves _blurFilter attached and
+      // visible until a page refresh. applyTransformInline(force=true) — called by
+      // prepareEngine right after — re-applies base blur only if layer.blur > 0
+      // (via syncBlurFilter), so layers with a genuine base blur are unaffected.
+      if (obj._blurFilter) {
+        obj._blurFilter.strength = 0
+        if (obj.filters && obj.filters.includes(obj._blurFilter)) {
+          obj.filters = obj.filters.filter(f => f !== obj._blurFilter)
+          if (obj.filters.length === 0) obj.filters = null
+        }
+      }
+      obj._blurLogicalStrength = 0
+      delete obj._applyAnimatedBlur
     })
     this.masterTimeline.clear()
     this.activeTimelines.forEach(tl => tl.destroy())
