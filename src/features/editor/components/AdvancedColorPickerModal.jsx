@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Droplet } from 'lucide-react'
+import { ThemeContext } from '../../../app/context/ThemeContext'
 
 // Helper functions for color conversion
 function hexToHsl(hex) {
@@ -62,8 +63,64 @@ function hslToHex(h, s, l) {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
 
+// Robust color parsing to handle Hex (3/6 char, with/without #), RGB/RGBA, HSL/HSLA
+function parseColorToHexAndHsl(value) {
+  let str = (value || '').trim()
+  if (!str) return null
+
+  // 1. Check if it is rgb/rgba
+  const rgbMatch = str.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)$/i)
+  if (rgbMatch) {
+    const r = parseInt(rgbMatch[1], 10)
+    const g = parseInt(rgbMatch[2], 10)
+    const b = parseInt(rgbMatch[3], 10)
+    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+      const toHex = (c) => {
+        const hex = c.toString(16)
+        return hex.length === 1 ? '0' + hex : hex
+      }
+      const hex = `#${toHex(r)}${toHex(g)}${toHex(b)}`
+      return { hex, hsl: hexToHsl(hex) }
+    }
+  }
+
+  // 2. Check if HSL
+  const hslMatch = str.match(/^hsla?\((\d+),\s*([\d.]+)%,\s*([\d.]+)%(?:,\s*[\d.]+)?\)$/i)
+  if (hslMatch) {
+    const h = parseFloat(hslMatch[1])
+    const s = parseFloat(hslMatch[2])
+    const l = parseFloat(hslMatch[3])
+    if (h >= 0 && h <= 360 && s >= 0 && s <= 100 && l >= 0 && l <= 100) {
+      const hex = hslToHex(h, s, l)
+      return { hex, hsl: [h, s, l] }
+    }
+  }
+
+  // 3. Hex formats
+  // Remove leading '#' if present
+  let cleanHex = str.startsWith('#') ? str.slice(1) : str
+  // Match only hex characters
+  cleanHex = cleanHex.replace(/[^0-9A-Fa-f]/g, '')
+
+  if (cleanHex.length === 3) {
+    const r = cleanHex[0] + cleanHex[0]
+    const g = cleanHex[1] + cleanHex[1]
+    const b = cleanHex[2] + cleanHex[2]
+    const hex = `#${r}${g}${b}`
+    return { hex, hsl: hexToHsl(hex) }
+  }
+
+  if (cleanHex.length === 6) {
+    const hex = `#${cleanHex}`
+    return { hex, hsl: hexToHsl(hex) }
+  }
+
+  return null
+}
+
 function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchorElement, isInline = false, hideHeader = false }) {
-  const [activeTab, setActiveTab] = useState('solid') // 'solid' or 'gradient'
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
   
   const [hsl, setHsl] = useState(() => {
     try {
@@ -169,16 +226,26 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 
   // Update HSL when hex input changes
   const handleHexChange = (value) => {
-    if (/^#[0-9A-Fa-f]{6}$/i.test(value)) {
-      setHex(value)
-      try {
-        const newHsl = hexToHsl(value)
-        setHsl(newHsl)
-      } catch (e) {
-        // Invalid hex, ignore
+    const trimmed = (value || '').trim()
+    
+    // Check if it matches a fully parsed color code (hex with/without #, rgb, hsl, etc.)
+    const parsed = parseColorToHexAndHsl(trimmed)
+    if (parsed) {
+      setHex(parsed.hex)
+      setHsl(parsed.hsl)
+      return
+    }
+
+    // Otherwise allow typing partial hex values
+    let displayVal = trimmed
+    if (displayVal && !displayVal.startsWith('#')) {
+      if (/^[0-9A-Fa-f]{0,6}$/.test(displayVal)) {
+        displayVal = '#' + displayVal
       }
-    } else if (/^#[0-9A-Fa-f]{0,6}$/i.test(value)) {
-      setHex(value)
+    }
+
+    if (/^#[0-9A-Fa-f]{0,6}$/i.test(displayVal)) {
+      setHex(displayVal)
     }
   }
 
@@ -299,10 +366,10 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
     <div
       ref={modalRef}
       className={isInline
-        ? "w-full flex flex-col text-white"
+        ? `w-full flex flex-col ${isLight ? 'text-slate-900' : 'text-white'}`
         : (typeof window !== 'undefined' && window.innerWidth < 1024
-          ? "fixed rounded-2xl shadow-2xl border border-white/10 z-[10000] overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-300"
-          : "fixed rounded-xl shadow-2xl border border-white/10 z-[10000] overflow-hidden")
+          ? `fixed rounded-2xl shadow-2xl border z-[10000] overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-300 ${isLight ? 'border-slate-200 text-slate-900' : 'border-white/10 text-white'}`
+          : `fixed rounded-xl shadow-2xl border z-[10000] overflow-hidden ${isLight ? 'border-slate-200 text-slate-900' : 'border-white/10 text-white'}`)
       }
       style={isInline ? {
         backgroundColor: 'transparent',
@@ -312,14 +379,14 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
         bottom: '16px',
         left: '50%',
         transform: 'translateX(-50%)',
-        backgroundColor: 'rgba(15, 16, 21, 0.95)',
+        backgroundColor: isLight ? 'rgba(255, 255, 255, 0.98)' : 'rgba(15, 16, 21, 0.95)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
       } : {
         width: '280px',
         top: `${position.top}px`,
         left: `${position.left}px`,
-        backgroundColor: 'rgba(15, 16, 21, 0.7)',
+        backgroundColor: isLight ? 'rgba(255, 255, 255, 0.9)' : 'rgba(15, 16, 21, 0.7)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
       })}
@@ -327,147 +394,121 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
     >
         {/* Header */}
         {!hideHeader && (
-          <div className="px-3 pt-3 pb-2 border-b border-white/5 flex-shrink-0 bg-white/5">
+          <div className={`px-3 pt-3 pb-2 border-b flex-shrink-0 ${isLight ? 'border-slate-100 bg-slate-50/50' : 'border-white/5 bg-white/5'}`}>
             {!isInline && (
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-[11px] font-bold uppercase tracking-wider text-white/50">Pick Colour</h2>
+              <div className="flex items-center justify-between">
+                <h2 className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-slate-500' : 'text-white/50'}`}>Pick Colour</h2>
                 <button
                   onClick={onClose}
-                  className="text-zinc-400 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                  className={`transition-colors p-1 rounded-full ${isLight ? 'text-slate-400 hover:text-slate-900 hover:bg-slate-100' : 'text-zinc-400 hover:text-white hover:bg-white/10'}`}
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
               </div>
             )}
-
-            {/* Tabs */}
-            <div className="flex gap-1 bg-black/40 p-1 rounded-lg">
-              <button
-                onClick={() => setActiveTab('solid')}
-                className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
-                  activeTab === 'solid'
-                    ? 'bg-white/10 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                Solid
-              </button>
-              <button
-                onClick={() => setActiveTab('gradient')}
-                className={`flex-1 px-2 py-1.5 text-[10px] font-semibold transition-all rounded-md ${
-                  activeTab === 'gradient'
-                    ? 'bg-white/10 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-zinc-300'
-                }`}
-              >
-                Gradient
-              </button>
-            </div>
           </div>
         )}
 
         {/* Content */}
         <div className="p-3">
-          {activeTab === 'solid' && (
-            <>
-              {/* Color Selection Area */}
-              <div className="mb-2">
-                <div
-                  ref={colorAreaRef}
-                  onMouseDown={handleColorAreaMouseDown}
-                  className="w-full h-32 rounded-lg cursor-crosshair relative overflow-hidden"
-                  style={colorAreaStyle}
-                >
-                  {/* Color Selector */}
-                  <div
-                    className="absolute w-3 h-3 rounded-full border-2 border-white shadow-lg pointer-events-none"
-                    style={{
-                      left: `calc(${colorX * 100}% - 6px)`,
-                      top: `calc(${colorY * 100}% - 6px)`,
-                      backgroundColor: `hsl(${hsl[0]}, ${hsl[1]}%, ${hsl[2]}%)`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Hue Slider */}
-              <div className="mb-2">
-                <div
-                  ref={hueSliderRef}
-                  onMouseDown={handleHueMouseDown}
-                  className="w-full h-4 rounded-lg cursor-pointer relative overflow-hidden"
-                  style={hueSliderStyle}
-                >
-                  {/* Hue Selector */}
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none"
-                    style={{
-                      left: `calc(${hueX * 100}% - 1px)`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Hex Input with Color Swatch and Eyedropper */}
-              <div className="mt-4">
-                <div className="flex items-center gap-2 bg-black/40 border border-white/5 rounded-xl px-3 py-2 transition-all focus-within:border-white/20">
-                  {/* Color Swatch */}
-                  <div
-                    className="w-6 h-6 rounded-lg border border-white/10 flex-shrink-0 shadow-inner"
-                    style={{ backgroundColor: hex }}
-                  />
-                  
-                  {/* Hex Input */}
-                  <div className="flex flex-col flex-1 min-w-0">
-                    <span className="text-[9px] uppercase font-bold text-white/30 leading-none mb-1">Hex Code</span>
-                    <input
-                      type="text"
-                      value={hex}
-                      onChange={(e) => handleHexChange(e.target.value)}
-                      className="bg-transparent text-white text-xs font-medium outline-none p-0 h-4"
-                      placeholder="#000000"
-                    />
-                  </div>
-                  
-                  {/* Eyedropper Button */}
-                  <button
-                    onClick={handleEyedropper}
-                    className="text-white/60 hover:text-white transition-all p-2 rounded-lg hover:bg-white/5 active:scale-95 flex-shrink-0"
-                    title="Eyedropper"
-                  >
-                    <Droplet className="h-4 w-4" strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'gradient' && (
-            <div className="text-center text-zinc-400 text-xs py-4">
-              Gradient feature coming soon
+          {/* Color Selection Area */}
+          <div className="mb-2">
+            <div
+              ref={colorAreaRef}
+              onMouseDown={handleColorAreaMouseDown}
+              className="w-full h-32 rounded-lg cursor-crosshair relative overflow-hidden"
+              style={colorAreaStyle}
+            >
+              {/* Color Selector */}
+              <div
+                className="absolute w-3 h-3 rounded-full border-2 border-white shadow-lg pointer-events-none"
+                style={{
+                  left: `calc(${colorX * 100}% - 6px)`,
+                  top: `calc(${colorY * 100}% - 6px)`,
+                  backgroundColor: `hsl(${hsl[0]}, ${hsl[1]}%, ${hsl[2]}%)`,
+                }}
+              />
             </div>
-          )}
+          </div>
+
+          {/* Hue Slider */}
+          <div className="mb-2">
+            <div
+              ref={hueSliderRef}
+              onMouseDown={handleHueMouseDown}
+              className="w-full h-4 rounded-lg cursor-pointer relative overflow-hidden"
+              style={hueSliderStyle}
+            >
+              {/* Hue Selector */}
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none"
+                style={{
+                  left: `calc(${hueX * 100}% - 1px)`,
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Hex Input with Color Swatch and Eyedropper */}
+          <div className="mt-4">
+            <div className={`flex items-center gap-2 border rounded-xl px-3 py-2 transition-all ${
+              isLight 
+                ? 'bg-slate-100 border-slate-200/60 focus-within:border-slate-400' 
+                : 'bg-black/40 border-white/5 focus-within:border-white/20'
+            }`}>
+              {/* Color Swatch */}
+              <div
+                className={`w-6 h-6 rounded-lg border flex-shrink-0 shadow-inner ${isLight ? 'border-slate-200' : 'border-white/10'}`}
+                style={{ backgroundColor: hex }}
+              />
+              
+              {/* Hex Input */}
+              <div className="flex flex-col flex-1 min-w-0">
+                <span className={`text-[9px] uppercase font-bold leading-none mb-1 ${isLight ? 'text-slate-500' : 'text-white/30'}`}>Hex Code</span>
+                <input
+                  type="text"
+                  value={hex}
+                  onChange={(e) => handleHexChange(e.target.value)}
+                  className={`bg-transparent text-xs font-medium outline-none p-0 h-4 ${isLight ? 'text-slate-900' : 'text-white'}`}
+                  placeholder="#000000"
+                />
+              </div>
+              
+              {/* Eyedropper Button */}
+              <button
+                onClick={handleEyedropper}
+                className={`transition-all p-2 rounded-lg active:scale-95 flex-shrink-0 ${
+                  isLight 
+                    ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' 
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+                title="Eyedropper"
+              >
+                <Droplet className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-    )
+    </div>
+  )
 
-    if (isInline) {
-      return content
-    }
-
-    return createPortal(
-      <>
-        {typeof window !== 'undefined' && window.innerWidth < 1024 && (
-          <div
-            className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-            onClick={onClose}
-          />
-        )}
-        {content}
-      </>,
-      document.body
-    )
+  if (isInline) {
+    return content
   }
+
+  return createPortal(
+    <>
+      {typeof window !== 'undefined' && window.innerWidth < 1024 && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={onClose}
+        />
+      )}
+      {content}
+    </>,
+    document.body
+  )
+}
 
 export default AdvancedColorPickerModal
 

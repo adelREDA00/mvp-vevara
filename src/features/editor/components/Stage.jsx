@@ -342,7 +342,7 @@ function Stage({
 
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
-  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering, prepareEngine } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer)
+  const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering, prepareEngine } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer, editingTextLayerId)
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -802,7 +802,8 @@ function Stage({
     interactionsAPIRef, // Pass interactions API ref for direct arrow synchronization
     currentSceneId, // Pass current scene ID for filtering
     currentSceneMotionFlow, // Pass scene motion flow for visibility logic
-    effectiveZoom // Pass zoom for handle scaling
+    effectiveZoom, // Pass zoom for handle scaling
+    dragStateAPI // Pass dragStateAPI to check for active interactions
   )
 
   // =============================================================================
@@ -913,7 +914,8 @@ function Stage({
     interactionsAPI?.updateMotionArrowVisibility, // Pass arrow sync callback for live resize/rotate updates
     effectiveZoom, // Pass zoom for handle scaling
     layerObjectsVersion, // [Bug 2 Fix] Force re-initialization when layer PIXI instances change
-    pausePlayback // UX: Pause playback when resize/rotate starts
+    pausePlayback, // UX: Pause playback when resize/rotate starts
+    editingTextLayerId
   )
 
   // =============================================================================

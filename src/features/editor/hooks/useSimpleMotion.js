@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
-import { selectSceneMotionFlow, selectLayers, selectProjectTimelineInfo, selectTotalProjectDuration, selectSceneMotionFlows, selectAspectRatio } from '../../../store/slices/projectSlice'
+import { selectSceneMotionFlow, selectLayers, selectProjectTimelineInfo, selectTotalProjectDuration, selectSceneMotionFlows, selectAspectRatio, selectIsTimelineDragging, selectIsCanvasInteracting } from '../../../store/slices/projectSlice'
 import { applyTransformInline } from './useCanvasLayers'
 import { createVideoLayer } from '../../engine/pixi/createLayer'
 
@@ -14,12 +14,14 @@ import { createVideoLayer } from '../../engine/pixi/createLayer'
  * @param {number} totalTimeInSeconds - Total scene duration in seconds
  * @param {function} onPlayingChange - Callback when playing state changes (optional)
  */
-export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null, motionCaptureMode = null, stageContainer = null) {
+export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds = 0, onPlayingChange = null, motionCaptureMode = null, stageContainer = null, editingTextLayerId = null) {
     const dispatch = useDispatch()
 
     // Get all layers for resetting state during transitions
     const layers = useSelector(selectLayers)
     const aspectRatio = useSelector(selectAspectRatio)
+    const isTimelineDragging = useSelector(selectIsTimelineDragging)
+    const isCanvasInteracting = useSelector(selectIsCanvasInteracting)
 
     // Calculate dimensions matching current aspect ratio
     const [widthRatio, heightRatio] = useMemo(() => {
@@ -253,12 +255,26 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             return
         }
 
-    // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
-    // This is critical because prepareEngine uses layersRef.current for hash calculation
-    layersRef.current = layers
+        // [TIMELINE DRAG PERF FIX] Skip rebuilding during active timeline dragging/resizing
+        if (isTimelineDragging) {
+            return
+        }
 
-    prepareEngine(false)
-  }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers, transitionsHash, stageContainer])
+        // [CANVAS INTERACT PERF FIX] Skip during resize/crop/scale canvas interactions.
+        // Every updateLayer dispatch during a normal-mode resize changes layersBaseStateHash,
+        // which would otherwise trigger a full GSAP timeline teardown + rebuild every frame.
+        // When isCanvasInteracting flips back to false this effect re-runs once, picking up
+        // all dimension changes accumulated during the interaction in one batch.
+        if (isCanvasInteracting) {
+            return
+        }
+
+        // [BASE EDITING FIX] Ensure layersRef is updated before prepareEngine runs
+        // This is critical because prepareEngine uses layersRef.current for hash calculation
+        layersRef.current = layers
+
+        prepareEngine(false)
+    }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers, transitionsHash, stageContainer, isTimelineDragging, isCanvasInteracting])
 
   // [TILT/PERF] When motion capture exits, run the deferred engine rebuild
   // so the freshly captured tilt/blur/etc. actions get loaded into GSAP
@@ -277,6 +293,16 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
     }
     wasInCaptureRef.current = isInCapture
   }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, prepareEngine, layers])
+
+  // Rebuild engine and re-seek when text editing finishes to cleanly re-create/sync perspective tilt meshes
+  const prevEditingTextLayerIdRef = useRef(editingTextLayerId)
+  useEffect(() => {
+    if (prevEditingTextLayerIdRef.current && !editingTextLayerId) {
+      layersRef.current = layers
+      prepareEngine(true)
+    }
+    prevEditingTextLayerIdRef.current = editingTextLayerId
+  }, [editingTextLayerId, prepareEngine, layers])
 
   // [FIX] Pause all video layers immediately when entering or during motion capture mode
   useEffect(() => {

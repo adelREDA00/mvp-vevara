@@ -111,7 +111,6 @@ export function installReactiveCornerRadius(pixiObject) {
             // mesh re-captures the updated original.
             if (this._tiltMesh && !this._tiltMesh.destroyed) {
                 markTiltTextureDirty(this)
-                syncTiltMesh(this, null)
             }
         }
     }

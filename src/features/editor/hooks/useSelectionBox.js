@@ -21,12 +21,14 @@
  */
 
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
+import { useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { drawShapePath, redrawFramePlaceholder } from '../../engine/pixi/createLayer'
 import { getRotatedCursor, calculateAdaptedScale } from '../utils/handleUtils'
-import { syncTiltMesh, markTiltTextureDirty } from '../../engine/pixi/perspectiveTilt'
+import { syncTiltMesh, markTiltTextureDirty, computePerspectiveCorners, stampTiltCaptureDims } from '../../engine/pixi/perspectiveTilt'
+import { setCanvasInteracting } from '../../../store/slices/projectSlice'
 import {
   removeDimensionsBadge,
   createDimensionsBadge,
@@ -81,7 +83,7 @@ function getCurrentInteractionState(dragStateAPI, interactionStateRef, rotationJ
 // Helper to update selection box visibility and children visibility
 // OPTIMIZATION: Keep selection box VISIBLE during interaction but hide handles/border
 // This allows badges (children of selection box) to remain visible while the box itself is hidden
-function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, firstActionTime = Infinity) {
+function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, firstActionTime = Infinity, editingTextLayerId = null) {
   if (!selectionBox) return
 
   // Hide completely during playback
@@ -105,6 +107,34 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
       isPastBaseStep = true
     }
   }
+
+  // If this layer is being edited, disable selection box interactivity and hide all handles except outline
+  if (editingTextLayerId && layerId === editingTextLayerId) {
+    selectionBox.visible = true
+    selectionBox.eventMode = 'none'
+    selectionBox.interactiveChildren = false
+
+    for (let i = 0; i < selectionBox.children.length; i++) {
+      const child = selectionBox.children[i]
+      if (child.label === 'selection-outline') {
+        child.visible = true
+      } else {
+        child.visible = false
+      }
+      child.alpha = 1.0
+    }
+
+    if (!selectionBox.parent && layersContainer) {
+      layersContainer.addChild(selectionBox)
+      const topIndex = layersContainer.children.length - 1
+      layersContainer.setChildIndex(selectionBox, topIndex)
+    }
+    return
+  }
+
+  // Restore normal eventMode/interactivity when not editing
+  selectionBox.eventMode = 'passive'
+  selectionBox.interactiveChildren = true
 
   // IMMEDIATELY HIDE during move/drag interaction to match normal mode behavior
   if (isMoving) {
@@ -213,12 +243,45 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
   }
 }
 
-// =============================================================================
-// MAIN HOOK - Core selection box functionality
-// =============================================================================
+// Helper function to project a point using centered perspective coordinates
+function projectPoint(px, py, w, h, tiltXDeg, tiltYDeg, offsetX = 0, offsetY = 0) {
+  const radX = (tiltXDeg || 0) * Math.PI / 180
+  const radY = (tiltYDeg || 0) * Math.PI / 180
 
+  const cosX = Math.cos(radX)
+  const sinX = Math.sin(radX)
+  const cosY = Math.cos(radY)
+  const sinY = Math.sin(radY)
 
-export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, updateMotionArrowVisibility = null, zoom = 1, layerObjectsVersion = 0, pausePlayback = null) {
+  const dX = 0.35
+  const dY = 0.35
+
+  const cx = w / 2
+  const cy = h / 2
+
+  const localX = px - offsetX - cx
+  const localY = py - offsetY - cy
+
+  // 1. Rotate around Y-axis (yaw / tiltX)
+  const x1 = localX * cosX
+  const y1 = localY
+  const z1 = -localX * sinX
+
+  // 2. Rotate around X-axis (pitch / tiltY)
+  const x2 = x1
+  const y2 = y1 * cosY - z1 * sinY
+
+  // 3. Perspective projection divisor (with Yaw-Pitch coupling)
+  const div = Math.max(0.1, 1 + (localX / Math.max(1, cx)) * dX * sinX * cosY - (localY / Math.max(1, cy)) * dY * sinY)
+
+  const projectedX = offsetX + cx + x2 / div
+  const projectedY = offsetY + cy + y2 / div
+
+  return { x: projectedX, y: projectedY }
+}
+
+export function useSelectionBox(stageContainer, layer, layerObject, viewport, onUpdate, layerObjectsMap = null, dragStateAPI, layers, layersContainer, motionCaptureMode = null, isPlaying = false, sceneMotionFlow = null, updateMotionArrowVisibility = null, zoom = 1, layerObjectsVersion = 0, pausePlayback = null, editingTextLayerId = null) {
+  const dispatch = useDispatch()
   // ===========================================================================
   // STATE MANAGEMENT - React refs and state variables for tracking interactions
   // ===========================================================================
@@ -250,38 +313,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     latestMotionCaptureModeRef.current = motionCaptureMode
   }, [layer, layerObject, viewport, onUpdate, sceneMotionFlow, motionCaptureMode])
 
-  // [FONT-SIZE FIX] When a text layer's font size / content / family changes from the
-  // panel, the PIXI object is re-measured by a different hook (useCanvasLayers), so on the
-  // render where the selection box would recreate, the object may still report its old
-  // dimensions and the per-frame dimensionsChanged guard skips the redraw. Force an
-  // immediate re-measure + redraw here so the box tracks the new size without requiring a
-  // manual resize/scale interaction. Reuses the existing forceRedraw + requestUpdateLoop path.
-  useEffect(() => {
-    if (layer?.type !== 'text') return
-    const obj = latestLayerObjectRef.current
-    if (!obj || obj.destroyed) return
-    if (obj.isFlowText) {
-      obj.updateText?.()
-    } else {
-      obj.updateText?.(true)
-    }
-    forceRedrawRef.current = true
-    requestUpdateLoop()
-  }, [layer?.data?.fontSize, layer?.data?.content, layer?.data?.fontFamily, layer?.type, requestUpdateLoop])
 
-  // [FRAME ASSET REPLACE FIX] When a frame's asset or showing side changes, force a redraw
-  // of the selection box so it immediately matches the new bounds.
-  useEffect(() => {
-    if (layer?.type !== LAYER_TYPES.FRAME) return
-    forceRedrawRef.current = true
-    requestUpdateLoop()
-  }, [
-    layer?.data?.assetUrl,
-    layer?.data?.backAssetUrl,
-    layer?.data?.showingFront,
-    layer?.type,
-    requestUpdateLoop
-  ])
 
   // [FIX] BACKGROUND PROTECTION: Never show selection box for background layers
   // Backgrounds are static elements and should not have interactive handles
@@ -329,6 +361,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
   const lastKnownScaleXRef = useRef(1)
   const lastKnownScaleYRef = useRef(1)
   const lastKnownRotationRef = useRef(0)
+  const lastKnownTiltXRef = useRef(0)
+  const lastKnownTiltYRef = useRef(0)
 
   // Performance optimization caches
   const lastCalculatedDimensionsRef = useRef(null)
@@ -413,6 +447,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         }
       }
     }
+
+    // During active resize/rotate interaction in normal mode:
+    // Return the live PIXI object's scale. This is because the PIXI object's scale
+    // is not synced from Redux until handleResizeEnd, while Redux might already have
+    // the throttled target scale of 1.
+    if (interactionStateRef.current.resize && currentLayerObject && !currentLayerObject.destroyed) {
+      const targetObject = currentLayerObject._cachedSprite || currentLayerObject
+      return {
+        scaleX: targetObject.scale.x,
+        scaleY: targetObject.scale.y
+      }
+    }
+
     // [FIX] In Normal Mode, if we are paused mid-animation, follow the PIXI object's actual scale.
     if (!motionCaptureMode?.isActive && currentLayerObject && !currentLayerObject.destroyed) {
       const engine = getGlobalMotionEngine()
@@ -454,6 +501,28 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     return currentLayer.rotation || 0
   }, [layer?.id])
+
+  // Get current 2D perspective tilt values, prioritizing captured state
+  const getCurrentLayerTilt = useCallback((currentLayer, currentLayerObject) => {
+    if (editingTextLayerId && currentLayer?.id === editingTextLayerId) {
+      return { tiltX: 0, tiltY: 0 }
+    }
+    const motionCaptureMode = latestMotionCaptureModeRef.current
+
+    if (motionCaptureMode?.isActive && currentLayerObject && !currentLayerObject.destroyed) {
+      const capturedLayer = motionCaptureMode.trackedLayers?.get(currentLayer.id)
+      if (capturedLayer) {
+        return {
+          tiltX: capturedLayer.tiltX !== undefined ? capturedLayer.tiltX : (currentLayer?.tiltX ?? 0),
+          tiltY: capturedLayer.tiltY !== undefined ? capturedLayer.tiltY : (currentLayer?.tiltY ?? 0)
+        }
+      }
+    }
+
+    const tiltX = (typeof currentLayerObject?._tiltXDeg === 'number' ? currentLayerObject._tiltXDeg : (currentLayer?.tiltX ?? 0))
+    const tiltY = (typeof currentLayerObject?._tiltYDeg === 'number' ? currentLayerObject._tiltYDeg : (currentLayer?.tiltY ?? 0))
+    return { tiltX, tiltY }
+  }, [layer?.id, editingTextLayerId])
 
   // Get current dimensions — single source of truth via getEffectiveLayerDimensions for media
   const getCurrentLayerDimensions = useCallback((currentLayer, currentLayerObject) => {
@@ -742,13 +811,27 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Clear and redraw the outline (much faster than recreating the graphics object)
     outline.clear()
-    outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+    const layerObj = latestLayerObjectRef.current
+    const { tiltX, tiltY } = getCurrentLayerTilt(latestLayerRef.current, layerObj)
+    const isTilted = Math.abs(tiltX) >= 0.01 || Math.abs(tiltY) >= 0.01
+
+    if (isTilted) {
+      const corners = computePerspectiveCorners(scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+      const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
+      outline.moveTo(tlX, tlY)
+      outline.lineTo(trX, trY)
+      outline.lineTo(brX, brY)
+      outline.lineTo(blX, blY)
+      outline.closePath()
+    } else {
+      outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+    }
 
     // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
     const baseScale = calculateAdaptedScale(zoomScale)
     outline.stroke({ color: 0x8B5CF6, width: 1.2 * baseScale })
     hoverBox.visible = true
-  }, [layersContainer, isPlaying])
+  }, [layersContainer, isPlaying, latestLayerRef, getCurrentLayerTilt])
 
   // Helper function to hide purple highlight box
   const hideHoverBox = useCallback(() => {
@@ -1453,11 +1536,18 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     const { scaleX, scaleY } = getCurrentLayerScale(currentLayer, currentLayerObject)
+    // [BUG2 FIX] Compute tilt BEFORE the shouldRedraw gate so tilt→flat (or
+    // angle) changes caused by step deletion are detected even when dimensions
+    // and scale are unchanged.  Without this, deleting a TiltAction step leaves
+    // a stale tilted outline because shouldRedraw stayed false.
+    const { tiltX: currentTiltX, tiltY: currentTiltY } = getCurrentLayerTilt(currentLayer, currentLayerObject)
 
     const dimensionsChanged = currentHeight !== lastKnownHeightRef.current || currentWidth !== lastKnownWidthRef.current
     const scaleChanged = scaleX !== lastKnownScaleXRef.current || scaleY !== lastKnownScaleYRef.current
     const rotationChanged = Math.abs(rotation - (lastKnownRotationRef?.current || 0)) > 0.01
-    const shouldRedraw = forceRedrawRef.current || dimensionsChanged || scaleChanged || rotationChanged
+    const tiltChanged = Math.abs(currentTiltX - (lastKnownTiltXRef.current || 0)) >= 0.01
+                     || Math.abs(currentTiltY - (lastKnownTiltYRef.current || 0)) >= 0.01
+    const shouldRedraw = forceRedrawRef.current || dimensionsChanged || scaleChanged || rotationChanged || tiltChanged
 
     // CRITICAL FIX: Ensure position and rotation ALWAYS track true layer coords instantly
     const cachedDragState = dragStateAPI && currentLayer?.id ? dragStateAPI.getLayerDragState(currentLayer.id) : null
@@ -1509,6 +1599,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       lastKnownScaleXRef.current = scaleX
       lastKnownScaleYRef.current = scaleY
       if (lastKnownRotationRef) lastKnownRotationRef.current = rotation
+      lastKnownTiltXRef.current = currentTiltX
+      lastKnownTiltYRef.current = currentTiltY
 
       const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
       const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
@@ -1523,9 +1615,23 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       // Synchronous visual update for outline and hitArea
       const outline = box.children.find(c => c.label === 'selection-outline')
+      const tiltX = currentTiltX
+      const tiltY = currentTiltY
+      const isTilted = Math.abs(tiltX) >= 0.01 || Math.abs(tiltY) >= 0.01
+
       if (outline && !outline.destroyed) {
         outline.clear()
-        outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+        if (isTilted) {
+          const corners = computePerspectiveCorners(scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+          const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
+          outline.moveTo(tlX, tlY)
+          outline.lineTo(trX, trY)
+          outline.lineTo(brX, brY)
+          outline.lineTo(blX, blY)
+          outline.closePath()
+        } else {
+          outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+        }
 
         // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
         const baseScale = calculateAdaptedScale(zoomScale)
@@ -1545,18 +1651,64 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           if (type.includes('s')) hy += scaledHeight
           else if (!type.includes('n')) hy += scaledHeight / 2
 
-          child.x = hx; child.y = hy
+          if (isTilted) {
+            const projected = projectPoint(hx, hy, scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+            child.x = projected.x
+            child.y = projected.y
+          } else {
+            child.x = hx
+            child.y = hy
+          }
           child.cursor = getRotatedCursor(type, rotation)
         } else if (child.label.startsWith('selection-hitarea-')) {
           const type = child.label.replace('selection-hitarea-', '')
-          // Use the helper logic to reposition hit areas (simpler to just follow the sides)
-          if (type === 'n') { child.x = localBoundsX + scaledWidth / 2; child.y = localBoundsY }
-          else if (type === 's') { child.x = localBoundsX + scaledWidth / 2; child.y = localBoundsY + scaledHeight }
-          else if (type === 'w') { child.x = localBoundsX; child.y = localBoundsY + scaledHeight / 2 }
-          else if (type === 'e') { child.x = localBoundsX + scaledWidth; child.y = localBoundsY + scaledHeight / 2 }
+          if (isTilted) {
+            const corners = computePerspectiveCorners(scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+            const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
+            
+            let hx, hy, angle = 0, lenScale = 1
+            if (type === 'n') {
+              hx = (tlX + trX) / 2
+              hy = (tlY + trY) / 2
+              const L = Math.hypot(trX - tlX, trY - tlY)
+              angle = Math.atan2(trY - tlY, trX - tlX)
+              lenScale = L / Math.max(1, scaledWidth)
+              child.scale.set(lenScale, 1)
+            } else if (type === 's') {
+              hx = (blX + brX) / 2
+              hy = (blY + brY) / 2
+              const L = Math.hypot(brX - blX, brY - blY)
+              angle = Math.atan2(brY - blY, brX - blX)
+              lenScale = L / Math.max(1, scaledWidth)
+              child.scale.set(lenScale, 1)
+            } else if (type === 'w') {
+              hx = (tlX + blX) / 2
+              hy = (tlY + blY) / 2
+              const L = Math.hypot(blX - tlX, blY - tlY)
+              angle = Math.atan2(blY - tlY, blX - tlX) - Math.PI / 2
+              lenScale = L / Math.max(1, scaledHeight)
+              child.scale.set(1, lenScale)
+            } else if (type === 'e') {
+              hx = (trX + brX) / 2
+              hy = (trY + brY) / 2
+              const L = Math.hypot(brX - trX, brY - trY)
+              angle = Math.atan2(brY - trY, brX - trX) - Math.PI / 2
+              lenScale = L / Math.max(1, scaledHeight)
+              child.scale.set(1, lenScale)
+            }
+            child.x = hx
+            child.y = hy
+            child.rotation = angle
+          } else {
+            child.scale.set(1, 1)
+            child.rotation = 0
+            if (type === 'n') { child.x = localBoundsX + scaledWidth / 2; child.y = localBoundsY }
+            else if (type === 's') { child.x = localBoundsX + scaledWidth / 2; child.y = localBoundsY + scaledHeight }
+            else if (type === 'w') { child.x = localBoundsX; child.y = localBoundsY + scaledHeight / 2 }
+            else if (type === 'e') { child.x = localBoundsX + scaledWidth; child.y = localBoundsY + scaledHeight / 2 }
+          }
         } else if (child.label === 'rotation-handle' || child.label === 'move-handle') {
           const baseScale = calculateAdaptedScale(zoomScale)
-          // Use the same small layer logic as creation for perfect sync
           const layerSizeRef = Math.min(scaledWidth, scaledHeight)
           const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
           const radius = Math.max(14, 22 * baseScale * smallLayerScale)
@@ -1568,38 +1720,103 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           const screenHeight = scaledHeight * viewportScale
           const isSmall = screenWidth < 80 || screenHeight < 80
 
+          let hx, hy = handleY
           if (child.label === 'rotation-handle') {
             if (isSmall) {
               const offset = radius + 6 * baseScale
-              child.x = centerX - offset
+              hx = centerX - offset
             } else {
-              child.x = centerX
+              hx = centerX
             }
-            child.y = handleY
           } else if (child.label === 'move-handle') {
             if (isSmall) {
               const offset = radius + 6 * baseScale
-              child.x = centerX + offset
+              hx = centerX + offset
             } else {
-              child.x = centerX
+              hx = centerX
             }
-            child.y = handleY
             box._showMoveHandle = isSmall
+          }
+
+          if (isTilted) {
+            const projected = projectPoint(hx, hy, scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+            child.x = projected.x
+            child.y = projected.y
+          } else {
+            child.x = hx
+            child.y = hy
           }
         }
       })
     }
-  }, [dragStateAPI, layersContainer, calculateTextDimensions, getCurrentLayerPosition, getCurrentLayerRotation, resolveAnchors, getCurrentLayerScale, getCurrentLayerDimensions])
+  }, [dragStateAPI, layersContainer, calculateTextDimensions, getCurrentLayerPosition, getCurrentLayerRotation, resolveAnchors, getCurrentLayerScale, getCurrentLayerDimensions, getCurrentLayerTilt])
+
+  // [FONT-SIZE FIX] When a text layer's font size / content / family changes from the
+  // panel, the PIXI object is re-measured by a different hook (useCanvasLayers), so on the
+  // render where the selection box would recreate, the object may still report its old
+  // dimensions and the per-frame dimensionsChanged guard skips the redraw. Force an
+  // immediate re-measure + redraw here so the box tracks the new size without requiring a
+  // manual resize/scale interaction. Reuses the existing forceRedraw + requestUpdateLoop path.
+  useEffect(() => {
+    if (layer?.type !== 'text') return
+    const obj = latestLayerObjectRef.current
+    if (!obj || obj.destroyed) return
+    if (obj.isFlowText) {
+      obj.updateText?.()
+    } else {
+      obj.updateText?.(true)
+    }
+    forceRedrawRef.current = true
+    syncBoxVisuals()
+  }, [layer?.data?.fontSize, layer?.data?.content, layer?.data?.fontFamily, layer?.type, syncBoxVisuals])
+
+  // [FRAME ASSET REPLACE FIX] When a frame's asset or showing side changes, force a redraw
+  // of the selection box so it immediately matches the new bounds.
+  useEffect(() => {
+    if (layer?.type !== LAYER_TYPES.FRAME) return
+    forceRedrawRef.current = true
+    syncBoxVisuals()
+  }, [
+    layer?.data?.assetUrl,
+    layer?.data?.backAssetUrl,
+    layer?.data?.showingFront,
+    layer?.type,
+    syncBoxVisuals
+  ])
+
+  // [BUG2 FIX] When the base-state tilt values change in Redux (e.g. user edits
+  // tiltX/Y in the panel, or a step deletion causes the engine to call
+  // removeTiltFromObject which clears the PIXI object's _tiltXDeg/_tiltYDeg),
+  // force the selection box outline to redraw. Without this, the
+  // dimensionsChanged/scaleChanged guards in syncBoxVisuals would miss the
+  // tilt→flat transition and keep drawing a tilted quad.
+  useEffect(() => {
+    forceRedrawRef.current = true
+    syncBoxVisuals()
+  }, [layer?.tiltX, layer?.tiltY, syncBoxVisuals])
+
+  // [BUG2 FIX] When the scene motion flow changes (step added, removed, or
+  // modified), force the selection box to redraw. This covers the case where
+  // a TiltAction step is deleted: the engine calls removeTiltFromObject which
+  // removes the mesh and clears _tiltXDeg/_tiltYDeg, but the selection box's
+  // lastKnown* cache prevents syncBoxVisuals from redrawing the now-flat
+  // outline unless we explicitly request it here.
+  useEffect(() => {
+    forceRedrawRef.current = true
+    syncBoxVisuals()
+  }, [sceneMotionFlow, syncBoxVisuals])
+
+  // Force selection box to redraw when entering/exiting text editing mode
+  useEffect(() => {
+    forceRedrawRef.current = true
+    syncBoxVisuals()
+  }, [editingTextLayerId, syncBoxVisuals])
 
 
   const handleResizeMove = useCallback((worldPos) => {
     const state = interactionStateRef.current.resize
     const currentLayerObject = latestLayerObjectRef.current
     const currentLayer = latestLayerRef.current
-
-    if (!state || !currentLayerObject || currentLayerObject.destroyed || !currentLayer) {
-      return
-    }
 
     const worldDeltaX = worldPos.x - state.startMouseX
     const worldDeltaY = worldPos.y - state.startMouseY
@@ -2224,7 +2441,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         badge.y = worldPos.y + (48 * zoomScale)
         updateDimensionsBadge(badge, { width: newWidth, height: hoverBoxHeight, zoomScale, viewportScale: latestViewportRef.current.scale.x })
       }
-      if (!isCaptureMode) throttledUpdate(updates)
+      if (!isCaptureMode) {
+        throttledUpdate(updates)
+      }
 
       // Per-tick mesh slave: transforms + corners only. Mesh creation / teardown
       // lives in useCanvasLayers' applyTransformInline.
@@ -2233,6 +2452,15 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
     }
   }, [syncBoxVisuals, immediateTextUpdate, calculateTextDimensions, updateHoverBox, throttledUpdate, resolveAnchors, getCurrentLayerScale, updateSnappingGuides, latestViewportRef])
+
+  // [FLINCH FIX v4] Monotonically incrementing session counter used by onEnd
+  // closures to detect stale listener firings. Each handleResizeStart captures
+  // the current sessionId; only the onEnd with the matching sessionId actually
+  // executes handleResizeEnd. Stale onEnd closures from previous sessions
+  // bail out immediately. This is bulletproof against PIXI event system
+  // listener leak (events.off() can fail silently when renderer refs change).
+  // Store as a ref so all closures see the latest value.
+  const resizeSessionIdRef = useRef(0)
 
   const handleResizeEnd = useCallback(() => {
     if (!interactionStateRef.current.resize) return
@@ -2243,6 +2471,44 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     if (updateThrottleRef.current) {
       cancelAnimationFrame(updateThrottleRef.current)
       updateThrottleRef.current = null
+    }
+    // [BUG1 FIX] Capture the final dispatched scale before clearing so we can
+    // pre-apply it to pixiObject.scale below.  For image corner-handle resizes
+    // the update always carries scaleX=1, but pixiObject.scale was never touched
+    // during the drag (only _storedCropWidth was).  Without this pre-apply,
+    // syncTiltMesh copies the stale PIXI scale to mesh.scale, making the mesh
+    // appear smaller than the selection box until prepareEngine corrects it.
+    let pendingFinalScaleX
+    let pendingFinalScaleY
+    if (pendingUpdateRef.current) {
+      pendingFinalScaleX = pendingUpdateRef.current.scaleX
+      pendingFinalScaleY = pendingUpdateRef.current.scaleY
+    }
+    // [Bug 3 Fix] Flush the FINAL live dimensions to Redux before the
+    // stale pendingUpdateRef. The throttle may have skipped the last ~150ms
+    // of mouse movement, so pendingUpdateRef carries slightly-stale values.
+    // If we dispatch those stale values and then applyTransformInline syncs
+    // _storedCropWidth from Redux, the tilt mesh's RTT will be recaptured
+    // at the wrong size, creating the visual desync the user sees.
+    const resizeState = interactionStateRef.current.resize
+    if (resizeState) {
+      const finalUpdates = {}
+      if (typeof resizeState._lastWidth === 'number' && Math.abs(resizeState._lastWidth - (pendingUpdateRef.current?.width ?? resizeState._lastWidth)) > 0.1) {
+        finalUpdates.width = resizeState._lastWidth
+      }
+      if (typeof resizeState._lastHeight === 'number' && Math.abs(resizeState._lastHeight - (pendingUpdateRef.current?.height ?? resizeState._lastHeight)) > 0.1) {
+        finalUpdates.height = resizeState._lastHeight
+      }
+      if (typeof resizeState._lastX === 'number' && Math.abs(resizeState._lastX - (pendingUpdateRef.current?.x ?? resizeState._lastX)) > 0.1) {
+        finalUpdates.x = resizeState._lastX
+      }
+      if (typeof resizeState._lastY === 'number' && Math.abs(resizeState._lastY - (pendingUpdateRef.current?.y ?? resizeState._lastY)) > 0.1) {
+        finalUpdates.y = resizeState._lastY
+      }
+      // Merge final dimensions into the pending update so Redux gets the truth
+      if (Object.keys(finalUpdates).length > 0 && pendingUpdateRef.current) {
+        Object.assign(pendingUpdateRef.current, finalUpdates)
+      }
     }
     if (pendingUpdateRef.current && latestOnUpdateRef.current) {
       const isCaptureMode = latestMotionCaptureModeRef.current?.isActive
@@ -2306,10 +2572,51 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       }
 
       currentLayerObject._isInteracting = false
+      // Pre-stamp current live dims into the tilt capture cache so syncTiltMesh
+      // doesn't snap back to pre-resize dimensions when _isResizing flips to false.
+      // Must come before _isResizing = false so getTiltLayout reads live interaction state.
+      if (currentLayerObject._tiltMesh) {
+        // [BUG1 FIX] Pre-apply the dispatched scale so mesh.scale is correct
+        // from the very first syncTiltMesh call after _isResizing clears.
+        // Image corner-handle resizes always reset scaleX to 1 in the update but
+        // leave pixiObject.scale untouched during the drag — the stale scale would
+        // otherwise make the mesh appear half-size until prepareEngine re-syncs.
+        if (typeof pendingFinalScaleX === 'number') {
+          currentLayerObject.scale.set(pendingFinalScaleX, pendingFinalScaleY ?? pendingFinalScaleX)
+        }
+        stampTiltCaptureDims(currentLayerObject)
+      }
+      // [Bug 3 Fix] Stamp the resize-end time so applyTransformInline can skip
+      // its unconditional syncTiltMesh call within the grace window. This prevents
+      // a second syncTiltMesh (without RTT recapture) from overwriting the mesh
+      // corners that were already correctly set above.
+      currentLayerObject._lastResizeEndTime = performance.now()
       currentLayerObject._isResizing = false
+
+      // [FLINCH FIX v3] Skip the non-force syncTiltMesh here entirely.
+      // This call would capture the RTT at pre-Redux dimensions (stale),
+      // which would then be immediately replaced by the RAF force-capture
+      // below at post-Redux dimensions (correct). The intermediate stale
+      // texture causes a 1-frame flash. Instead, only mark the texture dirty
+      // and set forceRedraw — the quad corners will be updated by the
+      // deferred RAF syncTiltMesh({force}) which fires after Redux propagates.
+      // The mesh corners are CPU-only and visually match syncBoxVisuals'
+      // outline via the forceRedraw + next ticker tick mechanism.
+      if (currentLayerObject._tiltMesh) {
+        markTiltTextureDirty(currentLayerObject)
+        // Remove any old capture dims so the forced RAF capture does not
+        // re-use stale _tiltCaptureW/H from before the Redux dispatch.
+        delete currentLayerObject._tiltCaptureW
+        delete currentLayerObject._tiltCaptureH
+      }
+      // Force the selection box to fully redraw its outline on the next ticker
+      // tick — bypasses the dimensionsChanged guard that would otherwise keep
+      // the outline at pre-stamp values if lastKnownWidth/Height already match.
+      forceRedrawRef.current = true
+
       // [SYNC FIX] Force one-shot sync from Redux to PIXI to ensure final state is correct
       // This bridges the timing gap between clearing _isResizing and Redux state propagation.
-      // [POST-CLIP FIX] Only force sync if NOT in motion capture mode to prevent 
+      // [POST-CLIP FIX] Only force sync if NOT in motion capture mode to prevent
       // snapping back to base state after saving.
       const isCapture = latestMotionCaptureModeRef.current?.isActive
       if (!isCapture) {
@@ -2321,12 +2628,52 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         currentLayerObject._cachedSprite._isResizing = false
       }
 
+      // RTT recapture is deferred to the GSAP ticker's next syncTiltedDisplay call
+      // (~16 ms) which picks up _tiltTextureDirty = true set above. Calling syncTiltMesh
+      // here was causing a synchronous GPU stall (10–100 ms) on every resize end.
+
       const prev = interactionStateRef.current.resize.prevEventMode
       const restoredEventMode = prev !== undefined ? prev : 'static'
       currentLayerObject.eventMode = restoredEventMode
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite.eventMode = restoredEventMode
       }
+
+      // [Bug 3 Fix] For tilted layers, schedule a deferred RTT recapture on the
+      // next frame. By the time this fires, applyTransformInline (triggered by
+      // the Redux dispatch above) will have fully synced the PIXI object's sprite/
+      // mask/pivot from Redux state. The forced recapture ensures the tilt mesh's
+      // RTT matches the final committed transform, not the intermediate state
+      // from before the React re-render cycle.
+      // [FLINCH FIX] Skip the synchronous non-force syncTiltMesh call above
+      // (we already set _tiltTextureDirty + forceRedraw for the next ticker tick).
+      // Only the single deferred RAF recapture runs, preventing three competing
+      // RTT captures (direct + RAF + applyTransformInline) from thrashing the
+      // mesh with stale textures. The sequential pattern was:
+      //   1. syncTiltMesh(no force) — captures at live drag dims (pre-Redux)
+      //   2. syncTiltMesh({force}) via RAF — captures again at near-identical dims
+      //   3. applyTransformInline → RECENT_RESIZE_END → syncTiltMesh({force}) — third capture
+      //   4. Next ticker: capture throttle skips (elapsed < 100ms) → mesh shows #3's RTT
+      //   But each step destroys the previous RTT, so #1's output is consumed by #2,
+      //   #2's output by #3, leaving a 1-frame gap where mesh.texture is stale/destroyed.
+      // Consolidated to a single deferred RAF capture.
+      if (currentLayerObject && !currentLayerObject.destroyed && currentLayerObject._tiltMesh) {
+        // Clear any previously scheduled RAF to prevent stacking
+        if (currentLayerObject._tiltResizeEndRAF) {
+          cancelAnimationFrame(currentLayerObject._tiltResizeEndRAF)
+        }
+        currentLayerObject._tiltResizeEndRAF = requestAnimationFrame(() => {
+          if (!currentLayerObject || currentLayerObject.destroyed) {
+            return
+          }
+          delete currentLayerObject._tiltResizeEndRAF
+          currentLayerObject._tiltTextureDirty = true
+          console.log(`[TILT-DEBUG] handleResizeEnd RAF: force recapture for ${currentLayerObject.label || currentLayer.id}`)
+          syncTiltMesh(currentLayerObject, latestLayerRef.current, { force: true })
+        })
+      }
+      console.log(`[TILT-DEBUG] handleResizeEnd: resize ended for ${currentLayerObject.label || currentLayer.id} | mesh=${!!currentLayerObject?._tiltMesh} | isResizing=${!!currentLayerObject?._isResizing} | _lastResizeEndTime=${(currentLayerObject?._lastResizeEndTime || 0).toFixed(1)} | rAF=${!!(currentLayerObject?._tiltResizeEndRAF)}`)
+      console.trace(`[TILT-DEBUG] handleResizeEnd: stack trace`)
 
       // Deferred safety sync to ensure Redux state has fully propagated
       setTimeout(() => {
@@ -2356,8 +2703,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     hideHoverBox()
+    dispatch(setCanvasInteracting(false))
     setForceUpdate(prev => prev + 1)
-  }, [dragStateAPI, calculateTextDimensions, hideHoverBox, setForceUpdate])
+  }, [dragStateAPI, calculateTextDimensions, hideHoverBox, setForceUpdate, dispatch])
 
 
   const handleResizeStart = useCallback((handleType, cursor, startEvent) => {
@@ -2375,6 +2723,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     if (currentLayer.type === 'background') {
       return
     }
+
+    dispatch(setCanvasInteracting(true))
 
     startEvent.stopPropagation()
     if (startEvent.data?.originalEvent) {
@@ -2577,6 +2927,38 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     if (canvas) canvas.style.cursor = cursor
 
+    // [FLINCH FIX v2] Store listener refs on the interaction state so we can
+    // detach OLD listeners BEFORE attaching new ones. Each handleResizeStart
+    // call accumulates stale onMove/onEnd closures on the PIXI event system.
+    // Without this cleanup, previously-registered listeners fire on every
+    // subsequent pointerup, each calling handleResizeEnd for a different
+    // (already-completed) resize session. This was causing 5+ sequential
+    // handleResizeEnd calls per mouse-up, each with different timestamps,
+    // triggering cascading RTT captures that destroyed each other's textures.
+    // Refs stored here so handleResizeEnd can also use them for cleanup.
+    const prevListeners = interactionStateRef.current._prevListeners
+    
+    if (prevListeners) {
+      // Detach OLD listeners from the previous resize session before attaching
+      // the new ones. Without this, each handleResizeStart adds new listeners
+      // without removing the previous ones, causing listener stacking.
+      const prevRend = prevListeners.rend
+      if (prevRend?.events) {
+        try {
+          prevRend.events.off('globalpointermove', prevListeners.onMove)
+          prevRend.events.off('pointerup', prevListeners.onEnd)
+          prevRend.events.off('pointerupoutside', prevListeners.onEnd)
+        } catch (_e) { /* ignore */ }
+      } else if (prevListeners.vp) {
+        try {
+          prevListeners.vp.off('globalpointermove', prevListeners.onMove)
+          prevListeners.vp.off('pointermove', prevListeners.onMove)
+          prevListeners.vp.off('pointerup', prevListeners.onEnd)
+          prevListeners.vp.off('pointerupoutside', prevListeners.onEnd)
+        } catch (_e) { /* ignore */ }
+      }
+    }
+
     const onMove = (e) => {
       if (!interactionStateRef.current.resize) return
       const v = latestViewportRef.current
@@ -2600,11 +2982,22 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       handleResizeMove(wp)
     }
 
+    // Capture the current session ID for this listener. Each handleResizeStart
+    // increments the session counter; only the onEnd whose captured sessionId
+    // matches the current ref value actually runs. Stale onEnd closures from
+    // old sessions that weren't properly cleaned up (events.off() can fail
+    // silently when renderer refs change between quick drags) bail out
+    // immediately, preventing cascading handleResizeEnd calls.
+    const sessionId = ++resizeSessionIdRef.current
+
     const onEnd = () => {
       if (!interactionStateRef.current.resize) return
+      // [FLINCH FIX v4] Session ID guard — if this closure is stale, skip
+      if (resizeSessionIdRef.current !== sessionId) return
       handleResizeEnd()
       hideSnappingGuides()
 
+      // Clean up THIS session's listeners
       const v = latestViewportRef.current
       const rend = v?.parent?.parent?.renderer || v?.parent?.renderer
       if (rend?.events) {
@@ -2617,9 +3010,24 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         v?.off('pointerup', onEnd)
         v?.off('pointerupoutside', onEnd)
       }
+      // Clear stored listener refs since the session is done
+      if (interactionStateRef.current) {
+        delete interactionStateRef.current._prevListeners
+      }
     }
 
     const rend = currentViewport.parent?.parent?.renderer || currentViewport.parent?.renderer
+    
+    // Store the current listeners so NEXT handleResizeStart can remove them
+    if (interactionStateRef.current) {
+      interactionStateRef.current._prevListeners = {
+        onMove,
+        onEnd,
+        rend,
+        vp: currentViewport
+      }
+    }
+
     if (rend?.events) {
       rend.events.on('globalpointermove', onMove)
       rend.events.on('pointerup', onEnd)
@@ -2645,6 +3053,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     if (currentLayer.type === 'background') return
+
+    dispatch(setCanvasInteracting(true))
 
     startEvent.stopPropagation()
     if (startEvent.data?.originalEvent) {
@@ -2847,6 +3257,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       interactionStateRef.current.rotate = null
       dragStateAPI.setInteractionState(false, false)
       hideHoverBox()
+      dispatch(setCanvasInteracting(false))
       setForceUpdate(p => p + 1)
 
       const rend = v?.parent?.parent?.renderer || v?.parent?.renderer
@@ -2871,7 +3282,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       currentViewport.on('pointerup', onRotateEnd)
       currentViewport.on('pointerupoutside', onRotateEnd)
     }
-  }, [dragStateAPI, calculateTextDimensions, hideHoverBox, setForceUpdate, syncBoxVisuals, throttledUpdate, updateHoverBox, requestUpdateLoop])
+  }, [dragStateAPI, calculateTextDimensions, hideHoverBox, setForceUpdate, syncBoxVisuals, throttledUpdate, updateHoverBox, requestUpdateLoop, dispatch])
 
 
 
@@ -2932,7 +3343,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         latestMotionCaptureModeRef.current,
         latestSceneMotionFlowRef.current,
         currentLayer?.id,
-        firstActionTime
+        firstActionTime,
+        editingTextLayerId
       )
 
       // [FIX] Ensure hover box (purple outline) is also hidden during movement/flipping
@@ -2957,7 +3369,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     return () => {
       ticker.remove(tickerHandler)
     }
-  }, [layer?.id, layersContainer, syncBoxVisuals, isPlaying, dragStateAPI, updateSelectionBoxVisibility])
+  }, [layer?.id, layersContainer, syncBoxVisuals, isPlaying, dragStateAPI, updateSelectionBoxVisibility, editingTextLayerId])
 
   // ===========================================================================
   // CLEANUP - Handles cleanup when layer selection changes or component unmounts
@@ -3447,7 +3859,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // We call this after adding all children to ensure they are properly hidden if necessary.
 
 
-    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, firstActionTime)
+    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, firstActionTime, editingTextLayerId)
+    syncBoxVisuals()
 
   }, [
     layersContainer,
@@ -3470,6 +3883,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     motionCaptureMode?.isActive, // Only recreate if capture mode state changes
     zoom, // Force redraw when zoom changes to update handle sizes
     layerObjectsVersion, // [Bug 2 Fix] Force re-creation when PIXI instances are swapped
+    editingTextLayerId,
   ])
 
   // =========================================================================

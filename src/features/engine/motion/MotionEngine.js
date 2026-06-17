@@ -3,7 +3,7 @@ import { gsap } from 'gsap'
 import { MotionTimeline } from './MotionTimeline.js'
 import { getActionHandler } from './actions/index.js'
 import { hexToRgb, rgbToNum, applyColor } from './actions/ColorChangeAction.js'
-import { syncTiltedDisplay, markTiltTextureDirty, syncTiltMesh } from '../pixi/perspectiveTilt.js'
+import { syncTiltedDisplay, markTiltTextureDirty, syncTiltMesh, removeTiltFromObject } from '../pixi/perspectiveTilt.js'
 import { PRESET_REGISTRY } from './presets.js'
 
 /**
@@ -52,11 +52,12 @@ export class MotionEngine {
           this.refreshFlows()
           this._lastFlowRefresh = now
         }
-        // [TILT] Per-frame sync for any tilted layers, even when no tilt
-        // tween is running (e.g. Move/Fade/Scale on a base-tilted layer).
-        // Mirrors the original's transform onto the perspective mesh and
-        // re-asserts the alpha=0 hide so other tweens don't unmask the
-        // original.  Cheap: short-circuits for non-tilted objects.
+        // [TILT] Per-frame sync for any tilted layers. This MUST run every frame —
+        // syncTiltMesh copies the pixiObject's live position/scale/rotation to the
+        // mesh at 60fps. Throttling this causes visible jitter during animations
+        // because the mesh lags behind the moving pixiObject. The GPU-expensive
+        // RTT capture is throttled inside syncTiltMesh itself (per-pixiObject
+        // time gate) — only the cheap transform copies run unthrottled here.
         this._syncTiltedLayers()
         this._handleUpdate()
       }
@@ -116,12 +117,31 @@ export class MotionEngine {
    * registeredObjects is O(n) but the early-exit in syncTiltedDisplay (no
    * mesh / not hidden) keeps the per-frame cost negligible.
    */
-  _syncTiltedLayers() {
+  _syncTiltedLayers(force = false) {
     if (!this.registeredObjects || this.registeredObjects.size === 0) return
+    // [PERF / RC2] Timestamp dedup: during seek/scrub, this method gets called
+    // 3-4 times within the same event-loop tick (masterTimeline.seek → onUpdate,
+    // masterTimeline.render → onUpdate, explicit _applyAnimatedTilt loop, and
+    // then an explicit _syncTiltedLayers() call).  Each full pass iterates
+    // all registered objects and can trigger expensive RTT recaptures for
+    // video/dirty layers.  The 2ms window collapses all same-tick calls into
+    // a single effective pass without risking stale data across frames.
+    // [FORCE SYNC FIX] If force is true, we bypass this 2ms throttle to ensure
+    // that the final state (especially alpha/sentinel) is correctly synchronized.
+    const now = performance.now()
+    if (!this.isExport && !force && this._lastTiltSyncTime && now - this._lastTiltSyncTime < 2) return
+    this._lastTiltSyncTime = now
+    
     this.registeredObjects.forEach((obj) => {
       if (!obj || obj.destroyed) return
+      if (obj._isEditingText) {
+        if (obj._tiltMesh) {
+          removeTiltFromObject(obj)
+        }
+        return
+      }
       if (!obj._tiltMesh || obj._tiltMesh.destroyed) return
-      syncTiltedDisplay(obj)
+      syncTiltedDisplay(obj, { force })
     })
   }
 
@@ -309,9 +329,10 @@ export class MotionEngine {
               // [TILT SYNC] Any change to these custom properties (crop, radius, flip) 
               // must invalidate the tilt mesh's cached texture so it re-captures 
               // the updated visual state of the original layer.
+              // [PERF] Redundant calls to syncTiltMesh are skipped here. The engine's
+              // single _syncTiltedLayers() pass at the end of the frame will handle the sync.
               if (this._tiltMesh && !this._tiltMesh.destroyed) {
                 markTiltTextureDirty(this)
-                syncTiltMesh(this, null)
               }
 
               // Special case for card frames - toggle visibility when showingFront changes
@@ -778,21 +799,27 @@ export class MotionEngine {
                 },
               }, startTimeOffset)
 
-              // [BG COLOR EXPORT FIX] Anchor the BASE color at scene start. The baseline
-              // .set() above can't carry color — color is applied via _animatedColorState +
-              // applyColor(), not a direct GSAP property. Without an anchor, a colorChange
-              // tween is the only thing that ever drives the color, so a deterministic
-              // frame-by-frame export (and a forced backward seek) can leave the colorChange
-              // TARGET showing before the step where the change should occur, while the live
-              // editor looks right because its background container retains its base fill.
-              // Anchoring base here makes export match editor. Gated to background layers so
-              // shapes/text that manage their own fill elsewhere are never redrawn. Mirrors
-              // the tilt-proxy baseline above.
-              const isBackgroundLayer = !!(pixiObject.isBackground || pixiObject._backgroundGraphics)
-              if (isBackgroundLayer && startState.color != null) {
+              // [COLOR STATE CONSISTENCY FIX] Anchor the BASE color at scene start for ALL
+              // layer types, not just backgrounds. Previously only background layers got a
+              // baseline .set() for _animatedColorState, which meant that scrubbing backward
+              // before a shape/text color change step would leave _animatedColorState at the
+              // value the forward tween last wrote — causing the layer to retain the motion
+              // color permanently (Bug 1) and bleed color into subsequent steps (Bug 3).
+              //
+              // For each layer type, startState.color is populated from the Redux base:
+              //   - Backgrounds: baseLayer.data.color (0xRRGGBB numeric)
+              //   - Shapes: baseLayer.data.fill ("#RRGGBB" string)
+              //   - Text: baseLayer.data.color ("#RRGGBB" string)
+              if (startState.color != null) {
                 const baseRgb = hexToRgb(startState.color)
                 if (!pixiObject._animatedColorState || typeof pixiObject._animatedColorState !== 'object') {
                   pixiObject._animatedColorState = { r: baseRgb.r, g: baseRgb.g, b: baseRgb.b }
+                } else {
+                  // Seed the baseline even if the proxy already exists (e.g. from a previous
+                  // scene) so a seek before any color tween in this scene shows the correct base.
+                  pixiObject._animatedColorState.r = baseRgb.r
+                  pixiObject._animatedColorState.g = baseRgb.g
+                  pixiObject._animatedColorState.b = baseRgb.b
                 }
                 if (!pixiObject._applyAnimatedColor) {
                   pixiObject._applyAnimatedColor = () => {
@@ -1109,6 +1136,7 @@ export class MotionEngine {
    * @param {Object} options - Animation options
    */
   loadProjectMotionFlow(timelineInfo, sceneMotionFlowsMap, allLayerObjects, options = {}) {
+    this.isExport = !!options.isExport
 
     // IMPORTANT: Clear ALL previous animations before loading the new project state.
     this.unloadAllMotions()
@@ -1536,7 +1564,7 @@ export class MotionEngine {
           const finalTime = effectiveEnd !== undefined ? Math.min(adjustedLocalTime, effectiveEnd) : adjustedLocalTime
           const isAtEnd = effectiveEnd !== undefined && adjustedLocalTime >= effectiveEnd - 0.01
 
-          if (this.isPlaying && !isAtEnd) {
+          if (this.isPlaying && !isAtEnd && !this._muteVideosForFastPreview) {
             intent.shouldPlay = true
           }
           intent.targetTime = finalTime
@@ -1647,7 +1675,9 @@ export class MotionEngine {
       const isAlreadyPlaying = !videoElement.paused && intent.shouldPlay
       const needsSeek = !isAlreadyPlaying || deviation > threshold
 
-      if (intent.targetTime !== -1 && needsSeek && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
+      const isFastPreview = this._muteVideosForFastPreview
+      const skipSeekForFastPreview = isFastPreview && !force
+      if (intent.targetTime !== -1 && needsSeek && !skipSeekForFastPreview && (force || (deviation > threshold && (!isSeeking || targetMovedSignificantly)))) {
 
         videoElement.currentTime = intent.targetTime
         videoElement._lastMotionTargetTime = intent.targetTime // Track last request
@@ -1780,6 +1810,7 @@ export class MotionEngine {
       // engine rebuilds. Mesh lifecycle is handled by applyTilt/removeTilt when
       // Redux tiltX/tiltY transitions to/from zero.
       delete obj._applyAnimatedTilt
+      delete obj._tiltProxy
     }
   }
 
@@ -1824,19 +1855,15 @@ export class MotionEngine {
       // has become zero. Destroying here caused visible tilt loss on every slider
       // update because layersBaseStateHash includes tiltX/tiltY.
       delete obj._applyAnimatedTilt
+      delete obj._tiltProxy
 
-      // [BLUR FIX] Detach the animated blur filter on full engine restart.
-      // Without this, deleting a blur preset/step leaves _blurFilter attached and
-      // visible until a page refresh. applyTransformInline(force=true) — called by
-      // prepareEngine right after — re-applies base blur only if layer.blur > 0
-      // (via syncBlurFilter), so layers with a genuine base blur are unaffected.
-      if (obj._blurFilter) {
-        obj._blurFilter.strength = 0
-        if (obj.filters && obj.filters.includes(obj._blurFilter)) {
-          obj.filters = obj.filters.filter(f => f !== obj._blurFilter)
-          if (obj.filters.length === 0) obj.filters = null
-        }
-      }
+      // [BLUR FIX v2] Preserve the blur filter through engine rebuilds.
+      // The filter is owned by syncBlurFilter (static path) and _applyAnimatedBlur
+      // (animated path).  Clearing the filter entirely creates a visual gap where
+      // blur=0 is briefly visible before applyTransformInline re-syncs it — this
+      // is the root cause of the "blur resets after layer interaction" bug.
+      // Only remove the animation hook so the reloaded GSAP timeline can re-attach
+      // a fresh _applyAnimatedBlur; the filter itself stays at its current strength.
       obj._blurLogicalStrength = 0
       delete obj._applyAnimatedBlur
     })
@@ -1976,6 +2003,15 @@ export class MotionEngine {
         if (typeof obj._tiltProxy.tiltY === 'number') obj._tiltYDeg = obj._tiltProxy.tiltY
       }
       if (obj._applyAnimatedTilt) obj._applyAnimatedTilt()
+      // [TEXT TILT SEEK FIX] For text layers, the tilt may be animated via
+      // a motion step action (which sets _tiltProxy) OR via base layer property
+      // (Redux tiltX/tiltY) which may not have a GSAP _tiltProxy.  Ensure
+      // syncTiltedDisplay is called for ANY tilted layer that has a mesh,
+      // regardless of whether _tiltProxy exists, so the mesh corners + RTT
+      // reflect the correct tilt state for the current playhead position.
+      if (obj._tiltMesh && !obj._tiltMesh.destroyed) {
+        syncTiltedDisplay(obj)
+      }
     })
 
     // [FIX] Evaluate flip visibility deterministically based on time position.
@@ -1998,7 +2034,12 @@ export class MotionEngine {
     // (requestVideoFrameCallback in perspectiveTilt.js also catches this,
     // but only on browsers that support it — this call covers every browser
     // and also handles the sub-16ms window before rVFC fires.)
-    this._syncTiltedLayers()
+    // [PERF] Non-forced sync — mesh corners are re-applied (CPU-only) but
+    // GPU RTT recaptures are skipped per the per-object throttle gate in
+    // syncTiltMesh.  For video layers, requestVideoFrameCallback marks the
+    // texture dirty after a new video frame decodes, which triggers the
+    // recapture on the next natural tick — we don't need to force it here.
+    this._syncTiltedLayers(false)
 
     // [FLOW TEXT FIX] Ensure word wrapping calculates the latest layout synchronously
     this.refreshFlows()
@@ -2052,6 +2093,11 @@ export class MotionEngine {
         if (typeof obj._tiltProxy.tiltY === 'number') obj._tiltYDeg = obj._tiltProxy.tiltY
       }
       if (obj._applyAnimatedTilt) obj._applyAnimatedTilt()
+      // [TEXT TILT SEEK FIX] Apply the same fix as seek() - ensure any tilted
+      // layer's mesh corners reflect the correct tilt for the scrubbed position.
+      if (obj._tiltMesh && !obj._tiltMesh.destroyed) {
+        syncTiltedDisplay(obj)
+      }
     })
 
     // [PERF] Throttle flip state evaluation during scrubbing (~100ms)
@@ -2070,7 +2116,10 @@ export class MotionEngine {
     // currentTime and forced a texture upload, otherwise the mesh shows the
     // pre-scrub frame.  This is the cross-browser complement to the
     // requestVideoFrameCallback hook in perspectiveTilt.js.
-    this._syncTiltedLayers()
+    // [PERF] Non-forced sync — mesh corners are re-applied (CPU-only).
+    // GPU RTT recaptures happen only when the video frame callback marks
+    // the texture dirty (after a new frame decodes), not on every scrub event.
+    this._syncTiltedLayers(false)
 
     // [PERF] Throttle text reflow during scrubbing (~150ms)
     if (!this._lastScrubFlowRefresh || now - this._lastScrubFlowRefresh > 150) {

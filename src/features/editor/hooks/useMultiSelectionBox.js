@@ -19,7 +19,7 @@ import { createResizeHandle, createRotateHandle, calculateAdaptedScale } from '.
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 
-export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null, zoom = 1) {
+export function useMultiSelectionBox(stageContainer, layersContainer, selectedLayerIds, layerObjectsMap, layers, viewport, worldWidth, worldHeight, isPlaying = false, motionCaptureMode = null, interactionsAPIRef = null, currentSceneId = null, sceneMotionFlow = null, zoom = 1, dragStateAPI = null) {
   const dispatch = useDispatch()
   const selectionBoxRef = useRef(null)
   const [forceUpdate, setForceUpdate] = useState(0)
@@ -103,7 +103,12 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
       // CRITICAL: Clear interaction flags on all layers that were part of this multi-selection
       // This prevents layers from getting "stuck" in an interacting state after scene switch or deselect
       if (latestSelectedLayerIdsRef.current) {
+        const activeIntId = dragStateAPI?.getInteractionLayerId?.() || dragStateAPI?.getDraggingLayerId?.()
         latestSelectedLayerIdsRef.current.forEach(layerId => {
+          if (activeIntId === layerId) {
+            // Do NOT clear interaction flags during active interaction
+            return
+          }
           const layerObject = latestLayerObjectsMapRef.current?.get(layerId)
           if (layerObject) {
             layerObject._isResizing = false
@@ -1592,7 +1597,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
         selectionBoxRef.current = null
       }
     }
-  }, [stageContainer, selectedLayerIds, layerObjectsMap, layers, viewport, isPlaying, motionCaptureMode, forceUpdate, currentSceneId, zoom])
+  }, [stageContainer, selectedLayerIds, layerObjectsMap, layers, viewport, isPlaying, motionCaptureMode, forceUpdate, currentSceneId, zoom, dragStateAPI])
 
   // API for external control (e.g. from useCanvasInteractions)
   const updateBoxPosition = (x, y) => {

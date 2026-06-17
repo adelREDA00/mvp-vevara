@@ -25,14 +25,14 @@ const ProjectStarterModal = ({
                         className="group cursor-pointer"
                         onClick={onSelectBlank}
                     >
-                        <div className="aspect-video bg-[var(--dashboard-card-bg)] border-2 border-dashed border-[var(--dashboard-border)] rounded-[16px] flex flex-col items-center justify-center gap-3 hover:border-[var(--dashboard-accent)]/30 transition-all duration-300 hover:bg-[var(--dashboard-accent)]/5">
-                            <div className="w-10 h-10 bg-[var(--dashboard-accent)]/5 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300 group-hover:bg-[var(--dashboard-accent)]/20">
-                                <Plus size={24} strokeWidth={2} className="text-[var(--dashboard-text-muted)] group-hover:text-[var(--dashboard-accent)]" />
+                        <div className="aspect-video bg-[var(--dashboard-card-bg)] border-2 border-dashed border-[var(--dashboard-border)] rounded-[16px] flex flex-col items-center justify-center gap-3 hover:border-slate-500/40 transition-all duration-300 hover:bg-slate-500/5">
+                            <div className="w-10 h-10 bg-slate-500/10 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-300 group-hover:bg-slate-500/20">
+                                <Plus size={24} strokeWidth={2} className="text-[var(--dashboard-text-muted)] group-hover:text-slate-800 dark:group-hover:text-white" />
                             </div>
                             <span className="text-[12px] font-semibold text-[var(--dashboard-text-muted)] group-hover:text-[var(--dashboard-text)] uppercase tracking-widest">Blank Project</span>
                         </div>
                         <div className="px-1 mt-3">
-                            <h3 className="text-[14px] font-medium text-[var(--dashboard-text)] group-hover:text-[var(--dashboard-accent)] transition-colors">Start from scratch</h3>
+                            <h3 className="text-[14px] font-medium text-[var(--dashboard-text)] group-hover:text-slate-700 dark:group-hover:text-white transition-colors">Start from scratch</h3>
                             <p className="text-[12px] text-[var(--dashboard-text-muted)] mt-0.5 font-normal opacity-60">A clean canvas for your ideas</p>
                         </div>
                     </div>
@@ -47,8 +47,8 @@ const ProjectStarterModal = ({
                             <TemplateThumbnail project={template} buttonText="Use Template" />
                             <div className="px-1 mt-3">
                                 <div className="flex items-center gap-2 mb-0.5">
-                                    <h3 className="text-[14px] font-medium text-[var(--dashboard-text)] group-hover:text-[var(--dashboard-accent)] transition-colors truncate">{template.name}</h3>
-                                    <Sparkles size={12} className="text-[var(--dashboard-accent)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    <h3 className="text-[14px] font-medium text-[var(--dashboard-text)] group-hover:text-slate-700 dark:group-hover:text-white transition-colors truncate">{template.name}</h3>
+                                    <Sparkles size={12} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
                                 <p className="text-[12px] text-[var(--dashboard-text-muted)] font-normal uppercase tracking-tight opacity-60">Featured Template</p>
                             </div>

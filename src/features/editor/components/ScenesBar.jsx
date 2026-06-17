@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useContext, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming } from '../../../store/slices/projectSlice'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming, setTimelineDragging } from '../../../store/slices/projectSlice'
 import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 
@@ -396,7 +396,63 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 // Detect touch device for adaptive interaction sizing
 const isTouchDevice = () => typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId, onMotionPause }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false }) => {
+  // Compute active step from playhead position (synchronous, no re-render lag)
+  // Uses the "preceding step region" rule: gaps after a step belong to that step.
+  // ONLY for the current scene — non-current scenes should never auto-highlight
+  // steps, they only show activeStepId if explicitly selected by user (context menu).
+  const computedActiveStepId = useMemo(() => {
+    // For non-current scenes, never auto-compute — only use activeStepId
+    // which is null (since activeStepId={isActive ? activeStepId : null} only
+    // passes a value to the current scene).
+    if (!isCurrentScene || !steps.length || pageDuration <= 0) return activeStepId
+    const timeInMs = currentTime * 1000
+    const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+    
+    // 1. Check if playhead is exactly within any step's range
+    for (let i = 0; i < sortedSteps.length; i++) {
+      const s = sortedSteps[i]
+      const start = s.startTime || 0
+      const duration = s.duration || 0
+      if (timeInMs >= start && timeInMs <= start + duration) return s.id
+    }
+    
+    // 2. Playhead is past the entire scene duration — no step is active.
+    // This detects the case where the playhead has moved to a different scene
+    // and this scene's relative time exceeds its pageDuration.
+    if (timeInMs >= pageDuration + 100) return null
+    
+    // 3. Playhead is in a gap — previous step owns the gap
+    for (let i = sortedSteps.length - 1; i >= 0; i--) {
+      const s = sortedSteps[i]
+      const stepEnd = (s.startTime || 0) + (s.duration || 0)
+      if (timeInMs > stepEnd) {
+        const nextStep = sortedSteps[i + 1]
+        if (nextStep && timeInMs < (nextStep.startTime || 0)) return s.id
+        // Only return the gap owner if we're still within the scene.
+        // timeInMs < pageDuration + buffer, guaranteed by check above.
+        // We're past the last step's end but within the scene → this step owns the gap.
+        return s.id
+      }
+    }
+    
+    // 4. Before first step — no active step
+    return null
+  }, [steps, currentTime, pageDuration, activeStepId, isCurrentScene])
+  
+  // Use the locally computed step ID for visual highlighting.
+  // Only apply when the playhead has actually entered this scene's timeline range
+  // (sceneRelativeTime > 0). This prevents non-current scenes from showing active
+  // steps when their sceneRelativeTime is 0 (before the scene starts).
+  // The activeStepId from EditorPage is only passed to the current scene,
+  // so non-current scenes will have activeStepId = null and computedActiveStepId = null.
+  // [ISSUE 1 FIX] When computedActiveStepId explicitly returns null (meaning the
+  // playhead is past all steps in this scene), do NOT fall back to activeStepId.
+  // activeStepId is the Redux-computed step from EditorPage (playheadStepId),
+  // which may return a stale step ID because its gap-finding logic differs from
+  // ours (no "past the last step" detection). Using null directly ensures no
+  // step remains highlighted once the playhead leaves the step region.
+  const displayStepId = computedActiveStepId === null ? null : (computedActiveStepId || activeStepId)
   const containerRef = useRef(null)
   const dispatch = useDispatch()
   const dragRef = useRef(null)
@@ -421,6 +477,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
     if (typeof onMotionPause === 'function') {
       onMotionPause()
     }
+
+    dispatch(setTimelineDragging(true))
 
     const startX = getClientX(e)
 
@@ -465,6 +523,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       setIsDragging(false)
       document.removeEventListener('pointermove', handlePointerMove)
       document.removeEventListener('pointerup', handlePointerUp)
+      dispatch(setTimelineDragging(false))
     }
 
     document.addEventListener('pointermove', handlePointerMove)
@@ -527,7 +586,13 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
       {/* ── Step Blocks ── */}
       <div className="absolute inset-0 overflow-visible">
         {steps.map((step, i) => {
-          const isActive = activeStepId === step.id
+          // [ISSUE 1 FIX] Only use displayStepId for determining active state.
+          // The fallback `|| activeStepId === step.id` was causing steps to remain
+          // highlighted even when computedActiveStepId returns null (playhead past
+          // all steps), because Redux's playheadStepId (activeStepId) may still
+          // return a stale step ID — its gap-finding logic doesn't have a
+          // "past the last step" detection.
+          const isActive = displayStepId === step.id
           const stepStart = step.startTime || 0
           const stepDur = step.duration || (pageDuration / (steps.length || 1))
           const leftPct = Math.min((stepStart / pageDuration) * 100, 100)
@@ -603,19 +668,28 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
                   document.addEventListener('touchmove', onMove, { passive: true })
                   document.addEventListener('touchend', onEnd, { once: true })
                 }}
-                className={`w-full h-full text-[11px] font-bold tracking-wider uppercase flex items-center justify-center rounded-[6px] select-none transition-all duration-100 relative overflow-hidden
-                  ${isActive
-                    ? 'text-white shadow-md z-10'
-                    : 'text-purple-200 hover:text-white'
+                className={(() => {
+                  const isEditing = isMotionCaptureActive && editingStepId === step.id
+                  const isPlayheadInside = isActive
+                  return `w-full h-full text-[11px] font-bold tracking-wider uppercase flex items-center justify-center rounded-[6px] select-none transition-all duration-100 relative overflow-hidden
+                    ${isEditing
+                      ? 'text-white shadow-md z-10'
+                      : 'text-purple-200 hover:text-white'
+                    }
+                    ${isEditing ? 'ring-[1.5px] ring-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)]' : ''}
+                    ${!isEditing && isPlayheadInside ? 'ring-2 ring-[#a78bfa]' : ''}
+                  `
+                })()}
+                style={(() => {
+                  const isEditing = isMotionCaptureActive && editingStepId === step.id
+                  const isPlayheadInside = isActive
+                  return {
+                    cursor: isDragging ? 'grabbing' : 'grab',
+                    touchAction: 'none',
+                    backgroundColor: isEditing ? '#7c3aed' : '#3b2667',
+                    border: isEditing ? '1px solid #a78bfa' : isPlayheadInside ? '1px solid #a78bfa' : '1px solid #5b3a8c',
                   }
-                  ${isActive && isMotionCaptureActive ? 'ring-[1.5px] ring-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)]' : ''}
-                `}
-                style={{
-                  cursor: isDragging ? 'grabbing' : 'grab',
-                  touchAction: 'none',
-                  backgroundColor: isActive ? '#7c3aed' : '#3b2667',
-                  border: isActive ? '1px solid #a78bfa' : '1px solid #5b3a8c',
-                }}
+                })()}
               >
                 <span className="truncate px-1 relative z-10">
                   M{i + 1}
@@ -651,7 +725,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, onStepClick, onSt
 
 
 
-const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive }) => {
+const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, editingStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive, currentTime = 0 }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   const scenes = useSelector(selectScenes)
@@ -1316,10 +1390,16 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             pointerEvents: 'auto',
             overflow: resizeState.isResizing ? 'visible' : 'hidden',
             cursor: isDraggingRef.current ? 'grabbing' : 'grab',
-            border: isActive ? '2px solid rgba(139,92,246,0.8)' : '1px solid rgba(255,255,255,0.08)',
+            border: isActive
+              ? isLight
+                ? '2px solid rgba(124,74,240,0.8)'
+                : '2px solid rgba(167,139,250,0.5)'
+              : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
             borderRadius: '6px',
             boxShadow: isActive
-              ? '0 0 0 1px rgba(139,92,246,0.2), 0 2px 8px rgba(0,0,0,0.3)'
+              ? isLight
+                ? '0 0 0 1px rgba(124,74,240,0.2), 0 2px 8px rgba(0,0,0,0.15)'
+                : '0 0 0 1px rgba(167,139,250,0.15), 0 2px 8px rgba(0,0,0,0.4)'
               : '0 1px 4px rgba(0,0,0,0.2)',
             transition: resizeState.isResizing ? 'none' : 'border-color 0.2s, box-shadow 0.2s',
           }}
@@ -1405,6 +1485,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         <MotionStepsBar
           steps={motionFlow?.steps || []}
           activeStepId={isActive ? activeStepId : null}
+          editingStepId={isActive ? editingStepId : null}
           onStepClick={onStepClick}
           onStepContextMenu={onStepContextMenu}
           isMotionCaptureActive={isMotionCaptureActive}
@@ -1412,6 +1493,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           pageDuration={calculateDurationFromWidth(actualWidth) * 1000}
           sceneId={scene.id}
           onMotionPause={onMotionPause}
+          currentTime={currentTime}
+          isCurrentScene={isActive}
         />
       </div>
 
@@ -1583,12 +1666,14 @@ const ScenesBar = React.memo(React.forwardRef(({
   onMotionPause,
   currentTimeStepId = null,
   isMotionCaptureActive,
+  editingStepId = null,
   onStepClick,
   onStepEdit, // Explicit edit action (context menu "Update Step")
   bottomSectionHeight = null, // Dynamic height from EditorPage
   onPlay, // Optional: to resume playback after split
   onPause, // Optional: to pause during split
-  onOpenTransitionsPanel
+  onOpenTransitionsPanel,
+  onPlayheadInteractionDuringCapture // Callback when playhead is interacted with during motion capture mode
 }, ref) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
@@ -1891,15 +1976,17 @@ const ScenesBar = React.memo(React.forwardRef(({
       resizingSceneIdRef.current = scene.id
     }
     isTimelineInteractingRef.current = true
-  }, [scenes])
+    dispatch(setTimelineDragging(true))
+  }, [scenes, dispatch])
 
   const handleResizeEnd = useCallback(() => {
     resizingSceneIdRef.current = null
     isTimelineInteractingRef.current = false
+    dispatch(setTimelineDragging(false))
     // [PLAYHEAD PRESERVE] Pause in place on resize end — do not reset to project start.
     if (onMotionPause) onMotionPause()
     else if (onMotionStop) onMotionStop()
-  }, [onMotionStop, onMotionPause])
+  }, [onMotionStop, onMotionPause, dispatch])
 
   // Calculate offsets for fast lookups
   const cumulativeOffsets = useMemo(() => {
@@ -2055,6 +2142,11 @@ const ScenesBar = React.memo(React.forwardRef(({
   const handleTimelineClick = (e) => {
     if (!cardsContainerRef.current || !onSeek || isDraggingPlayhead || isTimelineInteractingRef.current) return
 
+    // [PLAYHEAD INTERACTION DURING CAPTURE] If capture mode is active, exit it first
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     const containerRect = cardsContainerRef.current.getBoundingClientRect()
     const mouseX = e.clientX - containerRect.left
     const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
@@ -2124,6 +2216,12 @@ const ScenesBar = React.memo(React.forwardRef(({
   const handlePlayheadMouseDown = (e) => {
     e.preventDefault()
     e.stopPropagation()
+
+    // [PLAYHEAD INTERACTION DURING CAPTURE] If capture mode is active, exit it first
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     setIsDraggingPlayhead(true)
   }
 
@@ -2248,6 +2346,14 @@ const ScenesBar = React.memo(React.forwardRef(({
   }, [isDraggingPlayhead, totalTime, totalCardsWidth, onSeek, scenes, cardWidths])
 
   const handleAddScene = () => {
+    // [PLAYHEAD INTERACTION DURING CAPTURE] If capture mode is active, handle save or exit first
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
+    // Calculate the new scene's start time before dispatching (cumulative offset of all existing scenes)
+    const newSceneStartTime = cumulativeOffsets.totalTime
+
     const newSceneId = uid()
     dispatch(addScene({
       id: newSceneId,
@@ -2258,11 +2364,11 @@ const ScenesBar = React.memo(React.forwardRef(({
       height: worldHeight,
     }))
 
-    // Auto-switch to the new scene (behavior similar to handleSwitchScene)
-    // This triggers the scene switch effect in EditorPage that cancels motion capture
+    // Auto-switch to the new scene and seek playhead to its start time
     if (onMotionStop) onMotionStop()
     dispatch(clearLayerSelection())
     dispatch(setCurrentScene(newSceneId))
+    if (onSeek) onSeek(newSceneStartTime)
   }
 
   const handleSwitchScene = (sceneId) => {
@@ -2628,9 +2734,7 @@ const ScenesBar = React.memo(React.forwardRef(({
           willChange: 'transform, left',
         }}
         onMouseDown={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setIsDraggingPlayhead(true)
+          handlePlayheadMouseDown(e)
 
           setPlayheadTooltipTime(currentTime)
           if (timelineRef.current) {
@@ -2648,9 +2752,7 @@ const ScenesBar = React.memo(React.forwardRef(({
           setIsHoveringPlayhead(false)
         }}
         onTouchStart={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setIsDraggingPlayhead(true)
+          handlePlayheadMouseDown(e)
           const touch = e.touches[0]
           setPlayheadTooltipTime(currentTime)
           if (timelineRef.current) {
@@ -2729,6 +2831,9 @@ const ScenesBar = React.memo(React.forwardRef(({
         {scenes.map((scene, index) => {
           const sceneLayers = getSceneLayers(scene.id)
           const isCurrentScene = currentSceneId === scene.id
+          // Compute scene-relative time for the motion steps highlighting
+          const sceneStartTime = cumulativeOffsets.scenes[index]?.startTime || 0
+          const sceneRelativeTime = Math.max(0, currentTime - sceneStartTime)
 
           // Calculate position for button at the center of gap between cards
           // Card wrapper: width = cardWidth (content), marginRight = 4px
@@ -2822,11 +2927,37 @@ const ScenesBar = React.memo(React.forwardRef(({
                   motionStepCount={sceneMotionFlows?.[scene.id]?.steps?.length || 0}
                   motionFlow={sceneMotionFlows?.[scene.id]}
                   activeStepId={isCurrentScene ? currentTimeStepId : null}
+                  editingStepId={isCurrentScene ? editingStepId : null}
                   onStepClick={(stepId) => {
                     if (!isCurrentScene) {
-                      handleSwitchScene(scene.id)
+                      // [ISSUE 2 FIX] Compute step position BEFORE switching scene.
+                      // handleSwitchScene seeks to scene start, then relys on EditorPage's
+                      // handleSelectStep to seek to the step position — but that handler
+                      // reads currentSceneMotionFlow from a stale React selector (React
+                      // hasn't re-rendered after the setCurrentScene dispatch yet).
+                      // By seeking to the exact step time directly, we bypass this stale
+                      // selector issue entirely.
+                      const flow = sceneMotionFlows?.[scene.id]
+                      const step = flow?.steps?.find(s => s.id === stepId)
+                      if (step && cumulativeOffsets.scenes[index]) {
+                        const sceneStartTime = cumulativeOffsets.scenes[index].startTime || 0
+                        const stepStartMs = step.startTime ?? 0
+                        const stepStartSeconds = sceneStartTime + stepStartMs / 1000
+                        // Stop playback first
+                        if (onMotionStop) onMotionStop()
+                        dispatch(clearLayerSelection())
+                        dispatch(setCurrentScene(scene.id))
+                        // Seek directly to the exact step position (not scene start)
+                        if (onSeek) onSeek(stepStartSeconds)
+                      } else {
+                        // Fallback: switch scene and rely on standard flow
+                        handleSwitchScene(scene.id)
+                        if (onStepClick) onStepClick(stepId)
+                      }
+                    } else {
+                      // Current scene: delegate to standard handler
+                      if (onStepClick) onStepClick(stepId)
                     }
-                    if (onStepClick) onStepClick(stepId)
                   }}
                   onStepContextMenu={(e, stepId) => {
                     if (!isCurrentScene) {
@@ -2836,6 +2967,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   }}
                   isMotionCaptureActive={isMotionCaptureActive && isCurrentScene}
                   onContextMenu={(e) => handleContextMenu(e, scene.id)}
+                  currentTime={sceneRelativeTime}
                 />
               </div>
             </React.Fragment>

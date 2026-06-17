@@ -50,6 +50,17 @@ function TextEditOverlay({
     if (editableDivRef.current && editableDivRef.current.contains(e.relatedTarget)) {
       return
     }
+    // [SYNC FIX] Force-sync the final text content to Redux BEFORE calling onFinishEditing.
+    // This ensures the Redux state is up-to-date when useCanvasLayers makes the PIXI object
+    // visible again (triggered by editingTextLayerId=null). Without this explicit flush,
+    // the last change from the user's typing session may not have been dispatched yet,
+    // causing the PIXI text layer to display stale/corrupted content after exiting edit mode.
+    if (editableDivRef.current) {
+      const finalText = editableDivRef.current.innerText || ''
+      if (typeof onTextChange === 'function') {
+        onTextChange(finalText)
+      }
+    }
     onFinishEditing()
   }
 

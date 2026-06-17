@@ -8,10 +8,10 @@ import * as PIXI from 'pixi.js'
 import { createTextLayer, createShapeLayer, createImageLayer, createVideoLayer, createFrameLayer, attachAssetToFrame, attachBackAssetToFrame, showFramePlaceholderFallback, redrawFramePlaceholder, drawShapePath, releaseVideoElement } from '../../engine/pixi/createLayer'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { LAYER_TYPES } from '../../../store/models'
-import { updateLayer, selectScenes, selectProjectTimelineInfo, selectLoadingMode, startPreparingLayer, finishPreparingLayer } from '../../../store/slices/projectSlice'
+import { updateLayer, selectScenes, selectProjectTimelineInfo, selectLoadingMode, startPreparingLayer, finishPreparingLayer, selectIsTimelineDragging, selectIsCanvasInteracting } from '../../../store/slices/projectSlice'
 import { updateLayerZOrder } from '../utils/layerUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
-import { BLUR_MAX, BLUR_QUALITY } from '../../engine/motion/blurConstants.js'
+import { BLUR_MAX, BLUR_QUALITY, computeBlurPhysicalStrength } from '../../engine/motion/blurConstants.js'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 import {
   applyTiltToObject,
@@ -302,6 +302,16 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     return
   }
 
+  const isEditingText = layerId === editingTextLayerId
+  displayObject._isEditingText = isEditingText
+  if (isEditingText) {
+    if (displayObject._tiltMesh) {
+      removeTiltFromObject(displayObject)
+    }
+    displayObject.visible = false
+    displayObject.alpha = layer.opacity !== undefined ? layer.opacity : 1
+  }
+
   // Skip visual overrides if the layer is currently animating a local preset preview
   if (displayObject._isPlayingPresetPreview) {
     return
@@ -346,7 +356,6 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // [FIX] GSAP Baseline Priority: Redux raw base state is only applied if the layer has no animation timeline at all,
   // or if the user is explicitly editing the base layer starting state. This prevents clobbering baseline set tweens.
   const shouldApplyBaseState = !hasMotion || isEditingBase
-
   // 4. Metadata & Muted State Synchronization (CRITICAL for Video playback)
   // This must happen even during playback to ensure scene switches and mute toggles are reactive.
   if (displayObject instanceof PIXI.Container && (displayObject._imageSprite || displayObject._videoSprite)) {
@@ -583,18 +592,21 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   }
 
   // 7. Blur Filter Synchronization
-  // Blur is stored as 0-100 in Redux.
+  // Blur is stored as 0-BLUR_MAX in Redux.
   // [ANIMATED-EDIT FIX] Sentinel-change bypass: allow update whenever the Redux
   // base blur value genuinely changes, regardless of timeline position.
+  // This mirrors the opacity/color sentinel pattern — prevents static blur
+  // sync from overwriting GSAP-driven animated blur after prepareEngine rebuilds.
   const reduxBlur = layer.blur ?? 0
-  const allowBlurUpdate = force || shouldApplyBaseState
+  const reduxBlurChanged = displayObject._lastReduxBlurApplied !== reduxBlur
+  const allowBlurUpdate = force || shouldApplyBaseState || reduxBlurChanged
 
   if (force) {
     syncBlurFilter(displayObject, reduxBlur)
   } else if (!isActuallyPlaying) {
     if (capturedLayer && capturedLayer.blur !== undefined) {
       syncBlurFilter(displayObject, capturedLayer.blur)
-    } else if (allowBlurUpdate) {
+    } else if (allowBlurUpdate && reduxBlurChanged) {
       syncBlurFilter(displayObject, reduxBlur)
     }
   }
@@ -616,9 +628,13 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   // Redux base tilt values genuinely change, regardless of timeline position.
   const reduxTiltKey = `${layer.tiltX ?? 0},${layer.tiltY ?? 0}`
   const canApplyTiltState = force || !!capturedLayer || (!isActuallyPlaying && shouldApplyBaseState)
+  // [PERF] Track whether applyTiltToObject was called — it internally syncs
+  // the mesh, so we skip the redundant syncTiltMesh() below.
+  let _tiltMeshAlreadySynced = false
   if (canApplyTiltState) {
-    if (hasTilt) {
+    if (hasTilt && !isEditingText) {
       applyTiltToObject(displayObject, tiltX, tiltY, tiltRenderer)
+      _tiltMeshAlreadySynced = true
     } else if (displayObject._tiltMesh) {
       removeTiltFromObject(displayObject)
       // Step 6 was skipped above because _tiltHidden was still true at that
@@ -633,12 +649,37 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   if (!capturedLayer && !isActuallyPlaying) {
     displayObject._lastReduxTiltApplied = reduxTiltKey
   }
-  if (displayObject._tiltMesh) {
+  // [Bug 3 Fix] When a resize just ended on this layer (within the last 150ms),
+  // skip the unconditional syncTiltMesh. handleResizeEnd() already properly
+  // synced the mesh corners and scheduled a forced RTT recapture via
+  // requestAnimationFrame. Calling syncTiltMesh here without the force flag
+  // would re-compute corners using potentially stale _tiltCaptureW/H (before
+  // the deferred RTT recapture finishes), causing the mesh to visually drift
+  // away from the selection box after releasing the mouse.
+  const RECENT_RESIZE_END = typeof displayObject._lastResizeEndTime === 'number'
+    && (performance.now() - displayObject._lastResizeEndTime) < 150
+
+  if (displayObject._tiltMesh && !_tiltMeshAlreadySynced) {
     // Mirror the owner's intended visibility onto the mesh so scene cuts,
     // editing-text-hide, and other visibility toggles propagate.
     displayObject._tiltOwnerVisible = displayObject.visible !== false
-    syncTiltMesh(displayObject, layer)
-  } else if (allowOpacityUpdate && !displayObject._tiltHidden && displayObject.alpha === 0 && (capturedLayer?.opacity ?? layer.opacity ?? 1) > 0) {
+    // [Bug 3 Fix v2] When a resize just ended and applyTransformInline has
+    // synced the PIXI state from Redux, force a full RTT recapture IMMEDIATELY.
+    // This is the most direct fix: instead of skipping syncTiltMesh and relying
+    // on a deferred RAF callback (which introduces a frame of visual drift),
+    // we force the recapture right here with the freshly-synced PIXI state.
+    if (RECENT_RESIZE_END) {
+      syncTiltMesh(displayObject, layer, { force: true })
+    } else {
+      syncTiltMesh(displayObject, layer)
+    }
+  } else if (displayObject._tiltMesh) {
+    // Mesh was already synced by applyTiltToObject above — only update
+    // visibility metadata, no redundant CPU syncTiltMesh call.
+    displayObject._tiltOwnerVisible = displayObject.visible !== false
+  }
+  
+  if (!displayObject._tiltMesh && allowOpacityUpdate && !displayObject._tiltHidden && displayObject.alpha === 0 && (capturedLayer?.opacity ?? layer.opacity ?? 1) > 0) {
     // Guard for the frame after tilt is removed: step 6 may have been gated by
     // _tiltHidden earlier, so the alpha=0 left over from the hide mechanism would
     // otherwise persist. Restore here once mesh is gone.
@@ -667,15 +708,15 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
  * Uses filter.strength (PIXI v8). Values clamped to 0–BLUR_MAX for low-end/mobile perf.
  */
 function syncBlurFilter(displayObject, blurValue) {
-  const clamped = Math.max(0, Math.min(Number(blurValue) || 0, BLUR_MAX))
+  const physicalStrength = computeBlurPhysicalStrength(blurValue, displayObject)
   let blurChanged = false
-  if (clamped > 0) {
+  if (physicalStrength > 0) {
     if (!displayObject._blurFilter) {
       displayObject._blurFilter = new PIXI.BlurFilter()
       displayObject._blurFilter.quality = BLUR_QUALITY
     }
-    if (displayObject._blurFilter.strength !== clamped) {
-      displayObject._blurFilter.strength = clamped
+    if (Math.abs(displayObject._blurFilter.strength - physicalStrength) > 0.05) {
+      displayObject._blurFilter.strength = physicalStrength
       blurChanged = true
     }
     if (!displayObject.filters || !displayObject.filters.includes(displayObject._blurFilter)) {
@@ -767,6 +808,8 @@ function _destroyPlaceholder(placeholder, stageContainer) {
 export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWidth = 1920, worldHeight = 1080, dragStateAPI = null, motionCaptureMode = null, editingTextLayerId = null, zoom = 100, editingStepId = null) {
   const dispatch = useDispatch()
   const loadingMode = useSelector(selectLoadingMode)
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
+  const isCanvasInteracting = useSelector(selectIsCanvasInteracting)
 
   // Trigger a full redraw of text layers when web fonts finish loading
   const [fontsLoadedVersion, setFontsLoadedVersion] = useState(0)
@@ -931,6 +974,9 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
     // causing GL_INVALID_OPERATION errors.
     if (pixiApp && (!pixiApp.renderer || pixiApp.destroyed)) return
 
+    // [TIMELINE DRAG PERF FIX] Skip all canvas layer updates during active timeline dragging/resizing or canvas interaction
+    if (isTimelineDragging || isCanvasInteracting) return
+
     const layerObjects = layerObjectsRef.current
     const createdLayers = createdLayersRef.current
     const engine = getGlobalMotionEngine()
@@ -1009,7 +1055,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         const layerData = layerRenderData[layerId]
         if (layerData) {
           adoptedObject.visible = layerData.visible
-          adoptedObject.eventMode = layerData.visible ? 'static' : 'none'
+          const targetMode = layerData.visible ? 'static' : 'none'
+          if (adoptedObject._tiltHidden) {
+            adoptedObject._originalEventMode = targetMode
+            adoptedObject.eventMode = 'none'
+          } else {
+            adoptedObject.eventMode = targetMode
+          }
         }
 
         applyTransformInline(adoptedObject, layer, dragStateAPI, layerId, motionCaptureMode, true)
@@ -1241,7 +1293,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           const layerData = layerRenderData[layerId]
           if (layerData) {
             pixiObject.visible = layerData.visible
-            pixiObject.eventMode = layerData.visible ? 'static' : 'none'
+            const targetMode = layerData.visible ? 'static' : 'none'
+            if (pixiObject._tiltHidden) {
+              pixiObject._originalEventMode = targetMode
+              pixiObject.eventMode = 'none'
+            } else {
+              pixiObject.eventMode = targetMode
+            }
           }
           return
         }
@@ -1274,7 +1332,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         const layerData = layerRenderData[layerId]
         if (layerData) {
           pixiObject.visible = layerData.visible
-          pixiObject.eventMode = layerData.visible ? 'static' : 'none'
+          const targetMode = layerData.visible ? 'static' : 'none'
+          if (pixiObject._tiltHidden) {
+            pixiObject._originalEventMode = targetMode
+            pixiObject.eventMode = 'none'
+          } else {
+            pixiObject.eventMode = targetMode
+          }
         }
       }
     })
@@ -1389,7 +1453,13 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
         // REINFORCE SCENE ISOLATION: Explicitly disable interaction for off-scene layers
         // This prevents invisible layers from other scenes from responding to events
         // [FIX] BACKGROUND PROTECTION: Never set background layers to 'static'
-        pixiObject.eventMode = (layerData.visible && layer.type !== LAYER_TYPES.BACKGROUND) ? 'static' : 'none'
+        const targetMode = (layerData.visible && layer.type !== LAYER_TYPES.BACKGROUND) ? 'static' : 'none'
+        if (pixiObject._tiltHidden) {
+          pixiObject._originalEventMode = targetMode
+          pixiObject.eventMode = 'none'
+        } else {
+          pixiObject.eventMode = targetMode
+        }
       }
 
       // [TILT — SCENE ISOLATION] Keep the perspective-mesh sibling's visibility
@@ -2078,7 +2148,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
     previousSelectedLayerIdsRef.current = new Set(selectedLayerIds)
 
-  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp])
+  }, [stageContainer, isReady, layerRenderData, layerOrder, currentScene?.id, selectedLayerIds, motionCaptureMode, editingTextLayerId, layers, dragStateAPI, editingStepId, worldWidth, worldHeight, fontsLoadedVersion, scenes, pixiApp, isTimelineDragging, isCanvasInteracting])
 
   // SYNC DYNAMIC RESOLUTION FOR TEXT SHARPNESS
   // This ensures text remains crisp even at 500% zoom by re-rasterizing it

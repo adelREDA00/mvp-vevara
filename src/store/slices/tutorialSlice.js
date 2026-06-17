@@ -2,7 +2,7 @@ import { createSlice } from '@reduxjs/toolkit';
 
 const initialState = {
   active: false,
-  step: 0, // 0: off, 1: Animate Button, 2: Element Interaction, 3: Save Step
+  step: 0, // 0: off, 1: Add Moment Button, 2: Element Interaction, 3: Save Step
   isGuest: false,
   hasRunSession: false,
   isInteractionLocked: false,
@@ -28,6 +28,8 @@ const tutorialSlice = createSlice({
       state.active = false;
       state.step = 0;
       state.hasRunSession = true;
+      state.isInteractionLocked = false;
+      state.autoPlayState = 'none';
     },
     setGuestMode: (state, action) => {
       state.isGuest = action.payload;

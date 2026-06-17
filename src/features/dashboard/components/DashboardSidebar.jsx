@@ -12,12 +12,12 @@ const SidebarItem = ({ icon: Icon, label, to, active }) => (
   <Link
     to={to}
     className={`flex flex-col items-center justify-center gap-1 w-full py-3.5 transition-all duration-200 group relative ${active
-        ? 'text-[var(--dashboard-accent)]'
+        ? 'text-slate-800 dark:text-slate-100 font-bold'
         : 'text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
       }`}
   >
-    {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-[var(--dashboard-accent)] rounded-r-full" />}
-    <Icon size={18} strokeWidth={active ? 2 : 1.5} className="transition-transform group-hover:scale-110" />
+    {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-slate-600 dark:bg-slate-300 rounded-r-full" />}
+    <Icon size={18} strokeWidth={active ? 2.5 : 1.5} className="transition-transform group-hover:scale-110" />
     <span className={`text-[9px] tracking-tight text-center ${active ? 'font-semibold' : 'font-medium opacity-80'}`}>{label}</span>
   </Link>
 );

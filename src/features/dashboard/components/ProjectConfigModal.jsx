@@ -61,7 +61,7 @@ const ProjectConfigModal = ({ isOpen, onClose, mode, onCreate }) => {
                                         key={category}
                                         onClick={() => setSelectedCategory(category)}
                                         className={`px-4 py-2.5 rounded-lg border text-[12.5px] font-semibold transition-all cursor-pointer ${isSelected
-                                            ? "border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/5 text-[var(--dashboard-accent)] font-bold"
+                                            ? "border-transparent bg-slate-700 dark:bg-slate-600 text-white font-bold"
                                             : "border-[var(--dashboard-border)] bg-transparent text-[var(--dashboard-text-muted)] hover:border-[var(--dashboard-text)]/40 hover:text-[var(--dashboard-text)]"
                                             }`}
                                     >
@@ -82,16 +82,16 @@ const ProjectConfigModal = ({ isOpen, onClose, mode, onCreate }) => {
                             <button
                                 onClick={() => setSelectedPlatform("9:16")}
                                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3.5 ${selectedPlatform === "9:16"
-                                    ? "border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/5"
+                                    ? "border-transparent bg-slate-700 dark:bg-slate-600 text-white"
                                     : "border-[var(--dashboard-border)] bg-transparent hover:border-[var(--dashboard-text)]/40 text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]"
                                     }`}
                             >
-                                <Smartphone size={16} className={selectedPlatform === "9:16" ? "text-[var(--dashboard-accent)]" : "opacity-60"} />
+                                <Smartphone size={16} className={selectedPlatform === "9:16" ? "text-white" : "opacity-60"} />
                                 <div className="flex flex-col">
-                                    <span className={`text-[12.5px] font-bold ${selectedPlatform === "9:16" ? "text-[var(--dashboard-text)]" : "text-inherit"}`}>
+                                    <span className={`text-[12.5px] font-bold ${selectedPlatform === "9:16" ? "text-white" : "text-inherit"}`}>
                                         TikTok / Instagram
                                     </span>
-                                    <span className="text-[9.5px] opacity-60">Vertical — 9:16</span>
+                                    <span className={`text-[9.5px] ${selectedPlatform === "9:16" ? "text-white/80" : "opacity-60"}`}>Vertical — 9:16</span>
                                 </div>
                             </button>
 
@@ -99,16 +99,16 @@ const ProjectConfigModal = ({ isOpen, onClose, mode, onCreate }) => {
                             <button
                                 onClick={() => setSelectedPlatform("16:9")}
                                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3.5 ${selectedPlatform === "16:9"
-                                    ? "border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/5"
+                                    ? "border-transparent bg-slate-700 dark:bg-slate-600 text-white"
                                     : "border-[var(--dashboard-border)] bg-transparent hover:border-[var(--dashboard-text)]/40 text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]"
                                     }`}
                             >
-                                <Monitor size={16} className={selectedPlatform === "16:9" ? "text-[var(--dashboard-accent)]" : "opacity-60"} />
+                                <Monitor size={16} className={selectedPlatform === "16:9" ? "text-white" : "opacity-60"} />
                                 <div className="flex flex-col">
-                                    <span className={`text-[12.5px] font-bold ${selectedPlatform === "16:9" ? "text-[var(--dashboard-text)]" : "text-inherit"}`}>
+                                    <span className={`text-[12.5px] font-bold ${selectedPlatform === "16:9" ? "text-white" : "text-inherit"}`}>
                                         LinkedIn / Twitter
                                     </span>
-                                    <span className="text-[9.5px] opacity-60">Horizontal — 16:9</span>
+                                    <span className={`text-[9.5px] ${selectedPlatform === "16:9" ? "text-white/80" : "opacity-60"}`}>Horizontal — 16:9</span>
                                 </div>
                             </button>
                         </div>
@@ -125,7 +125,7 @@ const ProjectConfigModal = ({ isOpen, onClose, mode, onCreate }) => {
                     </button>
                     <button
                         onClick={handleCreate}
-                        className="px-5 py-2 bg-[var(--dashboard-accent)] hover:opacity-90 text-white text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer"
+                        className="px-5 py-2 bg-[#7c4af0] hover:bg-[#6a3fd4] text-white text-[12px] font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer"
                     >
                         <span>Create project</span>
                         <ArrowRight size={13} strokeWidth={2.5} />

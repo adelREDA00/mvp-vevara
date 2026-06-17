@@ -1,5 +1,6 @@
 import * as PIXI from 'pixi.js'
 import { LAYER_TYPES } from '../../../store/models'
+import { computePerspectiveCorners } from '../../engine/pixi/perspectiveTilt'
 
 const DEFAULT_DIMENSION = 100
 
@@ -182,23 +183,42 @@ export function getLayerWorldBounds(layer, layerObject, motionCaptureMode = null
   const scaleY = capturedLayer?.scaleY ?? (displayObject?.scale?.y !== undefined ? displayObject.scale.y : (layer.scaleY !== undefined ? layer.scaleY : 1))
   const rotation = capturedLayer?.rotation ?? (displayObject?.angle !== undefined ? displayObject.angle : (layer.rotation || 0))
 
-  // Calculate actual bounds (accounting for anchor)
-  const scaledWidth = width * scaleX
-  const scaledHeight = height * scaleY
-  const anchorOffsetX = -scaledWidth * anchorX
-  const anchorOffsetY = -scaledHeight * anchorY
+  const tiltX = capturedLayer && capturedLayer.tiltX !== undefined
+    ? capturedLayer.tiltX
+    : (typeof layerObject?._tiltXDeg === 'number' ? layerObject._tiltXDeg : (layer?.tiltX ?? 0))
+  const tiltY = capturedLayer && capturedLayer.tiltY !== undefined
+    ? capturedLayer.tiltY
+    : (typeof layerObject?._tiltYDeg === 'number' ? layerObject._tiltYDeg : (layer?.tiltY ?? 0))
+  const isTilted = Math.abs(tiltX) >= 0.01 || Math.abs(tiltY) >= 0.01
 
   // Get layer position (center position)
   const x = capturedLayer?.currentPosition?.x ?? (displayObject?.x !== undefined ? displayObject.x : (layer.x ?? 0))
   const y = capturedLayer?.currentPosition?.y ?? (displayObject?.y !== undefined ? displayObject.y : (layer.y ?? 0))
 
-  // Calculate local corners before rotation
-  const localCorners = [
-    { x: anchorOffsetX, y: anchorOffsetY }, // top-left
-    { x: anchorOffsetX + scaledWidth, y: anchorOffsetY }, // top-right
-    { x: anchorOffsetX + scaledWidth, y: anchorOffsetY + scaledHeight }, // bottom-right
-    { x: anchorOffsetX, y: anchorOffsetY + scaledHeight }, // bottom-left
-  ]
+  // Calculate local corners
+  let localCorners
+  if (isTilted) {
+    const localBoundsX = -width * anchorX
+    const localBoundsY = -height * anchorY
+    const corners = computePerspectiveCorners(width, height, tiltX, tiltY, localBoundsX, localBoundsY)
+    localCorners = [
+      { x: corners[0] * scaleX, y: corners[1] * scaleY }, // top-left
+      { x: corners[2] * scaleX, y: corners[3] * scaleY }, // top-right
+      { x: corners[4] * scaleX, y: corners[5] * scaleY }, // bottom-right
+      { x: corners[6] * scaleX, y: corners[7] * scaleY }, // bottom-left
+    ]
+  } else {
+    const scaledWidth = width * scaleX
+    const scaledHeight = height * scaleY
+    const anchorOffsetX = -scaledWidth * anchorX
+    const anchorOffsetY = -scaledHeight * anchorY
+    localCorners = [
+      { x: anchorOffsetX, y: anchorOffsetY }, // top-left
+      { x: anchorOffsetX + scaledWidth, y: anchorOffsetY }, // top-right
+      { x: anchorOffsetX + scaledWidth, y: anchorOffsetY + scaledHeight }, // bottom-right
+      { x: anchorOffsetX, y: anchorOffsetY + scaledHeight }, // bottom-left
+    ]
+  }
 
   // Rotate corners around layer center
   const rotationRad = (rotation * Math.PI) / 180

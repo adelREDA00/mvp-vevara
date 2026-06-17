@@ -23,14 +23,14 @@ import { ThemeContext } from '../../../app/context/ThemeContext'
 const TUTORIAL_VIDEO_URL = "/first.mp4"
 
 const CATEGORY_STYLES = {
-    'All': { icon: Layers, color: '#8b5cf6' },
+    'All': { icon: Layers, color: '#475569' },
     'Ads & Marketing': { icon: Presentation, color: '#10b981' },
     'Product Demos': { icon: Play, color: '#f59e0b' },
-    'Animated Elements': { icon: Wand2, color: '#7c4af0' },
+    'Animated Elements': { icon: Wand2, color: '#64748b' },
 }
 
 const CategoryCircle = ({ label, active, onClick, isStuck }) => {
-    const style = CATEGORY_STYLES[label] || { icon: Layout, color: '#7c4af0' }
+    const style = CATEGORY_STYLES[label] || { icon: Layout, color: '#475569' }
     const Icon = style.icon
 
     return (
@@ -91,8 +91,6 @@ const DashboardPage = () => {
     const [isDeleting, setIsDeleting] = useState(false)
     const [bottomFeedback, setBottomFeedback] = useState('')
     const [feedbackStatus, setFeedbackStatus] = useState('idle') // idle, loading, success, error
-    const [isUpdatesModalOpen, setIsUpdatesModalOpen] = useState(false)
-    const [activeUpdateTab, setActiveUpdateTab] = useState('updates')
     const [isCreateScratchModalOpen, setIsCreateScratchModalOpen] = useState(false)
     const [isProjectConfigModalOpen, setIsProjectConfigModalOpen] = useState(false)
     const [configModalMode, setConfigModalMode] = useState('app')
@@ -358,7 +356,7 @@ const DashboardPage = () => {
     const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
     return (
-        <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[#7c4af0]/20 flex overflow-x-hidden">
+        <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-slate-500/10 flex overflow-x-hidden">
             {/* Sidebar */}
             <DashboardSidebar
                 isOpen={isSidebarOpen}
@@ -372,6 +370,14 @@ const DashboardPage = () => {
                 className="flex-1 lg:ml-[var(--sidebar-width)] h-screen overflow-y-auto transition-all custom-scrollbar pb-2 md:pb-3 pr-2 md:pr-3 pt-1 md:pt-2"
             >
                 <div className="min-h-full bg-[var(--dashboard-bg)] rounded-[16px] md:rounded-[24px] border border-[var(--dashboard-border)] shadow-md dashboard-page-container flex flex-col relative">
+                    {/* Updates Banner */}
+                    <div className="w-full bg-slate-900 dark:bg-slate-950 py-2.5 px-4 md:px-10 border-b border-slate-800 dark:border-slate-900 flex items-center justify-center z-20 rounded-t-[15px] md:rounded-t-[23px] text-white">
+                        <div className="text-[11px] font-extrabold text-center tracking-wider uppercase flex items-center gap-2 justify-center">
+                            <span className="bg-emerald-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide">Update</span>
+                            <span className="opacity-90">new 2d tilt enging now live (2d persepcive titl is now imporved )</span>
+                        </div>
+                    </div>
+
                     {/* Brand Gradient Background - Softer Start */}
                     <div className="absolute inset-x-0 top-0 h-[500px] bg-gradient-to-b from-[var(--dashboard-accent)]/20 via-[var(--dashboard-accent)]/5 to-transparent pointer-events-none z-0 rounded-t-[16px] md:rounded-t-[24px]" />
 
@@ -396,14 +402,6 @@ const DashboardPage = () => {
 
                             <div className="flex items-center gap-4">
                                 <button
-                                    onClick={() => setIsUpdatesModalOpen(true)}
-                                    className="px-3 py-1.5 flex items-center gap-1.5 rounded-full text-[11px] font-semibold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-card-hover)] transition-all cursor-pointer"
-                                >
-                                    <Sparkles size={12} className="text-violet-500 animate-pulse" />
-                                    <span>Product Updates</span>
-                                </button>
-
-                                <button
                                     onClick={() => {
                                         const newTheme = theme === 'light' ? 'dark' : 'light'
                                         setTheme(newTheme)
@@ -421,7 +419,7 @@ const DashboardPage = () => {
                                     <DropdownMenu
                                         trigger={
                                             <button className="flex items-center gap-2 outline-none group">
-                                                <div className="w-8 h-8 rounded-full bg-[var(--dashboard-accent)] flex items-center justify-center text-white font-bold text-[11px] shadow-md group-hover:scale-105 transition-transform">
+                                                <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold text-[11px] shadow-md group-hover:scale-105 transition-transform">
                                                     {user?.email?.substring(0, 2).toUpperCase()}
                                                 </div>
                                                 <ChevronDown size={12} className="text-[var(--dashboard-text-muted)] mt-0.5" />
@@ -479,7 +477,7 @@ const DashboardPage = () => {
                                         setConfigModalMode('app')
                                         setIsProjectConfigModalOpen(true)
                                     }}
-                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#9F13FF] via-[#D11BE5] to-[#FF2A93] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#D11BE5]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
+                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#7c4af0] via-[#6a3fd4] to-[#5127be] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#7c4af0]/25 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
                                 >
                                     {/* Left text label */}
                                     <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
@@ -561,9 +559,9 @@ const DashboardPage = () => {
                                         {/* Add New Project Card - Always visible */}
                                         <div
                                             onClick={() => setIsCreateScratchModalOpen(true)}
-                                            className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-[var(--dashboard-accent)]/30 hover:bg-[var(--dashboard-accent)]/5 transition-all group"
+                                            className="aspect-video w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-slate-500/30 hover:bg-slate-550/5 transition-all group"
                                         >
-                                            <div className="w-10 h-10 bg-[var(--dashboard-accent)]/10 rounded-full flex items-center justify-center text-[var(--dashboard-accent)] group-hover:scale-110 transition-transform">
+                                            <div className="w-10 h-10 bg-slate-500/10 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 group-hover:scale-110 transition-transform">
                                                 <Plus size={20} strokeWidth={2} />
                                             </div>
                                             <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Create new</p>
@@ -576,7 +574,7 @@ const DashboardPage = () => {
                                                 className="group cursor-pointer"
                                                 onClick={() => window.location.href = `/project/${project._id}`}
                                             >
-                                                <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/40 transition-all duration-300 shadow-sm">
+                                                <div className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 group-hover:border-slate-500/40 transition-all duration-300 shadow-sm">
                                                     {project.thumbnail ? (
                                                         <img
                                                             src={project.thumbnail}
@@ -603,7 +601,7 @@ const DashboardPage = () => {
                                                     </button>
                                                 </div>
                                                 <div className="px-0.5">
-                                                    <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
+                                                    <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-slate-700 dark:group-hover:text-slate-350 transition-colors truncate">{project.name}</h3>
                                                     <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
                                                 </div>
                                             </div>
@@ -706,13 +704,56 @@ const DashboardPage = () => {
                         */}
 
 
+                        {/* Editor Updates Section */}
+                        <section id="roadmap" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
+                            <div className="w-full max-w-2xl">
+                                <h2 className="text-[18px] font-bold tracking-tight text-[var(--dashboard-text)] mb-8">Editor Updates</h2>
+                                
+                                <div className="relative pl-6 border-l-2 border-[var(--dashboard-border)] ml-3 space-y-6 py-2">
+                                    {[
+                                        { label: "Transition between pages", done: true },
+                                        { label: "Preset animation for text & elements", done: true },
+                                        { label: "Templates system", done: false },
+                                        { label: "Drag & drop ready motion videos for app walkthrough and launches", done: false },
+                                        { label: "Color gradient support", done: false },
+                                        { label: "Audio support", done: false },
+                                        { label: "Device mockups", done: false },
+                                        { label: "Presentation mode", done: false }
+                                    ].map((item, idx) => (
+                                        <div key={idx} className="relative flex items-start gap-3.5">
+                                            {/* Dot on line */}
+                                            <div className={`absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                                item.done 
+                                                    ? 'bg-emerald-500 border-[var(--dashboard-bg)] text-white shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                                                    : 'bg-zinc-700 border-[var(--dashboard-bg)] text-zinc-400 dark:bg-zinc-800'
+                                            }`}>
+                                                {item.done && (
+                                                    <svg className="w-1.5 h-1.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <p className={`text-[13px] font-semibold leading-tight ${item.done ? 'text-[var(--dashboard-text)]' : 'text-[var(--dashboard-text-muted)] opacity-70'}`}>
+                                                    {item.label}
+                                                </p>
+                                                <span className={`text-[9px] font-extrabold uppercase tracking-wider mt-0.5 ${item.done ? 'text-emerald-500' : 'text-slate-500'}`}>
+                                                    {item.done ? 'Released' : 'Coming soon'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
+
                         {/* AI Video Idea Generation Section */}
                         <section id="ai-idea-generator" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
                             <div className="w-full">
                                 <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] p-6 space-y-5">
                                     <div className="flex flex-col gap-1">
                                         <h3 className="text-[14px] font-bold text-[var(--dashboard-text)]">
-                                            What kind of video are you trying to create?
+                                            What would you like to see on the editor?
                                         </h3>
                                         <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">
                                             Get custom templates for your business, just describe what you want
@@ -723,9 +764,9 @@ const DashboardPage = () => {
                                         onSubmit={handleFeedbackSubmit}
                                         className="relative group/input space-y-4"
                                     >
-                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
+                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-slate-500 transition-all">
                                             {feedbackStatus === 'success' ? (
-                                                <div className="flex items-center justify-center w-full py-1 text-[var(--dashboard-accent)] animate-in fade-in zoom-in duration-300">
+                                                <div className="flex items-center justify-center w-full py-1 text-slate-600 dark:text-slate-400 animate-in fade-in zoom-in duration-300">
                                                     <span className="font-bold text-[13px]">Got it 🙌 This will be available in the next update</span>
                                                 </div>
                                             ) : (
@@ -735,13 +776,13 @@ const DashboardPage = () => {
                                                         value={bottomFeedback}
                                                         onChange={(e) => setBottomFeedback(e.target.value)}
                                                         disabled={feedbackStatus === 'loading'}
-                                                        placeholder="What kind of video are you trying to create?"
+                                                        placeholder="I would like you to add gradient color option"
                                                         className="w-full bg-transparent border-none outline-none text-[13px] font-medium text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-text-muted)]/40"
                                                     />
                                                     <button
                                                         type="submit"
                                                         disabled={isSubmitDisabled}
-                                                        className="bg-[var(--dashboard-accent)] text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        className="bg-slate-700 dark:bg-slate-600 text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
                                                         {feedbackStatus === 'loading' ? '...' : 'Submit'}
                                                     </button>
@@ -761,8 +802,8 @@ const DashboardPage = () => {
                                                             type="button"
                                                             onClick={() => handleAddExample(example)}
                                                             className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer ${isLight
-                                                                ? 'bg-violet-50 hover:bg-violet-100/80 border-violet-100 text-violet-700 shadow-sm'
-                                                                : 'bg-[#18122B] hover:bg-[#21173d] border-[#3D2C62]/30 text-violet-200 shadow-md'
+                                                                ? 'bg-gray-100 hover:bg-gray-200/80 border-gray-200 text-gray-700 shadow-sm'
+                                                                : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 shadow-md'
                                                                 }`}
                                                         >
                                                             {example}
@@ -790,13 +831,7 @@ const DashboardPage = () => {
                     {/* Footer */}
                     <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
                         <div className="flex items-center gap-6">
-                            <button
-                                onClick={() => setIsUpdatesModalOpen(true)}
-                                className="hover:text-[var(--dashboard-text)] transition-colors cursor-pointer flex items-center gap-1.5 opacity-80 hover:opacity-100"
-                            >
-                                <Sparkles size={12} className="text-violet-500" />
-                                <span>Product Updates</span>
-                            </button>
+                            <span>© {new Date().getFullYear()} Vevara Motion</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
@@ -807,91 +842,9 @@ const DashboardPage = () => {
             </div>
 
             {/* Modal Components */}
-            <Modal
-                isOpen={isUpdatesModalOpen}
-                onClose={() => setIsUpdatesModalOpen(false)}
-                maxWidth="max-w-md"
-            >
-                <div className="p-1 text-left select-none">
-                    {/* Tab Switcher */}
-                    <div className="flex border-b border-[var(--dashboard-border)] mb-4">
-                        <button
-                            onClick={() => setActiveUpdateTab('updates')}
-                            className={`flex-1 py-2 text-center text-[12px] font-bold border-b-2 transition-all ${
-                                activeUpdateTab === 'updates'
-                                    ? 'border-[var(--dashboard-accent)] text-[var(--dashboard-text)]'
-                                    : 'border-transparent text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
-                            }`}
-                        >
-                            Updates
-                        </button>
-                        <button
-                            onClick={() => setActiveUpdateTab('upcoming')}
-                            className={`flex-1 py-2 text-center text-[12px] font-bold border-b-2 transition-all ${
-                                activeUpdateTab === 'upcoming'
-                                    ? 'border-[var(--dashboard-accent)] text-[var(--dashboard-text)]'
-                                    : 'border-transparent text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)]'
-                            }`}
-                        >
-                            Upcoming
-                        </button>
-                    </div>
-
-                    {/* Content */}
-                    <div className="min-h-[180px] py-1">
-                        {activeUpdateTab === 'updates' ? (
-                            <ul className="space-y-3">
-                                <li className="flex items-start gap-2.5 text-[12.5px] font-semibold text-[var(--dashboard-text)]">
-                                    <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-500 mt-0.5 shrink-0">
-                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </span>
-                                    <span>transition between pages</span>
-                                </li>
-                                <li className="flex items-start gap-2.5 text-[12.5px] font-semibold text-[var(--dashboard-text)]">
-                                    <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-500 mt-0.5 shrink-0">
-                                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </span>
-                                    <span>preset animation for text and all elements</span>
-                                </li>
-                            </ul>
-                        ) : (
-                            <div className="relative pl-4 border-l-2 border-[var(--dashboard-border)] ml-2 space-y-5 py-1">
-                                {[
-                                    "templates system",
-                                    "drag & drop ready motion videos for app walkthrough and launches",
-                                    "color gradient support",
-                                    "audio support",
-                                    "device mockups",
-                                    "presentation mode"
-                                ].map((item, idx) => (
-                                    <div key={idx} className="relative group">
-                                        {/* Dot on line */}
-                                        <div className="absolute -left-[21px] top-1.5 w-2 h-2 rounded-full bg-[var(--dashboard-accent)] border border-[var(--dashboard-bg)]" />
-                                        <p className="text-[12.5px] font-semibold text-[var(--dashboard-text)]">{item}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mt-5 pt-3 border-t border-[var(--dashboard-border)] flex justify-end">
-                        <button
-                            onClick={() => setIsUpdatesModalOpen(false)}
-                            className="px-3.5 py-1.5 bg-[var(--dashboard-accent)] text-white rounded-lg text-[11px] font-bold shadow-md hover:opacity-90 transition-all cursor-pointer"
-                        >
-                            Close
-                        </button>
-                    </div>
-                </div>
-            </Modal>
-
             <Modal isOpen={isDuplicating} onClose={() => { }} hideCloseButton={true} maxWidth="max-w-sm">
                 <div className="flex flex-col items-center justify-center py-8 space-y-6">
-                    <div className="w-10 h-10 border-4 border-[var(--dashboard-accent)]/10 border-t-[var(--dashboard-accent)] rounded-full animate-spin" />
+                    <div className="w-10 h-10 border-4 border-slate-500/10 border-t-slate-500 rounded-full animate-spin" />
                     <h3 className="text-[16px] font-semibold text-[var(--dashboard-text)] uppercase tracking-tight">Creating Design...</h3>
                 </div>
             </Modal>

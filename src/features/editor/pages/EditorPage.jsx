@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
+import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams, useLocation } from 'react-router-dom'
@@ -16,6 +17,7 @@ import { exportVideo, initFFmpeg } from '../utils/videoExport'
 import { Loader2, ChevronDown, User, ZoomIn, ZoomOut } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
+import MobileMotionBar from '../components/MobileMotionBar'
 import TopToolbar from '../components/TopToolbar'
 import LeftSidebar, { SIDEBAR_ITEMS } from '../components/LeftSidebar'
 import Modal from '../components/Modal'
@@ -44,7 +46,7 @@ import { useEditorPlayback } from '../hooks/useEditorPlayback'
 import { useEditorLayout } from '../hooks/useEditorLayout'
 import { useWorldDimensions } from '../hooks/useWorldDimensions'
 import { applyTransformInline } from '../hooks/useCanvasLayers'
-import { resetGlobalMotionEngine } from '../../engine/motion'
+import { resetGlobalMotionEngine, getGlobalMotionEngine } from '../../engine/motion'
 import { PRESET_REGISTRY } from '../../engine/motion/presets.js'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
@@ -91,6 +93,7 @@ function EditorPage() {
   const [isNavigating, setIsNavigating] = useState(false)
   const editingStepActionCount = useSelector(selectEditingStepActionCount)
   const aspectRatio = useSelector(selectAspectRatio)
+
   const loadingMode = useSelector(selectLoadingMode)
   const [showGrid, setShowGrid] = useState(false)
   const [showSafeArea, setShowSafeArea] = useState(false)
@@ -130,7 +133,17 @@ function EditorPage() {
   }, [isAuthenticated])
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const isMotionCaptureActive = !!motionCaptureMode?.isActive
+  const [captureBaselineActionCount, setCaptureBaselineActionCount] = useState(0)
+  // [PRESET CHANGE FIX] Baseline snapshot of layerPresets IDs so changing from one
+  // preset to a different preset (same count, different identity) is detected as a change.
+  const [captureBaselinePresetSignature, setCaptureBaselinePresetSignature] = useState('')
   const [motionControls, setMotionControls] = useState(null)
+  // captureVersion bumps on every onPositionUpdate, so this re-evaluates on each interaction
+  const hasLiveCanvasChanges = motionCaptureMode?.trackedLayers
+    ? Array.from(motionCaptureMode.trackedLayers.values()).some(
+        l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
+      )
+    : false
   const hasInitializedScene = useRef(false)
   const stageRef = useRef(null)
   const viewportDataRef = useRef(null)
@@ -156,7 +169,16 @@ function EditorPage() {
     handleClosePanel,
   } = useEditorSidebar()
 
-  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(false)
+  const [isMotionPanelOpen, setIsMotionPanelOpen] = useState(true) // always open on desktop
+  const [isMotionPanelCollapsed, setIsMotionPanelCollapsed] = useState(false)
+  const [isMobileMotionMinimized, setIsMobileMotionMinimized] = useState(false)
+
+  // Force panel expanded whenever motion capture is active — panel must always be visible in motion mode
+  useEffect(() => {
+    if (isMotionCaptureActive && isMotionPanelCollapsed) {
+      setIsMotionPanelCollapsed(false)
+    }
+  }, [isMotionCaptureActive])
   const [requestOpenControl, setRequestOpenControl] = useState(null)
 
   // [PREVIEW MODE] Minimal, distraction-free playback view. Hides all editor
@@ -295,6 +317,11 @@ function EditorPage() {
   // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
   const [minTimeElapsed, setMinTimeElapsed] = useState(false)
   const minTimeRef = useRef(null)
+
+  const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
+
+  const isEditorLoading = projectStatus !== 'succeeded' || isPreloading || !isStageReady || !minTimeElapsed
+
   const hasTriggeredInitialAutoPlay = useRef(false)
   useEffect(() => {
     minTimeRef.current = setTimeout(() => setMinTimeElapsed(true), 300)
@@ -430,8 +457,6 @@ function EditorPage() {
       </div>
     </div>
   )
-
-  const { isPreloading, progress } = useAssetPreloader(layers, isPixiReady)
 
   // [NEW] Transition to local loading mode once initially ready
   useEffect(() => {
@@ -610,6 +635,8 @@ function EditorPage() {
     error: null
   })
   const [gifExportModalOpen, setGifExportModalOpen] = useState(false)
+  // [TOAST] Minimal toast notification for save/undo feedback
+  const [toast, setToast] = useState(null)
 
   // PERFORMANCE: Optimize rendering and animations based on tab visibility
   usePerformanceOptimization(pixiApp, motionControls, exportState.isActive)
@@ -827,8 +854,28 @@ function EditorPage() {
   }, [])
 
   const handleFinishEditing = useCallback(() => {
+    if (editingTextLayerId) {
+      const engine = getGlobalMotionEngine()
+      const pixiObject = engine?.registeredObjects?.get(editingTextLayerId)
+      if (pixiObject) {
+        pixiObject._isEditingText = false
+        // [SYNC FIX] Force an immediate text content re-sync from Redux onto the
+        // PIXI object BEFORE setting editingTextLayerId to null. This ensures the
+        // PIXI text layer has the correct content and texture BEFORE useCanvasLayers
+        // makes the layer visible again. Without this, there's a timing gap where
+        // the layer becomes visible but still shows stale text from before editing
+        // started, causing a flash of wrong content + broken wrapping.
+        const layer = layers[editingTextLayerId]
+        if (layer && layer.data?.content !== undefined && pixiObject.text !== layer.data.content) {
+          pixiObject.text = layer.data.content || ''
+          if (pixiObject.updateText) {
+            pixiObject.updateText(true)
+          }
+        }
+      }
+    }
     setEditingTextLayerId(null)
-  }, [])
+  }, [editingTextLayerId, layers])
 
   // Finish text editing when zoom changes
   useEffect(() => {
@@ -1059,8 +1106,28 @@ function EditorPage() {
     }
   }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
 
+  // [ONBOARDING] Keep moments panel visible during autoplay — the user should
+  // immediately understand that moments are part of the animation workflow.
+  // Collapse is no longer automatic; the panel remains in its normal state.
+
   // Handle playback completion for auto-play phases
   const prevIsPlaying = useRef(isPlaying);
+  const prevTutorialActiveRef = useRef(tutorialActive);
+
+  // [ONBOARDING] Cleanup when tutorial ends — ensure no onboarding-specific
+  // restrictions or hidden UI persist after the flow completes.
+  useEffect(() => {
+    if (!tutorialActive && prevTutorialActiveRef.current) {
+      // Tutorial just ended (active was true, now false)
+      dispatch(setInteractionLock(false))
+      // Cancel any lingering motion capture that was part of the tutorial
+      if (isMotionCaptureActive) {
+        handleCancelMotion()
+      }
+    }
+    prevTutorialActiveRef.current = tutorialActive
+  }, [tutorialActive])
+
   useEffect(() => {
     if (prevIsPlaying.current && !isPlaying) {
       if (autoPlayState === 'initial' && !isStarterCopy) {
@@ -1263,6 +1330,26 @@ function EditorPage() {
   // -------------------------------------------------------------------
   // State for tracking the current editing step (created via CanvasControls)
   const [editingStepId, setEditingStepId] = useState(null)
+  // True only when editing an EXISTING moment (not when creating a brand-new one)
+  const [isEditingExistingStep, setIsEditingExistingStep] = useState(false)
+
+  // Label shown in canvas controls during motion editing: "Editing Moment N"
+  // Only shown when editing an existing moment — hidden during new-moment creation
+  const editingMomentLabel = useMemo(() => {
+    if (!isMotionCaptureActive || !editingStepId || !isEditingExistingStep) return ''
+    const idx = currentSceneMotionFlow?.steps?.findIndex(s => s.id === editingStepId)
+    return idx >= 0 ? `Editing Moment ${idx + 1}` : 'Editing Moment'
+  }, [isMotionCaptureActive, editingStepId, isEditingExistingStep, currentSceneMotionFlow])
+
+  // [PRESET CHANGE FIX] Compare current preset identities against the baseline snapshot.
+  // This detects when a user changes a preset from one ID to another (count unchanged).
+  // Must be defined after editingStepId is declared.
+  const currentPresetSignature = currentSceneMotionFlow?.steps?.find(s => s.id === editingStepId)?.layerPresets
+    ? JSON.stringify(currentSceneMotionFlow.steps.find(s => s.id === editingStepId).layerPresets)
+    : ''
+  const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
+  // [PRESET CHANGE FIX] isDoneEnabled also checks hasPresetChanges so changing a preset (same count, different ID) activates the button.
+  const isDoneEnabled = editingStepActionCount > captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges
   const isNewStepRef = useRef(false) // Track if the current session is for a NEW step vs editing an EXISTING one
   const motionCaptureRef = useRef(null) // Ref to hold capture data for apply/cancel
   const savedStepTimingsRef = useRef(null) // Snapshot of step timings before adding a new step (for cancel restoration)
@@ -1327,7 +1414,12 @@ function EditorPage() {
 
 
 
-  // Determine which step (if any) the playhead is currently over
+  // Determine which step (if any) the playhead is currently over.
+  // Uses the "preceding step region" rule (the gap AFTER a step belongs to that step):
+  // - Playhead within Step N's [start, start+duration] → Step N is active
+  // - Playhead in gap between Step N and Step N+1 → Step N is active (the gap belongs to Step N)
+  // - Playhead before the first step → null (no step active yet)
+  // - Playhead after the last step → the last step is active
   const playheadStepId = useMemo(() => {
     if (!currentSceneId || !currentSceneMotionFlow?.steps?.length) return null
     if (!currentSceneTimelineInfo) return null
@@ -1335,13 +1427,46 @@ function EditorPage() {
     const timeInSceneMs = (playheadTime - currentSceneTimelineInfo.startTime) * 1000
     if (timeInSceneMs < 0) return null
 
-    const step = currentSceneMotionFlow.steps.find(s => {
+    const steps = currentSceneMotionFlow.steps
+    // Sort steps by startTime to ensure correct ordering
+    const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+
+    // 1. Check if playhead is exactly within any step's range
+    for (let i = 0; i < sortedSteps.length; i++) {
+      const s = sortedSteps[i]
       const start = s.startTime || 0
       const duration = s.duration || 0
-      return timeInSceneMs >= start && timeInSceneMs <= start + duration
-    })
+      if (timeInSceneMs >= start && timeInSceneMs <= start + duration) {
+        return s.id
+      }
+    }
 
-    return step?.id || null
+    // 2. Playhead is in a gap between steps — the PREVIOUS step is active
+    //    (the region after a step belongs to that step)
+    for (let i = sortedSteps.length - 1; i >= 0; i--) {
+      const s = sortedSteps[i]
+      const stepEnd = (s.startTime || 0) + (s.duration || 0)
+      if (timeInSceneMs > stepEnd) {
+        // We're past this step but before the next one
+        // Check if there's a next step
+        const nextStep = sortedSteps[i + 1]
+        if (nextStep) {
+          const nextStart = nextStep.startTime || 0
+          if (timeInSceneMs < nextStart) {
+            // Gap between this step and next — this step claims it
+            return s.id
+          }
+        }
+        // No next step, or timeInSceneMs >= nextStart (should have been caught by check 1)
+        return s.id
+      }
+    }
+
+    // 3. Playhead is before the first step — no step is active yet
+    const firstStep = sortedSteps[0]
+    if (firstStep && timeInSceneMs < (firstStep.startTime || 0)) return null
+
+    return null
   }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime])
 
   // Virtual layer for UI controls during motion capture
@@ -1433,6 +1558,7 @@ function EditorPage() {
         // 2. Reset local state
         setMotionCaptureMode({ isActive: false, trackedLayers: new Map(), onPositionUpdate: null, layerActions: {} })
         setEditingStepId(null)
+        setIsEditingExistingStep(false)
         motionCaptureRef.current = null
       }
     }
@@ -1457,9 +1583,7 @@ function EditorPage() {
     dispatch(clearLayerSelection())
 
     // [NEW] Auto-open motion panel on desktop and mobile when adding a step
-    if (isAuthenticated) {
-      setIsMotionPanelOpen(true)
-    }
+    setIsMotionPanelOpen(true)
 
     // 1. Ensure motion flow exists
     dispatch(initializeSceneMotionFlow({ sceneId: currentSceneId }))
@@ -1494,7 +1618,9 @@ function EditorPage() {
 
     // 4. Store the step ID for tracking
     setEditingStepId(newStepId)
+    setIsEditingExistingStep(false)
     isNewStepRef.current = true // Mark as NEWLY created step
+    setCaptureBaselineActionCount(0)
 
     // 5. Build initial tracked layers map for capture mode
     const initialTrackedLayers = new Map()
@@ -1812,6 +1938,13 @@ function EditorPage() {
           })
         }
       }
+      // [ONBOARDING – ISSUE 3] Release the interaction lock now that capture mode is active.
+      // From here the normal capture UI (Step 2) takes over; the user can interact freely with
+      // the canvas — the full-div blocker at z-[999999] is removed.
+      if (tutorialActive && tutorialStep === 1) {
+        dispatch(setInteractionLock(false))
+      }
+
       setMotionCaptureMode({
         isActive: true,
         isTransitioning: false,
@@ -2243,6 +2376,12 @@ function EditorPage() {
       })
     }
 
+    // [ONBOARDING – ISSUE 3] During Step 1 the fast-preview tween must not be interruptable.
+    // Lock all clicks until enableCaptureMode() fires (i.e. tween completes and capture activates).
+    if (tutorialActive && tutorialStep === 1) {
+      dispatch(setInteractionLock(true))
+    }
+
     // [BUG 1 FIX] Set transitioning state BEFORE the tween starts.
     // This prevents the auto-pause effect in Stage.jsx from interfering
     // even if selection clearing and isPlaying batching has timing issues.
@@ -2279,9 +2418,13 @@ function EditorPage() {
       const sceneEndTime = currentSceneTimelineInfo?.endTime || (startTimeOffset + 5)
       stepStartTimeSeconds = Math.min(stepStartTimeSeconds, sceneEndTime - 0.05)
 
+      // Mirror the reducer logic: new step duration = min(2000, pageDuration - newStartTimeMs).
+      // This means the new step may NOT end at scene end when there's more than 2s of remaining space.
+      const newDurationMs = Math.max(200, Math.min(2000, pageDuration - newStartTimeMs))
+      const newStepEndSeconds = Math.min(startTimeOffset + (newStartTimeMs + newDurationMs) / 1000, sceneEndTime - 0.05)
 
       try {
-        motionControls.tweenTo(stepStartTimeSeconds, {
+        motionControls.tweenTo(newStepEndSeconds, {
           duration: Math.min(stepIndex * 0.3, 1.5),
           startTime: startTimeOffset,
           onComplete: () => {
@@ -2315,14 +2458,15 @@ function EditorPage() {
    * Apply captured motion and exit capture mode
    */
   const handleApplyMotion = useCallback((options = {}) => {
-    // [TUTORIAL LOCK] Immediately block UI when saving the final step to prevent state corruption
-    // during fast-preview and autoplay restart.
-    if (tutorialActive && tutorialStep === 3) {
-      dispatch(setInteractionLock(true))
-    }
-    // [FIX] Efficiently check if ONLY meaningful interactions or existing actions/presets exist
-    const hasAnyInteraction = motionCaptureMode.trackedLayers
-      ? Array.from(motionCaptureMode.trackedLayers.values()).some(
+    // [ONBOARDING] Immediately end tutorial when user clicks Save Moment in Step 3.
+    // This removes the hint/highlight instantly. The fast-preview and auto-play
+    // still run, but the onboarding UI is gone.
+    // [ONBOARDING] Do NOT end tutorial here — wait for the fast-preview to complete
+    // in onComplete so the final autoplay can be scheduled properly.
+    // [FIX] Efficiently check if ONLY meaningful interactions or existing actions/presets exist.
+    // MUST read from motionCaptureRef (live state) NOT motionCaptureMode (stale initial state).
+    const hasAnyInteraction = motionCaptureRef.current?.trackedLayers
+      ? Array.from(motionCaptureRef.current.trackedLayers.values()).some(
         l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
       )
       : false
@@ -2359,6 +2503,7 @@ function EditorPage() {
       }
       setMotionCaptureMode(null)
       setEditingStepId(null)
+      setIsEditingExistingStep(false)
       motionCaptureRef.current = null
       dispatch(stopMotionEditing())
       return
@@ -2367,6 +2512,7 @@ function EditorPage() {
     if (!stepId || !currentSceneId) {
       setMotionCaptureMode(null)
       setEditingStepId(null)
+      setIsEditingExistingStep(false)
       motionCaptureRef.current = null
       return
     }
@@ -2387,9 +2533,13 @@ function EditorPage() {
     // Only dispatch crop actions here (not handled by onInteractionEnd).
 
     // =======================================================================
-    // FAST-PLAY PREVIEW: Trigger animated transition for visual feedback
+    // FAST-PLAY PREVIEW: Trigger animated transition for visual feedback.
+    // [ONBOARDING] During tutorial Step 3, skip the fast-preview entirely —
+    // the step is already saved in Redux, and we want to jump directly to a
+    // full-project autoplay instead of scrubbing just this one moment.
     // =======================================================================
-    if (motionControls && !options?.skipPreview) {
+    const skipPreview = options?.skipPreview || (tutorialActive && tutorialStep === 3)
+    if (motionControls && !skipPreview) {
       const motionFlow = currentFlow.steps || []
       const stepIndex = motionFlow.findIndex(s => s.id === stepId)
       const pageDuration = currentFlow.pageDuration || 5000
@@ -2414,7 +2564,7 @@ function EditorPage() {
       const targetStep = updatedSteps[stepIndex]
       if (targetStep) {
         if (!targetStep.layerActions) targetStep.layerActions = {}
-        motionCaptureMode.trackedLayers.forEach((layerData, layerId) => {
+        motionCaptureRef.current?.trackedLayers?.forEach((layerData, layerId) => {
           const { deltaX, deltaY, scaleX, scaleY, rotation, initialTransform, didMove } = layerData
           const actions = targetStep.layerActions[layerId] || []
 
@@ -2678,6 +2828,15 @@ function EditorPage() {
           // sync the engine with the latest Redux state without any visible jump.
           motionControls.seek(stepEndTimeSeconds)
 
+          // If we are in the final tutorial step (Step 3: Save Step),
+          // trigger the pending_final auto-play state and end tutorial.
+          // This ensures we wait for the fast preview to complete.
+          if (tutorialActive && tutorialStep === 3) {
+            dispatch(endTutorial())
+            dispatch(setInteractionLock(true))
+            dispatch(setAutoPlayState('pending_final'))
+          }
+
           // [FIX] Clear capture mode ONLY AFTER the preview is done.
           // This ensures that the Tutorial Step 6 (which prompts the user to play)
           // only appears once the engine is idle and isPlaying is false.
@@ -2685,30 +2844,34 @@ function EditorPage() {
           // would accidentally pause the still-running fast preview.
           setMotionCaptureMode(null)
           setEditingStepId(null)
+          setIsEditingExistingStep(false)
           motionCaptureRef.current = null
           savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
 
           // [SYNC FIX] Inform Redux that we are done editing
           dispatch(stopMotionEditing())
-
-          // If we are in the final tutorial step (Step 3: Save Step),
-          // trigger the pending_final auto-play state and end tutorial.
-          // This ensures we wait for the fast preview to complete.
-          if (tutorialActive && tutorialStep === 3) {
-            dispatch(setAutoPlayState('pending_final'))
-            dispatch(endTutorial())
-          }
         }
       })
     } else {
       // No motionControls available, just clear capture mode
       setMotionCaptureMode(null)
       setEditingStepId(null)
+      setIsEditingExistingStep(false)
       motionCaptureRef.current = null
       savedStepTimingsRef.current = null
 
       // [SYNC FIX] Inform Redux that we are done editing
       dispatch(stopMotionEditing())
+
+      // [ONBOARDING FIX] Ensure tutorial finalizes even without motion controls.
+      // When motionControls is null (e.g. before the engine has loaded),
+      // the user's Save Moment click in Step 3 must still end the tutorial
+      // and trigger the final autoplay sequence.
+      if (tutorialActive && tutorialStep === 3) {
+        dispatch(endTutorial())
+        dispatch(setInteractionLock(true))
+        dispatch(setAutoPlayState('pending_final'))
+      }
     }
   }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo, tutorialActive, tutorialStep])
 
@@ -2753,12 +2916,20 @@ function EditorPage() {
     // Exit capture mode
     setMotionCaptureMode(null)
     setEditingStepId(null)
+    setIsEditingExistingStep(false)
     motionCaptureRef.current = null
     isNewStepRef.current = false
 
     // [SYNC FIX] Inform Redux that we are done editing
     dispatch(stopMotionEditing())
-  }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset])
+
+    // [ONBOARDING] Cancel during onboarding should end the tutorial flow.
+    // Exit capture mode, end tutorial, restore normal editor state.
+    if (tutorialActive && (tutorialStep === 1 || tutorialStep === 2 || tutorialStep === 3)) {
+      dispatch(endTutorial())
+      dispatch(setInteractionLock(false))
+    }
+  }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset, tutorialActive, tutorialStep])
 
   // =========================================================================
   // Sync trackedLayers from Redux after undo/redo during active capture mode.
@@ -2934,7 +3105,7 @@ function EditorPage() {
     setEditingStepId(stepId)
 
     // [UX] Auto-open the motion panel when editing a step, same as Create Step.
-    if (stepId !== 'base' && isAuthenticated) {
+    if (stepId !== 'base') {
       setIsMotionPanelOpen(true)
     }
 
@@ -2963,6 +3134,7 @@ function EditorPage() {
 
     // Mark as EXISTING step being edited
     isNewStepRef.current = false
+    setIsEditingExistingStep(true)
 
     // [CANCEL FIX] Snapshot the full pre-edit steps array so Cancel can fully
     // revert live edits. In-capture edits (add/update/delete action, preset
@@ -2977,6 +3149,11 @@ function EditorPage() {
     if (stepIndex === -1) return
 
     const step = motionFlow[stepIndex]
+    // Snapshot existing action count and preset signature so Done stays inactive until new changes are made
+    const baselineCount = Object.values(step.layerActions || {}).reduce((sum, a) => sum + a.length, 0) + Object.keys(step.layerPresets || {}).length
+    setCaptureBaselineActionCount(baselineCount)
+    // [PRESET CHANGE FIX] Save the exact preset identities so changing from preset A → B (same count) is detected.
+    setCaptureBaselinePresetSignature(step.layerPresets ? JSON.stringify(step.layerPresets) : '')
     const initialTrackedLayers = new Map()
 
     // 1. Calculate cumulative transformation for all layers
@@ -3679,7 +3856,17 @@ function EditorPage() {
             } else if (data.controlPoints === null) {
               entry.controlPoints = []
             }
-            setCaptureVersion(v => v + 1)
+            // [PERF] Throttle setCaptureVersion to at most once per animation frame (~16ms)
+            // to prevent "Maximum update depth exceeded" React error during 60fps resize.
+            // onPositionUpdate fires from handleResizeMove / handleRotateMove / PIXI ticker
+            // on every frame; without throttling, each call triggers a full React re-render
+            // cascade through useCanvasLayers → useSelectionBox → potentially back to
+            // handleResizeMove, spiraling into an infinite update loop.
+            const now = performance.now()
+            if (!capture._lastCaptureVersionUpdate || now - capture._lastCaptureVersionUpdate > 16) {
+              capture._lastCaptureVersionUpdate = now
+              setCaptureVersion(v => v + 1)
+            }
           }
         },
         trackedLayers: initialTrackedLayers,
@@ -4398,6 +4585,80 @@ function EditorPage() {
     }
   }, [isMotionCaptureActive, editingStepId, motionControls])
 
+  // [PLAYHEAD INTERACTION DURING CAPTURE] When the user drags the playhead or clicks the
+  // timeline while motionCaptureMode is active, handle auto-saving or silent exit.
+  const handlePlayheadInteractionDuringCapture = useCallback(() => {
+    // Guard: not in capture mode
+    if (!isMotionCaptureActive) return
+
+    const stepId = editingStepId
+    const stepIndex = currentSceneMotionFlow?.steps?.findIndex(s => s.id === stepId) ?? -1
+    const momentNumber = stepIndex >= 0 ? stepIndex + 1 : 0
+
+    // [FIX] Detect if user made REAL new changes during this capture session.
+    // Always use the ref (motionCaptureRef) for live state as it's always current.
+    // IMPORTANT: Only check flags set by actual user CANVAS INTERACTION (move/scale/rotate/fade/blur/crop).
+    // Do NOT check didColor/didFlip/didTilt/didCornerRadius here, because when editing an
+    // existing step these flags are pre-seeded to true if the step already has such actions,
+    // causing false positives. Those are correctly detected via editingStepActionCount below.
+    const capture = motionCaptureRef.current
+    const hasLiveChanges = capture?.trackedLayers
+      ? Array.from(capture.trackedLayers.values()).some(
+          l => l.didMove || l.didScale || l.didRotate || l.didFade || l.didBlur || l.didCrop
+        )
+      : false
+    // Check if new actions were added beyond the baseline (works for both new and edit mode)
+    const hasNewActions = editingStepActionCount > captureBaselineActionCount
+    // [PRESET CHANGE FIX] Detect when a user changes a preset to a different preset (same count, different ID)
+    const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
+    // hasSizeChanges covers color/flip/tilt/cornerRadius which are non-positional edits
+    // tracked via editingStepActionCount changes
+    const hasChanges = hasLiveChanges || hasNewActions || hasPresetChanges
+
+    if (hasChanges) {
+      // CASE 1: Changes detected → Auto-save silently (no fast-play preview)
+      // [UNDO FIX] Use the ref-based snapshot captured at the START of the capture session,
+      // NOT currentSceneMotionFlow from the Redux selector — which has already been modified
+      // by onInteractionEnd dispatches during the session, so it no longer represents the
+      // true pre-edit state.
+      const preEditSteps = savedStepTimingsRef.current
+
+      // Flush pending history state
+      dispatch({ type: 'history/flushPending' })
+
+      // Apply motion changes silently (skipPreview = true forces save without fast-play)
+      handleApplyMotion({ skipPreview: true })
+
+      // Show toast notification with undo
+      if (momentNumber > 0) {
+        setToast({
+          message: `Moment ${momentNumber} saved`,
+          undo: () => {
+            // Restore the pre-edit steps using the ref-based snapshot
+            if (preEditSteps && currentSceneId) {
+              dispatch(updateSceneMotionFlow({
+                sceneId: currentSceneId,
+                steps: preEditSteps
+              }))
+            }
+            setToast(null)
+          }
+        })
+      }
+    } else {
+      // CASE 2: No changes detected → Silent exit (same as Cancel)
+      handleCancelMotion()
+    }
+  }, [isMotionCaptureActive, editingStepId, editingStepActionCount, captureBaselineActionCount, currentSceneMotionFlow, currentSceneId, dispatch, handleApplyMotion, handleCancelMotion])
+
+  // [TOAST AUTO-DISMISS] Auto-dismiss after 3 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [toast])
+
   const handleSplitScene = useCallback(() => {
     if (!currentSceneId) return
     const sceneInfo = timelineInfo.find(s => s.id === currentSceneId)
@@ -4429,7 +4690,9 @@ function EditorPage() {
         data-editor-container
         style={{
           touchAction: 'none',
-          backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d'
+          backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+          pointerEvents: isEditorLoading ? 'none' : undefined,
+          userSelect: isEditorLoading ? 'none' : undefined,
         }}
         onDragStart={(e) => {
           // Prevent drag operations that might trigger text selection
@@ -4468,6 +4731,45 @@ function EditorPage() {
               </div>
             </div>
           </Modal>
+        )}
+
+        {/* Full-Screen Loading Overlay — covers ALL editor chrome while assets load.
+            [FIX] Only visible during global loading mode; auth users transition
+            to local mode quickly, so this overlay must respect that transition. */}
+        {isEditorLoading && loadingMode !== 'local' && (
+          <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center p-8 text-center ${isLight ? 'bg-[#f4f5f8]' : 'bg-[#090a10]'}`}>
+            <style dangerouslySetInnerHTML={{
+              __html: `
+              @keyframes appleFloatCircle {
+                0%, 100% { transform: translateY(0px) rotate(0deg); }
+                50% { transform: translateY(-8px) rotate(10deg); }
+              }
+              @keyframes appleFloatSquare {
+                0%, 100% { transform: translateY(0px) rotate(45deg); }
+                50% { transform: translateY(-5px) rotate(60deg); }
+              }
+              @keyframes appleFloatTriangle {
+                0%, 100% { transform: translateY(0px) rotate(0deg); }
+                50% { transform: translateY(-11px) rotate(-15deg); }
+              }
+              .animate-shape-circle { animation: appleFloatCircle 4s ease-in-out infinite; }
+              .animate-shape-square { animation: appleFloatSquare 4.5s ease-in-out infinite; }
+              .animate-shape-triangle { animation: appleFloatTriangle 3.8s ease-in-out infinite; }
+            `}} />
+            <div className="flex items-center justify-center gap-6 mb-12 relative h-12">
+              <div className={`w-3.5 h-3.5 rounded-[3px] rotate-[45deg] animate-shape-square transition-colors duration-500 ${isLight ? 'bg-black/20 shadow-[0_4px_12px_rgba(0,0,0,0.04)]' : 'bg-white/20 shadow-[0_4px_12px_rgba(255,255,255,0.02)]'}`} />
+              <div className={`w-3.5 h-3.5 rounded-full animate-shape-circle transition-colors duration-500 ${isLight ? 'bg-black/35 shadow-[0_4px_12px_rgba(0,0,0,0.05)]' : 'bg-white/35 shadow-[0_4px_12px_rgba(255,255,255,0.03)]'}`} />
+              <svg viewBox="0 0 24 24" className={`w-4 h-4 fill-current animate-shape-triangle transition-colors duration-500 ${isLight ? 'text-black/15' : 'text-white/15'}`}>
+                <path d="M12 3L2 21H22L12 3Z" />
+              </svg>
+            </div>
+            <div className="space-y-4 max-w-[280px] w-full">
+              <div className="space-y-1">
+                <h2 className={`text-[15px] font-medium tracking-tight ${isLight ? 'text-gray-900/90' : 'text-white/90'}`}>Preparing workspace</h2>
+                <p className={`text-[12px] ${isLight ? 'text-gray-400' : 'text-white/30'}`}>Organizing your motion assets</p>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Loading Overlay */}
@@ -4560,11 +4862,13 @@ function EditorPage() {
           </div>
         )}
 
+        {/* [ONBOARDING] During autoplay and tutorial steps, hide top toolbar */}
         {/* Top Toolbar */}
         <div
           ref={topToolbarRef}
           className="absolute top-0 left-0 right-0 z-50"
           style={{
+            display: (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) ? 'none' : undefined,
             transform: (isMotionCaptureActive || previewMode) ? 'translateY(-100%)' : 'translateY(0)',
             transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
             pointerEvents: previewMode ? 'none' : undefined,
@@ -4598,9 +4902,11 @@ function EditorPage() {
           />
         </div>
 
+        {/* [ONBOARDING] Hide left sidebar during tutorial to focus attention */}
         <div
           className="hidden lg:block absolute left-0 z-50"
           style={{
+            display: (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) ? 'none' : undefined,
             top: `${topToolbarHeight}px`,
             height: `calc(100vh - ${topToolbarHeight}px)`,
             transform: (isMotionCaptureActive || previewMode) ? 'translateX(-100%)' : 'translateX(0)',
@@ -5025,15 +5331,48 @@ function EditorPage() {
 
           {/* Canvas and Bottom Sections */}
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+            {/* Mobile Motion Bar — top carousel (mobile only, hidden on desktop).
+                Padded down by topToolbarHeight in normal mode so it sits below the nav bar.
+                In capture mode the toolbar hides (translateY -100%) so no offset needed. */}
+            {!previewMode && (
+              <div
+                className="lg:hidden"
+                data-tutorial="mobile-motion-bar-container"
+                style={{ paddingTop: isMotionCaptureActive ? 0 : topToolbarHeight }}
+              >
+              <MobileMotionBar
+                motionFlow={currentSceneMotionFlow?.steps || []}
+                isMotionCaptureActive={isMotionCaptureActive}
+                editingStepId={editingStepId}
+                editingMomentLabel={editingMomentLabel}
+                editingStepActionCount={editingStepActionCount}
+                isDoneEnabled={isDoneEnabled}
+                onAddMoment={handleStartMotionCapture}
+                onEditMoment={handleEditStep}
+                onDeleteStep={(stepId) => {
+                  if (currentSceneId && stepId) {
+                    dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
+                  }
+                }}
+                onApplyMotion={handleApplyMotion}
+                onCancelMotion={handleCancelMotion}
+                onUndo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(undo()) }}
+                onRedo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(redo()) }}
+                sceneLayers={sceneLayersForMotion}
+                activeStepId={playheadStepId}
+              />
+              </div>
+            )}
+
             {/* Canvas Controls - Overlay at top (when element or canvas is selected)  */}
             <div
               ref={topControlsRef}
-              className={`absolute z-30 pointer-events-none flex justify-center ${(isAutoPlaying || previewMode) ? 'hidden' : (isMotionCaptureActive ? 'flex' : 'lg:flex hidden')}`}
+              className={`absolute z-30 pointer-events-none flex justify-center ${(isAutoPlaying || previewMode) ? 'hidden' : 'lg:flex hidden'}`}
               style={{
                 top: isMotionCaptureActive ? '8px' : `${topToolbarHeight + 8}px`,
                 left: currentSidebarWidth,
                 right: 0,
-                transform: currentSidebarWidth !== '0px' ? 'translateX(-40px)' : 'none'
+                transform: (currentSidebarWidth !== '0px') ? 'translateX(-40px)' : 'none'
               }}
             >
               <CanvasControls
@@ -5042,6 +5381,7 @@ function EditorPage() {
                 selectedCanvas={selectedCanvas}
                 currentScene={currentSceneData}
                 editingStepActionCount={editingStepActionCount}
+                isDoneEnabled={isDoneEnabled}
                 onUndo={() => {
                   if (isMotionCaptureActive) captureUndoSyncRef.current = true
                   dispatch(undo())
@@ -5153,9 +5493,6 @@ function EditorPage() {
                 onOpenPositionPanel={() => {
                   setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
                 }}
-                onToggleMotionPanel={() => {
-                  setIsMotionPanelOpen(prev => !prev)
-                }}
                 isMotionCaptureActive={isMotionCaptureActive}
                 onStartMotionCapture={handleStartMotionCapture}
                 onApplyMotion={handleApplyMotion}
@@ -5163,17 +5500,18 @@ function EditorPage() {
                 onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
                 requestOpenControl={requestOpenControl}
                 stepsCount={currentSceneMotionFlow?.steps?.length || 0}
+                editingMomentLabel={editingMomentLabel}
               />
             </div>
 
-            {/* Canvas - Takes all available space */}
+            {/* Canvas - Takes all available space. [ONBOARDING] Fill full screen when bottom section hidden */}
             <div
               ref={canvasContainerRef}
               data-tutorial="canvas-area"
               className="absolute flex-1 overflow-hidden select-none"
               style={{
                 top: 0,
-                bottom: previewMode ? 0 : (initialBottomHeight || 0),
+                bottom: (previewMode || (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3)))) ? 0 : (initialBottomHeight || 0),
                 left: 0,
                 right: 0,
                 backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
@@ -5297,8 +5635,9 @@ function EditorPage() {
             {/* Removed floating mobile menu button */}
           </div>
 
+          {/* [ONBOARDING] Hide playback controls during tutorial */}
           {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-          {!isMotionCaptureActive && !previewMode && (
+          {!isMotionCaptureActive && !previewMode && !((!isAuthenticated) && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) && (
             <div
               className={`absolute right-0 pointer-events-auto flex items-center justify-center ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
               style={{
@@ -5347,22 +5686,23 @@ function EditorPage() {
             </div>
           )}
 
+          {/* [ONBOARDING] Hide bottom section during tutorial to focus attention on canvas + moments panel */}
           {/* Bottom Sections - Overlay at bottom with glass effect */}
           <div
             ref={bottomSectionRef}
             className={`absolute bottom-0 right-0 z-45 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
             style={{
               zIndex: 45,
-              display: previewMode ? 'none' : undefined,
-              left: currentSidebarWidth,
+              display: (previewMode || (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3)))) ? 'none' : undefined,
+              left: (typeof window !== 'undefined' && window.innerWidth < 1024) ? '0px' : currentSidebarWidth,
               backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
               borderTop: 'none',
-              paddingBottom: 'env(safe-area-inset-bottom, 8px)',
+              paddingBottom: (isMobileMotionMinimized && isMotionCaptureActive) ? '48px' : 'env(safe-area-inset-bottom, 8px)',
               height: 'auto',
               maxHeight: '40vh',
-              transition: isResizingBottom ? 'none' : 'height 0.3s ease'
+              transition: isResizingBottom ? 'none' : 'height 0.3s ease, padding-bottom 0.22s ease'
             }}
           >
             {/* Top border line */}
@@ -5409,8 +5749,9 @@ function EditorPage() {
                     totalTime={totalTime}
                     worldWidth={worldWidth}
                     worldHeight={worldHeight}
-                    currentTimeStepId={editingStepId}
+                    currentTimeStepId={playheadStepId}
                     isMotionCaptureActive={isMotionCaptureActive}
+                    editingStepId={editingStepId}
                     onStepClick={handleSelectStep}
                     onStepEdit={handleEditStep}
                     bottomSectionHeight={customBottomHeight}
@@ -5418,6 +5759,7 @@ function EditorPage() {
                     onMotionStop={handleMotionStop}
                     onMotionPause={handleMotionPause}
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
+                    onPlayheadInteractionDuringCapture={handlePlayheadInteractionDuringCapture}
                   />
                 </div>
               </div>
@@ -5478,7 +5820,7 @@ function EditorPage() {
                   [UPDATE #2] During Motion Capture the controls move to the top of the
                   canvas (rendered by the shared top overlay above), so hide this one. */}
               <div className={`${isMotionCaptureActive ? 'hidden' : 'lg:hidden'} pointer-events-auto flex-shrink-0 w-full`} style={{
-                paddingBottom: 'max(6px, env(safe-area-inset-bottom, 6px))'
+                paddingBottom: 'env(safe-area-inset-bottom, 0px)'
               }}>
                 <CanvasControls
                   duration={`${totalTime.toFixed(1)}s`}
@@ -5486,6 +5828,7 @@ function EditorPage() {
                   selectedCanvas={selectedCanvas}
                   currentScene={currentSceneData}
                   editingStepActionCount={editingStepActionCount}
+                  isDoneEnabled={isDoneEnabled}
                   onUndo={() => {
                     if (isMotionCaptureActive) captureUndoSyncRef.current = true
                     dispatch(undo())
@@ -5582,9 +5925,6 @@ function EditorPage() {
                   onOpenPositionPanel={() => {
                     setActiveSidebarItem(activeSidebarItem === 'Position' ? null : 'Position')
                   }}
-                  onToggleMotionPanel={() => {
-                    setIsMotionPanelOpen(prev => !prev)
-                  }}
                   isMotionCaptureActive={isMotionCaptureActive}
                   onStartMotionCapture={handleStartMotionCapture}
                   onApplyMotion={handleApplyMotion}
@@ -5592,6 +5932,7 @@ function EditorPage() {
                   onFlipCardFrame={() => handleFlipForLayer(selectedLayerIds[0])}
                   requestOpenControl={requestOpenControl}
                   stepsCount={currentSceneMotionFlow?.steps?.length || 0}
+                  editingMomentLabel={editingMomentLabel}
                   isMobileBottom={true}
                   onSubmenuChange={(menuName) => setActiveBottomMenu(menuName)}
                 />
@@ -5600,15 +5941,23 @@ function EditorPage() {
 
           </div>
 
-          {/* Motion Panel - Right side overlay */}
-          {!previewMode && (
+          {/* Motion Panel - Right side overlay (always visible on desktop, togglable on mobile) */}
+          {/* [ONBOARDING] During tutorial motion capture the panel stays hidden; normal authenticated mode always shows it */}
+          {!previewMode && !(tutorialActive && isMotionCaptureActive) && (
           <MotionPanel
             isOpen={isMotionPanelOpen}
             onClose={() => setIsMotionPanelOpen(false)}
+            isCollapsed={isMotionPanelCollapsed}
+            onToggleCollapsed={() => setIsMotionPanelCollapsed(prev => !prev)}
             topToolbarHeight={topToolbarHeight}
             bottomSectionHeight={bottomSectionHeight}
             motionControls={motionControls}
             onStepEdit={handleEditStep}
+            onDeleteStep={(stepId) => {
+              if (currentSceneId && stepId) {
+                dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
+              }
+            }}
             onApplyMotion={handleApplyMotion}
             onCancelMotion={handleCancelMotion}
             onStartMotionCapture={handleStartMotionCapture}
@@ -5620,6 +5969,8 @@ function EditorPage() {
             isMotionCaptureActive={isMotionCaptureActive}
             editingStepId={editingStepId}
             editingStepActionCount={editingStepActionCount}
+            activeStepId={playheadStepId}
+            onMobileMinimizedChange={setIsMobileMotionMinimized}
           />
           )}
 
@@ -5693,17 +6044,61 @@ function EditorPage() {
             handleExport(res);
           }}
         />
-        {(autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy && (
-          <div
-            className={`fixed inset-0 z-[999998] ${isLight ? 'bg-white' : 'bg-black'}`}
-            style={{
-              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${currentSidebarWidth} 72px, ${currentSidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${currentSidebarWidth} 72px)`,
-              WebkitClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${currentSidebarWidth} 72px, ${currentSidebarWidth} calc(100% - (${initialBottomHeight}px + 48px)), 100% calc(100% - (${initialBottomHeight}px + 48px)), 100% 72px, ${currentSidebarWidth} 72px)`
-            }}
-          />
-        )}
         {isInteractionLocked && (
           <div className="fixed inset-0 z-[999999]" style={{ cursor: 'default' }} />
+        )}
+
+        {/* Toast notification for save/undo feedback - Purple design with timer bar */}
+        {toast && createPortal(
+          <div
+            className="fixed z-[999999] pointer-events-auto"
+            style={{
+              bottom: '24px',
+              right: '24px',
+              animation: 'toastSlideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+            }}
+          >
+            <style>{`
+              @keyframes toastSlideInRight {
+                from { transform: translateX(120%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+              }
+              @keyframes toastTimerShrink {
+                from { width: 100%; }
+                to { width: 0%; }
+              }
+            `}</style>
+            <div
+              className="relative overflow-hidden rounded-xl shadow-2xl border border-purple-400/30 backdrop-blur-xl"
+              style={{
+                backgroundColor: '#7c3aed',
+                minWidth: '260px',
+                maxWidth: '360px',
+              }}
+            >
+              {/* Timer bar at the top */}
+              <div
+                className="absolute top-0 left-0 h-[3px] bg-white/40 rounded-full"
+                style={{
+                  animation: 'toastTimerShrink 3s linear forwards',
+                }}
+              />
+
+              {/* Content */}
+              <div className="flex items-center gap-4 px-5 py-3.5 pt-[18px]">
+                <span className="text-sm font-medium text-white/95 whitespace-nowrap">{toast.message}</span>
+                <button
+                  onClick={() => {
+                    toast.undo()
+                  }}
+                  className="text-xs font-bold text-white/80 hover:text-white underline underline-offset-2 transition-colors whitespace-nowrap"
+                >
+                  Undo
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
         )}
       </div>
     </ThemeContext.Provider>

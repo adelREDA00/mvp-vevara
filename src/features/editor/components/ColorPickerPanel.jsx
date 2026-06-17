@@ -1,7 +1,6 @@
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import React, { useState, useMemo, useRef, useContext } from 'react'
-import { X, Search, Plus, FileText } from 'lucide-react'
-import { DragToCloseHandle } from './DragToCloseHandle'
+import React, { useState, useRef, useContext } from 'react'
+import { X, Plus, FileText } from 'lucide-react'
 import AdvancedColorPickerModal from './AdvancedColorPickerModal'
 
 // Default solid colors - comprehensive premium palette
@@ -12,12 +11,13 @@ const DEFAULT_COLORS = [
   '#222831', '#393E46', '#00ADB5', '#EEEEEE', '#000000',
   // Modern Premium Palette 3 (Soft Pinks/Reds)
   '#FFF5E4', '#FFE3E1', '#FFD1D1', '#FF9494', '#ff4500',
+  // Startup Tech/Vibrant background fun colors
+  '#D4F652', '#39E09B', '#FF8E99', '#00F5FF', '#FF7E5F', '#D800FF',
   // Extra UI Colors
   '#00d1b2', '#f5f5f5', '#209cee', '#ffdd57', '#ff3860'
 ]
 
 function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = 'fill' }) {
-  const [searchQuery, setSearchQuery] = useState('')
   const [documentColors, setDocumentColors] = useState([
     '#000000',
     '#808080',
@@ -25,49 +25,8 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
   ])
   const [showAdvancedPicker, setShowAdvancedPicker] = useState(false)
   const addColorButtonRef = useRef(null)
-  const [width, setWidth] = useState(320)
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
-
-  // Filter colors based on search query
-  const filteredColors = useMemo(() => {
-    if (!searchQuery.trim()) return DEFAULT_COLORS
-
-    const query = searchQuery.toLowerCase().trim()
-
-    // Check if it's a hex code
-    if (query.startsWith('#')) {
-      return DEFAULT_COLORS.filter(color =>
-        color.toLowerCase().includes(query)
-      )
-    }
-
-    // Color name matching (basic)
-    const colorNameMap = {
-      'black': '#000000',
-      'white': '#ffffff',
-      'red': '#ff0000',
-      'green': '#32cd32',
-      'blue': '#4169e1',
-      'yellow': '#ffff00',
-      'orange': '#ffa500',
-      'purple': '#9370db',
-      'pink': '#ff1493',
-      'gray': '#808080',
-      'grey': '#808080',
-      'teal': '#008080',
-      'cyan': '#00ced1',
-      'brown': '#a0522d',
-    }
-
-    if (colorNameMap[query]) {
-      return [colorNameMap[query]]
-    }
-
-    return DEFAULT_COLORS.filter(color =>
-      color.toLowerCase().includes(query.replace('#', ''))
-    )
-  }, [searchQuery])
 
   const handleColorClick = (color) => {
     if (onColorSelect) {
@@ -110,11 +69,9 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
           borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
         }}
       >
-        <DragToCloseHandle onClose={onClose} onWidthChange={setWidth} initialWidth={width} minWidth={200} />
-
         {/* Header */}
         <div className={`px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between">
             <h2 className={`text-lg font-semibold ${isLight ? 'text-gray-900' : 'text-white'}`}>Colour</h2>
             {onClose && (
               <button
@@ -124,22 +81,6 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
                 <X className="h-4 w-4" strokeWidth={1.5} />
               </button>
             )}
-          </div>
-
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isLight ? 'text-gray-400' : 'text-zinc-500'}`} strokeWidth={1.5} />
-            <input
-              type="text"
-              placeholder='Try "blue" or "#00c4cc"'
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full pl-9 pr-4 py-2 border rounded-lg text-sm transition-all focus:outline-none focus:ring-1 ${
-                isLight 
-                  ? 'bg-white border-gray-200 text-gray-900 placeholder-gray-400 focus:border-purple-500 focus:ring-purple-500/20' 
-                  : 'bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500 focus:border-zinc-700 focus:ring-zinc-700'
-              }`}
-            />
           </div>
         </div>
 
@@ -198,11 +139,6 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
             </div>
           </div>
 
-          {/* Brand Kit Message */}
-          <div className="mb-6">
-            <p className={`text-xs ${isLight ? 'text-gray-400' : 'text-zinc-500'}`}>No brand colours set for this Brand Kit.</p>
-          </div>
-
           {/* Default Solid Colours Section */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-3">
@@ -210,14 +146,11 @@ function ColorPickerPanel({ onClose, selectedColor, onColorSelect, colorType = '
                 <FileText className={`h-4 w-4 ${isLight ? 'text-gray-400' : 'text-zinc-400'}`} strokeWidth={1.5} />
                 <h3 className={`text-sm font-medium ${isLight ? 'text-gray-700' : 'text-zinc-300'}`}>Default solid colours</h3>
               </div>
-              <button className={`text-xs transition-colors ${isLight ? 'text-gray-400 hover:text-gray-600' : 'text-zinc-400 hover:text-zinc-300'}`}>
-                See all
-              </button>
             </div>
 
             {/* Color Grid */}
             <div className="grid grid-cols-5 gap-2">
-              {filteredColors.map((color, index) => (
+              {DEFAULT_COLORS.map((color, index) => (
                 <button
                   key={index}
                   onClick={() => handleColorClick(color)}

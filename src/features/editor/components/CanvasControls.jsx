@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import {
   Minus, ChevronDown,
-  Settings, Zap, X, MoreVertical, Layers,
+  Settings, X, Layers,
   Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
   Plus, Rotate3d, Check, Eye, EyeOff, Waves,
   AlignLeft, AlignCenter, AlignRight, RotateCcw,
@@ -11,12 +11,15 @@ import {
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
-import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
+import { BLUR_MAX, computeBlurPhysicalStrength } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import { useSelector, useDispatch } from 'react-redux'
 import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
 import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
+import * as PIXI from 'pixi.js'
+import { getGlobalMotionEngine } from '../../engine/motion'
+import { syncTiltMesh, applyTiltToObject } from '../../engine/pixi/perspectiveTilt'
 
 const DEFAULT_COLORS = [
   '#6367FF', '#8494FF', '#C9BEFF', '#FFDBFD', '#ffffff',
@@ -71,7 +74,6 @@ function CanvasControls({
   onToggleAdvanced,
   onOpenColorPicker,
   onOpenPositionPanel,
-  onToggleMotionPanel,
   isMotionCaptureActive = false,
   onStartMotionCapture,
   onApplyMotion,
@@ -80,6 +82,8 @@ function CanvasControls({
   requestOpenControl = null,
   stepsCount = 0,
   editingStepActionCount = 0,
+  isDoneEnabled = false,
+  editingMomentLabel = '',
   isMobileBottom = false,
   onSubmenuChange,
   onUndo,
@@ -100,6 +104,17 @@ function CanvasControls({
   const [showSizeMenu, setShowSizeMenu] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
+  // [PERF] Local state to track slider values during drag (bypasses Redux for smooth UX)
+  const [dragTiltX, setDragTiltX] = useState(null)
+  const [dragTiltY, setDragTiltY] = useState(null)
+  const [dragOpacity, setDragOpacity] = useState(null)
+  const [dragBlur, setDragBlur] = useState(null)
+  const [dragCornerRadius, setDragCornerRadius] = useState(null)
+  // [PERF] Resolve the PIXI object once for all direct-mutation sliders
+  const pixiObject = useMemo(() => {
+    if (!selectedLayer?.id) return null
+    return getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id) || null
+  }, [selectedLayer?.id])
   const scrollContainerRef = useRef(null)
   const containerRef = useRef(null)
   const animateButtonRef = useRef(null)
@@ -360,165 +375,130 @@ function CanvasControls({
 
 
 
-  // ─── Motion controls: Cancel + Done/Add + dots ────────────────────────────
-  // Extracted so they render identically in both mobile and desktop layouts,
-  // always anchored to the right edge and never pushed by the scrollable left.
-  const renderMotionControls = () => (
-    <div className="flex items-center gap-1 flex-shrink-0">
-      {/* Undo / Redo in Motion Capture Mode */}
-      {isMotionCaptureActive && (
-        <div className="flex items-center gap-0.5 mr-2 pr-2 border-r border-black/10 dark:border-white/10">
+  // ─── Motion controls: Undo/Redo + Cancel + Done (capture mode only) ──────────────────
+  // Layout: [Undo/Redo + label (grows)] | [Cancel] | [Done (wider, primary)]
+  const renderMotionControls = () => {
+    if (!isMotionCaptureActive) return null
+    return (
+      <>
+        {/* Left: Undo/Redo + optional label — grows to fill available space */}
+        <div className="flex items-center gap-1 px-2 flex-1">
+          <div className={`flex items-center gap-0.5 pr-2 mr-1 border-r border-black/10 dark:border-white/10`}>
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
+                theme === 'light'
+                  ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
+                  : 'text-white hover:bg-white/10 active:bg-white/20'
+              }`}
+              title="Undo (Ctrl+Z)"
+              type="button"
+            >
+              <Undo2 className="h-4 w-4" strokeWidth={2} />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
+                theme === 'light'
+                  ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
+                  : 'text-white hover:bg-white/10 active:bg-white/20'
+              }`}
+              title="Redo (Ctrl+Shift+Z)"
+              type="button"
+            >
+              <Redo2 className="h-4 w-4" strokeWidth={2} />
+            </button>
+          </div>
+          {editingMomentLabel && (
+            <span className={`text-xs font-medium px-1 whitespace-nowrap ${
+              theme === 'light' ? 'text-gray-500' : 'text-zinc-400'
+            }`}>
+              {editingMomentLabel}
+            </span>
+          )}
+        </div>
+
+        {/* Cancel — compact secondary action, immediately left of Done */}
+        <button
+          onClick={() => { onCancelMotion?.(); setShowAddStepHint(false) }}
+          className={`flex items-center justify-center px-4 border-l transition-all duration-200 touch-manipulation whitespace-nowrap font-semibold text-xs ${
+            theme === 'light'
+              ? 'text-gray-600 hover:bg-gray-100 active:bg-gray-200 border-black/10'
+              : 'text-zinc-300 hover:bg-white/10 active:bg-white/20 border-white/10'
+          }`}
+        >
+          Cancel
+        </button>
+
+        {/* Done — wider primary action on the far right */}
+        <div ref={animateButtonRef} className="flex">
           <button
-            onClick={onUndo}
-            disabled={!canUndo}
-            className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
-              theme === 'light'
-                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
-                : 'text-white hover:bg-white/10 active:bg-white/20'
+            data-tutorial="add-step-button"
+            onClick={() => { if (isDoneEnabled) { onApplyMotion?.(); setShowAddStepHint(false) } }}
+            className={`flex items-center justify-center px-6 border-l transition-all duration-300 touch-manipulation whitespace-nowrap font-semibold text-xs ${
+              isDoneEnabled
+                ? 'bg-[#7c4af0] text-white border-[#7c4af0] shadow-[0_0_20px_rgba(124,74,240,0.6)] animate-pulse-glow hover:bg-[#8b5cf6]'
+                : (theme === 'light'
+                  ? 'text-gray-400 border-black/10 cursor-default'
+                  : 'text-zinc-500 border-white/10 cursor-default')
             }`}
-            title="Undo (Ctrl+Z)"
-            type="button"
+            title="Done"
           >
-            <Undo2 className="h-4 w-4" strokeWidth={2} />
-          </button>
-          <button
-            onClick={onRedo}
-            disabled={!canRedo}
-            className={`h-8 w-8 rounded-[8px] transition-all flex items-center justify-center touch-manipulation disabled:opacity-30 disabled:pointer-events-none ${
-              theme === 'light'
-                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200'
-                : 'text-white hover:bg-white/10 active:bg-white/20'
-            }`}
-            title="Redo (Ctrl+Shift+Z)"
-            type="button"
-          >
-            <Redo2 className="h-4 w-4" strokeWidth={2} />
+            Save moment
           </button>
         </div>
-      )}
-
-      {/* Cancel — only visible in capture mode */}
-      {isMotionCaptureActive && (
-        <button
-          onClick={() => {
-            onCancelMotion?.()
-            setShowAddStepHint(false)
-          }}
-          className={`h-8 px-3 rounded-[10px] transition-all duration-200 flex items-center gap-1.5 touch-manipulation whitespace-nowrap font-medium text-xs ${
-            theme === 'light'
-              ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 active:bg-gray-300'
-              : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 active:bg-zinc-600'
-          }`}
-        >
-          <X className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
-          <span>Cancel Moment</span>
-        </button>
-      )}
-
-      {/* Done / Add moment */}
-      <div ref={animateButtonRef} className="relative">
-        <button
-          data-tutorial="add-step-button"
-          onClick={() => {
-            if (isMotionCaptureActive) {
-              onApplyMotion?.()
-              setShowAddStepHint(false)
-            } else {
-              onStartMotionCapture?.()
-              if (!hasShownAddStepHint && Number(stepsCount) === 0) {
-                setShowAddStepHint(true)
-              }
-            }
-          }}
-          className={`h-8 px-3 rounded-[10px] transition-all duration-300 flex items-center gap-2 touch-manipulation whitespace-nowrap font-medium text-xs ${
-            isMotionCaptureActive
-              ? (editingStepActionCount > 0
-                ? 'bg-[#7c4af0] text-white shadow-[0_0_20px_rgba(124,74,240,0.6)] ring-1 ring-white/20 animate-pulse-glow hover:bg-[#8b5cf6]'
-                : (theme === 'light' ? 'bg-gray-100 text-gray-400' : 'bg-zinc-800/80 text-zinc-500') + ' border border-white/5 cursor-default')
-              : (theme === 'light'
-                ? 'bg-gradient-to-r from-[#4285F4]/10 via-[#9B72CB]/10 to-[#D96570]/10 text-[#6940c9] border border-transparent hover:from-[#4285F4]/20 hover:via-[#9B72CB]/20 hover:to-[#D96570]/20'
-                : 'bg-gradient-to-r from-[#4285F4]/15 via-[#9B72CB]/15 to-[#D96570]/15 text-[#c084fc] border border-transparent hover:from-[#4285F4]/25 hover:via-[#9B72CB]/25 hover:to-[#D96570]/25 hover:text-white')
-          }`}
-          title={isMotionCaptureActive ? 'Save Moment' : 'Add moment'}
-        >
-          {isMotionCaptureActive
-            ? <Check className="h-4 w-4 flex-shrink-0" strokeWidth={3} />
-            : <Zap   className="h-4 w-4 flex-shrink-0" strokeWidth={2.5} />
-          }
-          <span>{isMotionCaptureActive ? 'Save Moment' : 'Add moment'}</span>
-        </button>
-      </div>
-
-      {/* Motion panel dots */}
-      <button
-        onClick={() => onToggleMotionPanel?.()}
-        className={`h-7 w-7 rounded-md transition-colors flex items-center justify-center border ${
-          theme === 'light'
-            ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
-            : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
-        }`}
-        title="Moments Panel"
-      >
-        <MoreVertical className="h-4 w-4 opacity-70" />
-      </button>
-    </div>
-  )
+      </>
+    )
+  }
 
   return (
     <div
       ref={containerRef}
       className={isMobileBottom
-        ? "relative flex flex-col items-center justify-center w-full px-2 py-1.5"
+        ? "relative flex flex-col items-center justify-center w-full"
         : "relative pointer-events-none w-full"
       }
       style={isMobileBottom ? undefined : { height: '54px' }}
     >
-      {/* ── Desktop: right pill fixed at center, left pill grows leftward from it ── */}
+      {/* ── Desktop: centered pill ── */}
       {!isMobileBottom && (
         <div className="absolute inset-0 pointer-events-none">
-          {/* Right pill — fixed anchor, slightly right of center.
-              During Motion Capture the left pill is hidden, so this pill becomes a
-              standalone centered pill with a full border + radius. */}
+          {/* Motion capture mode: standalone centered pill with Cancel / label / Done */}
+          {isMotionCaptureActive && (
           <div
             className="absolute top-1 flex items-center pointer-events-auto"
-            style={isMotionCaptureActive
-              ? { left: '50%', transform: 'translateX(-50%)' }
-              : { left: '52%' }}
+            style={{ left: '50%', transform: 'translateX(-50%)' }}
           >
             <div
-              className="h-10 flex items-center px-2 backdrop-blur-md flex-shrink-0"
+              className="h-10 flex items-stretch overflow-hidden backdrop-blur-md flex-shrink-0"
               style={{
                 backgroundColor: 'var(--editor-panel-bg)',
                 backdropFilter: 'blur(24px)',
                 WebkitBackdropFilter: 'blur(24px)',
-                borderTop: '1px solid var(--editor-panel-border)',
-                borderRight: '1px solid var(--editor-panel-border)',
-                borderBottom: '1px solid var(--editor-panel-border)',
-                borderLeft: isMotionCaptureActive ? '1px solid var(--editor-panel-border)' : 'none',
-                borderRadius: isMotionCaptureActive ? '12px' : '0 12px 12px 0',
+                border: '1px solid var(--editor-panel-border)',
+                borderRadius: '12px',
               }}
             >
               {renderMotionControls()}
             </div>
           </div>
+          )}
 
-          {/* Left pill — right edge pinned at same anchor, grows leftward.
-              [UPDATE #2] Hidden entirely during Motion Capture mode. */}
+          {/* Normal mode: single centered pill with property controls */}
           {!isMotionCaptureActive && (
           <div
-            className="absolute top-1 flex items-center justify-end pointer-events-auto"
-            style={{ right: '48%', left: 0 }}
+            className="absolute top-1 flex items-center justify-center pointer-events-auto"
+            style={{ left: '50%', transform: 'translateX(-50%)' }}
           >
             <div
               className="h-10 flex items-center backdrop-blur-md"
               style={{
                 backgroundColor: 'var(--editor-panel-bg)',
                 backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-                borderTop: '1px solid var(--editor-panel-border)',
-                borderLeft: '1px solid var(--editor-panel-border)',
-                borderBottom: '1px solid var(--editor-panel-border)',
-                borderRight: 'none',
-                borderRadius: '12px 0 0 12px',
+                border: '1px solid var(--editor-panel-border)',
+                borderRadius: '12px',
               }}
             >
             <div
@@ -772,7 +752,7 @@ function CanvasControls({
           </DropdownMenu>
         )}
 
-        {/* Opacity Control */}
+        {/* Opacity Control — [PERF] Direct PIXI mutation during drag, Redux sync on release */}
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <div className="relative flex-shrink-0">
             <button
@@ -785,7 +765,12 @@ function CanvasControls({
             >
               <Ghost className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
             </button>
-            <ControlPopover open={showOpacitySlider} anchorRef={opacityBtnRef}>
+            <ControlPopover open={showOpacitySlider} anchorRef={opacityBtnRef}>{showOpacitySlider && (() => {
+              // [PERF] Resolve PIXI object fresh in scope (same pattern as tilt for live visual updates)
+              const pixiObj = selectedLayer?.id
+                ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+                : null
+              return (
               <div
                 className="h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200"
                 style={{
@@ -799,8 +784,24 @@ function CanvasControls({
                 <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Opacity</span>
                 <Slider.Root
                   className="relative flex items-center select-none touch-none grow h-5"
-                  value={[Math.round((selectedLayer.opacity ?? 1) * 100)]}
-                  onValueChange={(value) => { handleLayerUpdate({ opacity: value[0] / 100 }) }}
+                  value={[Math.round(((dragOpacity !== null ? dragOpacity : selectedLayer.opacity) ?? 1) * 100)]}
+                  onValueChange={(value) => {
+                    const v = value[0] / 100
+                    if (pixiObj && !pixiObj.destroyed) {
+                      if (pixiObj._tiltHidden && pixiObj._tiltMesh && !pixiObj._tiltMesh.destroyed) {
+                        pixiObj._intendedAlpha = v
+                        pixiObj._tiltMesh.alpha = v
+                      } else {
+                        pixiObj.alpha = v
+                      }
+                    }
+                    setDragOpacity(v)
+                  }}
+                  onValueCommit={(value) => {
+                    const v = value[0] / 100
+                    handleLayerUpdate({ opacity: v })
+                    setDragOpacity(null)
+                  }}
                   min={0} max={100} step={1}
                 >
                   <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
@@ -809,14 +810,15 @@ function CanvasControls({
                   <Slider.Thumb className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`} aria-label="Layer Opacity" />
                 </Slider.Root>
                 <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-                  {Math.round((selectedLayer.opacity ?? 1) * 100)}%
+                  {Math.round(((dragOpacity !== null ? dragOpacity : selectedLayer.opacity) ?? 1) * 100)}%
                 </span>
               </div>
-            </ControlPopover>
+              )
+            })()}</ControlPopover>
           </div>
         )}
 
-        {/* Blur Control */}
+        {/* Blur Control — [PERF] Direct PIXI mutation during drag, Redux sync on release */}
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <div className="relative flex-shrink-0">
             <button
@@ -829,7 +831,11 @@ function CanvasControls({
             >
               <Droplets className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
             </button>
-            <ControlPopover open={showBlurSlider} anchorRef={blurBtnRef}>
+            <ControlPopover open={showBlurSlider} anchorRef={blurBtnRef}>{showBlurSlider && (() => {
+              const pixiObj = selectedLayer?.id
+                ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+                : null
+              return (
               <div
                 className="h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200"
                 style={{
@@ -843,8 +849,26 @@ function CanvasControls({
                 <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Blur</span>
                 <Slider.Root
                   className="relative flex items-center select-none touch-none grow h-5"
-                  value={[Math.min(BLUR_MAX, selectedLayer.blur ?? 0)]}
-                  onValueChange={(value) => { const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0)); handleLayerUpdate({ blur: v }) }}
+                  value={[Math.min(BLUR_MAX, (dragBlur !== null ? dragBlur : selectedLayer.blur) ?? 0)]}
+                  onValueChange={(value) => {
+                    const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0))
+                    if (pixiObj && !pixiObj.destroyed) {
+                      if (!pixiObj._blurFilter) {
+                        pixiObj._blurFilter = new PIXI.BlurFilter()
+                        pixiObj._blurFilter.quality = 4
+                      }
+                      pixiObj._blurFilter.strength = computeBlurPhysicalStrength(v, pixiObj)
+                      if (!pixiObj.filters?.includes(pixiObj._blurFilter)) {
+                        pixiObj.filters = pixiObj.filters ? [...pixiObj.filters, pixiObj._blurFilter] : [pixiObj._blurFilter]
+                      }
+                    }
+                    setDragBlur(v)
+                  }}
+                  onValueCommit={(value) => {
+                    const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0))
+                    handleLayerUpdate({ blur: v })
+                    setDragBlur(null)
+                  }}
                   min={0} max={BLUR_MAX} step={0.5}
                 >
                   <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
@@ -853,14 +877,15 @@ function CanvasControls({
                   <Slider.Thumb className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`} aria-label="Layer Blur" />
                 </Slider.Root>
                 <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-                  {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
+                  {Math.round(Math.min(BLUR_MAX, (dragBlur !== null ? dragBlur : selectedLayer.blur) ?? 0))}
                 </span>
               </div>
-            </ControlPopover>
+              )
+            })()}</ControlPopover>
           </div>
         )}
 
-        {/* Corner Radius Control */}
+        {/* Corner Radius Control — [PERF] Direct PIXI mutation during drag, Redux sync on release */}
         {selectedLayer?.type === LAYER_TYPES.SHAPE && hasCorners() && (
           <div className="relative flex-shrink-0">
             <button
@@ -875,7 +900,11 @@ function CanvasControls({
                 <path d="M21 4H11C7.13401 4 4 7.13401 4 11V21" />
               </svg>
             </button>
-            <ControlPopover open={showCornerRadiusSlider} anchorRef={radiusBtnRef}>
+            <ControlPopover open={showCornerRadiusSlider} anchorRef={radiusBtnRef}>{showCornerRadiusSlider && (() => {
+              const pixiObj = selectedLayer?.id
+                ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+                : null
+              return (
               <div
                 className="h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200"
                 style={{
@@ -889,8 +918,24 @@ function CanvasControls({
                 <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Radius</span>
                 <Slider.Root
                   className="relative flex items-center select-none touch-none grow h-5"
-                  value={[selectedLayer.data?.cornerRadius ?? 0]}
-                  onValueChange={(value) => { const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0))); handleLayerUpdate({ data: { ...selectedLayer.data, cornerRadius: v } }) }}
+                  value={[(dragCornerRadius !== null ? dragCornerRadius : selectedLayer.data?.cornerRadius) ?? 0]}
+                  onValueChange={(value) => {
+                    const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0)))
+                    if (pixiObj && !pixiObj.destroyed) {
+                      if (typeof pixiObj.cornerRadius !== 'undefined') {
+                        pixiObj.cornerRadius = v
+                      } else if (pixiObj._hasReactiveRadiusProperties) {
+                        pixiObj._cornerRadius = v
+                        pixiObj._applyAnimatedCornerRadius?.()
+                      }
+                    }
+                    setDragCornerRadius(v)
+                  }}
+                  onValueCommit={(value) => {
+                    const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0)))
+                    handleLayerUpdate({ data: { ...selectedLayer.data, cornerRadius: v } })
+                    setDragCornerRadius(null)
+                  }}
                   min={0}
                   max={Math.min(CORNER_RADIUS_MAX, Math.min(selectedLayer.width || 100, selectedLayer.height || 100) / 2)}
                   step={1}
@@ -901,14 +946,15 @@ function CanvasControls({
                   <Slider.Thumb className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`} aria-label="Corner Radius" />
                 </Slider.Root>
                 <span className={`text-xs font-mono min-w-[36px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-                  {Math.round(selectedLayer.data?.cornerRadius ?? 0)}px
+                  {Math.round((dragCornerRadius !== null ? dragCornerRadius : selectedLayer.data?.cornerRadius) ?? 0)}px
                 </span>
               </div>
-            </ControlPopover>
+              )
+            })()}</ControlPopover>
           </div>
         )}
 
-        {/* 3D Tilt Control */}
+        {/* 3D Tilt Control — [PERF] Direct PIXI mutation during drag, Redux sync on release */}
         {selectedLayer && selectedLayer.type !== LAYER_TYPES.BACKGROUND && (
           <div className="relative flex-shrink-0">
             <button
@@ -924,7 +970,9 @@ function CanvasControls({
             </button>
             <ControlPopover open={showTiltPanel} anchorRef={tiltBtnRef}>{showTiltPanel && (() => {
               const TILT_MAX = 60; const TILT_SAFE = 45
-              const tiltX = selectedLayer.tiltX ?? 0; const tiltY = selectedLayer.tiltY ?? 0
+              // Use local drag state if active, otherwise fallback to Redux value
+              const tiltX = dragTiltX !== null ? dragTiltX : (selectedLayer.tiltX ?? 0)
+              const tiltY = dragTiltY !== null ? dragTiltY : (selectedLayer.tiltY ?? 0)
               const isUnsafeX = Math.abs(tiltX) > TILT_SAFE; const isUnsafeY = Math.abs(tiltY) > TILT_SAFE
               const safeHalfPct = (TILT_SAFE / TILT_MAX) * 50
               const trackBase = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
@@ -934,14 +982,58 @@ function CanvasControls({
               const valCol = theme === 'light' ? 'text-gray-700' : 'text-white'
               const warnCol = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
               const thumbCls = `block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`
-              const renderRow = (axis, value, onChange, ariaLabel, isUnsafe, Icon) => (
+              
+              // [PERF] Resolve the PIXI object once so slider drags can mutate it directly
+              // without going through the Redux → useCanvasLayers → applyTransformInline pipeline.
+              const pixiObject = selectedLayer?.id
+                ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+                : null
+              const pixiRenderer = pixiObject?._pixiRenderer || null
+              
+              const renderRow = (axis, value, ariaLabel, isUnsafe, Icon) => (
                 <div className="flex items-center gap-2 w-full">
                   <div className="flex items-center gap-1 shrink-0 w-[24px]">
                     <Icon className={`h-2.5 w-2.5 ${labelCol}`} />
                     <span className={`text-[10px] uppercase font-bold tracking-wider select-none text-center ${labelCol}`}>{axis}</span>
                   </div>
                   <Slider.Root className="relative flex items-center select-none touch-none grow h-5" value={[value]}
-                    onValueChange={(v) => { let val = v[0] ?? 0; if (Math.abs(val) < 2) val = 0; onChange(Math.max(-TILT_MAX, Math.min(TILT_MAX, val))) }}
+                    onValueChange={(v) => {
+                      let val = v[0] ?? 0
+                      if (Math.abs(val) < 2) val = 0
+                      val = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
+                      // [PERF] Direct PIXI mutation for instant visual feedback during drag.
+                      // Local state drives the slider thumb; Redux sync is deferred to onValueCommit.
+                      // [BUG 1 FIX] When tilting from 0 (first drag), _tiltMesh doesn't exist yet.
+                      // syncTiltMesh returns immediately when mesh is null. Call applyTiltToObject
+                      // to create the mesh on first-touch, then subsequent drags are instant.
+                      if (pixiObject && !pixiObject.destroyed) {
+                        if (axis === 'H') pixiObject._tiltXDeg = val
+                        else pixiObject._tiltYDeg = val
+                        if (pixiObject._tiltMesh && !pixiObject._tiltMesh.destroyed) {
+                          syncTiltMesh(pixiObject, null)
+                        } else {
+                          // First-touch: mesh doesn't exist yet — create it immediately.
+                          applyTiltToObject(
+                            pixiObject,
+                            pixiObject._tiltXDeg || 0,
+                            pixiObject._tiltYDeg || 0,
+                            pixiObject._pixiRenderer || null
+                          )
+                        }
+                      }
+                      // Update local drag state so slider thumb follows mouse instantly
+                      if (axis === 'H') setDragTiltX(val)
+                      else setDragTiltY(val)
+                    }}
+                    onValueCommit={(v) => {
+                      // [PERF] Sync the final value to Redux on slider release, then clear local state.
+                      let val = v[0] ?? 0
+                      if (Math.abs(val) < 2) val = 0
+                      val = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
+                      handleLayerUpdate({ [axis === 'H' ? 'tiltX' : 'tiltY']: val })
+                      if (axis === 'H') setDragTiltX(null)
+                      else setDragTiltY(null)
+                    }}
                     min={-TILT_MAX} max={TILT_MAX} step={0.5}
                   >
                     <Slider.Track className={`${trackBase} relative grow rounded-full h-1 overflow-hidden`}>
@@ -966,7 +1058,16 @@ function CanvasControls({
                 >
                   <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
                     {(tiltX !== 0 || tiltY !== 0) && (
-                      <button onClick={() => handleLayerUpdate({ tiltX: 0, tiltY: 0 })}
+                      <button onClick={() => {
+                        setDragTiltX(null)
+                        setDragTiltY(null)
+                        if (pixiObject && !pixiObject.destroyed) {
+                          pixiObject._tiltXDeg = 0
+                          pixiObject._tiltYDeg = 0
+                          syncTiltMesh(pixiObject, null)
+                        }
+                        handleLayerUpdate({ tiltX: 0, tiltY: 0 })
+                      }}
                         className={`p-1 rounded-md transition-all ${theme === 'light' ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
                         title="Reset Tilt"
                       >
@@ -975,8 +1076,8 @@ function CanvasControls({
                     )}
                   </div>
                   <div className="pr-10 pt-1">
-                    {renderRow('H', tiltX, (v) => handleLayerUpdate({ tiltX: v }), 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
-                    {renderRow('V', tiltY, (v) => handleLayerUpdate({ tiltY: v }), 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
+                    {renderRow('H', tiltX, 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
+                    {renderRow('V', tiltY, 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
                   </div>
                 </div>
               )
@@ -1037,13 +1138,13 @@ function CanvasControls({
         </div>
       )}
 
-      {/* ── Mobile: connected two-section pill ── */}
+      {/* ── Mobile: pill bar (property controls in normal mode, motion controls in capture) ── */}
       {isMobileBottom && (
         <div
-          className="h-10 flex items-center w-full max-w-[calc(100vw-16px)] transition-all duration-300"
+          className="h-10 flex items-center justify-center w-full transition-all duration-300"
           style={{ pointerEvents: 'auto' }}
         >
-          {/* Left scrollable section — [UPDATE #2] hidden during Motion Capture mode */}
+          {/* Left scrollable section — hidden during Motion Capture mode */}
           {!isMotionCaptureActive && (
           <div
             className="h-10 flex items-center flex-1 min-w-0 backdrop-blur-md"
@@ -1051,15 +1152,11 @@ function CanvasControls({
               backgroundColor: 'var(--editor-panel-bg)',
               backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
               borderTop: '1px solid var(--editor-panel-border)',
-              borderLeft: '1px solid var(--editor-panel-border)',
-              borderBottom: '1px solid var(--editor-panel-border)',
-              borderRight: 'none',
-              borderRadius: '12px 0 0 12px',
             }}
           >
           <div
             ref={scrollContainerRef}
-            className="flex items-center gap-3 px-2 h-full overflow-x-auto scrollbar-none flex-1 min-w-0"
+            className="flex items-center justify-center gap-3 px-2 h-full overflow-x-auto scrollbar-none flex-1 min-w-0"
             style={{ pointerEvents: 'auto' }}
           >
 
@@ -1354,165 +1451,171 @@ function CanvasControls({
           </div>{/* end scrollable */}
           </div>
           )}{/* end left section */}
-          {/* Right motion section — full border/radius when standalone (capture mode) */}
+          {/* Right motion section — only shown in capture mode */}
+          {isMotionCaptureActive && (
           <div
-            className={`h-10 flex items-center px-2 backdrop-blur-md flex-shrink-0 ${isMotionCaptureActive ? 'mx-auto' : ''}`}
+            className="h-10 flex items-stretch overflow-hidden backdrop-blur-md w-full"
             style={{
               backgroundColor: 'var(--editor-panel-bg)',
               backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-              borderTop: '1px solid var(--editor-panel-border)',
-              borderRight: '1px solid var(--editor-panel-border)',
-              borderBottom: '1px solid var(--editor-panel-border)',
-              borderLeft: isMotionCaptureActive ? '1px solid var(--editor-panel-border)' : 'none',
-              borderRadius: isMotionCaptureActive ? '12px' : '0 12px 12px 0',
+              border: '1px solid var(--editor-panel-border)',
+              borderRadius: '12px',
             }}
           >
             {renderMotionControls()}
           </div>
+          )}
         </div>
       )}
 
-      {/* Transparency Sub-tab (Modal) — mobile only; desktop renders inline above button */}
-      {showOpacitySlider && selectedLayer && isMobileBottom && (
+      {/* Transparency Sub-tab (Modal) — mobile only [PERF] direct PIXI, fresh object resolve */}
+      {showOpacitySlider && selectedLayer && isMobileBottom && (() => {
+        const pixiObj = selectedLayer?.id
+          ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+          : null
+        return (
         <div
-          className={isMobileBottom
-            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
-            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-          }
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
           <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Opacity</span>
-
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
-            value={[Math.round((selectedLayer.opacity ?? 1) * 100)]}
+            value={[Math.round(((dragOpacity !== null ? dragOpacity : selectedLayer.opacity) ?? 1) * 100)]}
             onValueChange={(value) => {
-              handleLayerUpdate({ opacity: value[0] / 100 })
+              const v = value[0] / 100
+              if (pixiObj && !pixiObj.destroyed) {
+                if (pixiObj._tiltHidden && pixiObj._tiltMesh && !pixiObj._tiltMesh.destroyed) {
+                  pixiObj._intendedAlpha = v
+                  pixiObj._tiltMesh.alpha = v
+                } else {
+                  pixiObj.alpha = v
+                }
+              }
+              setDragOpacity(v)
             }}
-            min={0}
-            max={100}
-            step={1}
+            onValueCommit={(value) => {
+              const v = value[0] / 100
+              handleLayerUpdate({ opacity: v })
+              setDragOpacity(null)
+            }}
+            min={0} max={100} step={1}
           >
             <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
-                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-md hover:scale-110'}`}
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Layer Opacity"
             />
           </Slider.Root>
-
           <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-            {Math.round((selectedLayer.opacity ?? 1) * 100)}%
+            {Math.round(((dragOpacity !== null ? dragOpacity : selectedLayer.opacity) ?? 1) * 100)}%
           </span>
-
-          {isMobileBottom && (
-            <button
-              onClick={() => {
-                setShowOpacitySlider(false)
-                onSubmenuChange?.(null)
-              }}
-              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button
+            onClick={() => { setShowOpacitySlider(false); onSubmenuChange?.(null) }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          ><X className="h-3.5 w-3.5" /></button>
         </div>
-      )}
+        )
+      })()}
 
-      {/* Blur Sub-tab (Modal) — mobile only */}
-      {showBlurSlider && selectedLayer && isMobileBottom && (
+      {/* Blur Sub-tab (Modal) — mobile only [PERF] direct PIXI */}
+      {showBlurSlider && selectedLayer && isMobileBottom && (() => {
+        const pixiObj = selectedLayer?.id
+          ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+          : null
+        return (
         <div
-          className={isMobileBottom
-            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
-            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-          }
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
           <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Blur</span>
-
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
-            value={[Math.min(BLUR_MAX, selectedLayer.blur ?? 0)]}
+            value={[Math.min(BLUR_MAX, (dragBlur !== null ? dragBlur : selectedLayer.blur) ?? 0)]}
             onValueChange={(value) => {
               const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0))
-              handleLayerUpdate({ blur: v })
+              if (pixiObj && !pixiObj.destroyed) {
+                if (!pixiObj._blurFilter) { pixiObj._blurFilter = new PIXI.BlurFilter(); pixiObj._blurFilter.quality = 4 }
+                pixiObj._blurFilter.strength = computeBlurPhysicalStrength(v, pixiObj)
+                if (!pixiObj.filters?.includes(pixiObj._blurFilter)) pixiObj.filters = [...(pixiObj.filters || []), pixiObj._blurFilter]
+              }
+              setDragBlur(v)
             }}
-            min={0}
-            max={BLUR_MAX}
-            step={0.5}
+            onValueCommit={(value) => {
+              const v = Math.max(0, Math.min(BLUR_MAX, value[0] ?? 0))
+              handleLayerUpdate({ blur: v })
+              setDragBlur(null)
+            }}
+            min={0} max={BLUR_MAX} step={0.5}
           >
             <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
-                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-md hover:scale-110'}`}
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Layer Blur"
             />
           </Slider.Root>
-
           <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-            {Math.round(Math.min(BLUR_MAX, selectedLayer.blur ?? 0))}
+            {Math.round(Math.min(BLUR_MAX, (dragBlur !== null ? dragBlur : selectedLayer.blur) ?? 0))}
           </span>
-
-          {isMobileBottom && (
-            <button
-              onClick={() => {
-                setShowBlurSlider(false)
-                onSubmenuChange?.(null)
-              }}
-              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button
+            onClick={() => { setShowBlurSlider(false); onSubmenuChange?.(null) }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          ><X className="h-3.5 w-3.5" /></button>
         </div>
-      )}
+        )
+      })()}
 
-      {/* Corner Radius Sub-tab (Modal) — mobile only */}
-      {showCornerRadiusSlider && selectedLayer && hasCorners() && isMobileBottom && (
+      {/* Corner Radius Sub-tab (Modal) — mobile only [PERF] direct PIXI */}
+      {showCornerRadiusSlider && selectedLayer && hasCorners() && isMobileBottom && (() => {
+        const pixiObj = selectedLayer?.id
+          ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+          : null
+        return (
         <div
-          className={isMobileBottom
-            ? "absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
-            : "absolute top-full mt-2 left-1/2 -translate-x-1/2 h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-          }
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
           style={{
             backgroundColor: 'var(--editor-panel-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid var(--editor-panel-border)',
             boxShadow: 'var(--editor-panel-shadow)',
-            minWidth: isMobileBottom ? 'auto' : '240px',
             pointerEvents: 'auto'
           }}
         >
           <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Radius</span>
           <Slider.Root
             className="relative flex items-center select-none touch-none grow h-5"
-            value={[selectedLayer.data?.cornerRadius ?? 0]}
+            value={[(dragCornerRadius !== null ? dragCornerRadius : selectedLayer.data?.cornerRadius) ?? 0]}
             onValueChange={(value) => {
               const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0)))
+              if (pixiObj && !pixiObj.destroyed) {
+                if (typeof pixiObj.cornerRadius !== 'undefined') pixiObj.cornerRadius = v
+                else if (pixiObj._hasReactiveRadiusProperties) { pixiObj._cornerRadius = v; pixiObj._applyAnimatedCornerRadius?.() }
+              }
+              setDragCornerRadius(v)
+            }}
+            onValueCommit={(value) => {
+              const v = Math.max(0, Math.min(CORNER_RADIUS_MAX, Math.round(value[0] ?? 0)))
               handleLayerUpdate({ data: { ...selectedLayer.data, cornerRadius: v } })
+              setDragCornerRadius(null)
             }}
             min={0}
             max={Math.min(CORNER_RADIUS_MAX, Math.min(selectedLayer.width || 100, selectedLayer.height || 100) / 2)}
@@ -1522,39 +1625,27 @@ function CanvasControls({
               <Slider.Range className={`absolute ${theme === 'light' ? 'bg-[#7c4af0]' : 'bg-white'} rounded-full h-full`} />
             </Slider.Track>
             <Slider.Thumb
-              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
-                ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-                : 'bg-white shadow-md hover:scale-110'}`}
+              className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`}
               aria-label="Corner Radius"
             />
           </Slider.Root>
-
           <span className={`text-xs font-mono min-w-[36px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
-            {Math.round(selectedLayer.data?.cornerRadius ?? 0)}px
+            {Math.round((dragCornerRadius !== null ? dragCornerRadius : selectedLayer.data?.cornerRadius) ?? 0)}px
           </span>
-
-          {isMobileBottom && (
-            <button
-              onClick={() => {
-                setShowCornerRadiusSlider(false)
-                onSubmenuChange?.(null)
-              }}
-              className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button
+            onClick={() => { setShowCornerRadiusSlider(false); onSubmenuChange?.(null) }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          ><X className="h-3.5 w-3.5" /></button>
         </div>
-      )}
+        )
+      })()}
 
-      {/* 3D Tilt Sub-panel — mobile only */}
+      {/* 3D Tilt Sub-panel — mobile only [PERF] direct PIXI, fresh object resolve */}
       {showTiltPanel && selectedLayer && isMobileBottom && (() => {
-        const TILT_MAX = 60           // hard limit, matches TiltAction.clampTilt
-        const TILT_SAFE = 45          // recommended upper bound
-        const tiltX = selectedLayer.tiltX ?? 0
-        const tiltY = selectedLayer.tiltY ?? 0
-        const isUnsafeX = Math.abs(tiltX) > TILT_SAFE
-        const isUnsafeY = Math.abs(tiltY) > TILT_SAFE
+        const TILT_MAX = 60; const TILT_SAFE = 45
+        const tiltX = dragTiltX !== null ? dragTiltX : (selectedLayer.tiltX ?? 0)
+        const tiltY = dragTiltY !== null ? dragTiltY : (selectedLayer.tiltY ?? 0)
+        const isUnsafeX = Math.abs(tiltX) > TILT_SAFE; const isUnsafeY = Math.abs(tiltY) > TILT_SAFE
         const safeHalfPct = (TILT_SAFE / TILT_MAX) * 50
         const trackBase = theme === 'light' ? 'bg-gray-200' : 'bg-white/10'
         const safeBand = theme === 'light' ? 'bg-emerald-300/60' : 'bg-emerald-400/25'
@@ -1562,93 +1653,90 @@ function CanvasControls({
         const labelCol = theme === 'light' ? 'text-gray-500' : 'text-white/60'
         const valCol = theme === 'light' ? 'text-gray-700' : 'text-white'
         const warnCol = theme === 'light' ? 'text-amber-600' : 'text-amber-400'
-        const thumbCls = `block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light'
-          ? 'bg-white border-2 border-[#7c4af0] shadow-sm'
-          : 'bg-white shadow-md hover:scale-110'}`
+        const thumbCls = `block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`
+        
+        const pixiObj = selectedLayer?.id
+          ? getGlobalMotionEngine()?.registeredObjects?.get(selectedLayer.id)
+          : null
 
-        const renderRow = (axis, value, onChange, ariaLabel, isUnsafe, Icon) => (
+        const renderRow = (axis, value, ariaLabel, isUnsafe, Icon) => (
           <div className="flex items-center gap-2 w-full">
             <div className="flex items-center gap-1 shrink-0 w-[24px]">
               <Icon className={`h-2.5 w-2.5 ${labelCol}`} />
-              <span className={`text-[10px] uppercase font-bold tracking-wider select-none text-center ${labelCol}`}>
-                {axis}
-              </span>
+              <span className={`text-[10px] uppercase font-bold tracking-wider select-none text-center ${labelCol}`}>{axis}</span>
             </div>
-            <Slider.Root
-              className="relative flex items-center select-none touch-none grow h-5"
-              value={[value]}
+            <Slider.Root className="relative flex items-center select-none touch-none grow h-5" value={[value]}
               onValueChange={(v) => {
                 let val = v[0] ?? 0
-                // Snap to 0 if within +/- 2 degrees for easier resetting
-                if (Math.abs(val) < 2) {
-                  val = 0
+                if (Math.abs(val) < 2) val = 0
+                val = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
+                if (pixiObj && !pixiObj.destroyed) {
+                  if (axis === 'H') pixiObj._tiltXDeg = val
+                  else pixiObj._tiltYDeg = val
+                  // [BUG 1 FIX] Same fix as desktop: create mesh on first-touch
+                  if (pixiObj._tiltMesh && !pixiObj._tiltMesh.destroyed) {
+                    syncTiltMesh(pixiObj, null)
+                  } else {
+                    applyTiltToObject(
+                      pixiObj,
+                      pixiObj._tiltXDeg || 0,
+                      pixiObj._tiltYDeg || 0,
+                      pixiObj._pixiRenderer || null
+                    )
+                  }
                 }
-                const clamped = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
-                onChange(clamped)
+                if (axis === 'H') setDragTiltX(val)
+                else setDragTiltY(val)
               }}
-              min={-TILT_MAX}
-              max={TILT_MAX}
-              step={0.5}
+              onValueCommit={(v) => {
+                let val = v[0] ?? 0
+                if (Math.abs(val) < 2) val = 0
+                val = Math.max(-TILT_MAX, Math.min(TILT_MAX, val))
+                handleLayerUpdate({ [axis === 'H' ? 'tiltX' : 'tiltY']: val })
+                if (axis === 'H') setDragTiltX(null)
+                else setDragTiltY(null)
+              }}
+              min={-TILT_MAX} max={TILT_MAX} step={0.5}
             >
               <Slider.Track className={`${trackBase} relative grow rounded-full h-1 overflow-hidden`}>
-                <span
-                  aria-hidden
-                  className={`absolute top-0 bottom-0 ${safeBand}`}
-                  style={{ left: `${50 - safeHalfPct}%`, width: `${safeHalfPct * 2}%` }}
-                />
+                <span aria-hidden className={`absolute top-0 bottom-0 ${safeBand}`} style={{ left: `${50 - safeHalfPct}%`, width: `${safeHalfPct * 2}%` }} />
                 <Slider.Range className={`absolute ${rangeFill} rounded-full h-full`} />
               </Slider.Track>
               <Slider.Thumb className={thumbCls} aria-label={ariaLabel} />
             </Slider.Root>
-            <span className={`text-xs font-mono min-w-[44px] text-right tabular-nums ${isUnsafe ? warnCol : valCol}`}>
-              {value.toFixed(1)}°
-            </span>
+            <span className={`text-xs font-mono min-w-[44px] text-right tabular-nums ${isUnsafe ? warnCol : valCol}`}>{value.toFixed(1)}°</span>
           </div>
         )
 
         return (
           <div
-            className={isMobileBottom
-              ? "absolute bottom-full mb-3 left-4 right-4 flex flex-col gap-1 p-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
-              : "absolute top-full mt-2 left-1/2 -translate-x-1/2 flex flex-col gap-0.5 px-4 py-2 rounded-lg backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-            }
+            className="absolute bottom-full mb-3 left-4 right-4 flex flex-col gap-1 p-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
             style={{
               backgroundColor: 'var(--editor-panel-bg)',
-              backdropFilter: 'blur(24px)',
-              WebkitBackdropFilter: 'blur(24px)',
+              backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
               border: '1px solid var(--editor-panel-border)',
               boxShadow: 'var(--editor-panel-shadow)',
-              minWidth: isMobileBottom ? 'auto' : '270px',
               pointerEvents: 'auto'
             }}
           >
-            {/* Absolute Close/Reset Icons */}
             <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
               {(tiltX !== 0 || tiltY !== 0) && (
-                <button
-                  onClick={() => handleLayerUpdate({ tiltX: 0, tiltY: 0 })}
+                <button onClick={() => {
+                  setDragTiltX(null); setDragTiltY(null)
+                  if (pixiObj && !pixiObj.destroyed) { pixiObj._tiltXDeg = 0; pixiObj._tiltYDeg = 0; syncTiltMesh(pixiObj, null) }
+                  handleLayerUpdate({ tiltX: 0, tiltY: 0 })
+                }}
                   className={`p-1 rounded-md transition-all ${theme === 'light' ? 'text-gray-400 hover:text-gray-600 hover:bg-gray-100' : 'text-white/30 hover:text-white/60 hover:bg-white/10'}`}
                   title="Reset Tilt"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
+                ><RotateCcw className="h-3.5 w-3.5" /></button>
               )}
-              {isMobileBottom && (
-                <button
-                  onClick={() => {
-                    setShowTiltPanel(false)
-                    onSubmenuChange?.(null)
-                  }}
-                  className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
+              <button onClick={() => { setShowTiltPanel(false); onSubmenuChange?.(null) }}
+                className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+              ><X className="h-3.5 w-3.5" /></button>
             </div>
-
             <div className="pr-10 pt-1">
-              {renderRow('H', tiltX, (v) => handleLayerUpdate({ tiltX: v }), 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
-              {renderRow('V', tiltY, (v) => handleLayerUpdate({ tiltY: v }), 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
+              {renderRow('H', tiltX, 'Horizontal Tilt', isUnsafeX, ArrowLeftRight)}
+              {renderRow('V', tiltY, 'Vertical Tilt', isUnsafeY, ArrowUpDown)}
             </div>
           </div>
         )

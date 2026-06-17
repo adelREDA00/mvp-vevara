@@ -215,7 +215,6 @@ export class CropAction {
 
         if (pixiObject._tiltMesh && !pixiObject._tiltMesh.destroyed) {
             markTiltTextureDirty(pixiObject)
-            syncTiltMesh(pixiObject, null)
         }
     }
 }

@@ -11,6 +11,7 @@ import { loadTextureRobust } from './textureUtils'
 import { getGlobalMotionEngine } from '../motion/index'
 import { installReactiveCornerRadius } from '../motion/actions/CornerRadiusAction'
 import { FlowTextContainer } from '../text/FlowTextContainer'
+import { markTiltTextureDirty, syncTiltMesh } from './perspectiveTilt'
 
 // [MOBILE FIX] Detect mobile devices to conditionally disable GPU-heavy features
 const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
@@ -870,6 +871,11 @@ export function attachAssetToFrame(container, texture, frameWidth, frameHeight) 
   }
   container._frameHasAsset = true
 
+  if (container._tiltMesh) {
+    markTiltTextureDirty(container)
+    syncTiltMesh(container, null)
+  }
+
   return { mediaWidth: mediaW, mediaHeight: mediaH, cropX: 0, cropY: 0, cropWidth: mediaW, cropHeight: mediaH }
 }
 
@@ -980,6 +986,11 @@ export function attachBackAssetToFrame(container, texture, frameWidth, frameHeig
     }
   }
 
+  if (container._tiltMesh) {
+    markTiltTextureDirty(container)
+    syncTiltMesh(container, null)
+  }
+
   return { mediaWidth: mediaW, mediaHeight: mediaH, cropX: 0, cropY: 0, cropWidth: mediaW, cropHeight: mediaH }
 }
 
@@ -1070,6 +1081,11 @@ export function highlightFrameDropTarget(container, width, height, data = null) 
       ph.stroke({ color: 0xffffff, width: 2 })
     }
   }
+
+  if (container._tiltMesh) {
+    markTiltTextureDirty(container)
+    syncTiltMesh(container, null)
+  }
 }
 
 /**
@@ -1089,6 +1105,11 @@ export function unhighlightFrameDropTarget(container, width, height) {
     : container._frameHasAsset
   if (activeHasAsset && container._framePlaceholder) {
     container._framePlaceholder.visible = false
+  }
+
+  if (container._tiltMesh) {
+    markTiltTextureDirty(container)
+    syncTiltMesh(container, null)
   }
 }
 
@@ -1122,6 +1143,11 @@ export function showFramePlaceholderFallback(container, side = 'front') {
     const w = container._storedCropWidth || container.width || 200
     const h = container._storedCropHeight || container.height || 200
     redrawFramePlaceholder(container, w, h)
+  }
+
+  if (container._tiltMesh) {
+    markTiltTextureDirty(container)
+    syncTiltMesh(container, null)
   }
 }
 

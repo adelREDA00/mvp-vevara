@@ -28,7 +28,7 @@ export const TILT_HIDE_SENTINEL = 0.000001
 //     resize, crop, frame placeholder, etc.) calls `markTiltTextureDirty` so
 //     the next sync re-captures the RTT.
 
-const MESH_VERTICES = 10
+const MESH_VERTICES = 32
 const MIN_TILT_RAD = 0.0001 // Numerical guard around 0° to avoid div-by-zero.
 
 // [QUALITY / PERF] Upper bound on the larger RTT dimension (in physical
@@ -111,10 +111,19 @@ function _rasterizeTextToCanvasTexture(textObj, layoutW, layoutH) {
     const letterSpacing = Number(style.letterSpacing) || 0
     const lineHeight = Number(style.lineHeight) > 0 ? Number(style.lineHeight) : fontSize * 1.2
     const align = style.align || 'left'
+    // [TEXT TILT FIX] ALWAYS prefer style.wordWrapWidth when available so the
+    // Canvas2D rasterizer uses the EXACT SAME wrap width as PIXI.TextMetrics.
+    // Previously, Canvas2D's measureText() could produce different line breaks
+    // than PIXI for the same width, causing the tilted text to show different
+    // wrapping (e.g. 4 lines became 2 lines) when the canvas2d path was used.
+    // PIXI.TextMetrics uses breakWords:true + wordWrapWidth — we mirror both.
     const wordWrap = style.wordWrap !== false
     const wordWrapWidth = Number(style.wordWrapWidth) > 0
       ? Number(style.wordWrapWidth)
       : (layoutW > 0 ? layoutW : 200)
+    // Mirror PIXI's breakWords:true behavior: split at any character boundary
+    // when a single word exceeds wordWrapWidth, not just whitespace.
+    const breakWords = style.breakWords !== false
 
     // PIXI accepts fill as string, number or { color } — normalise to CSS.
     let fill = '#000000'
@@ -133,7 +142,11 @@ function _rasterizeTextToCanvasTexture(textObj, layoutW, layoutH) {
     const fontStr = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
     ctx.font = fontStr
 
-    // Word-wrap into physical lines.
+    // [TEXT TILT FIX] Word-wrap with breakWords support.
+    // PIXI's TextMetrics respects breakWords for long words — if a word
+    // alone exceeds wordWrapWidth, it gets broken at the wrap boundary,
+    // not pushed to the next line.  Mirror this with character-level
+    // splitting when breakWords is true AND the single word overflows.
     const rawLines = content.length ? content.split('\n') : ['']
     const lines = []
     for (const para of rawLines) {
@@ -141,21 +154,48 @@ function _rasterizeTextToCanvasTexture(textObj, layoutW, layoutH) {
         lines.push(para)
         continue
       }
-      const words = para.split(' ')
+      // Tokenise by whitespace (PIXI's default split pattern)
+      const words = para.split(/(\s+)/)
       let current = ''
-      for (const word of words) {
-        const test = current ? current + ' ' + word : word
+      for (const token of words) {
+        // Whitespace tokens are added to current without overflow check
+        if (/^\s+$/.test(token)) {
+          current += token
+          continue
+        }
+        const test = current + token
         const tw = ctx.measureText(test).width
-        if (tw > wordWrapWidth && current) {
+        if (tw > wordWrapWidth && current.trim()) {
           lines.push(current)
-          current = word
+          current = token
+          // [TEXT TILT FIX] If the single token itself overflows the line
+          // AND breakWords is enabled, split it character-by-character.
+          if (breakWords && ctx.measureText(token).width > wordWrapWidth) {
+            let charBuf = ''
+            for (const ch of token) {
+              const charTest = charBuf + ch
+              if (ctx.measureText(charTest).width > wordWrapWidth && charBuf) {
+                lines.push(charBuf)
+                charBuf = ch
+              } else {
+                charBuf = charTest
+              }
+            }
+            current = charBuf
+          }
         } else {
           current = test
         }
       }
-      if (current || !words.length) lines.push(current)
+      if (current || !para) lines.push(current)
     }
     if (!lines.length) lines.push('')
+
+    // [TEXT TILT FIX] Use layoutW as a hard ceiling for logical width.
+    // The tilt mesh's corners are computed from (layoutW, layoutH) — if the
+    // canvas2D texture is wider than layoutW, the mesh will compress the text
+    // visually.  Clamp textual width to the same mesh boundary PIXI would use.
+    let totalContentH = lines.length * lineHeight
 
     // Measure widest line (accounting for letter spacing).
     let maxLineW = 1
@@ -165,16 +205,14 @@ function _rasterizeTextToCanvasTexture(textObj, layoutW, layoutH) {
       if (mw > maxLineW) maxLineW = mw
     }
 
-    // Physical canvas size — use layout dims as floor so the texture
-    // matches the mesh vertices exactly (any extra space is just
-    // transparent padding, which is what we want).
-    const logicalW = Math.max(maxLineW, layoutW || 1, 1)
-    const logicalH = Math.max(lines.length * lineHeight, layoutH || 1, 1)
+    // Clamp to layoutW so the rasterised canvas matches the mesh quad exactly.
+    const logicalW = Math.max(1, layoutW || 200)
+    const logicalH = Math.max(totalContentH, layoutH || 1, 1)
+
     canvas.width = Math.max(1, Math.ceil(logicalW * resolution))
     canvas.height = Math.max(1, Math.ceil(logicalH * resolution))
 
-    // Canvas starts transparent — this is the whole point.  Redraw state
-    // after the resize (resizing a canvas resets ctx state) and paint.
+    // Canvas starts transparent. Redraw state after resize and paint.
     ctx.scale(resolution, resolution)
     ctx.font = fontStr
     ctx.fillStyle = fill
@@ -317,33 +355,79 @@ export function computePerspectiveCorners(w, h, tiltXDeg, tiltYDeg, offsetX = 0,
   const radY = (tiltYDeg || 0) * Math.PI / 180
 
   const cosX = Math.cos(radX)
+  const sinX = Math.sin(radX)
   const cosY = Math.cos(radY)
+  const sinY = Math.sin(radY)
 
-  const leftVScale  = tiltXDeg >= 0 ? 1.0 : cosX
-  const rightVScale = tiltXDeg >= 0 ? cosX : 1.0
-
-  const topHScale = tiltYDeg >= 0 ? cosY : 1.0
-  const botHScale = tiltYDeg >= 0 ? 1.0 : cosY
+  // Perspective coefficients (defines camera distance relative to layer size)
+  // 0.35 is a standard coefficient that gives a realistic perspective effect.
+  const dX = 0.35
+  const dY = 0.35
 
   const cx = w / 2
   const cy = h / 2
 
-  const tlX = offsetX + (cx - cx * topHScale)
-  const trX = offsetX + (cx + cx * topHScale)
-  const brX = offsetX + (cx + cx * botHScale)
-  const blX = offsetX + (cx - cx * botHScale)
+  // We compute the projected coordinates for each of the 4 corners relative to the center (0,0)
+  // using 3D rotation (Ry then Rx: yaw then pitch) and perspective projection.
+  // This ensures the perspective remains centered around the middle of the layer
+  // when both tilt axes are applied.
+  
+  const projectCorner = (x, y) => {
+    // 1. Rotate around Y-axis (yaw / tiltX)
+    const x1 = x * cosX
+    const y1 = y
+    const z1 = -x * sinX
 
-  const tlY = offsetY + (cy - cy * leftVScale)
-  const trY = offsetY + (cy - cy * rightVScale)
-  const brY = offsetY + (cy + cy * rightVScale)
-  const blY = offsetY + (cy + cy * leftVScale)
+    // 2. Rotate around X-axis (pitch / tiltY)
+    const x2 = x1
+    const y2 = y1 * cosY - z1 * sinY
+    const z2 = y1 * sinY + z1 * cosY
 
-  return [tlX, tlY, trX, trY, brX, brY, blX, blY]
+    // 3. Perspective projection divisor
+    // We map the X and Y perspective coefficients (dX, dY) to their respective rotated Z components.
+    const div = Math.max(0.1, 1 + (x / cx) * dX * sinX * cosY - (y / cy) * dY * sinY)
+
+    return {
+      px: offsetX + cx + x2 / div,
+      py: offsetY + cy + y2 / div
+    }
+  }
+
+  // 1. Top-Left corner (x = -cx, y = -cy)
+  const tl = projectCorner(-cx, -cy)
+
+  // 2. Top-Right corner (x = cx, y = -cy)
+  const tr = projectCorner(cx, -cy)
+
+  // 3. Bottom-Right corner (x = cx, y = cy)
+  const br = projectCorner(cx, cy)
+
+  // 4. Bottom-Left corner (x = -cx, y = cy)
+  const bl = projectCorner(-cx, cy)
+
+  return [tl.px, tl.py, tr.px, tr.py, br.px, br.py, bl.px, bl.py]
 }
 
 export function markTiltTextureDirty(pixiObject) {
   if (!pixiObject || pixiObject.destroyed) return
   pixiObject._tiltTextureDirty = true
+}
+
+// Stamps the current live layout dimensions as the cached capture dims so that
+// syncTiltMesh doesn't snap back to pre-resize dimensions when _isResizing flips
+// to false. Call this just before clearing _isResizing in handleResizeEnd.
+// [BUG1 FIX] Removed the `_tiltCaptureW === undefined` guard so this always
+// runs — even on the very first resize before any RTT capture has occurred.
+// Without this, the function silently no-opped on first drag, leaving
+// _tiltCaptureW undefined so syncTiltMesh fell back to getTiltLayout(), which
+// read stale pre-resize dims and caused the mesh to snap back after release.
+export function stampTiltCaptureDims(pixiObject) {
+  if (!pixiObject?._tiltMesh) return
+  const layout = getTiltLayout(pixiObject)
+  pixiObject._tiltCaptureW = layout.w
+  pixiObject._tiltCaptureH = layout.h
+  pixiObject._tiltCaptureOriginX = layout.originX
+  pixiObject._tiltCaptureOriginY = layout.originY
 }
 
 // ---------------------------------------------------------------------------
@@ -365,15 +449,13 @@ function getTiltLayout(pixiObject) {
     const rawW = pixiObject._storedCropWidth ?? pixiObject._cropMask?.width ?? pixiObject.width ?? 1
     const rawH = pixiObject._storedCropHeight ?? pixiObject._cropMask?.height ?? pixiObject.height ?? 1
 
-    // For images, preserve fractional dimensions so the mesh corners move
-    // smoothly when the crop animates. Math.ceil()-ing the layout snaps corner
-    // positions by whole pixels per frame, which reads as jitter/shake during
-    // crop tweens. The RTT allocation (which needs integer dims) is re-ceiled
-    // locally inside captureToTexture(). Videos keep the integer path — they
-    // run through the same capture but don't show jitter.
-    const isImage = !!(pixiObject._imageSprite && !pixiObject._videoSprite)
-    const cropW = isImage ? Math.max(1, rawW) : Math.max(1, Math.ceil(rawW))
-    const cropH = isImage ? Math.max(1, rawH) : Math.max(1, Math.ceil(rawH))
+    // [Bug 3 Fix] Preserve fractional dimensions for all media types (image,
+    // video, frame) so the tilt mesh corners match the selection box outline
+    // exactly. The ceil'ed dimensions were 1-2px larger than the actual
+    // fractional values stored in Redux, causing the mesh to appear off-sized.
+    // The RTT allocation uses its own ceil inside captureToTexture().
+    const cropW = Math.max(1, rawW)
+    const cropH = Math.max(1, rawH)
     return {
       w: cropW,
       h: cropH,
@@ -393,8 +475,12 @@ function getTiltLayout(pixiObject) {
   if (pixiObject instanceof PIXI.Graphics &&
       typeof pixiObject._storedWidth === 'number' &&
       typeof pixiObject._storedHeight === 'number') {
-    const w = Math.max(1, Math.ceil(pixiObject._storedWidth))
-    const h = Math.max(1, Math.ceil(pixiObject._storedHeight))
+    // [Bug 3 Fix] Preserve fractional dimensions for shapes (same as images)
+    // instead of ceil'ing. The ceil caused the RTT frame to be slightly larger
+    // than the actual drawn geometry, creating a mismatch between the tilt mesh
+    // corners and the selection box outline read from Redux fractional values.
+    const w = Math.max(1, pixiObject._storedWidth)
+    const h = Math.max(1, pixiObject._storedHeight)
     const aX = pixiObject._storedAnchorX ?? 0.5
     const aY = pixiObject._storedAnchorY ?? 0.5
     return {
@@ -420,6 +506,47 @@ function getTiltLayout(pixiObject) {
       originX: -w * anchorX,
       originY: -h * anchorY,
       usePivot: false, // anchor handles the origin shift, no extra pivot
+    }
+  }
+
+  // Standard text layers: use sprite-like layout to align mesh with internal sprite positioning.
+  const isPixiTextLike = !!(
+    (PIXI.Text && pixiObject instanceof PIXI.Text)
+    || pixiObject?.constructor?.name === 'Text'
+    || (typeof pixiObject?.text === 'string'
+        && pixiObject?.style != null
+        && typeof pixiObject?.updateText === 'function')
+  )
+  if (isPixiTextLike) {
+    // [TILT-SCALE FIX v2] Use the text's word-wrap width (style.wordWrapWidth)
+    // for the logical width.  getLocalBounds().width measures only the glyph
+    // extents ("Hi" ≈ 30px), while the selection / hover overlays use
+    // style.wordWrapWidth (= layer.width, e.g. 300px).  A mismatch between the
+    // tilt mesh base dimensions and the overlay dimensions causes interactions
+    // (resize-handle hit targets, corner→mouse deltas) to operate on different
+    // spatial scales — producing the "inverted scaling" bug during capture-mode
+    // resize of tilted text.
+    //
+    // Height still comes from getLocalBounds() because it accurately reflects the
+    // actual rendered glyph height (which changes with word-wrap reflows).
+    const wordWrapWidth = typeof pixiObject.style?.wordWrapWidth === 'number' && pixiObject.style.wordWrapWidth > 0
+      ? pixiObject.style.wordWrapWidth
+      : (pixiObject.width || 100)
+    const w = Math.max(1, Math.ceil(wordWrapWidth))
+    let h = pixiObject.height || 40
+    try {
+      const lb = pixiObject.getLocalBounds()
+      if (lb && lb.height > 0) h = lb.height
+    } catch (_e) { /* fall back */ }
+    h = Math.max(1, Math.ceil(h))
+    const anchorX = pixiObject.anchor?.x ?? 0
+    const anchorY = pixiObject.anchor?.y ?? 0
+    return {
+      w,
+      h,
+      originX: -w * anchorX,
+      originY: -h * anchorY,
+      usePivot: true,
     }
   }
 
@@ -533,6 +660,7 @@ function _captureViaGenerateTexture(pixiObject, renderer, w, h, originX, originY
     pixiObject.rotation = 0
     pixiObject.visible = true
     pixiObject.alpha = 1
+    pixiObject.renderable = true
     if (pixiObject.pivot) pixiObject.pivot.set(0, 0)
 
     // [EXPORT-BLACK-MESH] PIXI.Text rasterises its glyphs into an internal
@@ -567,6 +695,9 @@ function _captureViaGenerateTexture(pixiObject, renderer, w, h, originX, originY
     pixiObject.rotation = savedRotation
     pixiObject.visible = savedVisible
     pixiObject.alpha = savedAlpha
+    if (pixiObject._tiltHidden) {
+      pixiObject.renderable = false
+    }
     if (pixiObject.pivot) pixiObject.pivot.set(savedPivotX, savedPivotY)
   }
 
@@ -625,6 +756,8 @@ function captureToTexture(pixiObject, renderer) {
   
   const label = pixiObject.label || pixiObject.constructor?.name || 'unlabeled'
 
+  // [PERF-DEBUG] Log every RTT capture to diagnose tilt slider lag
+  const _perfStart = performance.now()
   _tdbg(`captureToTexture start: ${label} | dims: ${w}x${h} | res: ${resolution} | isExport: ${isExport}`)
 
 
@@ -780,7 +913,10 @@ function captureToTexture(pixiObject, renderer) {
   // and causes jitter. We reuse the old RTT if it's large enough to hold the
   // new content and the resolution hasn't changed significantly.
   const sizeTooSmall = oldRt && (rttW > oldRt.width || rttH > oldRt.height)
-  const sizeTooLarge = oldRt && (rttW < oldRt.width - 128 || rttH < oldRt.height - 128)
+  // [PERF] Widened from 128 to 256 to reduce RTT reallocation churn during
+  // crop/scale animations.  The memory overhead of a slightly oversized RTT is
+  // negligible compared to the GPU stall of allocating + deallocating textures.
+  const sizeTooLarge = oldRt && (rttW < oldRt.width - 256 || rttH < oldRt.height - 256)
   const resMismatch = oldRt && Math.abs(oldRt.resolution - resolution) > 0.01
   const sizeMismatch = oldRt && (sizeTooSmall || sizeTooLarge || resMismatch)
   // If the previous texture was a borrowed text.texture (from the PIXI.Text
@@ -888,6 +1024,7 @@ function captureToTexture(pixiObject, renderer) {
   pixiObject.rotation = 0
   pixiObject.visible = true
   pixiObject.alpha = 1
+  pixiObject.renderable = true
   if (pixiObject.pivot) pixiObject.pivot.set(0, 0)
 
   // ────────────────────────────────────────────────────────────────────────
@@ -976,6 +1113,9 @@ function captureToTexture(pixiObject, renderer) {
   pixiObject.rotation = savedRotation
   pixiObject.visible = savedVisible
   pixiObject.alpha = savedAlpha
+  if (pixiObject._tiltHidden) {
+    pixiObject.renderable = false
+  }
   if (pixiObject.pivot) pixiObject.pivot.set(savedPivotX, savedPivotY)
 
   wrapper.removeChild(pixiObject)
@@ -1120,6 +1260,11 @@ function captureToTexture(pixiObject, renderer) {
   pixiObject._tiltCaptureOriginY = originY
   pixiObject._tiltTextureDirty = false
 
+  const _perfEnd = performance.now()
+  if (_perfEnd - _perfStart > 1) {
+    console.log(`[TILT-PERF] captureToTexture ${label}: ${(_perfEnd - _perfStart).toFixed(1)}ms | dims:${w}x${h} | res:${resolution}`)
+  }
+
   return targetRt
 }
 
@@ -1178,6 +1323,25 @@ function ensureMeshParented(pixiObject, mesh) {
 // We hook it into every tilted video layer and simply mark the tilt texture
 // dirty + resync the mesh on every new frame.
 
+// [PERF] Minimum interval between video-tilt RTT recaptures (ms).
+// 50ms ≈ 20fps for playback — more than sufficient for a perspective-warped
+// video texture. The tilt mesh doesn't need every decoded frame since the
+// perspective distortion itself softens the texture. For scrubbing (seeking
+// while paused), we keep a tighter 33ms interval for responsive seeking.
+// Throttled further on low-end / mobile devices.
+const VIDEO_TILT_CAPTURE_PLAYBACK_MS = 50
+const VIDEO_TILT_CAPTURE_SCRUB_MS = 33
+const _isLowEndDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+function _getVideoCaptureInterval() {
+  // On low-end devices, use 66ms (~15fps) to save GPU cycles
+  if (_isLowEndDevice) return 100
+  return VIDEO_TILT_CAPTURE_PLAYBACK_MS
+}
+// [PERF] RTT resolution reduction during playback — we render at lower
+// resolution to save GPU fill-rate when tilt meshes are being recaptured
+// every frame. Still capped by MAX_RTT_DIMENSION.
+const PLAYBACK_RTT_RESOLUTION_CAP = 2.0
+
 function attachVideoFrameSync(pixiObject) {
   if (!pixiObject || pixiObject.destroyed) return
   const videoEl = getTiltVideoElement(pixiObject)
@@ -1205,10 +1369,57 @@ function attachVideoFrameSync(pixiObject) {
       return
     }
 
-    // Any new frame could be different pixels — mark dirty and resync.
-    pixiObject._tiltTextureDirty = true
-    pixiObject._tiltLastVideoTime = videoEl.currentTime
-    syncTiltMesh(pixiObject, null)
+    // [PERF] When the engine is fully idle (not playing AND not scrubbing),
+    // the video frame is static — skip the rVFC subscription.  The playback
+    // engine's seek()/scrub() methods explicitly call syncMedia() with a
+    // forced texture update that covers the "seeking while paused" path, so
+    // we don't miss frame updates during manual scrubbing.  This avoids
+    // perpetual GPU RTT recaptures on tilted video layers while the user is
+    // simply editing in Design Mode.
+
+    // [PERF] Only subscribe to the next frame if the video is actually
+    // playing OR the engine is actively scrubbing/playing.  A paused video
+    // with a static frame doesn't need the tilt mesh recaptured every
+    // playback-rate frame — the existing RTT capture from the last seek is
+    // already correct.  We check the <video> element's paused state plus the
+    // per-object throttle below.
+    if (videoEl.paused) {
+      // Reschedule a check at a much lower frequency (500ms) while paused,
+      // in case the video was seeked externally.  This keeps the mesh in
+      // eventual sync without the GPU overhead of a per-frame rVFC loop.
+      const pausedInterval = 500
+      const now = performance.now()
+      if (!pixiObject._tiltPausedCheckTime || now - pixiObject._tiltPausedCheckTime > pausedInterval) {
+        pixiObject._tiltPausedCheckTime = now
+        const currentTime = videoEl.currentTime
+        if (pixiObject._tiltLastVideoTime !== currentTime) {
+          pixiObject._tiltTextureDirty = true
+          pixiObject._tiltLastVideoTime = currentTime
+        }
+      }
+      pixiObject._tiltVideoFrameHandle = setTimeout(() => tick(performance.now(), null), pausedInterval)
+      pixiObject._tiltVideoFrameAttached = true  // still "attached" for cleanup tracking
+      return
+    }
+
+    // [PERF] Throttle: only mark dirty if enough time has passed since the
+    // last RTT capture.  The browser fires rVFC at the video's native frame
+    // rate (24–60fps), but we only need to recapture at much lower rate
+    // (~10-20fps) since perspective distortion softens texture detail anyway.
+    // The actual capture happens in the next syncTiltMesh call from
+    // _syncTiltedLayers (the engine's per-frame loop), not here — we just
+    // set the flag.
+    const now = performance.now()
+    const lastCapture = pixiObject._tiltLastCaptureTime || 0
+    const interval = _getVideoCaptureInterval()
+    if (now - lastCapture >= interval) {
+      pixiObject._tiltTextureDirty = true
+      pixiObject._tiltLastVideoTime = videoEl.currentTime
+      // NOTE: We intentionally do NOT call syncTiltMesh here.
+      // The engine's _syncTiltedLayers() (called from masterTimeline.onUpdate)
+      // will pick up the dirty flag and do the capture in the same frame.
+      // Calling syncTiltMesh here too would cause a redundant capture.
+    }
 
     // Re-subscribe for the next frame.
     pixiObject._tiltVideoFrameHandle = videoEl.requestVideoFrameCallback(tick)
@@ -1264,8 +1475,21 @@ export function applyTiltToObject(pixiObject, tiltXDeg, tiltYDeg, renderer, opti
       verticesX: MESH_VERTICES,
       verticesY: MESH_VERTICES,
     })
-    mesh.eventMode = 'none'
-    mesh.label = 'tilt-perspective-mesh'
+    mesh.eventMode = pixiObject.eventMode || 'static'
+    mesh.cursor = pixiObject.cursor || 'pointer'
+    mesh.label = pixiObject.label || 'tilt-perspective-mesh'
+
+    // Forward pointer events to the original object so interaction/hover outlines work correctly
+    mesh.on('pointerenter', (e) => {
+      if (!pixiObject.destroyed) pixiObject.emit('pointerenter', e)
+    })
+    mesh.on('pointerleave', (e) => {
+      if (!pixiObject.destroyed) pixiObject.emit('pointerleave', e)
+    })
+    mesh.on('pointerdown', (e) => {
+      if (!pixiObject.destroyed) pixiObject.emit('pointerdown', e)
+    })
+
     pixiObject._tiltMesh = mesh
   } else if (texture && mesh.texture !== texture) {
     mesh.texture = texture
@@ -1285,6 +1509,13 @@ export function applyTiltToObject(pixiObject, tiltXDeg, tiltYDeg, renderer, opti
   // [SENTINEL FIX] 1e-6 allows us to distinguish from user-set alpha=0.
   pixiObject._tiltHidden = true
   pixiObject.alpha = TILT_HIDE_SENTINEL
+  pixiObject.renderable = false
+
+  // Override eventMode to none to prevent selection area overshoot on flat bounds
+  if (pixiObject._originalEventMode === undefined) {
+    pixiObject._originalEventMode = pixiObject.eventMode || 'static'
+  }
+  pixiObject.eventMode = 'none'
 
   syncTiltMesh(pixiObject, null)
 
@@ -1303,16 +1534,64 @@ export function applyTiltToObject(pixiObject, tiltXDeg, tiltYDeg, renderer, opti
 // Cheap per-frame slave: refresh transforms + corners.  No RTT recapture
 // unless _tiltTextureDirty is set (e.g. after a content change).  Safe to
 // call every frame from interaction handlers.
-export function syncTiltMesh(pixiObject, layer) {
+export function syncTiltMesh(pixiObject, layer, options = {}) {
   if (!pixiObject || pixiObject.destroyed) return
   const mesh = pixiObject._tiltMesh
   if (!mesh || mesh.destroyed) return
 
+  const renderer = pixiObject._pixiRenderer || null
+  const isExport = !!renderer?._isExportRenderer
+
   const tiltXDeg = pixiObject._tiltXDeg || 0
   const tiltYDeg = pixiObject._tiltYDeg || 0
 
-  // Re-capture the texture if visible content changed.
-  if (pixiObject._tiltTextureDirty) {
+  // [PERF] During active resize/scaling interactions, skip full RTT capture to maintain 60fps.
+  // Instead, allow the mesh corners to stretch based on live dimensions. We will trigger
+  // a full recapture when the user releases the resize handles (handleResizeEnd resets _isResizing).
+  // [Bug 3 Fix] `force` option bypasses all interaction guards — used by the deferred
+  // recapture mechanism in handleResizeEnd to ensure the RTT is re-captured AFTER
+  // applyTransformInline has synced the PIXI state from the final Redux dispatch.
+  const isActivelyResizing = !options.force && !!pixiObject._isResizing
+
+  // [PERF-CRITICAL] Global capture throttle — gates ALL code paths.
+  // syncTiltMesh is called from 4+ different sites (applyTransformInline,
+  // _syncTiltedLayers, CropAction reactive setters, useCanvasInteractions
+  // ticker, etc). Without a per-pixiObject time throttle here, GPU RTT
+  // captures happen at 60fps, 5-8x per frame. This is the SINGLE gate
+  // that reduces captures to a sustainable rate.
+  //   - Playback: 100ms (~10fps) — tilt distortion softens texture anyway
+  //   - Video playback: per-video interval (typically 33-100ms)
+  //   - Scrubbed/paused: 50ms (~20fps) — responsive enough for seeking
+  //   - Force/export: immediate (0ms) — for resize-end sync and export
+  // [COLOR-ANIMATION FIX] When _tiltTextureDirty is set every frame (e.g. during a
+  // ColorChangeAction animation), the 100ms throttle causes the mesh RTT to show
+  // stale color for ~6 frames before snapping to the fresh capture — visible as
+  // a color "stutter" / flicker.  Bypass the time throttle whenever the layer is
+  // actively dirty, so per-frame color changes are captured every frame.
+  const label = pixiObject.label || 'tilt-layer'
+  const isVideo = !!(pixiObject._videoElement || (pixiObject._videoSprite?.texture?.source?.resource instanceof HTMLVideoElement))
+  const captureInterval = options.force 
+    ? 0 
+    : (pixiObject._tiltTextureDirty ? 0 : (isVideo ? _getVideoCaptureInterval() : 100))
+  const now = performance.now()
+  const elapsedSinceCapture = now - (pixiObject._tiltLastCaptureTime || 0)
+  const isCaptureThrottled = !isExport && captureInterval > 0 && elapsedSinceCapture < captureInterval
+
+  // [JITTER FIX] When the layout dimensions differ from the last captured
+  // dimensions (scale/crop/resize animations), the mesh corners will be
+  // computed at the new size but the cached RTT texture was captured at
+  // the old size — causing a visible "snap back" jitter every throttled
+  // frame. Bypass the time throttle whenever dimensions genuinely changed.
+  const liveLayout = getTiltLayout(pixiObject)
+  const dimsChanged = Math.abs((pixiObject._tiltCaptureW || 0) - liveLayout.w) > 0.5
+                   || Math.abs((pixiObject._tiltCaptureH || 0) - liveLayout.h) > 0.5
+
+  const shouldCapture = options.force || (pixiObject._tiltTextureDirty && !isActivelyResizing && (!isCaptureThrottled || dimsChanged))
+
+  // Re-capture the texture if visible content changed and we are NOT actively resizing.
+  // [Bug 3 Fix] When `force` is true, always recapture regardless of the dirty flag or
+  // resize state — this ensures the mesh's RTT always matches the post-Redux-sync PIXI state.
+  if (shouldCapture) {
     const renderer = pixiObject._pixiRenderer || null
     _tdbg(`syncTiltMesh: texture dirty, requesting recapture for ${pixiObject.label || 'unlabeled'}`)
     if (renderer) {
@@ -1320,6 +1599,7 @@ export function syncTiltMesh(pixiObject, layer) {
       if (refreshed && mesh.texture !== refreshed) {
         mesh.texture = refreshed
       }
+      pixiObject._tiltLastCaptureTime = performance.now()
     } else {
       _twarn(`syncTiltMesh: cannot recapture, no renderer on ${pixiObject.label || 'unlabeled'}`)
       pixiObject._tiltTextureDirty = false
@@ -1329,9 +1609,15 @@ export function syncTiltMesh(pixiObject, layer) {
   // Compute the same w/h that captureToTexture used last time so the mesh
   // quad matches the texture exactly.  When no capture has happened yet, fall
   // back to live layout — the mesh will visually catch up on the next sync.
+  // If actively resizing, we bypass the cached capture dimensions so the mesh corners 
+  // update in real-time according to the live layout dimensions.
+  // [Bug 3 Fix] When `force` is true, always recompute from live layout.
+  // The cached _tiltCaptureW/H was stamped BEFORE Redux sync, but the RTT
+  // was just recaptured AFTER Redux sync. If _storedCropWidth changed between
+  // stamp and capture, the cached dims no longer match the actual RTT content.
   const w = pixiObject._tiltCaptureW
   const h = pixiObject._tiltCaptureH
-  const useCapture = (typeof w === 'number') && (typeof h === 'number')
+  const useCapture = (typeof w === 'number') && (typeof h === 'number') && !isActivelyResizing && !options.force
 
   let dimW, dimH, originX, originY, usePivot
   if (useCapture) {
@@ -1339,7 +1625,14 @@ export function syncTiltMesh(pixiObject, layer) {
     dimH = h
     originX = pixiObject._tiltCaptureOriginX || 0
     originY = pixiObject._tiltCaptureOriginY || 0
-    usePivot = !(pixiObject instanceof PIXI.Sprite) || isCroppedMediaContainer(pixiObject)
+    const isPixiTextLike = !!(
+      (PIXI.Text && pixiObject instanceof PIXI.Text)
+      || pixiObject?.constructor?.name === 'Text'
+      || (typeof pixiObject?.text === 'string'
+          && pixiObject?.style != null
+          && typeof pixiObject?.updateText === 'function')
+    )
+    usePivot = !(pixiObject instanceof PIXI.Sprite) || isCroppedMediaContainer(pixiObject) || isPixiTextLike
   } else {
     const layout = getTiltLayout(pixiObject)
     dimW = layout.w
@@ -1360,6 +1653,25 @@ export function syncTiltMesh(pixiObject, layer) {
     mesh.pivot.copyFrom(pixiObject.pivot)
   } else if (mesh.pivot) {
     mesh.pivot.set(0, 0)
+  }
+
+  // If tilted, ensure original object is not hit-testable to prevent selection overshoot
+  if (pixiObject._tiltHidden) {
+    if (pixiObject.eventMode !== 'none') {
+      pixiObject._originalEventMode = pixiObject.eventMode
+      pixiObject.eventMode = 'none'
+    }
+  }
+
+  // Sync interactivity, cursor, and label so the mesh responds to clicks/selection identical to the original
+  let targetEventMode = pixiObject._originalEventMode || 'static'
+  if (pixiObject._isInteracting || pixiObject._isResizing) {
+    targetEventMode = 'none'
+  }
+  mesh.eventMode = targetEventMode
+  mesh.cursor = pixiObject.cursor || 'pointer'
+  if (pixiObject.label) {
+    mesh.label = pixiObject.label
   }
 
   // ---- Tilt-hide invariant (defensive) ---------------------------------
@@ -1446,38 +1758,40 @@ export function syncTiltMesh(pixiObject, layer) {
  * the tilt-hide invariant so GSAP-touched alphas don't reveal the original.
  * Cheap enough to call every tick for every tilted registered object.
  */
-export function syncTiltedDisplay(pixiObject) {
+export function syncTiltedDisplay(pixiObject, options = {}) {
+  if (typeof options === 'string') {
+    options = {}
+  }
   if (!pixiObject || pixiObject.destroyed) return
   const mesh = pixiObject._tiltMesh
   if (!mesh || mesh.destroyed) return
 
-  // [VIDEO TILT] A video sprite's underlying texture is refreshed by the
-  // browser as the video element plays, but our tilt mesh samples from a
-  // RenderTexture we captured once in captureToTexture().  Without this
-  // flag, the mesh keeps showing the frame that was current at capture
-  // time — the video looks frozen (the "becomes like an image" bug) while
-  // the actual <video> element keeps playing underneath at alpha=0.  Mark
-  // the tilt texture dirty on every tick the video has advanced, so
-  // syncTiltMesh re-captures the current video frame.  We gate on "not
-  // paused" and a changed currentTime so idle videos don't waste an RTT
-  // render per ticker tick.
+  const renderer = pixiObject._pixiRenderer || null
+  const isExport = !!renderer?._isExportRenderer
+
+  const now = performance.now()
+  if (!isExport && !options.force && pixiObject._tiltSyncedThisFrame && now - pixiObject._tiltSyncedThisFrame < 2) {
+    return
+  }
+  pixiObject._tiltSyncedThisFrame = now
+
   const videoEl = pixiObject._videoElement
     || (pixiObject._videoSprite?.texture?.source?.resource instanceof HTMLVideoElement
       ? pixiObject._videoSprite.texture.source.resource
       : null)
   if (videoEl) {
-    // Advanced playback OR a scrub/seek that moved the video head — both
-    // produce new pixels in the underlying <video> that the tilt mesh
-    // needs to pick up.  Cache the last-seen currentTime so genuinely idle
-    // videos don't pay for an RTT recapture every ticker tick.
     const t = videoEl.currentTime
     if (pixiObject._tiltLastVideoTime !== t) {
-      pixiObject._tiltTextureDirty = true
-      pixiObject._tiltLastVideoTime = t
+      const lastCapture = pixiObject._tiltLastCaptureTime || 0
+      const interval = _getVideoCaptureInterval()
+      if (isExport || now - lastCapture >= interval) {
+        pixiObject._tiltTextureDirty = true
+        pixiObject._tiltLastVideoTime = t
+      }
     }
   }
 
-  syncTiltMesh(pixiObject, null)
+  syncTiltMesh(pixiObject, null, options)
 }
 
 export function removeTiltFromObject(pixiObject) {
@@ -1509,6 +1823,16 @@ export function removeTiltFromObject(pixiObject) {
     // [SENTINEL FIX] Re-assert the intended alpha once the sentinel is gone.
     const restoreAlpha = (typeof pixiObject._intendedAlpha === 'number') ? pixiObject._intendedAlpha : 1
     pixiObject.alpha = restoreAlpha
+    
+    // Restore renderable state
+    pixiObject.renderable = true
+    
+    // Restore the original eventMode
+    if (pixiObject._originalEventMode !== undefined) {
+      pixiObject.eventMode = pixiObject._originalEventMode
+      delete pixiObject._originalEventMode
+    }
+    
     delete pixiObject._tiltHidden
   }
 
@@ -1523,6 +1847,11 @@ export function removeTiltFromObject(pixiObject) {
   delete pixiObject._tiltCaptureOriginY
   delete pixiObject._tiltOwnerVisible
   delete pixiObject._intendedAlpha
+  delete pixiObject._originalEventMode
+  // [PERF] Clean up throttle/dedup tracking added for RC1/RC5 fixes
+  delete pixiObject._tiltLastCaptureTime
+  delete pixiObject._tiltSyncedThisFrame
+  delete pixiObject._tiltLastVideoTime
 
   if (pixiObject.skew && !pixiObject.destroyed) {
     pixiObject.skew.set(0, 0)

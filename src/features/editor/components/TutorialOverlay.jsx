@@ -6,8 +6,12 @@ import { selectProjectName } from '../../../store/slices/projectSlice';
 const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
   const { active, step } = useSelector(selectTutorialState);
   const projectName = useSelector(selectProjectName);
+  
   const [targetRect, setTargetRect] = useState(null);
   const [hintPos, setHintPos] = useState({ top: 0, left: 0 });
+  const [panelWidth, setPanelWidth] = useState(300);
+  const [mobileBarHeight, setMobileBarHeight] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
   const requestRef = useRef();
 
   // Reset targetRect on step change to prevent stale highlights between steps
@@ -19,6 +23,26 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
     const viewWidth = window.innerWidth;
     const margin = 16;
     const modalWidth = 280;
+
+    // Detect mobile size
+    const mobile = window.innerWidth < 1024;
+    setIsMobile(mobile);
+
+    // Measure right panel width dynamically
+    const panelEl = document.querySelector('.editor-panel-container');
+    if (panelEl) {
+      setPanelWidth(panelEl.getBoundingClientRect().width);
+    } else {
+      setPanelWidth(300);
+    }
+
+    // Measure mobile motion bar container height dynamically - only apply if step is 1 (non-capture mode)
+    const mobileBarEl = document.querySelector('[data-tutorial="mobile-motion-bar-container"]');
+    if (mobileBarEl && step === 1) {
+      setMobileBarHeight(mobileBarEl.getBoundingClientRect().bottom);
+    } else {
+      setMobileBarHeight(0);
+    }
 
     // Step 2 uses the manual target rect from the canvas
     if (step === 2 && manualTargetRect) {
@@ -58,8 +82,13 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
       return;
     }
 
-    // Steps 1 and 3 target the Animate / Save Step button
-    const buttonElements = document.querySelectorAll('[data-tutorial="add-step-button"]');
+    // Selector update: Step 1 highlights Add Moment, Step 3 highlights Save Step
+    let selector = '[data-tutorial="add-step-button"]';
+    if (step === 1) {
+      selector = '[data-tutorial="add-moment-button"]';
+    }
+    
+    const buttonElements = document.querySelectorAll(selector);
     let buttonElement = null;
     if (buttonElements.length > 0) {
       // Find the button element that is currently visible in the DOM
@@ -89,21 +118,29 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
         return prev;
       });
 
-      // Determine if Animate/Save button is at the bottom of the screen (on mobile)
+      // Determine if button is at the bottom of the screen (e.g. mobile bottom vs top placement)
       const isAtBottom = rect.top > window.innerHeight / 2;
-      const top = isAtBottom ? rect.top - 20 : rect.bottom + 20;
+      // [ISSUE 4 FIX] On mobile the Add Moment button sits at the very bottom of the viewport.
+      // 20px clearance was too tight — the hint tooltip overlapped the highlight ring.
+      // Use 90px clearance on mobile so the tooltip has room to breathe above the button.
+      const verticalOffset = isAtBottom ? (mobile ? 90 : 20) : 20;
+      const top = isAtBottom ? rect.top - verticalOffset : rect.bottom + verticalOffset;
       const position = isAtBottom ? 'top' : 'bottom';
 
       setHintPos(prev => {
         let targetCenter = rect.left + rect.width / 2;
         const modalHalfWidth = 140;
-        const left = Math.max(modalHalfWidth + margin, Math.min(viewWidth - modalHalfWidth - margin, targetCenter));
+        // [ISSUE 4 FIX] Use a tighter margin on mobile (20px) vs desktop (16px) so the
+        // tooltip is clamped away from screen edges on small viewports.
+        const clampMargin = mobile ? 20 : margin;
+        const left = Math.max(modalHalfWidth + clampMargin, Math.min(viewWidth - modalHalfWidth - clampMargin, targetCenter));
 
         if (Math.abs(prev.top - top) > 1 || Math.abs(prev.left - left) > 1 || prev.position !== position) {
           return { top, left, position };
         }
         return prev;
       });
+
     } else {
       setTargetRect(null);
     }
@@ -122,17 +159,28 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
     return () => cancelAnimationFrame(requestRef.current);
   }, [active, step, updatePosition]);
 
+  // Layout boundaries for the backdrop offset
+  const backdropLeft = 0;
+  const backdropTop = isMobile ? mobileBarHeight : 0;
+  const backdropRight = isMobile ? 0 : panelWidth;
+  const backdropBottom = 0;
+
   const clipPath = useMemo(() => {
     if (!targetRect || step === 3) return 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)';
     const pts = ['0px 0px', '100% 0px', '100% 100%', '0px 100%', '0px 0px'];
     const { x, y, width: w, height: h } = targetRect;
-    pts.push(`${x}px ${y}px`); // Bridge
-    pts.push(`${x}px ${y + h}px`, `${x + w}px ${y + h}px`, `${x + w}px ${y}px`, `${x}px ${y}px`);
+
+    // Translate screen coords to backdrop local coords
+    const localX = x - backdropLeft;
+    const localY = y - backdropTop;
+
+    pts.push(`${localX}px ${localY}px`); // Bridge
+    pts.push(`${localX}px ${localY + h}px`, `${localX + w}px ${localY + h}px`, `${localX + w}px ${localY}px`, `${localX}px ${localY}px`);
     pts.push('0px 0px'); // Bridge back
     return `polygon(${pts.join(', ')})`;
-  }, [targetRect, step]);
+  }, [targetRect, step, isMobile, mobileBarHeight, panelWidth]);
 
-  if (!active || step <= 0 || step > 3 || !targetRect) return null;
+  if (!active || step <= 0 || step > 3) return null;
 
   const getHintText = () => {
     if (step === 1) return "Add the final moment";
@@ -144,6 +192,9 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
     if (step === 3) return "When you're ready, Save your moment";
     return "";
   };
+
+  // Fallback: no target rect to highlight yet
+  if (!targetRect) return null;
 
   const getHintContainerStyle = () => {
     if (hintPos.position === 'left') return { top: `${hintPos.top}px`, left: `${hintPos.left}px`, transform: 'translate(-100%, -50%)' };
@@ -169,13 +220,29 @@ const TutorialOverlay = ({ isPlaying, manualTargetRect }) => {
 
   return (
     <div className="fixed inset-0 z-[10000] pointer-events-none overflow-hidden">
-      {/* Overlay - Skip for Step 3 */}
+      {/* Dynamic Overlay Backdrop - Skip for Step 3 */}
       {step < 3 && (
         <div
-          className="absolute inset-0 bg-black/40 pointer-events-auto transition-[clip-path] duration-300"
-          style={{ clipPath, WebkitClipPath: clipPath }}
+          className="absolute bg-black/40 pointer-events-auto transition-[clip-path] duration-300"
+          style={{
+            left: `${backdropLeft}px`,
+            top: `${backdropTop}px`,
+            right: `${backdropRight}px`,
+            bottom: `${backdropBottom}px`,
+            clipPath,
+            WebkitClipPath: clipPath,
+          }}
         />
       )}
+
+      {/* Interaction blockers during Step 1 (to block collapsed panel elements on desktop except add-moment-button) */}
+      {step === 1 && !isMobile && (
+        <div
+          className="fixed right-0 top-0 bottom-0 z-[9999] bg-transparent pointer-events-auto"
+          style={{ width: `${panelWidth}px`, clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, 0px ${targetRect ? targetRect.y : 0}px, 0px ${targetRect ? targetRect.y + targetRect.height : 0}px, ${panelWidth}px ${targetRect ? targetRect.y + targetRect.height : 0}px, ${panelWidth}px ${targetRect ? targetRect.y : 0}px, 0px ${targetRect ? targetRect.y : 0}px)` }}
+        />
+      )}
+
 
       {/* Target Highlight */}
       {targetRect && step < 3 && (

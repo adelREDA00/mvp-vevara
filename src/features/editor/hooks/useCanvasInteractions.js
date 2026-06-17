@@ -27,7 +27,7 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDispatch } from 'react-redux'
 import * as PIXI from 'pixi.js'
-import { updateLayer, deleteLayer, attachAssetToFrame, updateSceneMotionAction, addSceneMotionAction } from '../../../store/slices/projectSlice'
+import { updateLayer, deleteLayer, attachAssetToFrame, updateSceneMotionAction, addSceneMotionAction, setCanvasInteracting } from '../../../store/slices/projectSlice'
 import { setSelectedLayer, clearLayerSelection, setSelectedCanvas, setSelectedLayers } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { applyCenterSnapping, applyObjectAlignmentSnapping, applySpacingSnapping, applySafeZoneSnapping } from '../utils/centerSnapping'
@@ -51,7 +51,7 @@ import { getGlobalMotionEngine } from '../../engine/motion'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
-import { syncTiltMesh } from '../../engine/pixi/perspectiveTilt'
+import { syncTiltMesh, computePerspectiveCorners } from '../../engine/pixi/perspectiveTilt'
 
 
 // Polyfill for requestIdleCallback (needed for Safari/iOS)
@@ -979,7 +979,26 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     // Reuse existing graphics object - just clear and redraw
     outlineGraphics.clear()
-    outlineGraphics.rect(localBoundsX, localBoundsY, boundsWidth, boundsHeight)
+
+    const tiltX = (capturedLayer && capturedLayer.tiltX !== undefined)
+      ? capturedLayer.tiltX
+      : (typeof pixiObject?._tiltXDeg === 'number' ? pixiObject._tiltXDeg : (layer?.tiltX ?? 0))
+    const tiltY = (capturedLayer && capturedLayer.tiltY !== undefined)
+      ? capturedLayer.tiltY
+      : (typeof pixiObject?._tiltYDeg === 'number' ? pixiObject._tiltYDeg : (layer?.tiltY ?? 0))
+    const isTilted = Math.abs(tiltX) >= 0.01 || Math.abs(tiltY) >= 0.01
+
+    if (isTilted) {
+      const corners = computePerspectiveCorners(boundsWidth, boundsHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+      const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
+      outlineGraphics.moveTo(tlX, tlY)
+      outlineGraphics.lineTo(trX, trY)
+      outlineGraphics.lineTo(brX, brY)
+      outlineGraphics.lineTo(blX, blY)
+      outlineGraphics.closePath()
+    } else {
+      outlineGraphics.rect(localBoundsX, localBoundsY, boundsWidth, boundsHeight)
+    }
 
     // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
     const viewportScale = viewport.scale?.x || 1
@@ -1002,7 +1021,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
   // =============================================================================
 
   // Helper function to update drag hover box with explicit coordinates (like useSelectionBox)
-  const updateDragHoverBox = useCallback((x, y, width, height, rotationRadians, anchorX, anchorY, scaleX = 1, scaleY = 1, zoomScale = 1) => {
+  const updateDragHoverBox = useCallback((x, y, width, height, rotationRadians, anchorX, anchorY, scaleX = 1, scaleY = 1, zoomScale = 1, tiltX = 0, tiltY = 0) => {
     const dragHoverBox = dragHoverBoxRef.current
     if (!dragHoverBox || !layersContainer || dragHoverBox.destroyed) return
     // Note: dragHoverBox is now guaranteed to exist and be properly parented by drag start logic
@@ -1026,7 +1045,19 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     // Clear and redraw the outline (much faster than recreating the graphics object)
     outline.clear()
-    outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+    const isTilted = Math.abs(tiltX) >= 0.01 || Math.abs(tiltY) >= 0.01
+
+    if (isTilted) {
+      const corners = computePerspectiveCorners(scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
+      const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
+      outline.moveTo(tlX, tlY)
+      outline.lineTo(trX, trY)
+      outline.lineTo(brX, brY)
+      outline.lineTo(blX, blY)
+      outline.closePath()
+    } else {
+      outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
+    }
 
     // [FIX] ZOOM ADAPTIVE: Use the provided zoomScale for consistency with selection box
     outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
@@ -2786,6 +2817,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         pausePlayback()
       }
 
+      // [BLUR STABILITY FIX] Update the engine's interaction timestamp so
+      // getIsPlaying() stays true for the 200ms grace period after selection /
+      // drag / resize / rotate.  This prevents applyTransformInline from
+      // overwriting GSAP-driven blur state with static Redux blur during
+      // the gap between unloadAllMotions() and the reloaded GSAP timeline.
+      if (!latestMotionCaptureModeRef.current?.isActive) {
+        const engine = getGlobalMotionEngine()
+        if (engine) engine._lastInteractionTime = Date.now()
+      }
+
       // Use ref to get latest selectedLayerIds (avoids stale closure)
       // CRITICAL FIX: Filter by currentSceneId to prevent teleporting layers from other scenes
       let currentSelectedLayerIds = (selectedLayerIdsRef.current || [])
@@ -3359,6 +3400,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           pausePlayback()
         }
         dragStateAPI.setDragState(true, dragLayerId)
+        dispatch(setCanvasInteracting(true))
 
         // Show drag hover box when dragging starts
         const dragStartLayerId = dragStartRef.current.layerId
@@ -3422,12 +3464,27 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               scaleX,
               scaleY,
               rotation: rotationDegrees,
-              rotationRadians: rotationDegrees * Math.PI / 180 // Pre-calculate radians to avoid repeated conversions
+              rotationRadians: rotationDegrees * Math.PI / 180, // Pre-calculate radians to avoid repeated conversions
+              tiltX: (capturedLayer && capturedLayer.tiltX !== undefined)
+                ? capturedLayer.tiltX
+                : (typeof liveObj?._tiltXDeg === 'number' ? liveObj._tiltXDeg : (layer?.tiltX ?? 0)),
+              tiltY: (capturedLayer && capturedLayer.tiltY !== undefined)
+                ? capturedLayer.tiltY
+                : (typeof liveObj?._tiltYDeg === 'number' ? liveObj._tiltYDeg : (layer?.tiltY ?? 0))
             }
 
             // CRITICAL FIX: Pass correct anchors and zoomScale to updateDragHoverBox for proper alignment
             const { dragScale } = getViewportScale()
-            updateDragHoverBox(currentX, currentY, width, height, dragHoverBoxDimensionsRef.current.rotationRadians, anchorX, anchorY, scaleX, scaleY, dragScale)
+            updateDragHoverBox(
+              currentX, currentY,
+              width, height,
+              dragHoverBoxDimensionsRef.current.rotationRadians,
+              anchorX, anchorY,
+              scaleX, scaleY,
+              dragScale,
+              dragHoverBoxDimensionsRef.current.tiltX || 0,
+              dragHoverBoxDimensionsRef.current.tiltY || 0
+            )
           }
         }
 
@@ -4165,7 +4222,16 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           liveHeight = layerObject._actualHeight
         }
 
-        updateDragHoverBox(newX, newY, dragHoverBoxDims.width, liveHeight, dragHoverBoxDims.rotationRadians, dragHoverBoxDims.anchorX, dragHoverBoxDims.anchorY, dragHoverBoxDims.scaleX, dragHoverBoxDims.scaleY, dragScale)
+        updateDragHoverBox(
+          newX, newY,
+          dragHoverBoxDims.width, liveHeight,
+          dragHoverBoxDims.rotationRadians,
+          dragHoverBoxDims.anchorX, dragHoverBoxDims.anchorY,
+          dragHoverBoxDims.scaleX, dragHoverBoxDims.scaleY,
+          dragScale,
+          dragHoverBoxDims.tiltX || 0,
+          dragHoverBoxDims.tiltY || 0
+        )
       }
 
       // Handle motion capture mode vs normal drag mode
@@ -4344,6 +4410,10 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     const handleGlobalPointerUp = () => {
       // Check if there was an active drag before processing
       const wasDragging = dragStateAPI.isDragging()
+
+      if (wasDragging) {
+        dispatch(setCanvasInteracting(false))
+      }
 
       // [SHIFT-DRAG FIX] Resolve a deferred shift+click selection toggle. If the
       // pointer never dragged, treat it as a shift+click: toggle the layer in/out
@@ -4633,7 +4703,13 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         const isBackground = layer?.type === 'background'
 
         // CRITICAL: Only make layers interactive if they belong to the current scene and are NOT backgrounds
-        pixiObject.eventMode = (isVisibleInScene && !isBackground) ? 'static' : 'none'
+        const targetMode = (isVisibleInScene && !isBackground) ? 'static' : 'none'
+        if (pixiObject._tiltHidden) {
+          pixiObject._originalEventMode = targetMode
+          pixiObject.eventMode = 'none'
+        } else {
+          pixiObject.eventMode = targetMode
+        }
         pixiObject.cursor = (isVisibleInScene && !isBackground) ? 'pointer' : 'default'
 
         if (!isVisibleInScene || isBackground) return

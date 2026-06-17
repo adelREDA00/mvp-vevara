@@ -76,6 +76,9 @@ const initialState = {
   // [NEW] Asset loading management
   loadingMode: 'global', // 'global' (full screen preloader) or 'local' (card spinners)
   preparingLayers: {}, // Map of layerId -> true for layers being initialized in PIXI
+  // [NEW] Timeline drag/resize state tracking
+  isTimelineDragging: false,
+  isCanvasInteracting: false,
 }
 
 // Resolve step layout: auto steps get default duration, manual steps are preserved.
@@ -2084,6 +2087,14 @@ const projectSlice = createSlice({
       state.isDirty = true
       state.version++
     },
+    // Set active timeline dragging state
+    setTimelineDragging: (state, action) => {
+      state.isTimelineDragging = !!action.payload
+    },
+    // Set active canvas interaction state (dragging/resizing/rotating layers)
+    setCanvasInteracting: (state, action) => {
+      state.isCanvasInteracting = !!action.payload
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -2180,6 +2191,8 @@ export const {
   detachAssetFromFrame,
   flipCardFrame,
   toggleFrameLock,
+  setTimelineDragging,
+  setCanvasInteracting,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders
@@ -2188,6 +2201,8 @@ export const EMPTY_OBJECT = {}
 export const EMPTY_ARRAY = []
 
 // Selectors
+export const selectIsTimelineDragging = (state) => state.project.isTimelineDragging
+export const selectIsCanvasInteracting = (state) => state.project.isCanvasInteracting
 export const selectProjectId = (state) => state.project.projectId
 export const selectProjectName = (state) => state.project.projectName
 export const selectAspectRatio = (state) => state.project.aspectRatio

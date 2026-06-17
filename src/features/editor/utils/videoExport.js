@@ -881,7 +881,7 @@ export const exportVideo = async ({
             backgroundAlpha: 1,
             antialias: true,
             preserveDrawingBuffer: true,
-            roundPixels: !isGif,
+            roundPixels: false,
             resolution: 1,
             preference: 'webgl',
             hello: true

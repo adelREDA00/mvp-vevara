@@ -358,7 +358,9 @@ export default function PresetPreviewCard({ preset, layer, showingFront, isActiv
       <div
         className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden transition-all duration-200 relative ${
           isActive
-            ? 'border-2 border-[#7c4af0] bg-[#7c4af0]/5 shadow-sm shadow-[#7c4af0]/15'
+            ? isLight
+              ? 'border-2 border-slate-400 bg-slate-200/50 shadow-sm'
+              : 'border-2 border-zinc-650 bg-zinc-800 shadow-sm shadow-black/20'
             : (isLight ? 'bg-slate-100 hover:bg-slate-200/85 border border-transparent' : 'bg-zinc-900/40 hover:bg-zinc-900/80 border border-white/[0.04]')
         }`}
         style={contrastBg ? { backgroundColor: contrastBg } : undefined}
@@ -373,16 +375,20 @@ export default function PresetPreviewCard({ preset, layer, showingFront, isActiv
 
         {/* Active checkmark badge */}
         {isActive && (
-          <div className={`absolute rounded-full bg-[#7c4af0] flex items-center justify-center text-white shrink-0 ${isMobile ? 'top-1 right-1 w-3 h-3' : 'top-1.5 right-1.5 w-3.5 h-3.5'}`}>
-            <Check className="h-2 w-2" strokeWidth={3.5} />
+          <div className={`absolute rounded-full flex items-center justify-center text-white shrink-0 ${
+            isLight
+              ? 'bg-slate-600 top-1 right-1 w-3.5 h-3.5'
+              : 'bg-zinc-500 top-1.5 right-1.5 w-3.5 h-3.5'
+          }`}>
+            <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
           </div>
         )}
       </div>
 
       {/* Label centered beneath card */}
-      <span className={`font-medium text-center transition-colors truncate max-w-full px-0.5 ${isMobile ? 'text-[8px] mt-1' : 'text-[9px] mt-1.5'} ${
+      <span className={`font-semibold text-center transition-colors truncate max-w-full px-0.5 ${isMobile ? 'text-[8px] mt-1' : 'text-[9px] mt-1.5'} ${
         isActive
-          ? 'text-[#7c4af0]'
+          ? (isLight ? 'text-slate-800' : 'text-zinc-200')
           : (isLight ? 'text-slate-500 group-hover:text-slate-700' : 'text-zinc-400 group-hover:text-zinc-200')
       }`}>
         {preset?.name || 'Preset'}

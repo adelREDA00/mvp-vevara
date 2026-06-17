@@ -1,6 +1,6 @@
 import { gsap } from 'gsap'
 import { CustomEase } from "gsap/CustomEase";
-import { applyTiltToObject, syncTiltMesh } from '../../pixi/perspectiveTilt.js'
+import { applyTiltToObject, syncTiltMesh, removeTiltFromObject } from '../../pixi/perspectiveTilt.js'
 
 // Register the plugin
 gsap.registerPlugin(CustomEase);
@@ -68,23 +68,52 @@ export class TiltAction {
     // every frame the proxy crosses zero, causing visible flicker / vanish.
     // We pass `keepMesh: true` so applyTiltToObject keeps the mesh sticky for
     // the duration of the animation.
+    // [COLOR-TILT RACE FIX] Removed syncTiltMesh() from _applyAnimatedTilt.
+    //
+    // GSAP evaluates tweens in timeline order within a single tick. If the
+    // TiltAction's onUpdate fires BEFORE the ColorChangeAction's onUpdate,
+    // syncTiltMesh() captures the RTT with the STALE color (before the
+    // ColorChangeAction has painted the new frame's interpolated color).
+    // By the time ColorChangeAction's onUpdate fires and calls
+    // markTiltTextureDirty(), the RTT capture throttle has already been
+    // consumed — so the mesh shows the old color until the next throttle
+    // window (~6 frames at 60fps). This is the root cause of the
+    // alternating-color flicker on tilted layers during multi-step playback.
+    //
+    // The engine's per-frame _syncTiltedLayers() (from masterTimeline.
+    // onUpdate, running AFTER all tween onUpdate callbacks) handles ALL
+    // mesh corner updates + RTT captures. _applyAnimatedTilt only needs
+    // to ensure the perspective mesh EXISTS (keepMesh lifecycle) and that
+    // the tilt-hide invariant is re-asserted. The actual mesh transform
+    // and texture sync happens once, after all actions have painted.
     pixiObject._applyAnimatedTilt = () => {
       if (pixiObject.destroyed) return
+      // If currently editing this text layer, do not apply tilt and do not hide the original text
+      if (pixiObject._isEditingText) {
+        if (pixiObject._tiltMesh) {
+          // If the mesh exists, clean it up so the flat original is used
+          removeTiltFromObject(pixiObject)
+        }
+        return
+      }
+
       const tx = pixiObject._tiltXDeg || 0
       const ty = pixiObject._tiltYDeg || 0
       if (!pixiObject._tiltMesh) {
-        // Use a tiny non-zero seed so the mesh is created and visible even at 0.
+        // Create the mesh at a tiny non-zero seed so it's visible even at
+        // 0° crossing; the degree fields are restored immediately after.
         applyTiltToObject(pixiObject, tx || 0.001, ty, renderer, { keepMesh: true })
-        // Restore actual angles so syncTiltMesh draws the real corners.
         pixiObject._tiltXDeg = tx
         pixiObject._tiltYDeg = ty
-        syncTiltMesh(pixiObject, null)
       } else {
-        // Mark hidden in case some prior tween / capture-mode reset cleared
-        // the flag — syncTiltMesh's defensive block re-asserts alpha=0.
+        // Re-assert the tilt-hide invariant in case a previous engine
+        // rebuild or capture-mode reset cleared _tiltHidden.
         pixiObject._tiltHidden = true
-        syncTiltMesh(pixiObject, null)
       }
+      // The engine's _syncTiltedLayers() → syncTiltedDisplay() → syncTiltMesh()
+      // runs later in the same GSAP tick, after ALL action onUpdate callbacks
+      // have fired (including ColorChangeAction). That single pass updates
+      // mesh corners and captures the RTT with final per-frame state.
     }
 
     // pixiObject._applyAnimatedTilt() - Removed immediate call to prevent premature hiding

@@ -74,7 +74,7 @@ const TemplateThumbnail = memo(({ project, buttonText = "Edit Template" }) => {
         <div
             ref={containerRef}
             id={`template-container-${project._id}`}
-            className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] md:rounded-[16px] overflow-hidden relative mb-3 group-hover:border-[var(--dashboard-accent)]/30 transition-all duration-300 shadow-sm"
+            className="aspect-video bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] md:rounded-[16px] overflow-hidden relative mb-3 group-hover:border-slate-500/40 transition-all duration-300 shadow-sm"
         >
             {project.videoUrl && shouldRenderVideo ? (
                 <video

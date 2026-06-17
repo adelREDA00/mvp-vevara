@@ -1,16 +1,18 @@
-import { useState, useRef, useEffect, useContext } from 'react'
+import { useState, useRef, useEffect, useContext, useCallback } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { gsap } from 'gsap'
 import * as Slider from '@radix-ui/react-slider'
 import { ThemeContext } from '../../../app/context/ThemeContext'
+import { selectTutorialState } from '../../../store/slices/tutorialSlice'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { PRESET_REGISTRY, getPresetGroups } from '../../engine/motion/presets.js'
 import { getContrastCardBg } from '../utils/contrast'
 import PresetPreviewCard from './PresetPreviewCard'
 import {
   Move, RotateCw, Maximize2, Eye, X, Crop, FlipHorizontal2,
-  ChevronDown, Droplets, Palette, Film, Type, Rotate3d,
-  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, ChevronRight, Zap,
+  ChevronDown, ChevronUp, Droplets, Palette, Film, Type, Rotate3d,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, ChevronRight, ChevronLeft, Zap,
+  Pencil, Trash2, Plus,
 } from 'lucide-react'
 
 const CornerRadiusIcon = (props) => (
@@ -282,12 +284,17 @@ function getInheritedStepValues(motionFlow, editingStepId, selectedLayerId, prev
 function MotionPanel({
   isOpen = false,
   onClose,
+  isCollapsed = false,
+  onToggleCollapsed,
   topToolbarHeight = 0,
   bottomSectionHeight = 140,
   onApplyMotion,
   onCancelMotion,
+  onStartMotionCapture,
   onAddAnimation,
   onCustomActionValueChange,
+  onStepEdit,
+  onDeleteStep,
   sceneLayers = [],
   selectedLayerIds = [],
   motionControls = null,
@@ -295,10 +302,13 @@ function MotionPanel({
   editingStepId,
   onDeleteCaptureAction,
   editingStepActionCount = 0,
+  activeStepId = null,
+  onMobileMinimizedChange = null,
 }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
   const layers = useSelector(selectLayers)
+  const tutorialState = useSelector(selectTutorialState)
 
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
@@ -316,8 +326,125 @@ function MotionPanel({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Mobile: minimized state — collapses to small handle bar
+  const [isMobileMinimized, setIsMobileMinimized] = useState(false)
+  useEffect(() => {
+    if (isMobile && isMotionCaptureActive) {
+      setIsMobileMinimized(false) // Auto-expand when capture starts on mobile
+    }
+  }, [isMobile, isMotionCaptureActive])
+
+  useEffect(() => {
+    onMobileMinimizedChange?.(isMobileMinimized)
+  }, [isMobileMinimized, onMobileMinimizedChange])
+
+  // Animate panel in/out on desktop collapse toggle
+  useEffect(() => {
+    if (prevIsCollapsedRef.current === isCollapsed) return
+    prevIsCollapsedRef.current = isCollapsed
+    if (!isCollapsed && !isMobile && panelRef.current) {
+      gsap.killTweensOf(panelRef.current)
+      panelRef.current.style.transition = 'none'
+      gsap.fromTo(panelRef.current, { x: PANEL_WIDTH }, { x: 0, duration: 0.18, ease: 'power1.out', onComplete: () => { if (panelRef.current) panelRef.current.style.transition = '' } })
+    }
+    if (isCollapsed && !isMobile) {
+      requestAnimationFrame(() => {
+        if (collapsedOuterRef.current) {
+          gsap.killTweensOf(collapsedOuterRef.current)
+          gsap.fromTo(collapsedOuterRef.current, { x: 48 }, { x: 0, duration: 0.18, ease: 'power1.out' })
+        }
+      })
+    }
+  }, [isCollapsed, isMobile, PANEL_WIDTH])
+
+  // Animate panel in on mobile expand from minimized
+  useEffect(() => {
+    if (prevIsMobileMinimizedRef.current === isMobileMinimized) return
+    prevIsMobileMinimizedRef.current = isMobileMinimized
+    if (!isMobileMinimized && isMobile && panelRef.current) {
+      gsap.killTweensOf(panelRef.current)
+      panelRef.current.style.transition = 'none'
+      gsap.fromTo(panelRef.current, { y: '100%' }, { y: 0, duration: 0.22, ease: 'power2.out', onComplete: () => { if (panelRef.current) panelRef.current.style.transition = '' } })
+    }
+  }, [isMobileMinimized, isMobile])
+
+  // Animate panel in when motion capture first starts on mobile (mirrors the close animation)
+  useEffect(() => {
+    if (!isMobile) return
+    if (!prevCaptureActiveRef.current && isMotionCaptureActive) {
+      requestAnimationFrame(() => {
+        if (panelRef.current) {
+          gsap.killTweensOf(panelRef.current)
+          panelRef.current.style.transition = 'none'
+          gsap.fromTo(panelRef.current, { y: '100%' }, { y: 0, duration: 0.22, ease: 'power2.out', onComplete: () => { if (panelRef.current) panelRef.current.style.transition = '' } })
+        }
+      })
+    }
+    prevCaptureActiveRef.current = isMotionCaptureActive
+  }, [isMobile, isMotionCaptureActive])
+
+  // Handlers for animated collapse/minimize (reset view state before animating)
+  const handleCollapseWithAnimation = useCallback(() => {
+    if (panelRef.current) {
+      gsap.killTweensOf(panelRef.current)
+      panelRef.current.style.transition = 'none'
+      gsap.to(panelRef.current, {
+        x: PANEL_WIDTH, duration: 0.18, ease: 'power1.in',
+        onComplete: () => {
+          if (panelRef.current) panelRef.current.style.transition = ''
+          setMotionModeState('list')
+          setSelectedLayerId(null)
+          setExpandedFamilyKey(null)
+          dispatch(setSelectedLayer(null))
+          onToggleCollapsed?.()
+        }
+      })
+    } else {
+      setMotionModeState('list')
+      setSelectedLayerId(null)
+      setExpandedFamilyKey(null)
+      dispatch(setSelectedLayer(null))
+      onToggleCollapsed?.()
+    }
+  }, [onToggleCollapsed, PANEL_WIDTH, dispatch])
+
+  const handleMobileMinimize = useCallback(() => {
+    if (panelRef.current) {
+      gsap.killTweensOf(panelRef.current)
+      panelRef.current.style.transition = 'none'
+      gsap.to(panelRef.current, {
+        y: '100%', duration: 0.22, ease: 'power2.in',
+        onComplete: () => {
+          if (panelRef.current) panelRef.current.style.transition = ''
+          setMotionModeState('list')
+          setSelectedLayerId(null)
+          setExpandedFamilyKey(null)
+          dispatch(setSelectedLayer(null))
+          setIsMobileMinimized(true)
+        }
+      })
+    } else {
+      setMotionModeState('list')
+      setSelectedLayerId(null)
+      setExpandedFamilyKey(null)
+      dispatch(setSelectedLayer(null))
+      setIsMobileMinimized(true)
+    }
+  }, [dispatch])
+
+  const handleExpandFromCollapsed = useCallback(() => {
+    if (collapsedOuterRef.current) {
+      gsap.killTweensOf(collapsedOuterRef.current)
+      gsap.to(collapsedOuterRef.current, { x: 48, duration: 0.22, ease: 'power2.in', onComplete: () => onToggleCollapsed?.() })
+    } else {
+      onToggleCollapsed?.()
+    }
+  }, [onToggleCollapsed])
+
   // Normal mode: which moment card is expanded (one at a time)
   const [expandedStepId, setExpandedStepId] = useState(null)
+  // Inline delete confirmation
+  const [confirmDeleteStepId, setConfirmDeleteStepId] = useState(null)
 
   // Motion mode
   const [motionModeState, setMotionModeState] = useState('list') // 'list' | 'element'
@@ -331,6 +458,22 @@ function MotionPanel({
   const [familyModes, setFamilyModes] = useState({})
   // Which custom-action row has its inline settings panel expanded (Custom tab)
   const [expandedActionType, setExpandedActionType] = useState(null)
+
+  // Reset motion state when tutorial ends — ensure no onboarding-specific logic lingers.
+  // Only fires on the active→inactive transition so authenticated users are never affected.
+  const wasTutorialActive = useRef(false)
+  useEffect(() => {
+    if (wasTutorialActive.current && !tutorialState.active) {
+      setMotionModeState('list')
+      setSelectedLayerId(null)
+      setActiveTab('presets')
+      setExpandedFamilyKey(null)
+      setFamilyDirections({})
+      setFamilyModes({})
+      setExpandedActionType(null)
+    }
+    wasTutorialActive.current = tutorialState.active
+  }, [tutorialState.active])
 
   // Reset motion state when capture starts/stops
   useEffect(() => {
@@ -349,6 +492,32 @@ function MotionPanel({
   useEffect(() => { setExpandedActionType(null) }, [selectedLayerId])
 
   const scrollContainerRef = useRef(null)
+  const cardRefs = useRef({})
+  const collapsedScrollRef = useRef(null)
+  const collapsedOuterRef = useRef(null)
+  const panelRef = useRef(null)
+  const prevIsCollapsedRef = useRef(isCollapsed)
+  const prevIsMobileMinimizedRef = useRef(isMobileMinimized)
+  const prevCaptureActiveRef = useRef(false)
+
+  useEffect(() => {
+    const el = collapsedOuterRef.current
+    if (!el) return
+    const handleWheel = (e) => {
+      if (!collapsedScrollRef.current) return
+      e.preventDefault()
+      e.stopPropagation()
+      collapsedScrollRef.current.scrollTop += e.deltaY
+    }
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [isCollapsed, isMobile])
+
+  useEffect(() => {
+    if (activeStepId && cardRefs.current[activeStepId]) {
+      cardRefs.current[activeStepId].scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [activeStepId])
 
   useEffect(() => {
     if (isMobile && (expandedFamilyKey || expandedActionType) && scrollContainerRef.current) {
@@ -393,7 +562,81 @@ function MotionPanel({
     }
   }, [actionsCount, selectedLayerId, isMotionCaptureActive])
 
-  if (!isOpen || !currentSceneId) return null
+  // On mobile, only render during motion capture (MobileMotionBar handles normal mode)
+  if (!currentSceneId || (isMobile && !isMotionCaptureActive)) return null
+
+  // Mobile: minimized state — compact 40px horizontal bar matching Canvas Control height
+  if (isMobile && isMobileMinimized) {
+    return (
+      <div
+        className="fixed bottom-0 left-0 right-0 flex items-center"
+        style={{
+          height: 40,
+          zIndex: 61,
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          backgroundColor: isLight ? 'rgba(255,255,255,0.97)' : 'rgba(15,16,21,0.97)',
+          borderTop: `1px solid ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.08)'}`,
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        <div
+          className="flex items-center gap-2 px-3 overflow-x-auto flex-1 min-w-0 h-full"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          onClick={() => setIsMobileMinimized(false)}
+        >
+          <span className={`text-[11px] font-semibold shrink-0 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
+            Select element
+          </span>
+          <div className={`w-px h-3.5 shrink-0 ${isLight ? 'bg-slate-200' : 'bg-zinc-700'}`} />
+          {sceneLayers.slice(0, 10).map(layer => {
+            const isText = layer.type === LAYER_TYPES.TEXT
+            const isVideo = layer.type === LAYER_TYPES.VIDEO
+            const isShape = layer.type === LAYER_TYPES.SHAPE
+            const fill = layer.data?.fill
+            const thumb = layer.data?.thumbnail
+            const url = layer.data?.url || layer.data?.src
+            const textContent = layer.data?.content || ''
+            const textColor = layer.data?.color
+            return (
+              <button
+                key={layer.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedLayerId(layer.id)
+                  setMotionModeState('element')
+                  dispatch(setSelectedLayer(layer.id))
+                  setIsMobileMinimized(false)
+                }}
+                className={`w-6 h-6 rounded shrink-0 flex items-center justify-center overflow-hidden ${
+                  isLight ? 'bg-slate-100' : 'bg-zinc-800'
+                }`}
+                style={(isShape || (!isText && !isVideo)) && fill ? { backgroundColor: fill } : undefined}
+              >
+                {thumb ? (
+                  <img src={thumb} alt="" className="w-full h-full object-cover" />
+                ) : url && !isVideo ? (
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                ) : isText ? (
+                  <span style={{ fontSize: 7, color: textColor || (isLight ? '#374151' : '#d4d4d8'), fontWeight: 700, lineHeight: 1 }}>
+                    {textContent ? textContent.slice(0, 2) : 'T'}
+                  </span>
+                ) : isVideo ? (
+                  <Film className={`h-3 w-3 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`} />
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+        <button
+          onClick={() => setIsMobileMinimized(false)}
+          className={`shrink-0 h-10 w-10 flex items-center justify-center ${isLight ? 'text-slate-400 hover:text-slate-600' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          <ChevronUp className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+    )
+  }
 
   // ============================================================================
   // HANDLERS
@@ -707,9 +950,24 @@ function MotionPanel({
             {subtitle && <p className={`mt-0.5 truncate ${isMobile ? 'text-[11px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{subtitle}</p>}
           </div>
         </div>
-        <button onClick={onClose} className={`p-1 rounded transition-colors shrink-0 ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-200'}`} aria-label="Close">
-          {isMobile ? <ChevronDown className="h-5 w-5 text-[#7c4af0]" strokeWidth={2.5} /> : <X className="h-4 w-4" strokeWidth={2} />}
-        </button>
+        {/* Mobile: minimize during capture, close otherwise. Desktop: collapse (hidden during capture) */}
+        {isMobile ? (
+          <button
+            onClick={isMotionCaptureActive ? handleMobileMinimize : onClose}
+            className={`p-1 rounded transition-colors shrink-0 ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-zinc-500 hover:text-zinc-200'}`}
+            aria-label={isMotionCaptureActive ? 'Minimize' : 'Close'}
+          >
+            <ChevronDown className="h-5 w-5 text-[#7c4af0]" strokeWidth={2.5} />
+          </button>
+        ) : !isMotionCaptureActive && (
+          <button
+            onClick={handleCollapseWithAnimation}
+            className={`transition-all duration-300 p-2 rounded-[10px] shrink-0 ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
+            aria-label="Collapse"
+          >
+            <ChevronRight className="h-5 w-5" strokeWidth={2} />
+          </button>
+        )}
       </div>
     )
   }
@@ -720,47 +978,131 @@ function MotionPanel({
   const renderNormalMode = () => {
     if (motionFlow.length === 0) {
       return (
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="text-center py-16 px-4">
-            <Zap className="h-9 w-9 mx-auto mb-4 text-[#7c4af0] opacity-80" />
-            <p className={`text-sm font-bold mb-1.5 ${isLight ? 'text-slate-900' : 'text-zinc-200'}`}>No moments yet</p>
-            <p className={`text-xs leading-relaxed max-w-[230px] mx-auto ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
-              Click <span className="font-semibold text-[#7c4af0]">Add moment</span> on the canvas to bring this scene to life.
-            </p>
+        <div className={`flex-1 ${isMobile ? 'p-3' : 'p-4'}`}>
+          <div
+            data-tutorial="add-moment-button"
+            onClick={() => onStartMotionCapture?.()}
+            className={`
+              w-full rounded-xl cursor-pointer border-2 border-dashed transition-all duration-200 overflow-hidden
+              flex items-center justify-center gap-2
+              ${isLight 
+                ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50 text-[#7c4af0] bg-[#7c4af0]/[0.02]' 
+                : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45 text-[#a78bfa] hover:text-[#c084fc] bg-white/[0.02]'
+              }
+              active:scale-[0.99]
+              ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}
+            `}
+            style={{ minHeight: 52 }}
+          >
+            <Plus className="h-4 w-4 shrink-0" strokeWidth={2.5} />
+            <span className={`font-semibold tracking-wide ${isMobile ? 'text-[11px]' : 'text-xs'}`}>
+              Create your first moment
+            </span>
           </div>
         </div>
       )
     }
+    // [ONBOARDING] During Step 1, dim all moment cards with a semi-transparent overlay.
+    // Only the Add Moment button at the bottom remains fully interactive.
+    const isTutorialStep1 = tutorialState?.active && tutorialState?.step === 1;
+
     return (
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 relative" style={{ scrollBehavior: 'smooth' }}>
+        {/* [ONBOARDING] Dimmed overlay over all cards except the Add Moment button */}
+        {isTutorialStep1 && (
+          <div
+            className="absolute inset-0 z-10 pointer-events-auto"
+            style={{
+              background: 'rgba(0,0,0,0.35)',
+              // Expose only the Add Moment button area via clip-path.
+              // The pointer-events:auto overlay blocks clicks on everything except the cutout.
+            }}
+          />
+        )}
         {motionFlow.map((step, stepIndex) => {
           const isExpanded = expandedStepId === step.id
           const allLayerIds = new Set([...Object.keys(step.layerActions || {}), ...Object.keys(step.layerPresets || {})])
-          const totalEffects = [...allLayerIds].reduce((sum, lid) => sum + (step.layerActions?.[lid]?.length || 0) + (step.layerPresets?.[lid] ? 1 : 0), 0)
           const layerCount = allLayerIds.size
+          const isPlayheadActive = activeStepId === step.id
+          const isConfirmingDelete = confirmDeleteStepId === step.id
 
           return (
-            <div key={step.id} className={`overflow-hidden border rounded-xl transition-all duration-150 ${isExpanded
+            <div key={step.id} ref={el => { if (el) cardRefs.current[step.id] = el }}
+              style={{
+                pointerEvents: isTutorialStep1 ? 'none' : 'auto',
+                opacity: isTutorialStep1 ? 0.5 : 1,
+              }}
+              className={`overflow-hidden border rounded-xl transition-all duration-150 ${isPlayheadActive
+              ? (isLight ? 'border-[#7c4af0] ring-1 ring-[#7c4af0]/30 bg-white shadow-sm' : 'border-[#7c4af0] ring-1 ring-[#7c4af0]/30 bg-white/[0.05]')
+              : isExpanded
               ? (isLight ? 'border-[#7c4af0]/30 bg-white shadow-sm' : 'border-white/[0.08] bg-white/[0.05]')
               : (isLight ? 'border-slate-200 bg-white hover:border-slate-300' : 'border-white/[0.04] bg-white/[0.02] hover:border-white/[0.08]')
               }`}>
-              {/* Header */}
-              <button
-                onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
-                className={`w-full flex items-center gap-3 text-left ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`}
-              >
-                <div className={`flex items-center justify-center font-bold shrink-0 ${isMobile ? 'w-5 h-5 text-[10px]' : 'w-6 h-6 text-[11px]'} ${isExpanded ? 'text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')
-                  }`}>
-                  {stepIndex + 1}
+              {/* Delete confirmation — consistent min-height, no layout shift */}
+              {isConfirmingDelete ? (
+                <div className="flex w-full overflow-hidden" style={{ minHeight: 52 }}>
+                  <button
+                    onClick={() => setConfirmDeleteStepId(null)}
+                    className={`flex-1 flex items-center justify-center transition-colors ${
+                      isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/[0.05] text-zinc-200 hover:bg-white/[0.08]'
+                    }`}
+                  >
+                    <span className="text-sm font-bold">No</span>
+                  </button>
+                  <button
+                    onClick={() => { onDeleteStep?.(step.id); setConfirmDeleteStepId(null) }}
+                    className="flex-1 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors"
+                  >
+                    Delete
+                  </button>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <h4 className={`font-semibold ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>Moment {stepIndex + 1}</h4>
-                  <p className={`${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
-                    {totalEffects > 0 ? `${totalEffects} effect${totalEffects !== 1 ? 's' : ''} · ${layerCount} layer${layerCount !== 1 ? 's' : ''}` : 'No effects'}
-                  </p>
+              ) : (
+              <div className={`w-full flex items-center gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
+                {/* Number badge + title/subtitle (clickable to expand) */}
+                <button
+                  onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                  className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                >
+                  <div className="min-w-0 flex-1">
+                    <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>Moment {stepIndex + 1}</h4>
+                    <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+                      {layerCount > 0 ? `${layerCount} animated element${layerCount !== 1 ? 's' : ''}` : 'No effects'}
+                    </p>
+                  </div>
+                </button>
+                {/* Edit → Delete → Expand (always at far right) */}
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onStepEdit?.(step.id) }}
+                    title="Edit moment"
+                    className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${
+                      isLight ? 'text-slate-400 hover:text-[#7c4af0] hover:bg-slate-100' : 'text-zinc-500 hover:text-[#c084fc] hover:bg-white/10'
+                    }`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteStepId(step.id) }}
+                    title="Delete moment"
+                    className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${
+                      isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-500 hover:text-red-400 hover:bg-red-500/10'
+                    }`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                    className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${
+                      isExpanded
+                        ? (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#c084fc] bg-white/10')
+                        : (isLight ? 'text-slate-400 hover:bg-slate-100' : 'text-zinc-500 hover:bg-white/10')
+                    }`}
+                  >
+                    <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180' : 'rotate-0'}`} />
+                  </button>
                 </div>
-                <ChevronDown className={`shrink-0 transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-[#7c4af0]' : 'rotate-0'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`} />
-              </button>
+              </div>
+              )}
 
               {isExpanded && (
                 <div className={`border-t px-3 py-2.5 space-y-1.5 ${isLight ? 'border-slate-150 bg-slate-50/70' : 'border-white/[0.05] bg-black/25'
@@ -805,6 +1147,19 @@ function MotionPanel({
             </div>
           )
         })}
+
+        {/* Add Moment dotted card — always at bottom of the list.
+            [ONBOARDING] Elevated z-index so it stays above the dimmed overlay during Step 1. */}
+        <div
+          data-tutorial="add-moment-button"
+          className={`relative z-20 border-2 border-dashed rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'} ${
+            isLight ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50' : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45'
+          }`}
+          onClick={() => onStartMotionCapture?.()}
+        >
+          <Plus className="h-3.5 w-3.5 text-[#7c4af0] shrink-0" />
+          <span className={`text-sm font-medium text-[#7c4af0] ${isMobile ? 'text-[12px]' : ''}`}>Add Moment</span>
+        </div>
       </div>
     )
   }
@@ -899,7 +1254,7 @@ function MotionPanel({
           } ${isLight ? 'bg-slate-50 border border-slate-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
           {/* ON ENTER / ON EXIT toggle */}
           {hasOut && (
-            <div className={`flex border ${isLight ? 'border-slate-200' : 'border-white/[0.08]'} rounded-lg overflow-hidden ${isMobileRow ? (fam.hasDirections ? 'w-[130px]' : 'mx-auto w-[160px]') : 'w-full'
+            <div className={`flex p-0.5 border ${isLight ? 'border-slate-200 bg-slate-100/50' : 'border-white/[0.08] bg-zinc-900'} rounded-lg overflow-hidden ${isMobileRow ? (fam.hasDirections ? 'w-[130px]' : 'mx-auto w-[160px]') : 'w-full'
               }`}>
               {[
                 { id: 'IN', label: 'On Enter' },
@@ -908,9 +1263,13 @@ function MotionPanel({
                 <button
                   key={opt.id}
                   onClick={() => selectModeAndApply(opt.id)}
-                  className={`flex-1 ${isMobile ? 'py-1 text-[10px]' : 'py-2 text-[11px]'} font-bold tracking-wide transition-colors ${currentMode === opt.id
-                    ? 'bg-[#7c4af0] text-white'
-                    : (isLight ? 'bg-white text-slate-500 hover:text-slate-800' : 'bg-transparent text-zinc-500 hover:text-zinc-200')
+                  className={`flex-1 ${isMobile ? 'py-1 text-[10px]' : 'py-1.5 text-[11px]'} font-bold tracking-wide transition-all rounded-md ${currentMode === opt.id
+                    ? isLight
+                      ? 'bg-white text-slate-800 shadow-sm border border-slate-200/30'
+                      : 'bg-zinc-800 text-white shadow-[0_1px_2px_rgba(0,0,0,0.4)] border border-white/[0.04]'
+                    : isLight
+                      ? 'text-slate-500 hover:text-slate-800'
+                      : 'text-zinc-500 hover:text-zinc-200 bg-transparent'
                     }`}
                 >
                   {opt.label}
@@ -932,9 +1291,11 @@ function MotionPanel({
                     onClick={() => selectDirAndApply(direction)}
                     title={direction}
                     className={`${isMobile ? 'w-7 h-7' : 'w-8 h-8'} flex items-center justify-center border transition-all active:scale-95 rounded-md ${isSelDir
-                      ? 'border-[#7c4af0] bg-[#7c4af0]/15 text-[#7c4af0]'
+                      ? isLight
+                        ? 'border-slate-400 bg-slate-200 text-slate-800'
+                        : 'border-zinc-650 bg-zinc-800 text-white shadow-[0_1px_2px_rgba(0,0,0,0.4)]'
                       : (isLight
-                        ? 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+                        ? 'border-slate-250 bg-white text-slate-400 hover:border-slate-350 hover:text-slate-655'
                         : 'border-white/[0.08] bg-white/[0.04] text-zinc-500 hover:text-zinc-200')
                       }`}
                   >
@@ -1248,25 +1609,25 @@ function MotionPanel({
         <div key={actionType}>
           <div
             onClick={handleRowClick}
-            className={`flex items-center justify-between gap-3 font-medium transition-colors ${isMobile ? 'px-3 py-2.5 text-[11px]' : 'px-3 py-3 text-[13px]'} ${isAct
-              ? (isLight ? 'bg-[#7c4af0]/[0.06]' : 'bg-[#7c4af0]/[0.08]')
+            className={`flex items-center justify-between gap-3 font-semibold transition-colors ${isMobile ? 'px-3 py-2.5 text-[11px]' : 'px-3 py-3 text-[13px]'} ${isAct
+              ? (isLight ? 'bg-slate-200/50' : 'bg-zinc-800/60')
               : (isLight ? 'hover:bg-slate-50 cursor-pointer' : 'hover:bg-white/[0.03] cursor-pointer')
               } ${hasSettings ? 'cursor-pointer' : ''}`}
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
+              <div className={`p-1 shrink-0 ${isAct ? (isLight ? 'text-slate-800' : 'text-zinc-200') : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
                 <Icon className={isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
               </div>
-              <span className={`font-medium ${isAct ? (isLight ? 'text-slate-900' : 'text-zinc-100') : (isLight ? 'text-slate-600' : 'text-zinc-400')}`}>{meta.label}</span>
+              <span className={`font-semibold ${isAct ? (isLight ? 'text-slate-900' : 'text-zinc-100') : (isLight ? 'text-slate-600' : 'text-zinc-400')}`}>{meta.label}</span>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               {hasSettings && (
-                <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-[#7c4af0]' : (isLight ? 'text-slate-400' : 'text-zinc-500')}`} />
+                <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180 text-zinc-500 dark:text-zinc-400' : (isLight ? 'text-slate-400' : 'text-zinc-500')}`} />
               )}
               {isAct && (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDeleteAction(step.id, layerId, action.id, actionType) }}
-                  className={`p-0.5 transition-colors ${isLight ? 'text-slate-300 hover:text-red-500' : 'text-zinc-600 hover:text-red-400'}`}
+                  className={`p-0.5 transition-colors ${isLight ? 'text-slate-300 hover:text-red-500' : 'text-zinc-650 hover:text-red-400'}`}
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -1305,11 +1666,13 @@ function MotionPanel({
                     <div
                       onClick={handleRowClick}
                       className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-200 relative ${isAct
-                        ? 'border-2 border-[#7c4af0] bg-[#7c4af0]/5 shadow-sm shadow-[#7c4af0]/15'
+                        ? isLight
+                          ? 'border border-slate-350 bg-slate-200/50 shadow-sm'
+                          : 'border border-zinc-700 bg-zinc-800 shadow-sm shadow-black/20'
                         : (isLight ? 'bg-slate-100 hover:bg-slate-200/85 border border-transparent' : 'bg-zinc-900/40 hover:bg-zinc-900/80 border border-white/[0.04]')
                         }`}
                     >
-                      <div className={`p-1 shrink-0 ${isAct ? 'text-[#7c4af0]' : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
+                      <div className={`p-1 shrink-0 ${isAct ? (isLight ? 'text-slate-800' : 'text-zinc-100') : (isLight ? 'text-slate-500' : 'text-zinc-500')}`}>
                         <Icon className="h-6 w-6" strokeWidth={2} />
                       </div>
                       {isAct && (
@@ -1327,8 +1690,8 @@ function MotionPanel({
                         </button>
                       )}
                     </div>
-                    <span className={`block font-medium text-center transition-colors truncate max-w-full px-0.5 text-[8px] mt-1 ${isAct
-                      ? 'text-[#7c4af0]'
+                    <span className={`block font-semibold text-center transition-colors truncate max-w-full px-0.5 text-[8px] mt-1 ${isAct
+                      ? (isLight ? 'text-slate-800' : 'text-zinc-200')
                       : (isLight ? 'text-slate-500 hover:text-slate-700' : 'text-zinc-400 hover:text-zinc-200')
                       }`}>
                       {meta.label}
@@ -1382,15 +1745,48 @@ function MotionPanel({
           ).map((tab) => {
             const isTActive = effectiveTab === tab.id
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 font-bold tracking-wide transition-colors flex items-center justify-center gap-1.5 ${isMobile ? 'py-2.5 text-[11px]' : 'py-3 text-[13px]'} ${isTActive ? 'bg-[#7c4af0] text-white' : (isLight ? 'text-slate-500 hover:text-slate-800 bg-white' : 'text-zinc-500 hover:text-zinc-200 bg-transparent')
-                }`}>
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 font-bold tracking-wide transition-colors flex items-center justify-center gap-1.5 ${
+                  isMobile ? 'py-2.5 text-[11px]' : 'py-3 text-[13px]'
+                } ${
+                  isTActive
+                    ? isLight
+                      ? 'bg-slate-800 text-white shadow-sm'
+                      : 'bg-zinc-100 text-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.15)]'
+                    : isLight
+                      ? 'text-slate-500 hover:text-slate-800 bg-white hover:bg-slate-50'
+                      : 'text-zinc-500 hover:text-zinc-200 bg-transparent hover:bg-white/[0.02]'
+                }`}
+              >
                 {tab.label}
                 {tab.badge > 0 && (
-                  <span className={`w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold font-mono ${isTActive ? 'bg-white/20 text-white' : (isLight ? 'bg-slate-200 text-slate-600' : 'bg-zinc-800 text-zinc-300')}`}>{tab.badge}</span>
+                  <span className={`w-4 h-4 rounded-full text-[8px] flex items-center justify-center font-bold font-mono ${
+                    isTActive
+                      ? isLight
+                        ? 'bg-white/20 text-white'
+                        : 'bg-zinc-200 text-zinc-900'
+                      : isLight
+                        ? 'bg-slate-200 text-slate-600'
+                        : 'bg-zinc-800 text-zinc-350'
+                  }`}>{tab.badge}</span>
                 )}
               </button>
             )
           })}
+          {/* Mobile-only collapse arrow — always visible regardless of active tab */}
+          {isMobile && (
+            <button
+              onClick={handleMobileMinimize}
+              className={`px-2.5 border-l shrink-0 flex items-center justify-center ${
+                isLight ? 'border-slate-100' : 'border-white/[0.05]'
+              }`}
+              aria-label="Collapse"
+            >
+              <ChevronDown className="h-4 w-4 text-zinc-500 dark:text-zinc-400" strokeWidth={2.5} />
+            </button>
+          )}
         </div>
 
         {/* Tab content */}
@@ -1400,10 +1796,14 @@ function MotionPanel({
         </div>
 
         {/* Exit element footer */}
-        <div className={`px-3 py-2.5 border-t flex-shrink-0 ${isLight ? 'border-slate-100' : 'border-white/[0.05]'}`}>
+        <div className="flex-shrink-0">
           <button
             onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
-            className="w-full py-2 text-[12px] font-semibold flex items-center justify-center gap-2 bg-[#7c4af0] text-white hover:bg-[#8b5cf6] active:bg-[#6d3fd6] transition-colors"
+            className={`w-full py-3 text-[12px] font-bold flex items-center justify-center gap-2 border-t transition-all duration-150 ${
+              isLight
+                ? 'bg-slate-900 border-slate-950 text-white hover:bg-slate-800 active:bg-slate-950'
+                : 'bg-white border-transparent text-zinc-950 hover:bg-zinc-100 active:bg-zinc-200'
+            }`}
           >
             <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.5} />
             Back to elements
@@ -1414,13 +1814,83 @@ function MotionPanel({
   }
 
   // ============================================================================
-  // MAIN RENDER
+  // COLLAPSED STATE (desktop only)
+  // ============================================================================
+  if (!isMobile && isCollapsed) {
+    const collapsedTop = isMotionCaptureActive ? 0 : topToolbarHeight
+    return (
+      <div
+        ref={collapsedOuterRef}
+        className="fixed right-0 flex flex-col items-center"
+        style={{
+          width: '48px',
+          top: `${collapsedTop}px`,
+          height: `calc(100vh - ${collapsedTop}px - ${bottomSectionHeight || 0}px)`,
+          zIndex: 50,
+          backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+          borderLeft: `1px solid ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.05)'}`,
+        }}
+      >
+        {/* Expand toggle */}
+        <button
+          onClick={handleExpandFromCollapsed}
+          title="Expand moments panel"
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0 mt-3 mb-1 ${
+            isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200' : 'text-zinc-400 hover:text-white hover:bg-white/10'
+          }`}
+        >
+          <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+        </button>
+
+        {/* Scrollable list: moment cards + Add Moment at the end */}
+        <div
+          ref={collapsedScrollRef}
+          className="flex flex-col items-center gap-2 overflow-y-auto flex-1 min-h-0 w-full py-1"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
+          {motionFlow.map((step, idx) => (
+            <button
+              key={step.id}
+              onClick={() => onStepEdit?.(step.id)}
+              title={`Edit Moment ${idx + 1}`}
+              className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${
+                activeStepId === step.id
+                  ? 'border-[#7c4af0] text-[#7c4af0] bg-[#7c4af0]/10'
+                  : isLight
+                    ? 'border-slate-200 text-slate-500 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
+                    : 'border-white/10 text-zinc-500 hover:border-[#7c4af0]/50 hover:text-[#c084fc]'
+              }`}
+            >
+              M{idx + 1}
+            </button>
+          ))}
+          {/* Add Moment — always after the last card, scrolls into view */}
+          <button
+            data-tutorial="add-moment-button"
+            onClick={() => onStartMotionCapture?.()}
+            title="Add Moment"
+            className={`w-9 h-9 rounded-lg border-2 border-dashed flex items-center justify-center transition-colors shrink-0 ${
+              isLight
+                ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
+                : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#7c4af0]/45 hover:text-[#c084fc]'
+            }`}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ============================================================================
+  // MAIN RENDER (expanded)
   // ============================================================================
   return (
     <>
-      {isOpen && <div className="lg:hidden fixed inset-0 z-[60] bg-transparent pointer-events-none" />}
+      {isMobile && isOpen && <div className="lg:hidden fixed inset-0 z-[60] bg-transparent pointer-events-none" />}
       <div
-        className={`fixed flex flex-col transition-all duration-300 editor-panel-container ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t mobile-sheet-in' : 'inset-y-0 right-0 border-l'}`}
+        ref={panelRef}
+        className={`fixed flex flex-col editor-panel-container ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl border-t' : 'inset-y-0 right-0 border-l transition-all duration-300'}`}
         style={{
           zIndex: isMobile ? 61 : (isMotionCaptureActive ? 50 : 35),
           top: isMobile ? 'auto' : (isMotionCaptureActive ? '0px' : `${topToolbarHeight}px`),
@@ -1437,10 +1907,17 @@ function MotionPanel({
           borderLeft: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
         }}
       >
-        {isMobile && <div className="flex justify-center pt-2.5 pb-1 flex-shrink-0"><div className={`h-1 w-9 rounded-full ${isLight ? 'bg-slate-300' : 'bg-zinc-700'}`} /></div>}
-        {/* [UPDATE #5 / MOBILE] Both desktop and mobile hide the header in the layer (element)
-            view so content begins at the Preset/Custom tabs. Navigation back is handled by the
-            "Back to elements" footer; mobile keeps the drag handle for dismissal. */}
+        {isMobile && (
+          <div
+            className="flex justify-center pt-2.5 pb-1 flex-shrink-0 cursor-pointer"
+            title="Minimize"
+            onClick={handleMobileMinimize}
+          >
+            <div className={`h-1 w-9 rounded-full ${isLight ? 'bg-slate-300' : 'bg-zinc-600'}`} />
+          </div>
+        )}
+        {/* Both desktop and mobile hide the header in the layer (element)
+            view so content begins at the Preset/Custom tabs. */}
         {!(isMotionCaptureActive && motionModeState === 'element') && renderHeader()}
         <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
           {!isMotionCaptureActive && renderNormalMode()}

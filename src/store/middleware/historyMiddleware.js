@@ -53,6 +53,8 @@ const DEBOUNCE_MS = 100
 
 let debounceTimer = null
 let pendingState = null
+let hasPendingDragChanges = false
+
 
 /**
  * Creates a deep clone of the project state
@@ -85,6 +87,36 @@ function flushPendingState(store) {
 
 export const historyMiddleware = (store) => (next) => (action) => {
   const actionType = action.type
+
+  // Handle timeline dragging finish to commit the final state to history
+  if (actionType === 'project/setTimelineDragging') {
+    const result = next(action)
+    if (action.payload === false && hasPendingDragChanges) {
+      const newState = store.getState()
+      const finalState = cloneProjectState(newState)
+      store.dispatch({
+        type: 'history/addToHistory',
+        payload: finalState,
+      })
+      hasPendingDragChanges = false
+    }
+    return result
+  }
+
+  // Handle canvas interacting finish to commit the final state to history
+  if (actionType === 'project/setCanvasInteracting') {
+    const result = next(action)
+    if (action.payload === false && hasPendingDragChanges) {
+      const newState = store.getState()
+      const finalState = cloneProjectState(newState)
+      store.dispatch({
+        type: 'history/addToHistory',
+        payload: finalState,
+      })
+      hasPendingDragChanges = false
+    }
+    return result
+  }
 
   // Flush pending debounced state on demand (used by handleApplyMotion before exiting capture)
   if (actionType === 'history/flushPending') {
@@ -171,6 +203,12 @@ export const historyMiddleware = (store) => (next) => (action) => {
 
     // Execute the action
     const result = next(action)
+
+    // Skip cloning and history recording during active timeline dragging/resizing or canvas interaction
+    if (currentState.project?.isTimelineDragging || currentState.project?.isCanvasInteracting) {
+      hasPendingDragChanges = true
+      return result
+    }
 
     // Get the new state after the action
     const newState = store.getState()

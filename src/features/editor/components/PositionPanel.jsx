@@ -1,7 +1,6 @@
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import React, { useMemo, useState, useRef, useCallback, useContext } from 'react'
 import { GripVertical, X, Film } from 'lucide-react'
-import { DragToCloseHandle } from './DragToCloseHandle'
 import { LAYER_TYPES } from '../../../store/models'
 import { getContrastCardBg } from '../utils/contrast'
 
@@ -24,7 +23,6 @@ function PositionPanel({
 }) {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
-  const [panelWidth, setPanelWidth] = useState(320)
   const [overId, setOverId] = useState(null)
 
   const containerRef = useRef(null)
@@ -444,15 +442,13 @@ function PositionPanel({
     <div
       className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
       style={{
-        width: isMobile ? '100%' : `${panelWidth}px`,
+        width: isMobile ? '100%' : '320px',
         backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
         backdropFilter: isMobile ? 'none' : 'blur(20px)',
         WebkitBackdropFilter: isMobile ? 'none' : 'blur(20px)',
         borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      <DragToCloseHandle onClose={onClose} onWidthChange={setPanelWidth} initialWidth={panelWidth} minWidth={240} />
-
       {/* Header */}
       <div className={`hidden lg:block px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
         <div className="flex items-center justify-between">

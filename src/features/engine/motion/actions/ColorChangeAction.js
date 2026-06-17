@@ -3,7 +3,7 @@ import { CustomEase } from "gsap/CustomEase";
 import * as PIXI from 'pixi.js'
 import { drawShapePath } from '../../pixi/createLayer'
 import { drawDashedRect } from '../../pixi/dashUtils'
-import { markTiltTextureDirty, syncTiltMesh } from '../../pixi/perspectiveTilt'
+import { markTiltTextureDirty } from '../../pixi/perspectiveTilt'
 
 // Register the plugin
 gsap.registerPlugin(CustomEase);
@@ -61,8 +61,10 @@ export function applyColor(pixiObject, numericColor) {
     if (pixiObject._lastAppliedColor === numericColor) return
     pixiObject._lastAppliedColor = numericColor
 
-    // Any color mutation invalidates the tilt mesh's cached RenderTexture.
-    // The next syncTiltMesh tick (fired below or by TiltAction onUpdate) re-captures.
+    // [COLOR-TILT FIX] Mark the tilt RTT dirty so the engine's single
+    // _syncTiltedLayers() pass (from masterTimeline.onUpdate) re-captures
+    // on the next frame. The direct syncTiltMesh() call has been removed
+    // from all ColorChangeAction callbacks to eliminate dual-path flicker.
     if (pixiObject._tiltMesh) markTiltTextureDirty(pixiObject)
 
     // Text layer: PIXI.Text has a `style` property with `fill`
@@ -216,12 +218,17 @@ export class ColorChangeAction {
 
         // Store a function for manual color sync after seek (since onUpdate may not
         // reliably fire during masterTimeline.pause(time) in nested timeline configs)
+        // [COLOR-TILT FIX] Removed direct syncTiltMesh() call from _applyAnimatedColor.
+        // ColorChangeAction should only PAINT the original PIXI object; the engine's
+        // single _syncTiltedLayers pass (from masterTimeline.onUpdate) handles the
+        // actual RTT capture. Dual-path capture causes frame-by-frame flickering on
+        // tilted layers because the two syncs race within the same tick.
         pixiObject._applyAnimatedColor = () => {
             if (pixiObject._animatedColorState) {
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
-                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
+                // markTiltTextureDirty is now called inside applyColor — no direct syncTiltMesh needed
             }
         }
 
@@ -233,26 +240,27 @@ export class ColorChangeAction {
             ease: easing,
             immediateRender: false,
             overwrite: false,
+            // [COLOR-TILT FIX] Removed direct syncTiltMesh() calls from onUpdate/onComplete/onReverseComplete.
+            // applyColor() now calls markTiltTextureDirty internally. The engine's single
+            // _syncTiltedLayers() (from masterTimeline.onUpdate) captures the RTT, eliminating
+            // the dual-path frame-by-frame flicker on tilted layers.
             onUpdate: () => {
                 if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
-                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             onComplete: () => {
                 if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(pixiObject._animatedColorState.r, pixiObject._animatedColorState.g, pixiObject._animatedColorState.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
-                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             onReverseComplete: () => {
                 if (!pixiObject._animatedColorState) return
                 const num = rgbToNum(startRgb.r, startRgb.g, startRgb.b)
                 pixiObject._animatedColorState.numeric = num
                 applyColor(pixiObject, num)
-                if (pixiObject._tiltMesh) syncTiltMesh(pixiObject, null)
             },
             ...options.gsapOptions
         }

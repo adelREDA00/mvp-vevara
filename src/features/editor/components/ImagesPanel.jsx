@@ -100,7 +100,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
             const isIcon = (image.type === 'image' || image.metadata?.type?.startsWith('image/')) && image.assetType === 'icon'
 
             const matchesTab = activeTab === 'All' ||
-                (activeTab === 'Images' && isImage) ||
+                (activeTab === 'Backgrounds' && isImage) ||
                 (activeTab === 'Icons' && isIcon) ||
                 (activeTab === 'Videos' && isVideo)
             return matchesSearch && matchesTab
@@ -199,14 +199,33 @@ function ImagesPanel({ onClose, aspectRatio }) {
                 </div>
             )}
 
-            <div className={`flex border-b px-6 ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-                {['All', 'Images', 'Icons', 'Videos'].map(tab => (
+            <div 
+                className={`relative flex overflow-x-auto whitespace-nowrap scrollbar-hide border-b px-4 ${isLight ? 'border-black/5' : 'border-white/5'}`}
+                onWheel={(e) => {
+                    if (e.deltaY !== 0) {
+                        e.currentTarget.scrollLeft += e.deltaY;
+                    }
+                }}
+            >
+                {['All', 'Backgrounds', 'Icons', 'Videos'].map(tab => (
                     <button
                         key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
+                        onClick={(e) => {
+                            setActiveTab(tab)
+                            const container = e.currentTarget.parentElement
+                            if (container) {
+                                const containerWidth = container.clientWidth
+                                const buttonWidth = e.currentTarget.clientWidth
+                                const buttonLeft = e.currentTarget.offsetLeft
+                                container.scrollTo({
+                                    left: buttonLeft - (containerWidth / 2) + (buttonWidth / 2),
+                                    behavior: 'smooth'
+                                })
+                            }
+                        }}
+                        className={`flex-shrink-0 px-3 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
                     >
-                        {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : videoCount}</span>
+                        {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Backgrounds' ? imageCount : tab === 'Icons' ? iconCount : videoCount}</span>
                         {activeTab === tab && (
                             <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
                         )}
