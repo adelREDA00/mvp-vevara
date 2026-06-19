@@ -950,7 +950,7 @@ function MotionPanel({
             {subtitle && <p className={`mt-0.5 truncate ${isMobile ? 'text-[11px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{subtitle}</p>}
           </div>
         </div>
-        {/* Mobile: minimize during capture, close otherwise. Desktop: collapse (hidden during capture) */}
+        {/* Mobile: minimize during capture, close otherwise. Desktop: collapse */}
         {isMobile ? (
           <button
             onClick={isMotionCaptureActive ? handleMobileMinimize : onClose}
@@ -959,7 +959,7 @@ function MotionPanel({
           >
             <ChevronDown className="h-5 w-5 text-[#7c4af0]" strokeWidth={2.5} />
           </button>
-        ) : !isMotionCaptureActive && (
+        ) : (
           <button
             onClick={handleCollapseWithAnimation}
             className={`transition-all duration-300 p-2 rounded-[10px] shrink-0 ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
@@ -1775,18 +1775,20 @@ function MotionPanel({
               </button>
             )
           })}
-          {/* Mobile-only collapse arrow — always visible regardless of active tab */}
-          {isMobile && (
-            <button
-              onClick={handleMobileMinimize}
-              className={`px-2.5 border-l shrink-0 flex items-center justify-center ${
-                isLight ? 'border-slate-100' : 'border-white/[0.05]'
-              }`}
-              aria-label="Collapse"
-            >
+          {/* Collapse arrow — always visible regardless of active tab */}
+          <button
+            onClick={isMobile ? handleMobileMinimize : handleCollapseWithAnimation}
+            className={`px-2.5 border-l shrink-0 flex items-center justify-center ${
+              isLight ? 'border-slate-100' : 'border-white/[0.05]'
+            }`}
+            aria-label="Collapse"
+          >
+            {isMobile ? (
               <ChevronDown className="h-4 w-4 text-zinc-500 dark:text-zinc-400" strokeWidth={2.5} />
-            </button>
-          )}
+            ) : (
+              <ChevronRight className="h-4 w-4 text-zinc-500 dark:text-zinc-400" strokeWidth={2} />
+            )}
+          </button>
         </div>
 
         {/* Tab content */}
@@ -1848,35 +1850,87 @@ function MotionPanel({
           className="flex flex-col items-center gap-2 overflow-y-auto flex-1 min-h-0 w-full py-1"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          {motionFlow.map((step, idx) => (
-            <button
-              key={step.id}
-              onClick={() => onStepEdit?.(step.id)}
-              title={`Edit Moment ${idx + 1}`}
-              className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${
-                activeStepId === step.id
-                  ? 'border-[#7c4af0] text-[#7c4af0] bg-[#7c4af0]/10'
-                  : isLight
-                    ? 'border-slate-200 text-slate-500 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
-                    : 'border-white/10 text-zinc-500 hover:border-[#7c4af0]/50 hover:text-[#c084fc]'
-              }`}
-            >
-              M{idx + 1}
-            </button>
-          ))}
-          {/* Add Moment — always after the last card, scrolls into view */}
-          <button
-            data-tutorial="add-moment-button"
-            onClick={() => onStartMotionCapture?.()}
-            title="Add Moment"
-            className={`w-9 h-9 rounded-lg border-2 border-dashed flex items-center justify-center transition-colors shrink-0 ${
-              isLight
-                ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
-                : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#7c4af0]/45 hover:text-[#c084fc]'
-            }`}
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          {isMotionCaptureActive ? (
+            sceneLayers.map((layer) => {
+              const isSelected = selectedLayerIds?.includes(layer.id)
+              const isText = layer.type === LAYER_TYPES.TEXT
+              const isVideo = layer.type === LAYER_TYPES.VIDEO
+              const isShape = layer.type === LAYER_TYPES.SHAPE
+              const fill = layer.data?.fill
+              const thumb = layer.data?.thumbnail
+              const url = layer.data?.url || layer.data?.src
+              const textContent = layer.data?.content || ''
+              const textColor = layer.data?.color
+
+              return (
+                <button
+                  key={layer.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedLayerId(layer.id)
+                    setMotionModeState('element')
+                    dispatch(setSelectedLayer(layer.id))
+                    handleExpandFromCollapsed()
+                  }}
+                  title={getLayerDisplayName(layer)}
+                  className={`w-9 h-9 rounded-lg border flex items-center justify-center overflow-hidden shrink-0 transition-colors ${
+                    isSelected
+                      ? 'border-[#7c4af0] ring-1 ring-[#7c4af0]/30 bg-[#7c4af0]/10'
+                      : isLight
+                        ? 'border-slate-200 hover:border-slate-350 bg-slate-100 hover:bg-slate-200/85'
+                        : 'border-white/10 hover:border-white/20 bg-zinc-900/40 hover:bg-zinc-900/80'
+                  }`}
+                  style={(isShape || (!isText && !isVideo)) && fill ? { backgroundColor: fill } : undefined}
+                >
+                  {thumb ? (
+                    <img src={thumb} alt="" className="w-full h-full object-cover" />
+                  ) : url && !isVideo ? (
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                  ) : isText ? (
+                    <span style={{ fontSize: 9, color: textColor || (isLight ? '#374151' : '#d4d4d8'), fontWeight: 700, lineHeight: 1 }}>
+                      {textContent ? textContent.slice(0, 2) : 'T'}
+                    </span>
+                  ) : isVideo ? (
+                    <Film className={`h-4 w-4 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`} />
+                  ) : (
+                    <span className="text-[10px] font-bold">{(layer.type || 'L').charAt(0).toUpperCase()}</span>
+                  )}
+                </button>
+              )
+            })
+          ) : (
+            <>
+              {motionFlow.map((step, idx) => (
+                <button
+                  key={step.id}
+                  onClick={() => onStepEdit?.(step.id)}
+                  title={`Edit Moment ${idx + 1}`}
+                  className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${
+                    activeStepId === step.id
+                      ? 'border-[#7c4af0] text-[#7c4af0] bg-[#7c4af0]/10'
+                      : isLight
+                        ? 'border-slate-200 text-slate-500 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
+                        : 'border-white/10 text-zinc-500 hover:border-[#7c4af0]/50 hover:text-[#c084fc]'
+                  }`}
+                >
+                  M{idx + 1}
+                </button>
+              ))}
+              {/* Add Moment — always after the last card, scrolls into view */}
+              <button
+                data-tutorial="add-moment-button"
+                onClick={() => onStartMotionCapture?.()}
+                title="Add Moment"
+                className={`w-9 h-9 rounded-lg border-2 border-dashed flex items-center justify-center transition-colors shrink-0 ${
+                  isLight
+                    ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
+                    : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#7c4af0]/45 hover:text-[#c084fc]'
+                }`}
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
     )

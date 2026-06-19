@@ -1349,7 +1349,7 @@ function EditorPage() {
     : ''
   const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
   // [PRESET CHANGE FIX] isDoneEnabled also checks hasPresetChanges so changing a preset (same count, different ID) activates the button.
-  const isDoneEnabled = editingStepActionCount > captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges
+  const isDoneEnabled = editingStepActionCount !== captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges
   const isNewStepRef = useRef(false) // Track if the current session is for a NEW step vs editing an EXISTING one
   const motionCaptureRef = useRef(null) // Ref to hold capture data for apply/cancel
   const savedStepTimingsRef = useRef(null) // Snapshot of step timings before adding a new step (for cancel restoration)
@@ -4607,13 +4607,13 @@ function EditorPage() {
           l => l.didMove || l.didScale || l.didRotate || l.didFade || l.didBlur || l.didCrop
         )
       : false
-    // Check if new actions were added beyond the baseline (works for both new and edit mode)
-    const hasNewActions = editingStepActionCount > captureBaselineActionCount
+    // Check if actions were modified/added/removed beyond the baseline
+    const hasActionChanges = editingStepActionCount !== captureBaselineActionCount
     // [PRESET CHANGE FIX] Detect when a user changes a preset to a different preset (same count, different ID)
     const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
     // hasSizeChanges covers color/flip/tilt/cornerRadius which are non-positional edits
     // tracked via editingStepActionCount changes
-    const hasChanges = hasLiveChanges || hasNewActions || hasPresetChanges
+    const hasChanges = hasLiveChanges || hasActionChanges || hasPresetChanges
 
     if (hasChanges) {
       // CASE 1: Changes detected → Auto-save silently (no fast-play preview)
@@ -4691,8 +4691,8 @@ function EditorPage() {
         style={{
           touchAction: 'none',
           backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-          pointerEvents: isEditorLoading ? 'none' : undefined,
-          userSelect: isEditorLoading ? 'none' : undefined,
+          pointerEvents: (isEditorLoading && loadingMode !== 'local') ? 'none' : undefined,
+          userSelect: (isEditorLoading && loadingMode !== 'local') ? 'none' : undefined,
         }}
         onDragStart={(e) => {
           // Prevent drag operations that might trigger text selection
