@@ -881,6 +881,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     duration: null,
     tooltipPosition: { top: 0, right: 0 }
   })
+  const [hoveredSide, setHoveredSide] = useState(null)
+  const [isCardHovered, setIsCardHovered] = useState(false)
 
   const currentCardWidth = cardWidth || defaultWidth
 
@@ -909,6 +911,31 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const dragMoveWrapper = useCallback((e) => {
     if (handleDragRef.current) handleDragRef.current(e)
   }, [])
+
+  const handleCardMouseMove = useCallback((e) => {
+    if (!cardRef.current) return
+    const rect = cardRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const borderThreshold = isTouchDevice() ? 24 : 16
+    
+    // Check if mouse is vertically within the scene card body (not in the steps area above)
+    if (y < 0 || y > height) {
+      setHoveredSide(null)
+      setIsCardHovered(false)
+      return
+    }
+
+    setIsCardHovered(true)
+
+    if (x <= borderThreshold) {
+      setHoveredSide('left')
+    } else if (x >= rect.width - borderThreshold) {
+      setHoveredSide('right')
+    } else {
+      setHoveredSide(null)
+    }
+  }, [height])
 
   // Use cardWidth for display
   const width = currentCardWidth
@@ -1315,11 +1342,19 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const interactionWidth = resizeState.isResizing && resizeState.width !== undefined ? resizeState.width : currentCardWidth
   const actualWidth = Math.max(interactionWidth, minWidthFallback)
 
+  const showHandles = isActive || isCardHovered
+
   return (
     <div
       ref={cardRef}
       className="relative flex-shrink-0"
       onContextMenu={onContextMenu}
+      onMouseEnter={() => setIsCardHovered(true)}
+      onMouseMove={handleCardMouseMove}
+      onMouseLeave={() => {
+        setIsCardHovered(false)
+        setHoveredSide(null)
+      }}
       style={{
         width: `${actualWidth}px`,
         minWidth: `${minWidthFallback}px`,
@@ -1656,123 +1691,141 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           currentTime={currentTime}
           isCurrentScene={isActive}
         />
+        {/* Left Visual Resize Grab Area */}
+        {/* Left Visual Resize Grab Area */}
+        {showHandles && (
+          <div
+            className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 transition-opacity duration-150 rounded-l-md flex items-center justify-center"
+            style={{
+              width: isTouchDevice() ? '28px' : '16px',
+              background: 'linear-gradient(to right, rgba(0, 0, 0, 0.35) 0%, rgba(255, 255, 255, 0.1) 100%)',
+              opacity: (hoveredSide === 'left' || (resizeState.isResizing && resizeState.side === 'left')) ? 1 : 0,
+            }}
+          >
+            <div
+              style={{
+                width: '2px',
+                height: '24px',
+                borderRadius: '1px',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Right Visual Resize Grab Area */}
+        {showHandles && (
+          <div
+            className="pointer-events-none absolute right-0 top-0 bottom-0 z-20 transition-opacity duration-150 rounded-r-md flex items-center justify-center"
+            style={{
+              width: isTouchDevice() ? '28px' : '16px',
+              background: 'linear-gradient(to left, rgba(0, 0, 0, 0.35) 0%, rgba(255, 255, 255, 0.1) 100%)',
+              opacity: (hoveredSide === 'right' || (resizeState.isResizing && resizeState.side === 'right')) ? 1 : 0,
+            }}
+          >
+            <div
+              style={{
+                width: '2px',
+                height: '24px',
+                borderRadius: '1px',
+                backgroundColor: '#ffffff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Left resize handle */}
-      <div
-        className="resize-handle absolute left-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
-        onMouseDown={(e) => {
-          e.stopPropagation()
-          e.preventDefault()
-          e.nativeEvent.stopImmediatePropagation()
-          handleResizeMouseDown(e, 'left')
-        }}
-        onTouchStart={(e) => {
-          e.stopPropagation()
-          const touch = e.touches[0]
-          handleResizeMouseDown({
-            clientX: touch.clientX,
-            clientY: touch.clientY,
-            currentTarget: e.currentTarget,
-            stopPropagation: () => { },
-            preventDefault: () => { },
-            nativeEvent: { stopImmediatePropagation: () => { } }
-          }, 'left')
-        }}
-        onDragStart={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-        }}
-        draggable={false}
-        style={{
-          cursor: 'ew-resize',
-          touchAction: 'none',
-          width: isTouchDevice() ? '28px' : '10px',
-          left: isTouchDevice() ? '-14px' : '-2px',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          MozUserSelect: 'none',
-          msUserSelect: 'none',
-          pointerEvents: 'auto',
-          zIndex: 50,
-        }}
-        title="Drag to resize"
-      >
+      {showHandles && (
         <div
-          style={{
-            position: 'absolute',
-            left: '2px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: '3px',
-            height: '16px',
-            borderRadius: '2px',
-            backgroundColor: resizeState.isResizing && resizeState.side === 'left'
-              ? 'rgba(139,92,246,0.8)' : 'transparent',
-            transition: 'background-color 0.15s',
-            pointerEvents: 'none',
+          className="resize-handle absolute left-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            e.nativeEvent.stopImmediatePropagation()
+            handleResizeMouseDown(e, 'left')
           }}
-          className="group-hover:!bg-purple-400/50"
+          onTouchStart={(e) => {
+            e.stopPropagation()
+            const touch = e.touches[0]
+            handleResizeMouseDown({
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+              currentTarget: e.currentTarget,
+              stopPropagation: () => { },
+              preventDefault: () => { },
+              nativeEvent: { stopImmediatePropagation: () => { } }
+            }, 'left')
+          }}
+          onMouseEnter={() => setHoveredSide('left')}
+          onMouseLeave={() => setHoveredSide(null)}
+          onDragStart={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          draggable={false}
+          style={{
+            cursor: 'ew-resize',
+            touchAction: 'none',
+            width: isTouchDevice() ? '64px' : '44px',
+            left: isTouchDevice() ? '-32px' : '-22px',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            MozUserSelect: 'none',
+            msUserSelect: 'none',
+            pointerEvents: 'auto',
+            zIndex: 50,
+          }}
+          title="Drag to resize"
         />
-      </div>
+      )}
 
       {/* Right resize handle */}
-      <div
-        className="resize-handle absolute right-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
-        onMouseDown={(e) => {
-          e.stopPropagation()
-          e.preventDefault()
-          e.nativeEvent.stopImmediatePropagation()
-          handleResizeMouseDown(e, 'right')
-        }}
-        onTouchStart={(e) => {
-          e.stopPropagation()
-          const touch = e.touches[0]
-          handleResizeMouseDown({
-            clientX: touch.clientX,
-            clientY: touch.clientY,
-            currentTarget: e.currentTarget,
-            stopPropagation: () => { },
-            preventDefault: () => { },
-            nativeEvent: { stopImmediatePropagation: () => { } }
-          }, 'right')
-        }}
-        onDragStart={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-        }}
-        draggable={false}
-        style={{
-          cursor: 'ew-resize',
-          touchAction: 'none',
-          width: isTouchDevice() ? '28px' : '10px',
-          right: isTouchDevice() ? '-14px' : '-2px',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          MozUserSelect: 'none',
-          msUserSelect: 'none',
-          pointerEvents: 'auto',
-          zIndex: 50,
-        }}
-        title="Drag to resize"
-      >
+      {showHandles && (
         <div
-          style={{
-            position: 'absolute',
-            right: '2px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: '3px',
-            height: '16px',
-            borderRadius: '2px',
-            backgroundColor: resizeState.isResizing && resizeState.side === 'right'
-              ? 'rgba(139,92,246,0.8)' : 'transparent',
-            transition: 'background-color 0.15s',
-            pointerEvents: 'none',
+          className="resize-handle absolute right-0 top-0 bottom-0 cursor-ew-resize z-50 select-none"
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            e.nativeEvent.stopImmediatePropagation()
+            handleResizeMouseDown(e, 'right')
           }}
-          className="group-hover:!bg-purple-400/50"
+          onTouchStart={(e) => {
+            e.stopPropagation()
+            const touch = e.touches[0]
+            handleResizeMouseDown({
+              clientX: touch.clientX,
+              clientY: touch.clientY,
+              currentTarget: e.currentTarget,
+              stopPropagation: () => { },
+              preventDefault: () => { },
+              nativeEvent: { stopImmediatePropagation: () => { } }
+            }, 'right')
+          }}
+          onMouseEnter={() => setHoveredSide('right')}
+          onMouseLeave={() => setHoveredSide(null)}
+          onDragStart={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          draggable={false}
+          style={{
+            cursor: 'ew-resize',
+            touchAction: 'none',
+            width: isTouchDevice() ? '64px' : '44px',
+            right: isTouchDevice() ? '-32px' : '-22px',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            MozUserSelect: 'none',
+            msUserSelect: 'none',
+            pointerEvents: 'auto',
+            zIndex: 50,
+          }}
+          title="Drag to resize"
         />
-      </div>
+      )}
 
       {/* Duration tooltip */}
       {
