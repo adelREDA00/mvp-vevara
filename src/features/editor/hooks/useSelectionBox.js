@@ -83,7 +83,7 @@ function getCurrentInteractionState(dragStateAPI, interactionStateRef, rotationJ
 // Helper to update selection box visibility and children visibility
 // OPTIMIZATION: Keep selection box VISIBLE during interaction but hide handles/border
 // This allows badges (children of selection box) to remain visible while the box itself is hidden
-function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, firstActionTime = Infinity, editingTextLayerId = null) {
+function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying = false, isRotating = false, motionCaptureMode = null, sceneMotionFlow = null, layerId = null, firstActionTime = Infinity, editingTextLayerId = null, layerType = null) {
   if (!selectionBox) return
 
   // Hide completely during playback
@@ -175,13 +175,20 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
   if (isLocked) {
     // Show outline, Move, and Rotation handles
     selectionBox.visible = true
+    const isText = layerType === 'text'
     for (let i = 0; i < selectionBox.children.length; i++) {
       const child = selectionBox.children[i]
       const isOutline = child.label === 'selection-outline'
       const isRotation = child.label === 'rotation-handle'
       const isMove = child.label === 'move-handle'
+      const isTextLeftRightHandle = isText && (
+        child.label === 'selection-handle-w' ||
+        child.label === 'selection-handle-e' ||
+        child.label === 'selection-hitarea-w' ||
+        child.label === 'selection-hitarea-e'
+      )
 
-      if (isOutline || isRotation) {
+      if (isOutline || isRotation || isTextLeftRightHandle) {
         child.visible = true
       } else if (isMove) {
         child.visible = !!selectionBox._showMoveHandle
@@ -921,6 +928,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     handle.x = hx
     handle.y = hy
     handle.label = `selection-handle-${handleType}`
+    handle._initialZoomScale = zoomScale
     handle.eventMode = 'static'
     handle.cursor = rotatedCursor
 
@@ -1237,6 +1245,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     rotationHandle.x = rotationX
     rotationHandle.y = rotationY
     rotationHandle.label = 'rotation-handle'
+    rotationHandle._initialZoomScale = zoomScale
     rotationHandle.eventMode = 'static'
     rotationHandle.cursor = 'grab'
     rotationHandle.zIndex = 10001
@@ -1383,6 +1392,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     moveHandle.x = localBoundsX + scaledWidth / 2
     moveHandle.y = localBoundsY + scaledHeight + distanceFromBottom
     moveHandle.label = 'move-handle'
+    moveHandle._initialZoomScale = zoomScale
     moveHandle.eventMode = 'static'
     moveHandle.cursor = 'grab'
     moveHandle.zIndex = 10001
@@ -1546,7 +1556,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const scaleChanged = scaleX !== lastKnownScaleXRef.current || scaleY !== lastKnownScaleYRef.current
     const rotationChanged = Math.abs(rotation - (lastKnownRotationRef?.current || 0)) > 0.01
     const tiltChanged = Math.abs(currentTiltX - (lastKnownTiltXRef.current || 0)) >= 0.01
-                     || Math.abs(currentTiltY - (lastKnownTiltYRef.current || 0)) >= 0.01
+      || Math.abs(currentTiltY - (lastKnownTiltYRef.current || 0)) >= 0.01
     const shouldRedraw = forceRedrawRef.current || dimensionsChanged || scaleChanged || rotationChanged || tiltChanged
 
     // CRITICAL FIX: Ensure position and rotation ALWAYS track true layer coords instantly
@@ -1592,6 +1602,19 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     box.y = y + boundsCenterY
     box.rotation = (rotation * Math.PI) / 180
 
+    const viewportScale = latestViewportRef.current?.scale?.x || 1
+    const zoomScale = 1 / viewportScale
+
+    // Dynamically adjust handle scales to keep visual screen size constant when zooming
+    box.children.forEach(child => {
+      if (child.label && (child.label.startsWith('selection-handle-') || child.label === 'rotation-handle' || child.label === 'move-handle')) {
+        if (child._initialZoomScale) {
+          const currentScaleFactor = zoomScale / child._initialZoomScale
+          child.scale.set(currentScaleFactor, currentScaleFactor)
+        }
+      }
+    })
+
     if (shouldRedraw) {
       if (forceRedrawRef.current) forceRedrawRef.current = false
       lastKnownHeightRef.current = currentHeight
@@ -1604,8 +1627,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
       const { anchorX, anchorY } = resolveAnchors(currentLayer, currentLayerObject)
       const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
-      const viewportScale = latestViewportRef.current?.scale?.x || 1
-      const zoomScale = 1 / viewportScale
       const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
 
       const scaledWidth = currentWidth * scaleX
@@ -1665,7 +1686,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           if (isTilted) {
             const corners = computePerspectiveCorners(scaledWidth, scaledHeight, tiltX, tiltY, localBoundsX, localBoundsY)
             const [tlX, tlY, trX, trY, brX, brY, blX, blY] = corners
-            
+
             let hx, hy, angle = 0, lenScale = 1
             if (type === 'n') {
               hx = (tlX + trX) / 2
@@ -1840,7 +1861,23 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const transformFunc = handleTransformCache.current[state.handleType]
     if (!transformFunc) return
 
-    const transform = transformFunc(localDeltaX, localDeltaY, state, maintainAspectRatio, currentMotionCaptureMode)
+    let transform
+    if (state.isAnimatedText) {
+      let newWidth = state.startWidth
+      if (state.handleType === 'e') {
+        newWidth = Math.max(10, state.startWidth + localDeltaX * 2)
+      } else if (state.handleType === 'w') {
+        newWidth = Math.max(10, state.startWidth - localDeltaX * 2)
+      }
+      transform = {
+        newWidth,
+        newHeight: state.startHeight,
+        localOffsetX: 0,
+        localOffsetY: 0
+      }
+    } else {
+      transform = transformFunc(localDeltaX, localDeltaY, state, maintainAspectRatio, currentMotionCaptureMode)
+    }
     let { newWidth, newHeight, localOffsetX, localOffsetY } = transform
 
     const worldOffsetX = localOffsetX * trig.cosPos - localOffsetY * trig.sinPos
@@ -1852,8 +1889,26 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const updates = {}
     if (Math.abs(newWidth - state.startWidth) > 0.01) updates.width = newWidth
     if (Math.abs(newHeight - state.startHeight) > 0.01) updates.height = newHeight
-    if (Math.abs(newX - state.startX) > 0.01) updates.x = newX
-    if (Math.abs(newY - state.startY) > 0.01) updates.y = newY
+    if (state.isAnimatedText) {
+      const align = currentLayer.data?.textAlign || 'left'
+      const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+      const deltaWidth = newWidth - state.startWidth
+      const shiftFactor = (0.5 - anchorX) * deltaWidth
+      const cos = Math.cos(state.rotationRad)
+      const sin = Math.sin(state.rotationRad)
+
+      const reduxDx = -shiftFactor * cos
+      const reduxDy = -shiftFactor * sin
+
+      const targetX = state.startBaseX + reduxDx
+      const targetY = state.startBaseY + reduxDy
+
+      if (Math.abs(targetX - state.startBaseX) > 0.01) updates.x = targetX
+      if (Math.abs(targetY - state.startBaseY) > 0.01) updates.y = targetY
+    } else {
+      if (Math.abs(newX - state.startX) > 0.01) updates.x = newX
+      if (Math.abs(newY - state.startY) > 0.01) updates.y = newY
+    }
 
     const centerSnap = { x: newX, y: newY, alignmentGuides: [], releaseGuides: () => { } }
     const safeZoneSnap = { x: newX, y: newY, alignmentGuides: [], releaseGuides: () => { } }
@@ -1955,14 +2010,49 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       state._lastWidth = newWidth
       state._lastHeight = newHeight
     }
-    state._lastX = newX
-    state._lastY = newY
+    if (state.isAnimatedText) {
+      const align = currentLayer.data?.textAlign || 'left'
+      const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+      const deltaWidth = newWidth - state.startWidth
+      const shiftFactor = (0.5 - anchorX) * deltaWidth
+      const cos = Math.cos(state.rotationRad)
+      const sin = Math.sin(state.rotationRad)
+      state._lastX = state.startBaseX - shiftFactor * cos
+      state._lastY = state.startBaseY - shiftFactor * sin
+    } else {
+      state._lastX = newX
+      state._lastY = newY
+    }
 
     if (Object.keys(updates).length > 0) {
       const targetObject = currentLayerObject._cachedSprite || currentLayerObject
       const isMediaEdgeResize = state.isMediaElement && ['n', 's', 'e', 'w'].includes(state.handleType)
 
-      if (isCaptureMode && !isMediaEdgeResize) {
+      if (state.isAnimatedText) {
+        const align = currentLayer.data?.textAlign || 'left'
+        const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+
+        targetObject.x = state.startX
+        targetObject.y = state.startY
+
+        if (targetObject.isFlowText) {
+          targetObject.wordWrapWidth = newWidth
+          targetObject.updateText()
+        } else if (targetObject instanceof PIXI.Text) {
+          targetObject.style.wordWrapWidth = newWidth
+          targetObject.updateText?.(true)
+        }
+
+        const actualHeight = targetObject.getLocalBounds().height || state.startHeight
+        if (targetObject.anchor) {
+          targetObject.anchor.set(anchorX, 0)
+        }
+        targetObject.pivot.set((0.5 - anchorX) * newWidth, actualHeight / 2)
+
+        if (targetObject._tiltMesh && !targetObject._tiltMesh.destroyed) {
+          markTiltTextureDirty(targetObject)
+        }
+      } else if (isCaptureMode && !isMediaEdgeResize) {
         const newScaleX = (newWidth / state.startWidth) * state.scaleX
         const newScaleY = (newHeight / state.startHeight) * state.scaleY
         const align = currentLayer.data?.textAlign || 'left'
@@ -2027,7 +2117,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         }
       }
 
-      if ((currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) && !isCaptureMode) {
+      if ((currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText) && !isCaptureMode && !state.isAnimatedText) {
         const isCorner = ['nw', 'ne', 'sw', 'se'].includes(state.handleType)
         immediateTextUpdate(currentLayerObject, newWidth, isCorner, state, currentLayer)
 
@@ -2467,6 +2557,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     const currentLayer = latestLayerRef.current
     const currentLayerObject = latestLayerObjectRef.current
+    const resizeState = interactionStateRef.current.resize
+
+
 
     if (updateThrottleRef.current) {
       cancelAnimationFrame(updateThrottleRef.current)
@@ -2490,7 +2583,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // If we dispatch those stale values and then applyTransformInline syncs
     // _storedCropWidth from Redux, the tilt mesh's RTT will be recaptured
     // at the wrong size, creating the visual desync the user sees.
-    const resizeState = interactionStateRef.current.resize
     if (resizeState) {
       const finalUpdates = {}
       if (typeof resizeState._lastWidth === 'number' && Math.abs(resizeState._lastWidth - (pendingUpdateRef.current?.width ?? resizeState._lastWidth)) > 0.1) {
@@ -2506,7 +2598,10 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         finalUpdates.y = resizeState._lastY
       }
       // Merge final dimensions into the pending update so Redux gets the truth
-      if (Object.keys(finalUpdates).length > 0 && pendingUpdateRef.current) {
+      if (Object.keys(finalUpdates).length > 0) {
+        if (!pendingUpdateRef.current) {
+          pendingUpdateRef.current = { id: currentLayer.id }
+        }
         Object.assign(pendingUpdateRef.current, finalUpdates)
       }
     }
@@ -2668,12 +2763,9 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           }
           delete currentLayerObject._tiltResizeEndRAF
           currentLayerObject._tiltTextureDirty = true
-          console.log(`[TILT-DEBUG] handleResizeEnd RAF: force recapture for ${currentLayerObject.label || currentLayer.id}`)
           syncTiltMesh(currentLayerObject, latestLayerRef.current, { force: true })
         })
       }
-      console.log(`[TILT-DEBUG] handleResizeEnd: resize ended for ${currentLayerObject.label || currentLayer.id} | mesh=${!!currentLayerObject?._tiltMesh} | isResizing=${!!currentLayerObject?._isResizing} | _lastResizeEndTime=${(currentLayerObject?._lastResizeEndTime || 0).toFixed(1)} | rAF=${!!(currentLayerObject?._tiltResizeEndRAF)}`)
-      console.trace(`[TILT-DEBUG] handleResizeEnd: stack trace`)
 
       // Deferred safety sync to ensure Redux state has fully propagated
       setTimeout(() => {
@@ -2744,6 +2836,13 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const isTextElement = currentLayerObject instanceof PIXI.Text || currentLayerObject?.isFlowText
     const { anchorX: stateAnchorX, anchorY: stateAnchorY } = resolveAnchors(currentLayer, currentLayerObject)
 
+    const firstActionTime = getLayerFirstActionTime(currentLayer.id, latestSceneMotionFlowRef.current)
+    const engine = getGlobalMotionEngine()
+    const currentTime = engine?.masterTimeline?.time() || 0
+    const sceneStartTime = latestSceneMotionFlowRef.current?.sceneStartOffset || 0
+    const relativeTime = currentTime - sceneStartTime
+    const isAnimatedText = isTextElement && !latestMotionCaptureModeRef.current?.isActive && (relativeTime > 0.02 && relativeTime >= (firstActionTime - 0.02)) && firstActionTime !== Infinity
+
     // Check for captured transform overrides during motion capture
     const currentMotionCaptureMode = latestMotionCaptureModeRef.current
     const capturedLayer = currentMotionCaptureMode?.isActive && currentMotionCaptureMode.trackedLayers?.get(currentLayer.id)
@@ -2762,20 +2861,26 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       ? (capturedLayer?.cropHeight ?? currentLayer.cropHeight ?? currentLayer.height ?? 100)
       : (capturedLayer?.initialTransform?.height ?? (currentLayer.height ?? 100))
 
+    const isCaptureMode = !!currentMotionCaptureMode?.isActive
+    const useLiveVisuals = isAnimatedText || isCaptureMode
+
     const initialState = {
       handleType,
       cursor,
       prevEventMode: currentLayerObject?.eventMode,
       startWidth: currentSessionWidth,
       startHeight: currentSessionHeight,
-      startX: capturedLayer?.currentPosition?.x ?? (currentLayer.x || 0),
-      startY: capturedLayer?.currentPosition?.y ?? (currentLayer.y || 0),
-      rotation: currentSessionRotation,
-      rotationRad: currentSessionRotationRad,
+      startX: useLiveVisuals ? currentLayerObject.x : (capturedLayer?.currentPosition?.x ?? (currentLayer.x || 0)),
+      startY: useLiveVisuals ? currentLayerObject.y : (capturedLayer?.currentPosition?.y ?? (currentLayer.y || 0)),
+      startBaseX: currentLayer.x || 0,
+      startBaseY: currentLayer.y || 0,
+      rotation: useLiveVisuals ? (currentLayerObject.rotation * 180 / Math.PI) : currentSessionRotation,
+      rotationRad: useLiveVisuals ? currentLayerObject.rotation : currentSessionRotationRad,
       anchorX: stateAnchorX,
       anchorY: stateAnchorY,
-      scaleX: currentSessionScaleX,
-      scaleY: currentSessionScaleY,
+      scaleX: useLiveVisuals ? currentLayerObject.scale.x : currentSessionScaleX,
+      scaleY: useLiveVisuals ? currentLayerObject.scale.y : currentSessionScaleY,
+      isAnimatedText,
       startMouseX: startWorldPos.x,
       startMouseY: startWorldPos.y,
       startFontSize,
@@ -2923,7 +3028,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     pauseViewportDragPlugin(currentViewport)
 
     const isMoving = dragStateAPI && currentLayer ? dragStateAPI.isLayerDragging(currentLayer.id) : false
-    updateSelectionBoxVisibility(selectionBoxRef.current, isMoving, true, layersContainer, isPlaying)
+    updateSelectionBoxVisibility(selectionBoxRef.current, isMoving, true, layersContainer, isPlaying, false, null, null, null, Infinity, null, currentLayer?.type)
 
     if (canvas) canvas.style.cursor = cursor
 
@@ -2937,7 +3042,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // triggering cascading RTT captures that destroyed each other's textures.
     // Refs stored here so handleResizeEnd can also use them for cleanup.
     const prevListeners = interactionStateRef.current._prevListeners
-    
+
     if (prevListeners) {
       // Detach OLD listeners from the previous resize session before attaching
       // the new ones. Without this, each handleResizeStart adds new listeners
@@ -3017,7 +3122,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     const rend = currentViewport.parent?.parent?.renderer || currentViewport.parent?.renderer
-    
+
     // Store the current listeners so NEXT handleResizeStart can remove them
     if (interactionStateRef.current) {
       interactionStateRef.current._prevListeners = {
@@ -3126,7 +3231,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     pauseViewportDragPlugin(currentViewport)
-    updateSelectionBoxVisibility(selectionBoxRef.current, false, false, layersContainer, false, true, latestMotionCaptureModeRef.current)
+    updateSelectionBoxVisibility(selectionBoxRef.current, false, false, layersContainer, false, true, latestMotionCaptureModeRef.current, null, null, Infinity, null, currentLayer?.type)
     if (canvas) canvas.style.cursor = 'grab'
 
     const onRotateMove = (e) => {
@@ -3344,7 +3449,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         latestSceneMotionFlowRef.current,
         currentLayer?.id,
         firstActionTime,
-        editingTextLayerId
+        editingTextLayerId,
+        currentLayer?.type
       )
 
       // [FIX] Ensure hover box (purple outline) is also hidden during movement/flipping
@@ -3859,7 +3965,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // We call this after adding all children to ensure they are properly hidden if necessary.
 
 
-    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, firstActionTime, editingTextLayerId)
+    updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layersContainer, isPlaying, isRotating, currentMotionCaptureMode, sceneMotionFlow, layer?.id, firstActionTime, editingTextLayerId, layer?.type)
     syncBoxVisuals()
 
   }, [

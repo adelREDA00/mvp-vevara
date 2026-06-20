@@ -209,7 +209,7 @@ function MobileMotionBar({
                   }}
                   className={`shrink-0 transition-all duration-150 flex flex-col rounded-lg border-2 ${
                     isActive
-                      ? (isLight ? 'border-[#7c4af0]' : 'border-[#a78bfa]')
+                      ? (isLight ? 'border-[#b89eff]' : 'border-[#5a4b81]')
                       : (isLight ? 'border-slate-200' : 'border-white/10')
                   } ${
                     isLight ? 'bg-white hover:bg-slate-50' : 'bg-[#151620] hover:bg-white/[0.02]'

@@ -397,6 +397,8 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 const isTouchDevice = () => typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
 
 const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false }) => {
+  const { theme } = useContext(ThemeContext)
+  const isLight = theme === 'light'
   // Compute active step from playhead position (synchronous, no re-render lag)
   // Uses the "preceding step region" rule: gaps after a step belong to that step.
   // ONLY for the current scene — non-current scenes should never auto-highlight
@@ -408,7 +410,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     if (!isCurrentScene || !steps.length || pageDuration <= 0) return activeStepId
     const timeInMs = currentTime * 1000
     const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
-    
+
     // 1. Check if playhead is exactly within any step's range
     for (let i = 0; i < sortedSteps.length; i++) {
       const s = sortedSteps[i]
@@ -416,12 +418,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       const duration = s.duration || 0
       if (timeInMs >= start && timeInMs <= start + duration) return s.id
     }
-    
+
     // 2. Playhead is past the entire scene duration — no step is active.
     // This detects the case where the playhead has moved to a different scene
     // and this scene's relative time exceeds its pageDuration.
     if (timeInMs >= pageDuration + 100) return null
-    
+
     // 3. Playhead is in a gap — previous step owns the gap
     for (let i = sortedSteps.length - 1; i >= 0; i--) {
       const s = sortedSteps[i]
@@ -435,11 +437,11 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
         return s.id
       }
     }
-    
+
     // 4. Before first step — no active step
     return null
   }, [steps, currentTime, pageDuration, activeStepId, isCurrentScene])
-  
+
   // Use the locally computed step ID for visual highlighting.
   // Only apply when the playhead has actually entered this scene's timeline range
   // (sceneRelativeTime > 0). This prevents non-current scenes from showing active
@@ -468,6 +470,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
   }, [])
 
   const handleStepPointerDown = useCallback((e, step, type) => {
+    if (e.pointerType === 'touch') return
     e.stopPropagation()
     e.preventDefault()
     didDragRef.current = false
@@ -530,6 +533,118 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     document.addEventListener('pointerup', handlePointerUp)
   }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX, onMotionPause])
 
+  const handleStepTouchStart = useCallback((e, step, type) => {
+    e.stopPropagation()
+    const touch = e.touches[0]
+    const startX = touch.clientX
+    const startY = touch.clientY
+    let hasMoved = false
+    let isLongPressActive = false
+
+    let contextTimer = null
+    if (type === 'move') {
+      contextTimer = setTimeout(() => {
+        if (!hasMoved) {
+          onStepContextMenu?.({ preventDefault: () => { }, stopPropagation: () => { }, clientX: touch.clientX, clientY: touch.clientY }, step.id)
+        }
+      }, 600)
+    }
+
+    const longPressTimer = setTimeout(() => {
+      if (!hasMoved) {
+        isLongPressActive = true
+        if (navigator.vibrate) {
+          navigator.vibrate(30)
+        }
+      }
+    }, 250)
+
+    const onTouchMove = (moveE) => {
+      const touchX = moveE.touches[0].clientX
+      const touchY = moveE.touches[0].clientY
+      const dx = touchX - startX
+      const dy = touchY - startY
+      const threshold = 6
+
+      if (!isLongPressActive) {
+        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+          clearTimeout(contextTimer)
+          clearTimeout(longPressTimer)
+          cleanup()
+        }
+        return
+      }
+
+      if (moveE.cancelable) {
+        moveE.preventDefault()
+      }
+
+      if (!hasMoved) {
+        hasMoved = true
+        clearTimeout(contextTimer)
+
+        if (typeof onMotionPause === 'function') {
+          onMotionPause()
+        }
+        dispatch(setTimelineDragging(true))
+        setIsDragging(true)
+
+        dragRef.current = {
+          stepId: step.id,
+          type,
+          startX: touchX,
+          origStartTime: step.startTime || 0,
+          origDuration: step.duration || (pageDuration / (steps.length || 1)),
+        }
+      } else if (dragRef.current) {
+        const dx = touchX - dragRef.current.startX
+        const msDelta = dx * pxToMs
+
+        if (dragRef.current.type === 'resize-right') {
+          dispatch(updateStepTiming({
+            sceneId,
+            stepId: dragRef.current.stepId,
+            duration: Math.round(dragRef.current.origDuration + msDelta),
+          }))
+        } else if (dragRef.current.type === 'resize-left') {
+          dispatch(updateStepTiming({
+            sceneId,
+            stepId: dragRef.current.stepId,
+            startTime: Math.round(dragRef.current.origStartTime + msDelta),
+            duration: Math.round(dragRef.current.origDuration - msDelta),
+          }))
+        } else {
+          dispatch(updateStepTiming({
+            sceneId,
+            stepId: dragRef.current.stepId,
+            startTime: Math.round(dragRef.current.origStartTime + msDelta),
+          }))
+        }
+      }
+    }
+
+    const onTouchEnd = () => {
+      clearTimeout(contextTimer)
+      clearTimeout(longPressTimer)
+      if (hasMoved) {
+        dragRef.current = null
+        setIsDragging(false)
+        dispatch(setTimelineDragging(false))
+      }
+      cleanup()
+    }
+
+    const cleanup = () => {
+      document.removeEventListener('touchmove', onTouchMove)
+      document.removeEventListener('touchend', onTouchEnd)
+      document.removeEventListener('touchcancel', onTouchEnd)
+    }
+
+    document.addEventListener('touchmove', onTouchMove, { passive: false })
+    document.addEventListener('touchend', onTouchEnd, { once: true })
+    document.addEventListener('touchcancel', onTouchEnd, { once: true })
+  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, onMotionPause, onStepContextMenu])
+
   return (
     <div
       ref={containerRef}
@@ -583,16 +698,51 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
         </div>
       </button> */}
 
+      {/* ── Step Fills ── */}
+      <div className="absolute inset-0 overflow-visible pointer-events-none">
+        {(() => {
+          const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+          return sortedSteps.map((step, idx) => {
+            const isEditing = isMotionCaptureActive && editingStepId === step.id
+            const isPlayheadInside = displayStepId === step.id
+            const isStepSelected = isEditing
+
+            const stepStart = step.startTime || 0
+            const nextStep = sortedSteps[idx + 1]
+            const nextStart = nextStep ? (nextStep.startTime || 0) : pageDuration
+            const fillDuration = Math.max(0, nextStart - stepStart)
+
+            const fillLeftPct = (stepStart / pageDuration) * 100
+            const fillWidthPct = (fillDuration / pageDuration) * 100
+
+            return (
+              <div
+                key={`fill-${step.id || idx}`}
+                className={`absolute top-1/2 -translate-y-1/2 pointer-events-none rounded-[6px] transition-colors duration-100
+                  ${isStepSelected
+                    ? isLight ? 'bg-[#e4d9f9]' : 'bg-[#e4d9f9]/25'
+                    : isPlayheadInside
+                      ? isLight ? 'bg-[#ede8f9]' : 'bg-[#ede8f9]/10'
+                      : 'bg-transparent'
+                  }
+                `}
+                style={{
+                  left: `${fillLeftPct}%`,
+                  width: `${fillWidthPct}%`,
+                  height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '36px' : '28px',
+                }}
+              />
+            )
+          })
+        })()}
+      </div>
+
       {/* ── Step Blocks ── */}
       <div className="absolute inset-0 overflow-visible">
         {steps.map((step, i) => {
-          // [ISSUE 1 FIX] Only use displayStepId for determining active state.
-          // The fallback `|| activeStepId === step.id` was causing steps to remain
-          // highlighted even when computedActiveStepId returns null (playhead past
-          // all steps), because Redux's playheadStepId (activeStepId) may still
-          // return a stale step ID — its gap-finding logic doesn't have a
-          // "past the last step" detection.
           const isActive = displayStepId === step.id
+          const isEditing = isMotionCaptureActive && editingStepId === step.id
+          const isPlayheadInside = isActive
           const stepStart = step.startTime || 0
           const stepDur = step.duration || (pageDuration / (steps.length || 1))
           const leftPct = Math.min((stepStart / pageDuration) * 100, 100)
@@ -606,7 +756,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
             <div
               key={step.id || i}
               data-step-id={step.id}
-              className="absolute top-1/2 -translate-y-1/2 group/step"
+              className="absolute top-1/2 -translate-y-1/2 group/step overflow-visible"
               style={{
                 left: `${leftPct}%`,
                 width: `${widthPct}%`,
@@ -620,6 +770,9 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                   if (e.button !== undefined && e.button !== 0) return
                   handleStepPointerDown(e, step, 'resize-left')
                 }}
+                onTouchStart={(e) => {
+                  handleStepTouchStart(e, step, 'resize-left')
+                }}
                 className="absolute top-0 bottom-0 z-30 flex items-center justify-center"
                 style={{
                   cursor: 'ew-resize',
@@ -628,8 +781,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                   left: isTouchDevice() ? `${-touchWidth / 2}px` : '0px',
                 }}
               >
-                <div className={`${blockPx < 32 ? 'hidden' : 'w-[4px] h-[16px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/40 group-hover/step:bg-white/80' : 'bg-transparent group-hover/step:bg-purple-300/60'
-                  }`} />
+                <div className={`${blockPx < 32 ? 'hidden' : 'w-[4px] h-[16px] rounded-full transition-all duration-150'} bg-zinc-450/80 group-hover/step:bg-white`} />
               </div>
 
               {/* Step body */}
@@ -650,44 +802,24 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                 }}
                 onTouchStart={(e) => {
                   if (e.target.dataset.resizeHandle) return
-                  e.stopPropagation()
-                  const touch = e.touches[0]
-                  let moved = false
-                  const timer = setTimeout(() => {
-                    if (!moved && !didDragRef.current) {
-                      onStepContextMenu?.({ preventDefault: () => {}, stopPropagation: () => {}, clientX: touch.clientX, clientY: touch.clientY }, step.id)
-                    }
-                  }, 600)
-                  const onMove = (me) => {
-                    if (me.touches?.length > 0 && (Math.abs(me.touches[0].clientX - touch.clientX) > 5 || Math.abs(me.touches[0].clientY - touch.clientY) > 5)) {
-                      moved = true
-                      clearTimeout(timer)
-                    }
-                  }
-                  const onEnd = () => { clearTimeout(timer); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd) }
-                  document.addEventListener('touchmove', onMove, { passive: true })
-                  document.addEventListener('touchend', onEnd, { once: true })
+                  handleStepTouchStart(e, step, 'move')
                 }}
                 className={(() => {
-                  const isEditing = isMotionCaptureActive && editingStepId === step.id
-                  const isPlayheadInside = isActive
                   return `w-full h-full text-[11px] font-bold tracking-wider uppercase flex items-center justify-center rounded-[6px] select-none transition-all duration-100 relative overflow-hidden
                     ${isEditing
-                      ? 'text-white shadow-md z-10'
-                      : 'text-purple-200 hover:text-white'
+                      ? isLight ? 'bg-[#7a40ed] text-white shadow-md z-10' : 'bg-[#633cc4] text-purple-100 shadow-md z-10'
+                      : isPlayheadInside
+                        ? isLight ? 'bg-[#cab3f8] text-purple-950' : 'bg-[#4c3b70] text-purple-200'
+                        : isLight
+                          ? 'bg-[#d7d7db] text-slate-800 hover:bg-[#cab3f8] hover:text-purple-950'
+                          : 'bg-[#25232d] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
                     }
-                    ${isEditing ? 'ring-[1.5px] ring-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)]' : ''}
-                    ${!isEditing && isPlayheadInside ? 'ring-2 ring-[#a78bfa]' : ''}
                   `
                 })()}
                 style={(() => {
-                  const isEditing = isMotionCaptureActive && editingStepId === step.id
-                  const isPlayheadInside = isActive
                   return {
                     cursor: isDragging ? 'grabbing' : 'grab',
                     touchAction: 'none',
-                    backgroundColor: isEditing ? '#7c3aed' : '#3b2667',
-                    border: isEditing ? '1px solid #a78bfa' : isPlayheadInside ? '1px solid #a78bfa' : '1px solid #5b3a8c',
                   }
                 })()}
               >
@@ -704,6 +836,9 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                   if (e.button !== undefined && e.button !== 0) return
                   handleStepPointerDown(e, step, 'resize-right')
                 }}
+                onTouchStart={(e) => {
+                  handleStepTouchStart(e, step, 'resize-right')
+                }}
                 className="absolute top-0 bottom-0 z-30 flex items-center justify-center"
                 style={{
                   cursor: 'ew-resize',
@@ -712,8 +847,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                   right: isTouchDevice() ? `${-touchWidth / 2}px` : '0px',
                 }}
               >
-                <div className={`${blockPx < 32 ? 'hidden' : 'w-[3px] h-[14px] rounded-full transition-all duration-150'} ${isActive ? 'bg-white/30 group-hover/step:bg-white/60' : 'bg-transparent group-hover/step:bg-purple-300/40'
-                  }`} />
+                <div className={`${blockPx < 32 ? 'hidden' : 'w-[3px] h-[14px] rounded-full transition-all duration-150'} bg-zinc-450/80 group-hover/step:bg-white`} />
               </div>
             </div>
           )
@@ -749,6 +883,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   // Track drag position for floating preview - minimize React state updates
   const dragAllowedRef = useRef(false)
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 })
+  const [isTouchGrabbed, setIsTouchGrabbed] = useState(false)
   const cardElementRef = useRef(null)
   const dragPositionRef = useRef({ x: 0, y: 0 })
   const previewElementRef = useRef(null)
@@ -810,6 +945,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', index.toString())
+      
+      // Hide the default browser drag ghost image so only our custom portal drag preview is visible
+      const img = new Image()
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      e.dataTransfer.setDragImage(img, 0, 0)
     }
 
     // Mark as dragging
@@ -1239,8 +1379,6 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               willChange: 'transform',
               transition: 'none',
               backfaceVisibility: 'hidden',
-              contain: 'strict',
-              isolation: 'isolate',
               transformOrigin: 'center center',
               pointerEvents: 'none',
               userSelect: 'none',
@@ -1252,8 +1390,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               style={{
                 width: '100%',
                 height: `${height}px`,
-                border: '2px solid rgba(139,92,246,0.7)',
-                boxShadow: '0 20px 40px -8px rgba(0,0,0,0.5), 0 0 20px rgba(139,92,246,0.3)',
+                border: isLight
+                  ? '2px solid rgba(124,74,240,0.8)'
+                  : '2px solid rgba(167,139,250,0.5)',
+                boxSizing: 'border-box',
+                boxShadow: 'none',
                 willChange: 'transform',
                 transform: 'translateZ(0) scale(1.04)',
                 backfaceVisibility: 'hidden',
@@ -1261,8 +1402,8 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             >
               <ScenePreview
                 layers={layers}
-                cardWidth={width}
-                cardHeight={height}
+                cardWidth={width - 4}
+                cardHeight={height - 4}
                 backgroundColor={scene.backgroundColor}
               />
             </div>
@@ -1333,6 +1474,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             const startY = touch.clientY
             let hasMoved = false
             let isContextMenuShown = false
+            let isLongPressActive = false
 
             const contextTimer = setTimeout(() => {
               if (!hasMoved) {
@@ -1346,42 +1488,72 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               }
             }, 600)
 
+            const longPressTimer = setTimeout(() => {
+              if (!hasMoved) {
+                isLongPressActive = true
+                setIsTouchGrabbed(true)
+                if (navigator.vibrate) {
+                  navigator.vibrate(30)
+                }
+              }
+            }, 300)
+
             const onTouchMove = (moveE) => {
-              const dx = moveE.touches[0].clientX - startX
-              const dy = moveE.touches[0].clientY - startY
-              const threshold = 8
-              if (Math.abs(dx) > threshold || Math.abs(dy) > threshold || hasMoved) {
-                if (moveE.cancelable) {
-                  moveE.preventDefault()
-                }
+              const touchX = moveE.touches[0].clientX
+              const touchY = moveE.touches[0].clientY
+              const dx = touchX - startX
+              const dy = touchY - startY
+              const threshold = 6
 
-                if (!hasMoved && !isContextMenuShown) {
-                  hasMoved = true
+              if (!isLongPressActive) {
+                // If moved before the long press activates, assume scrolling and cancel the drag/reorder trigger
+                if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
                   clearTimeout(contextTimer)
-                  
-                  const touchX = moveE.touches[0].clientX
-                  const touchY = moveE.touches[0].clientY
-                  isDraggingRef.current = true
-                  dragPositionRef.current = { x: touchX, y: touchY }
-                  setDragPosition({ x: touchX, y: touchY })
-
-                  if (previewElementRef.current) {
-                    previewElementRef.current.style.transform = `translate3d(${touchX}px,${touchY}px,0) translate(-50%,-50%)`
-                  }
-
-                  onDragStart(index)
+                  clearTimeout(longPressTimer)
+                  setIsTouchGrabbed(false)
                 }
+                return
+              }
+
+              // Long press is active, prevent default scrolling and handle drag
+              if (moveE.cancelable) {
+                moveE.preventDefault()
+              }
+
+              if (!hasMoved && !isContextMenuShown) {
+                hasMoved = true
+                clearTimeout(contextTimer)
+
+                isDraggingRef.current = true
+                dragPositionRef.current = { x: touchX, y: touchY }
+                setDragPosition({ x: touchX, y: touchY })
+
+                if (previewElementRef.current) {
+                  previewElementRef.current.style.transform = `translate3d(${touchX}px,${touchY}px,0) translate(-50%,-50%)`
+                }
+
+                onDragStart(index)
+              } else if (hasMoved) {
+                // Keep moving the preview
+                if (previewElementRef.current) {
+                  previewElementRef.current.style.transform = `translate3d(${touchX}px,${touchY}px,0) translate(-50%,-50%)`
+                }
+                dragPositionRef.current = { x: touchX, y: touchY }
               }
             }
 
             const onTouchEnd = () => {
               clearTimeout(contextTimer)
+              clearTimeout(longPressTimer)
+              setIsTouchGrabbed(false)
               e.currentTarget?.removeEventListener('touchmove', onTouchMove)
               e.currentTarget?.removeEventListener('touchend', onTouchEnd)
+              e.currentTarget?.removeEventListener('touchcancel', onTouchEnd)
             }
 
             e.currentTarget.addEventListener('touchmove', onTouchMove, { passive: false })
             e.currentTarget.addEventListener('touchend', onTouchEnd, { once: true })
+            e.currentTarget.addEventListener('touchcancel', onTouchEnd, { once: true })
           }}
           className="rounded-md touch-manipulation flex-shrink-0 relative"
           style={{
@@ -1390,18 +1562,23 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             pointerEvents: 'auto',
             overflow: resizeState.isResizing ? 'visible' : 'hidden',
             cursor: isDraggingRef.current ? 'grabbing' : 'grab',
-            border: isActive
-              ? isLight
-                ? '2px solid rgba(124,74,240,0.8)'
-                : '2px solid rgba(167,139,250,0.5)'
-              : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
+            border: isTouchGrabbed
+              ? '2px solid #7c4af0'
+              : isActive
+                ? isLight
+                  ? '2px solid rgba(124,74,240,0.8)'
+                  : '2px solid rgba(167,139,250,0.5)'
+                : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
             borderRadius: '6px',
-            boxShadow: isActive
-              ? isLight
-                ? '0 0 0 1px rgba(124,74,240,0.2), 0 2px 8px rgba(0,0,0,0.15)'
-                : '0 0 0 1px rgba(167,139,250,0.15), 0 2px 8px rgba(0,0,0,0.4)'
-              : '0 1px 4px rgba(0,0,0,0.2)',
-            transition: resizeState.isResizing ? 'none' : 'border-color 0.2s, box-shadow 0.2s',
+            boxShadow: isTouchGrabbed
+              ? '0 0 0 2px rgba(124,74,240,0.4)'
+              : isActive
+                ? isLight
+                  ? '0 0 0 1px rgba(124,74,240,0.2)'
+                  : '0 0 0 1px rgba(167,139,250,0.15)'
+                : 'none',
+            transform: isTouchGrabbed ? 'scale(1.05)' : 'none',
+            transition: resizeState.isResizing ? 'none' : 'border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
           <ScenePreview
@@ -1410,7 +1587,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             cardHeight={height}
             backgroundColor={scene.backgroundColor}
           />
-          
+
           {/* Outgoing transition overlay (at the right edge of this scene card) */}
           {(() => {
             const nextScene = scenes?.[index + 1]
@@ -1514,9 +1691,9 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             clientX: touch.clientX,
             clientY: touch.clientY,
             currentTarget: e.currentTarget,
-            stopPropagation: () => {},
-            preventDefault: () => {},
-            nativeEvent: { stopImmediatePropagation: () => {} }
+            stopPropagation: () => { },
+            preventDefault: () => { },
+            nativeEvent: { stopImmediatePropagation: () => { } }
           }, 'left')
         }}
         onDragStart={(e) => {
@@ -1572,9 +1749,9 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             clientX: touch.clientX,
             clientY: touch.clientY,
             currentTarget: e.currentTarget,
-            stopPropagation: () => {},
-            preventDefault: () => {},
-            nativeEvent: { stopImmediatePropagation: () => {} }
+            stopPropagation: () => { },
+            preventDefault: () => { },
+            nativeEvent: { stopImmediatePropagation: () => { } }
           }, 'right')
         }}
         onDragStart={(e) => {
@@ -2090,10 +2267,10 @@ const ScenesBar = React.memo(React.forwardRef(({
   const markersData = useMemo(() => {
     const major = []
     const minor = []
-    
+
     const secondWidth = calculateWidthFromDuration(1.0)
     const majorInterval = secondWidth > 120 ? 1 : 5
-    
+
     let minorInterval = 1
     if (majorInterval === 1) {
       minorInterval = secondWidth > 300 ? 0.1 : 0.5
@@ -2451,7 +2628,7 @@ const ScenesBar = React.memo(React.forwardRef(({
       if (e.type.startsWith('touch') && e.cancelable) {
         e.preventDefault()
       }
-      
+
       // Handle both MouseEvent and TouchEvent
       const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX
       lastClientX = clientX
@@ -2779,8 +2956,8 @@ const ScenesBar = React.memo(React.forwardRef(({
             width: isDraggingPlayhead ? '3px' : '2.5px',
             top: '8px',
             borderRadius: '1px',
-            boxShadow: isDraggingPlayhead 
-              ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)') 
+            boxShadow: isDraggingPlayhead
+              ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)')
               : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
             transition: 'width 0.1s, box-shadow 0.1s',
           }}
@@ -2885,7 +3062,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                       WebkitBackdropFilter: 'blur(8px)',
                       zIndex: 100,
                     }}
-                    title={scene.transition && scene.transition !== 'None' 
+                    title={scene.transition && scene.transition !== 'None'
                       ? `${scene.transition === 'LiquidShapes' ? 'Liquid Shapes' : scene.transition === 'BubbleWipe' ? 'Bubble Wipe' : scene.transition} Transition - Click to edit`
                       : 'Add Scene Transition'
                     }
@@ -2983,20 +3160,20 @@ const ScenesBar = React.memo(React.forwardRef(({
                 if (!cardsContainerRef.current) return '0px'
                 const wrappers = Array.from(cardsContainerRef.current.querySelectorAll('[data-scene-card-wrapper]'))
                 const containerRect = cardsContainerRef.current.getBoundingClientRect()
-                
+
                 // Find all cards excluding the dragged card
                 const visibleWrappers = wrappers.filter((_, i) => i !== draggedIndex)
-                
+
                 if (insertionIndex === 0 && visibleWrappers[0]) {
                   const rect = visibleWrappers[0].getBoundingClientRect()
                   return `${rect.left - containerRect.left - 2}px`
                 }
-                
+
                 if (insertionIndex >= visibleWrappers.length) {
                   const lastRect = visibleWrappers[visibleWrappers.length - 1].getBoundingClientRect()
                   return `${lastRect.right - containerRect.left + 2}px`
                 }
-                
+
                 const nextRect = visibleWrappers[insertionIndex].getBoundingClientRect()
                 return `${nextRect.left - containerRect.left - 2}px`
               })(),
@@ -3178,8 +3355,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
-              <Pencil className="h-3.5 w-3.5 text-purple-400" />
-              <span>Update Step</span>
+              <span>Update Moment</span>
             </button>
           )}
 
@@ -3211,7 +3387,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   setStepContextMenu(prev => ({ ...prev, visible: false }))
                 }}
               >
-                <span>Delete Step</span>
+                <span>Delete Moment</span>
               </button>
             </>
           )}
