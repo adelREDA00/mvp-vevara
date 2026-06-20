@@ -54,6 +54,13 @@ const _tiltDisableRenderGroup = () => typeof window !== 'undefined' && window.__
 // blur. Off by default so production isn't spammed.
 const _tiltDebugQuality = () => typeof window !== 'undefined' && window.__TILT_DEBUG_QUALITY === true
 
+const getIsPlayingOrScrubbing = () => {
+  if (typeof window === 'undefined') return false
+  const engine = window.__globalMotionEngine
+  if (!engine) return false
+  return !!(engine.isPlaying || engine._isScrubbing)
+}
+
 function _tdbg(...args) {
   void args
 }
@@ -285,56 +292,54 @@ function _rasterizeTextToCanvasTexture(textObj, layoutW, layoutH) {
 // ---------------------------------------------------------------------------
 function _rttToCanvasBackedTexture(renderer, renderTexture, label) {
   try {
-    if (!renderer?.extract || !renderTexture || renderTexture.destroyed) return null
+    if (!renderer?.extract || !renderTexture || renderTexture.destroyed) {
+      _twarn(`_rttToCanvasBackedTexture failed early for ${label}: renderer.extract=${!!renderer?.extract}, renderTexture=${!!renderTexture}, destroyed=${renderTexture?.destroyed}`);
+      return null
+    }
     const canvas = renderer.extract.canvas(renderTexture)
-    
-    if (!(canvas instanceof HTMLCanvasElement)) return null
-    if (canvas.width <= 0 || canvas.height <= 0) return null
 
-    const tex = PIXI.Texture.from(canvas)
-    tex._tiltCanvas2dOwned = true   // tilt owns this — safe to destroy on swap
-
-    // [IMG-QUALITY B4] PIXI.Texture.from(canvas) leaves the new TextureSource
-    // with default sampling — which on this build means scaleMode='nearest'
-    // for some uploads and no mipmaps. That gives the export pipeline the
-    // same minification aliasing we fixed on the live RTT in B1, just one
-    // step later. Force the same linear+mipmapped sampling here so exported
-    // images stay as crisp as the editor preview.
-    if (tex.source) {
-      try {
-        tex.source.scaleMode = 'linear'
-        tex.source.autoGenerateMipmaps = true
-        tex.source.updateMipmaps?.()
-      } catch (_e) { /* defensive */ }
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      _twarn(`_rttToCanvasBackedTexture: extract.canvas did not return HTMLCanvasElement`);
+      return null
+    }
+    if (canvas.width <= 0 || canvas.height <= 0) {
+      _twarn(`_rttToCanvasBackedTexture: canvas dimensions invalid: ${canvas.width}x${canvas.height}`);
+      return null
     }
 
-    // Carry the source RTT's frame onto the canvas-backed texture so the
-    // mesh keeps sampling exactly the (fractional) layout region instead of
-    // the full integer canvas — preserves the B-jitter fix through export.
-    //
-    // The RTT's frame is in logical units (resolution-divided); the canvas
-    // is at PHYSICAL pixels and PIXI.Texture.from(canvas) gives the new
-    // TextureSource resolution=1 (canvas IS the data). So convert frame
-    // dims from RTT-logical → canvas-pixel by multiplying by the RTT's
-    // source resolution.
-    try {
-      const srcFrame = renderTexture.frame
-      if (srcFrame && tex.frame) {
-        const rttRes = renderTexture.source?.resolution || 1
-        tex.frame.x = srcFrame.x * rttRes
-        tex.frame.y = srcFrame.y * rttRes
-        tex.frame.width = srcFrame.width * rttRes
-        tex.frame.height = srcFrame.height * rttRes
-        tex.updateUvs?.()
+    const rttRes = renderTexture.source?.resolution || 1
+    const srcFrame = renderTexture.frame
+    const frameX = Math.round((srcFrame?.x || 0) * rttRes)
+    const frameY = Math.round((srcFrame?.y || 0) * rttRes)
+    const frameW = Math.max(1, Math.round((srcFrame?.width || renderTexture.width) * rttRes))
+    const frameH = Math.max(1, Math.round((srcFrame?.height || renderTexture.height) * rttRes))
+
+    let finalCanvas = canvas
+    if (frameX !== 0 || frameY !== 0 || frameW !== canvas.width || frameH !== canvas.height) {
+      const croppedCanvas = document.createElement('canvas')
+      croppedCanvas.width = frameW
+      croppedCanvas.height = frameH
+      const ctx = croppedCanvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(canvas, frameX, frameY, frameW, frameH, 0, 0, frameW, frameH)
+        finalCanvas = croppedCanvas
+      } else {
+        _twarn(`_rttToCanvasBackedTexture: could not get 2D context of cropped canvas`);
       }
-    } catch (_e) { /* defensive */ }
+    }
+
+    const tex = PIXI.Texture.from(finalCanvas, {
+      scaleMode: 'linear',
+      autoGenerateMipmaps: true,
+      resolution: rttRes,
+    })
+    tex._tiltCanvas2dOwned = true   // tilt owns this — safe to destroy on swap
 
     _tdbg(`RTT→canvas conversion OK for ${label} (${canvas.width}x${canvas.height})`)
 
-
     return tex
   } catch (e) {
-    _twarn(`RTT→canvas conversion failed for ${label}:`, e?.message || e)
+    _twarn(`_rttToCanvasBackedTexture failed with error for ${label}:`, e?.message || e);
     return null
   }
 }
@@ -371,7 +376,7 @@ export function computePerspectiveCorners(w, h, tiltXDeg, tiltYDeg, offsetX = 0,
   // using 3D rotation (Ry then Rx: yaw then pitch) and perspective projection.
   // This ensures the perspective remains centered around the middle of the layer
   // when both tilt axes are applied.
-  
+
   const projectCorner = (x, y) => {
     // 1. Rotate around Y-axis (yaw / tiltX)
     const x1 = x * cosX
@@ -473,8 +478,8 @@ function getTiltLayout(pixiObject) {
   // for one frame, which would size the RTT to 1×1 and make the mesh appear
   // empty / vanish.  The stored dims are always current.
   if (pixiObject instanceof PIXI.Graphics &&
-      typeof pixiObject._storedWidth === 'number' &&
-      typeof pixiObject._storedHeight === 'number') {
+    typeof pixiObject._storedWidth === 'number' &&
+    typeof pixiObject._storedHeight === 'number') {
     // [Bug 3 Fix] Preserve fractional dimensions for shapes (same as images)
     // instead of ceil'ing. The ceil caused the RTT frame to be slightly larger
     // than the actual drawn geometry, creating a mismatch between the tilt mesh
@@ -514,8 +519,8 @@ function getTiltLayout(pixiObject) {
     (PIXI.Text && pixiObject instanceof PIXI.Text)
     || pixiObject?.constructor?.name === 'Text'
     || (typeof pixiObject?.text === 'string'
-        && pixiObject?.style != null
-        && typeof pixiObject?.updateText === 'function')
+      && pixiObject?.style != null
+      && typeof pixiObject?.updateText === 'function')
   )
   if (isPixiTextLike) {
     // [TILT-SCALE FIX v2] Use the text's word-wrap width (style.wordWrapWidth)
@@ -680,7 +685,7 @@ function _captureViaGenerateTexture(pixiObject, renderer, w, h, originX, originY
     texture = renderer.generateTexture({
       target: pixiObject,
       resolution,
-      antialias: true,
+      antialias: false,
       frame,
       clearColor: [0, 0, 0, 0],
     })
@@ -747,13 +752,13 @@ function captureToTexture(pixiObject, renderer) {
   // In the editor, we use 1.5x to ensure crispness even during user zoom.
   const boost = isExport ? 1.1 : 1.5
   const targetRes = rendererRes * Math.max(1, layerScale) * boost
-  
+
   const largestDim = Math.max(rttW, rttH)
   const capResolution = largestDim > 0 ? (MAX_RTT_DIMENSION / largestDim) : rendererRes
-  
+
   // Final resolution is the lower of what we need vs what we can afford.
   const resolution = Math.max(0.5, Math.min(targetRes, capResolution, MAX_RTT_RESOLUTION))
-  
+
   const label = pixiObject.label || pixiObject.constructor?.name || 'unlabeled'
 
   // [PERF-DEBUG] Log every RTT capture to diagnose tilt slider lag
@@ -787,8 +792,8 @@ function captureToTexture(pixiObject, renderer) {
     (PIXI.Text && pixiObject instanceof PIXI.Text)
     || pixiObject?.constructor?.name === 'Text'
     || (typeof pixiObject?.text === 'string'
-        && pixiObject?.style != null
-        && typeof pixiObject?.updateText === 'function')
+      && pixiObject?.style != null
+      && typeof pixiObject?.updateText === 'function')
   )
 
   if (isPixiTextLike) {
@@ -908,15 +913,29 @@ function captureToTexture(pixiObject, renderer) {
   const oldRttW = pixiObject._tiltRttW
   const oldRttH = pixiObject._tiltRttH
 
+  // [Jitter Fix / Edge Outlines Fix] Allocate RenderTexture at exact size to prevent
+  // bilinear filtering and mipmapping from blending with transparent padding at the edges
+  // (which causes blurry/pixelated outlines in Design Mode and black border artifacts in exports).
+  // We only use slack padding (64px) during active editor playback or scrubbing to preserve 60fps performance.
+  const isPlayingOrScrubbing = getIsPlayingOrScrubbing()
+  const slack = isExport ? 1 : (isPlayingOrScrubbing ? 64 : 1)
+  const allocW = slack === 1 ? rttW : Math.ceil(rttW / slack) * slack
+  const allocH = slack === 1 ? rttH : Math.ceil(rttH / slack) * slack
+
   // [Jitter Fix] RenderTexture reuse logic.
   // Re-creating the RTT on every frame of a crop/scale animation is expensive
   // and causes jitter. We reuse the old RTT if it's large enough to hold the
   // new content and the resolution hasn't changed significantly.
-  const sizeTooSmall = oldRt && (rttW > oldRt.width || rttH > oldRt.height)
+  const sizeTooSmall = oldRt && (allocW > oldRt.width || allocH > oldRt.height)
   // [PERF] Widened from 128 to 256 to reduce RTT reallocation churn during
-  // crop/scale animations.  The memory overhead of a slightly oversized RTT is
+  // crop/scale animations. The memory overhead of a slightly oversized RTT is
   // negligible compared to the GPU stall of allocating + deallocating textures.
-  const sizeTooLarge = oldRt && (rttW < oldRt.width - 256 || rttH < oldRt.height - 256)
+  // When slack is 1, we require an exact size match to guarantee razor-sharp edges.
+  const sizeTooLarge = oldRt && (
+    slack === 1
+      ? (oldRt.width !== allocW || oldRt.height !== allocH)
+      : (allocW < oldRt.width - 256 || allocH < oldRt.height - 256)
+  )
   const resMismatch = oldRt && Math.abs(oldRt.resolution - resolution) > 0.01
   const sizeMismatch = oldRt && (sizeTooSmall || sizeTooLarge || resMismatch)
   // If the previous texture was a borrowed text.texture (from the PIXI.Text
@@ -956,22 +975,13 @@ function captureToTexture(pixiObject, renderer) {
     //    the visible result reads as "blur" / "low-resolution" exactly as
     //    reported for image layers under tilt. Mipmaps must be (re)built
     //    after every render, see updateMipmaps() call below.
-    // [Jitter Fix] Allocate with "slack" to avoid reallocating on every frame
-    // of a growing animation.
-    // [PERF] During export, we use a smaller slack (8px) compared to the 
-    // editor (64px). This prevents constant RTT re-allocations due to 
-    // fractional layout changes during animation, while still keeping 
-    // the GPU readback buffer relatively small.
-    const slack = isExport ? 8 : 64
-    const allocW = Math.ceil(rttW / slack) * slack
-    const allocH = Math.ceil(rttH / slack) * slack
 
     targetRt = PIXI.RenderTexture.create({
       width: allocW,
       height: allocH,
       resolution,
       scaleMode: 'linear',
-      antialias: true,
+      antialias: false,
       autoGenerateMipmaps: true,
     })
     createdNewRt = true
@@ -1008,7 +1018,15 @@ function captureToTexture(pixiObject, renderer) {
 
   const wrapper = getCaptureWrapper(renderer)
   wrapper.position.set(0, 0)
-  wrapper.scale.set(1, 1)
+
+  // [Jitter Fix / Edge Outlines Fix] Scale the wrapper container when slack is 1
+  // to fill the allocated RenderTexture exactly. This eliminates any fractional-pixel
+  // transparent black padding, preventing bilinear filtering/mipmapping from blending
+  // with the background and causing dark fringes or blurry edges.
+  const scaleX = slack === 1 ? (allocW / w) : 1
+  const scaleY = slack === 1 ? (allocH / h) : 1
+  wrapper.scale.set(scaleX, scaleY)
+
   wrapper.rotation = 0
   wrapper.pivot.set(0, 0)
   wrapper.alpha = 1
@@ -1078,28 +1096,27 @@ function captureToTexture(pixiObject, renderer) {
     captureFailed = true
   }
 
-  // [IMG-QUALITY B-jitter] Constrain the texture's sampled region to the
-  // fractional layout w×h. The RTT's framebuffer is (rttW, rttH) in pixels,
-  // but the layer was rendered into [0..w, 0..h] of that buffer (w/h may be
-  // sub-pixel for image containers). Without this frame the mesh would
-  // stretch the full integer texture across a fractional quad — visible as
-  // a half-pixel transparent strip at the right/bottom edge plus subtle
-  // texture "breathing" during crop animations.
+  // [IMG-QUALITY B-jitter] Constrain the texture's sampled region.
+  // When slack is 1, set the frame to the full allocated size (allocW, allocH)
+  // because the content has been scaled to fill it exactly (no padding).
+  // When slack > 1, set the frame to (w, h) to crop the active region from the padded texture.
   if (!captureFailed && targetRt && !targetRt.destroyed) {
     try {
       const f = targetRt.frame
       if (f) {
+        const targetFrameW = slack === 1 ? allocW : w
+        const targetFrameH = slack === 1 ? allocH : h
         const drift = (
           Math.abs(f.x) > 1e-3
           || Math.abs(f.y) > 1e-3
-          || Math.abs(f.width - w) > 1e-3
-          || Math.abs(f.height - h) > 1e-3
+          || Math.abs(f.width - targetFrameW) > 1e-3
+          || Math.abs(f.height - targetFrameH) > 1e-3
         )
         if (drift) {
           f.x = 0
           f.y = 0
-          f.width = w
-          f.height = h
+          f.width = targetFrameW
+          f.height = targetFrameH
           targetRt.updateUvs?.()
         }
       }
@@ -1260,10 +1277,7 @@ function captureToTexture(pixiObject, renderer) {
   pixiObject._tiltCaptureOriginY = originY
   pixiObject._tiltTextureDirty = false
 
-  const _perfEnd = performance.now()
-  if (_perfEnd - _perfStart > 1) {
-    console.log(`[TILT-PERF] captureToTexture ${label}: ${(_perfEnd - _perfStart).toFixed(1)}ms | dims:${w}x${h} | res:${resolution}`)
-  }
+
 
   return targetRt
 }
@@ -1570,8 +1584,8 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
   // actively dirty, so per-frame color changes are captured every frame.
   const label = pixiObject.label || 'tilt-layer'
   const isVideo = !!(pixiObject._videoElement || (pixiObject._videoSprite?.texture?.source?.resource instanceof HTMLVideoElement))
-  const captureInterval = options.force 
-    ? 0 
+  const captureInterval = options.force
+    ? 0
     : (pixiObject._tiltTextureDirty ? 0 : (isVideo ? _getVideoCaptureInterval() : 100))
   const now = performance.now()
   const elapsedSinceCapture = now - (pixiObject._tiltLastCaptureTime || 0)
@@ -1584,7 +1598,7 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
   // frame. Bypass the time throttle whenever dimensions genuinely changed.
   const liveLayout = getTiltLayout(pixiObject)
   const dimsChanged = Math.abs((pixiObject._tiltCaptureW || 0) - liveLayout.w) > 0.5
-                   || Math.abs((pixiObject._tiltCaptureH || 0) - liveLayout.h) > 0.5
+    || Math.abs((pixiObject._tiltCaptureH || 0) - liveLayout.h) > 0.5
 
   const shouldCapture = options.force || (pixiObject._tiltTextureDirty && !isActivelyResizing && (!isCaptureThrottled || dimsChanged))
 
@@ -1629,8 +1643,8 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
       (PIXI.Text && pixiObject instanceof PIXI.Text)
       || pixiObject?.constructor?.name === 'Text'
       || (typeof pixiObject?.text === 'string'
-          && pixiObject?.style != null
-          && typeof pixiObject?.updateText === 'function')
+        && pixiObject?.style != null
+        && typeof pixiObject?.updateText === 'function')
     )
     usePivot = !(pixiObject instanceof PIXI.Sprite) || isCroppedMediaContainer(pixiObject) || isPixiTextLike
   } else {
@@ -1823,16 +1837,16 @@ export function removeTiltFromObject(pixiObject) {
     // [SENTINEL FIX] Re-assert the intended alpha once the sentinel is gone.
     const restoreAlpha = (typeof pixiObject._intendedAlpha === 'number') ? pixiObject._intendedAlpha : 1
     pixiObject.alpha = restoreAlpha
-    
+
     // Restore renderable state
     pixiObject.renderable = true
-    
+
     // Restore the original eventMode
     if (pixiObject._originalEventMode !== undefined) {
       pixiObject.eventMode = pixiObject._originalEventMode
       delete pixiObject._originalEventMode
     }
-    
+
     delete pixiObject._tiltHidden
   }
 

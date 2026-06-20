@@ -16,6 +16,9 @@ const _isMobileDevice = typeof window !== 'undefined' && /iPhone|iPad|iPod|Andro
 
 export class MotionEngine {
   constructor() {
+    if (typeof window !== 'undefined') {
+      window.__globalMotionEngine = this
+    }
     this.activeTimelines = new Map() // layerId -> MotionTimeline
     this.registeredObjects = new Map() // layerId -> PIXI.DisplayObject
     this.backgroundMedia = new Map() // layerId -> { _videoElement, _sceneId, _sourceStartTime, _sourceEndTime }

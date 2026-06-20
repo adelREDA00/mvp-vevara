@@ -16,8 +16,6 @@ const preloadFonts = async (layers) => {
     }
   })
 
-  console.log('[ExportPage] Preloading font families:', Array.from(fontFamilies))
-
   // 2-second timeout to prevent infinite preloading block on browser font ready hangs
   const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000))
 
@@ -36,7 +34,6 @@ const preloadFonts = async (layers) => {
 
     try {
       await document.fonts.ready
-      console.log('[ExportPage] Browser font faces are fully loaded.')
     } catch (e) {
       console.warn('[ExportPage] Warning waiting for fonts ready:', e)
     }
@@ -107,7 +104,6 @@ export default function ExportPage() {
   // Fetch project data (from sessionStorage first, fallback to DB if missing/reloaded)
   useEffect(() => {
     async function loadProject() {
-      console.log('[ExportPage] loadProject initiated. exportId:', exportId, 'projectId:', projectId)
       try {
         setLoading(true)
         setError(null)
@@ -115,14 +111,11 @@ export default function ExportPage() {
         // 1. Poll for IndexedDB, Local Storage, or Session Storage snapshot (handles race conditions on fast tabs)
         let projectSnapshot = null
         if (exportId) {
-          console.log('[ExportPage] Starting 15-attempt polling for key:', exportId)
           for (let attempt = 0; attempt < 15; attempt++) {
-            console.log(`[ExportPage] Polling attempt ${attempt + 1}/15...`)
             // Check IndexedDB first (no size limits)
             try {
               projectSnapshot = await getFromIndexedDB(exportId)
               if (projectSnapshot) {
-                console.log('[ExportPage] Found snapshot in IndexedDB!')
                 break
               }
             } catch (err) {
@@ -133,7 +126,6 @@ export default function ExportPage() {
             try {
               const cached = localStorage.getItem(exportId) || sessionStorage.getItem(exportId)
               if (cached) {
-                console.log('[ExportPage] Found snapshot in LocalStorage or SessionStorage fallback!')
                 projectSnapshot = JSON.parse(cached)
                 break
               }
@@ -147,11 +139,6 @@ export default function ExportPage() {
         }
 
         if (projectSnapshot) {
-          console.log('[ExportPage] Successfully loaded snapshot:', {
-            projectName: projectSnapshot.projectName,
-            scenesCount: projectSnapshot.scenes?.length,
-            layersCount: Object.keys(projectSnapshot.layers || {}).length,
-          })
           setProjectData(projectSnapshot)
           setLoading(false)
           return
@@ -159,10 +146,8 @@ export default function ExportPage() {
 
         // 2. Fallback to Database API (only if authenticated & projectId exists)
         if (projectId) {
-          console.log('[ExportPage] Snapshot not in local storage. Fetching from DB for projectId:', projectId)
           const project = await api.get(`/projects/${projectId}`)
           if (project && project.data) {
-            console.log('[ExportPage] Successfully fetched project from DB API')
             setProjectData({
               projectName: project.name || 'Untitled Project',
               scenes: project.data.scenes || [],
@@ -188,7 +173,6 @@ export default function ExportPage() {
 
   // Run the export pipeline
   useEffect(() => {
-    console.log('[ExportPage] export run effect triggered. loading:', loading, 'error:', error, 'hasProjectData:', !!projectData, 'startedRef:', exportStartedRef.current)
     if (loading || error || !projectData || exportStartedRef.current) return
     exportStartedRef.current = true
 
@@ -197,17 +181,13 @@ export default function ExportPage() {
 
     async function runExport() {
       try {
-        console.log('[ExportPage] Beginning export pipeline execution')
         setExportState({ status: 'initializing', progress: 0 })
 
         // Preload all custom Google Fonts before starting the PIXI rendering pipeline
-        console.log('[ExportPage] Invoking font preloader')
         await preloadFonts(projectData.layers)
         if (controller.signal.aborted) {
-          console.log('[ExportPage] Export aborted during font preloading')
           return
         }
-        console.log('[ExportPage] Font preloading finished or timed out')
 
         // Derive timelineInfo (cumulative scene times)
         let cumulativeTime = 0
@@ -240,7 +220,6 @@ export default function ExportPage() {
           },
           onProgress: (update) => {
             if (controller.signal.aborted) return
-            console.log(`[ExportPage] exportVideo callback. status: ${update.status}, progress: ${update.progress}%`)
             setExportState({
               status: update.status,
               progress: update.progress,
@@ -249,7 +228,6 @@ export default function ExportPage() {
           signal: controller.signal,
         }
 
-        console.log('[ExportPage] Invoking exportVideo with derived options:', opts)
         const blob = await exportVideo(opts)
 
         if (controller.signal.aborted) return
@@ -273,7 +251,6 @@ export default function ExportPage() {
         }
       } catch (err) {
         if (err.message === 'cancelled') {
-          console.log('[ExportPage] Export was cancelled.')
           return
         }
         console.error('[ExportPage] Export failed:', err)
@@ -285,7 +262,6 @@ export default function ExportPage() {
     runExport()
 
     return () => {
-      console.log('[ExportPage] Cleaning up runExport effect, resetting exportStartedRef')
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
