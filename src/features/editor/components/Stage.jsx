@@ -1498,6 +1498,31 @@ function Stage({
     }
   }, [viewport, isReady, cameraControlHandlers]) // Optimized: handleWheel no longer depends on viewport/onZoomChange
 
+  // Prevent browser text selection / magnifier / scrolling on touch devices during canvas editing
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleTouchStart = (e) => {
+      // Prevent default browser action (selection, magnification, scrolling) on canvas touch
+      if (!isPlaying) {
+        e.preventDefault()
+      }
+    }
+
+    const handleSelectStart = (e) => {
+      e.preventDefault()
+    }
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false })
+    container.addEventListener('selectstart', handleSelectStart)
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('selectstart', handleSelectStart)
+    }
+  }, [isPlaying])
+
   // =============================================================================
   // LIFECYCLE EFFECTS & INITIALIZATION
   // =============================================================================

@@ -1924,6 +1924,7 @@ const ScenesBar = React.memo(React.forwardRef(({
   // Timeline zoom state (default to 1.0, max 30.0)
   const [timelineZoom, setTimelineZoom] = useState(1.0)
   const zoomScrollRef = useRef(null)
+  const touchZoomRef = useRef(null)
 
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
@@ -2382,12 +2383,14 @@ const ScenesBar = React.memo(React.forwardRef(({
   }
 
   const handleSeekMouseEnter = (e) => {
+    if (isTouchDevice()) return
     if (isDraggingPlayhead || !cardsContainerRef.current) return
     if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'block'
     if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'block'
   }
 
   const handleSeekMouseMove = (e) => {
+    if (isTouchDevice()) return
     if (isDraggingPlayhead || !cardsContainerRef.current || !ghostPlayheadRef.current) return
 
     const containerRect = cardsContainerRef.current.getBoundingClientRect()
@@ -2422,6 +2425,7 @@ const ScenesBar = React.memo(React.forwardRef(({
   }
 
   const handleSeekMouseLeave = (e) => {
+    if (isTouchDevice()) return
     if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
     if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
   }
@@ -2822,6 +2826,77 @@ const ScenesBar = React.memo(React.forwardRef(({
     }
   }, [timelineZoom])
 
+  // Handle pinch-to-zoom touch events on the timeline container
+  useEffect(() => {
+    const container = timelineRef.current?.parentElement?.parentElement
+    if (!container) return
+
+    const handleTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const dx = touch1.clientX - touch2.clientX
+        const dy = touch1.clientY - touch2.clientY
+        const initialDistance = Math.sqrt(dx * dx + dy * dy)
+        const midpointX = (touch1.clientX + touch2.clientX) / 2
+
+        touchZoomRef.current = {
+          initialDistance,
+          initialZoom: timelineZoom,
+          midpointX
+        }
+      }
+    }
+
+    const handleTouchMove = (e) => {
+      if (touchZoomRef.current && e.touches.length === 2) {
+        e.preventDefault()
+        e.stopPropagation()
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const dx = touch1.clientX - touch2.clientX
+        const dy = touch1.clientY - touch2.clientY
+        const distance = Math.sqrt(dx * dx + dy * dy)
+
+        if (touchZoomRef.current.initialDistance > 0) {
+          const scale = distance / touchZoomRef.current.initialDistance
+          const newZoom = Math.max(1.0, Math.min(30.0, touchZoomRef.current.initialZoom * scale))
+
+          if (newZoom !== timelineZoom) {
+            const rect = container.getBoundingClientRect()
+            const xClient = touchZoomRef.current.midpointX - rect.left
+            const scrollLeft = container.scrollLeft
+
+            zoomScrollRef.current = {
+              xClient,
+              scrollLeft,
+              oldZoom: timelineZoom
+            }
+            setTimelineZoom(newZoom)
+          }
+        }
+      }
+    }
+
+    const handleTouchEnd = (e) => {
+      if (e.touches.length < 2) {
+        touchZoomRef.current = null
+      }
+    }
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false })
+    container.addEventListener('touchmove', handleTouchMove, { passive: false })
+    container.addEventListener('touchend', handleTouchEnd)
+    container.addEventListener('touchcancel', handleTouchEnd)
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('touchend', handleTouchEnd)
+      container.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [timelineZoom])
+
   // Adjust container scrollLeft after zoom level changes to keep cursor position centered
   useLayoutEffect(() => {
     if (zoomScrollRef.current) {
@@ -3001,29 +3076,31 @@ const ScenesBar = React.memo(React.forwardRef(({
       </div>
 
       {/* Ghost Playhead */}
-      <div
-        ref={ghostPlayheadRef}
-        className="absolute bottom-0 pointer-events-none"
-        style={{
-          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
-          left: '16px',
-          transform: 'translateX(-50%)',
-          zIndex: 45,
-          width: '16px',
-          display: 'none',
-          willChange: 'left',
-        }}
-      >
-        {/* Ghost Playhead line */}
+      {!isTouchDevice() && (
         <div
-          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
+          ref={ghostPlayheadRef}
+          className="absolute bottom-0 pointer-events-none"
           style={{
-            borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
-            width: '0px',
-            top: '8px',
+            top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
+            left: '16px',
+            transform: 'translateX(-50%)',
+            zIndex: 45,
+            width: '16px',
+            display: 'none',
+            willChange: 'left',
           }}
-        />
-      </div>
+        >
+          {/* Ghost Playhead line */}
+          <div
+            className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
+            style={{
+              borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
+              width: '0px',
+              top: '8px',
+            }}
+          />
+        </div>
+      )}
 
       {/* Scene Cards */}
       <div
@@ -3294,7 +3371,7 @@ const ScenesBar = React.memo(React.forwardRef(({
         : null}
 
       {/* Ghost Playhead time tooltip */}
-      {typeof document !== 'undefined' && createPortal(
+      {!isTouchDevice() && typeof document !== 'undefined' && createPortal(
         <div
           ref={ghostTooltipRef}
           className="fixed pointer-events-none"
