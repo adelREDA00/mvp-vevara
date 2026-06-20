@@ -539,7 +539,6 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     const startX = touch.clientX
     const startY = touch.clientY
     let hasMoved = false
-    let isLongPressActive = false
 
     let contextTimer = null
     if (type === 'move') {
@@ -550,53 +549,38 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       }, 600)
     }
 
-    const longPressTimer = setTimeout(() => {
-      if (!hasMoved) {
-        isLongPressActive = true
-        if (navigator.vibrate) {
-          navigator.vibrate(30)
-        }
-      }
-    }, 250)
-
     const onTouchMove = (moveE) => {
       const touchX = moveE.touches[0].clientX
       const touchY = moveE.touches[0].clientY
       const dx = touchX - startX
       const dy = touchY - startY
-      const threshold = 6
-
-      if (!isLongPressActive) {
-        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
-          clearTimeout(contextTimer)
-          clearTimeout(longPressTimer)
-          cleanup()
-        }
-        return
-      }
-
-      if (moveE.cancelable) {
-        moveE.preventDefault()
-      }
+      const threshold = type === 'move' ? 4 : 2
 
       if (!hasMoved) {
-        hasMoved = true
-        clearTimeout(contextTimer)
+        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+          hasMoved = true
+          clearTimeout(contextTimer)
 
-        if (typeof onMotionPause === 'function') {
-          onMotionPause()
-        }
-        dispatch(setTimelineDragging(true))
-        setIsDragging(true)
+          if (typeof onMotionPause === 'function') {
+            onMotionPause()
+          }
+          dispatch(setTimelineDragging(true))
+          setIsDragging(true)
 
-        dragRef.current = {
-          stepId: step.id,
-          type,
-          startX: touchX,
-          origStartTime: step.startTime || 0,
-          origDuration: step.duration || (pageDuration / (steps.length || 1)),
+          dragRef.current = {
+            stepId: step.id,
+            type,
+            startX: touchX,
+            origStartTime: step.startTime || 0,
+            origDuration: step.duration || (pageDuration / (steps.length || 1)),
+          }
         }
-      } else if (dragRef.current) {
+      }
+
+      if (hasMoved && dragRef.current) {
+        if (moveE.cancelable) {
+          moveE.preventDefault()
+        }
         const dx = touchX - dragRef.current.startX
         const msDelta = dx * pxToMs
 
@@ -625,7 +609,6 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
 
     const onTouchEnd = () => {
       clearTimeout(contextTimer)
-      clearTimeout(longPressTimer)
       if (hasMoved) {
         dragRef.current = null
         setIsDragging(false)
