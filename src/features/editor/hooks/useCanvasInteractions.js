@@ -2939,6 +2939,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         pointerIsDownRef.current = true
         dragStartRef.current = { x: screenPos.x, y: screenPos.y }
+        pauseViewportDragPlugin(viewport)
         return
       }
 
@@ -2998,6 +2999,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
           pointerIsDownRef.current = true
           dragStartRef.current = { x: screenPos.x, y: screenPos.y, layerId: selectedLayerId }
+          pauseViewportDragPlugin(viewport)
 
           return
         }
@@ -3202,6 +3204,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
             pointerIsDownRef.current = true
             dragStartRef.current = { x: screenPos.x, y: screenPos.y }
+            pauseViewportDragPlugin(viewport)
 
 
             // [FIX] iOS Magnifier/Selection prevention
@@ -3338,6 +3341,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
         pointerIsDownRef.current = true
         dragStartRef.current = { x: screenPos.x, y: screenPos.y, layerId: layerId, timestamp: Date.now() }
+        pauseViewportDragPlugin(viewport)
       }
     }
 

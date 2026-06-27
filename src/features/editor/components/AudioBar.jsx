@@ -19,7 +19,7 @@ import React, {
 import { createPortal } from 'react-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { Music, Mic, Upload, Scissors, Volume2, VolumeX, Trash2 } from 'lucide-react'
+import { Music, Mic, Upload, Scissors, Volume2, VolumeX, Trash2, X } from 'lucide-react'
 import {
   selectAudioTracks,
   addAudioTrack,
@@ -28,7 +28,7 @@ import {
   cutAudioTrack,
 } from '../../../store/slices/projectSlice'
 import { pause } from '../../../store/slices/playbackSlice'
-import { uploadFile } from '../../../store/slices/uploadsSlice'
+import { uploadFile, enqueueUpload, cancelUpload } from '../../../store/slices/uploadsSlice'
 import { checkAutoScroll, stopAutoScroll } from './ScenesBar'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ const AudioBlock = React.memo(function AudioBlock({
   const blockPx = Math.max(8, rightPx - leftPx) // min width of 8px to keep handles grabable
 
 
+  const dispatch = useDispatch()
   const blockOuterRef = useRef(null)
   const resizeScrollTimerRef = useRef(null)
   const startScrollLeftRef = useRef(0)
@@ -81,6 +82,31 @@ const AudioBlock = React.memo(function AudioBlock({
   const dragRef = useRef(null)
   const [isInteracting, setIsInteracting] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
+  const [showMobileCancel, setShowMobileCancel] = useState(false)
+  const touchTimerRef = useRef(null)
+
+  const handleTouchStart = useCallback(() => {
+    if (!block.isUploading) return
+    touchTimerRef.current = setTimeout(() => {
+      setShowMobileCancel(true)
+    }, 2000)
+  }, [block.isUploading])
+
+  const handleTouchEnd = useCallback(() => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+      touchTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showMobileCancel) return
+    const handler = () => {
+      setShowMobileCancel(false)
+    }
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
+  }, [showMobileCancel])
 
   const startDrag = useCallback((e, type) => {
     if (block.isUploading) return
@@ -184,13 +210,13 @@ const AudioBlock = React.memo(function AudioBlock({
       stopAutoScroll(resizeScrollTimerRef)
       dragRef.current = null
       setIsInteracting(false)
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
       onDragEnd?.()
     }
 
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
   }, [block, calculateWidthFromDuration, onSelect, onResize, onDragStart, onDragEnd])
 
   const isDefaultOrSelected = isSelected || !hasAnySelected
@@ -236,13 +262,16 @@ const AudioBlock = React.memo(function AudioBlock({
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchEnd}
     >
       {/* ── Left resize handle ─── */}
       {!block.isUploading && (
         <div
           className="absolute top-0 bottom-0 left-0 z-30 flex items-center justify-center cursor-ew-resize"
           style={{ width: Math.min(blockPx * 0.3, 16) }}
-          onMouseDown={(e) => startDrag(e, 'resize-left')}
+          onPointerDown={(e) => startDrag(e, 'resize-left')}
         >
           <div
             className={`w-[3px] h-[14px] rounded-full transition-all duration-150 ${
@@ -263,26 +292,25 @@ const AudioBlock = React.memo(function AudioBlock({
           border: blockBorder,
           boxShadow: 'none',
         }}
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
           if (!block.isUploading) startDrag(e, 'move')
         }}
       >
         {/* Waveform — real data if available, deterministic fake otherwise */}
-        {!block.isUploading && (
-          <WaveformDisplay
-            waveform={block.waveform}
-            blockId={block.id}
-            width={blockPx - 16}
-            height={BLOCK_HEIGHT - 8}
-            isSelected={isSelected}
-            hasAnySelected={hasAnySelected}
-            hue={224}
-            blockTrimStart={block.trimStart || 0}
-            blockDuration={block.duration}
-            blockTotalDuration={block.totalDuration}
-            pixelsPerSecond={calculateWidthFromDuration(1.0)}
-          />
-        )}
+        <WaveformDisplay
+          waveform={block.waveform}
+          blockId={block.id}
+          width={blockPx - 16}
+          height={BLOCK_HEIGHT - 8}
+          isSelected={isSelected}
+          hasAnySelected={hasAnySelected}
+          hue={224}
+          blockTrimStart={block.trimStart || 0}
+          blockDuration={block.duration}
+          blockTotalDuration={block.totalDuration}
+          pixelsPerSecond={calculateWidthFromDuration(1.0)}
+          isUploading={block.isUploading}
+        />
 
         {/* Block label */}
         {blockPx > 60 && !isInteracting && !isHovered && (
@@ -302,7 +330,7 @@ const AudioBlock = React.memo(function AudioBlock({
         <div
           className="absolute top-0 bottom-0 right-0 z-30 flex items-center justify-center cursor-ew-resize"
           style={{ width: Math.min(blockPx * 0.3, 16) }}
-          onMouseDown={(e) => startDrag(e, 'resize-right')}
+          onPointerDown={(e) => startDrag(e, 'resize-right')}
         >
           <div
             className={`w-[3px] h-[14px] rounded-full transition-all duration-150 ${
@@ -311,6 +339,22 @@ const AudioBlock = React.memo(function AudioBlock({
             style={{ backgroundColor: isSelected ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)' }}
           />
         </div>
+      )}
+      {/* Cancel Overlay */}
+      {block.isUploading && (isHovered || showMobileCancel) && (
+        <button
+          className="absolute inset-0 bg-black/60 flex items-center justify-center gap-1 text-[10px] text-white font-bold rounded-[6px] z-50 transition-all duration-150"
+          style={{ cursor: 'pointer' }}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            dispatch(cancelUpload(block.id))
+          }}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          <X className="h-3.5 w-3.5" />
+          <span>Cancel</span>
+        </button>
       )}
     </div>
   )
@@ -331,6 +375,7 @@ const WaveformDisplay = React.memo(function WaveformDisplay({
   blockDuration,
   blockTotalDuration,
   pixelsPerSecond,
+  isUploading,
 }) {
   const canvasRef = useRef(null)
 
@@ -350,9 +395,11 @@ const WaveformDisplay = React.memo(function WaveformDisplay({
     const barW = W / bars
 
     const isDefaultOrSelected = isSelected || !hasAnySelected
-    ctx.fillStyle = isDefaultOrSelected
-      ? `hsla(224, 90%, 88%, 0.65)`
-      : `hsla(224, 50%, 70%, 0.25)`
+    ctx.fillStyle = isUploading
+      ? 'rgba(255, 255, 255, 0.4)'
+      : isDefaultOrSelected
+        ? `hsla(224, 90%, 88%, 0.65)`
+        : `hsla(224, 50%, 70%, 0.25)`
 
     let maxVal = 0
     if (hasReal) {
@@ -390,7 +437,7 @@ const WaveformDisplay = React.memo(function WaveformDisplay({
       const y  = (H - bH) / 2
       ctx.fillRect(x, y, 2, bH) // 2px bar, 1px gap
     }
-  }, [waveform, blockId, width, height, isSelected, hasAnySelected, hue, blockTrimStart, blockDuration, blockTotalDuration, pixelsPerSecond])
+  }, [waveform, blockId, width, height, isSelected, hasAnySelected, hue, blockTrimStart, blockDuration, blockTotalDuration, pixelsPerSecond, isUploading])
 
   return (
     <canvas
@@ -560,6 +607,13 @@ const AudioBar = React.forwardRef(function AudioBar(
         waveform: [],
         isUploading: true,
         progress: 0,
+      }))
+
+      dispatch(enqueueUpload({
+        tempId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
       }))
 
       dispatch(uploadFile({ tempId, file, isPublic: true, assetType: 'audio' })).unwrap().then(({ data }) => {

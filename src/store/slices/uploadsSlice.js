@@ -383,6 +383,18 @@ const uploadsSlice = createSlice({
         state.uploadingCount += 1
         // Check if this specific file is large (> 50MB) 
         // Note: action.meta.arg is { tempId, file }
+        const { tempId, file } = action.meta.arg || {}
+        if (tempId && !state.uploadQueue[tempId]) {
+          state.uploadQueue[tempId] = {
+            id: tempId,
+            name: file?.name || 'File',
+            size: file?.size || 0,
+            type: file?.type || '',
+            progress: 0,
+            status: 'pending',
+            createdAt: Date.now()
+          }
+        }
         if (action.meta.arg.file?.size > 50 * 1024 * 1024) {
           state.hasLargeUpload = true
         }

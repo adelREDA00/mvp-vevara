@@ -1038,7 +1038,7 @@ function MotionPanel({
                 : isLight
                   ? 'border-transparent bg-white'
                   : 'border-transparent bg-[#090a0d]'
-              }`}>
+                }`}>
               {/* Delete confirmation — consistent min-height, no layout shift */}
               {isConfirmingDelete ? (
                 <div className="flex w-full overflow-hidden" style={{ minHeight: 52 }}>
@@ -1793,24 +1793,19 @@ function MotionPanel({
         </div>
 
         {/* Exit element footer */}
-        <div className={`flex-shrink-0 border-t flex flex-col items-center ${
-          isMobile ? 'p-1.5 gap-1' : 'p-3 gap-2'
-        } ${
-          isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/[0.05] bg-[#0d0e12]/50'
-        }`}>
-          {/* Animated layers badge/chip */}
-          <div className={`rounded-full font-bold tracking-wide transition-all ${
-            isMobile ? 'px-2 py-0.5 text-[9px]' : 'px-2.5 py-1 text-[10px]'
-          } ${
-            isLight ? 'bg-slate-200/60 text-slate-500' : 'bg-zinc-800/60 text-zinc-400'
+        <div className={`flex-shrink-0 border-t flex flex-col items-center ${isMobile ? 'p-1.5 gap-1' : 'p-3 gap-2'
+          } ${isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/[0.05] bg-[#0d0e12]/50'
           }`}>
-            Animating {sceneLayers.filter(l => step?.layerPresets?.[l.id] || (step?.layerActions?.[l.id] || []).length > 0).length} of {sceneLayers.length} layers
+          {/* Animated layers badge/chip */}
+          <div className={`rounded-full font-bold tracking-wide transition-all ${isMobile ? 'px-2 py-0.5 text-[9px]' : 'px-2.5 py-1 text-[10px]'
+            } ${isLight ? 'bg-slate-200/60 text-slate-500' : 'bg-zinc-800/60 text-zinc-400'
+            }`}>
+            Animating {sceneLayers.filter(l => step?.layerPresets?.[l.id] || (step?.layerActions?.[l.id] || []).length > 0).length} of {sceneLayers.length} elements
           </div>
           <button
             onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
-            className={`w-full font-bold flex items-center justify-center gap-2 border-2 border-dashed border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${
-              isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
-            }`}
+            className={`w-full font-bold flex items-center justify-center gap-2 border-2 border-dashed border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
+              }`}
             style={{
               backgroundColor: 'rgb(228, 217, 249)',
               color: '#7c4af0',

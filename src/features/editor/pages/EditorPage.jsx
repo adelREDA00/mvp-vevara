@@ -5894,7 +5894,7 @@ function EditorPage() {
               {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens.
                   [UPDATE #2] During Motion Capture the controls move to the top of the
                   canvas (rendered by the shared top overlay above), so hide this one. */}
-              <div className={`${isMotionCaptureActive ? 'hidden' : 'lg:hidden'} pointer-events-auto flex-shrink-0 w-full`} style={{
+              <div className={`${isMotionCaptureActive ? 'hidden' : 'lg:hidden'} pointer-events-auto flex-shrink-0 w-full mt-auto`} style={{
                 paddingBottom: 'env(safe-area-inset-bottom, 0px)'
               }}>
                 <CanvasControls
