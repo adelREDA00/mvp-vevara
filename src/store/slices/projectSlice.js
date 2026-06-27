@@ -18,6 +18,7 @@ export const saveProject = createAsyncThunk(
           scenes: state.scenes,
           layers: state.layers,
           sceneMotionFlows: state.sceneMotionFlows,
+          audioTracks: state.audioTracks,
           aspectRatio: state.aspectRatio || '16:9'
         },
         thumbnail,
@@ -56,6 +57,9 @@ const initialState = {
   layers: {},
   // Scene-based motion flows: { [sceneId]: { steps: [{ id, layerActions: { [layerId]: [...actions] } }], pageDuration } }
   sceneMotionFlows: {},
+  // Project-level audio tracks (span across scenes)
+  // { id, assetId, assetUrl, name, startOffset, duration, trimStart, rowIndex, volume, muted, waveform }
+  audioTracks: [],
   currentSceneId: null, // Unified scene selection 
   projectName: 'Untitled Project',
   aspectRatio: '16:9',
@@ -89,7 +93,7 @@ const initialState = {
 const resolveStepLayout = (steps, sceneDurationMs, resizeSide = 'right') => {
   if (steps.length === 0) return
   const MIN_DURATION = 200 // ms — minimum to prevent micro-durations
-  const MIN_SPACING = 50   // ms — minimum spacing between steps to maintain visual gaps
+  const MIN_SPACING = 0   // ms — minimum spacing between steps to maintain visual gaps
 
   // Step 1: Initialize step durations and enforce minimums
   const defaultDuration = Math.max(MIN_DURATION, Math.round(sceneDurationMs / steps.length))
@@ -1294,7 +1298,7 @@ const projectSlice = createSlice({
 
     // Restore project state from history (for undo/redo)
     restoreProjectState: (state, action) => {
-      const { scenes, layers, sceneMotionFlows, currentSceneId, currentProjectId } = action.payload
+      const { scenes, layers, sceneMotionFlows, audioTracks, currentSceneId, currentProjectId } = action.payload
       // Deep copy to ensure immutability (Immer will handle this, but being explicit)
       if (scenes) {
         state.scenes = JSON.parse(JSON.stringify(scenes))
@@ -1304,6 +1308,9 @@ const projectSlice = createSlice({
       }
       if (sceneMotionFlows) {
         state.sceneMotionFlows = JSON.parse(JSON.stringify(sceneMotionFlows))
+      }
+      if (audioTracks) {
+        state.audioTracks = JSON.parse(JSON.stringify(audioTracks))
       }
       const finalSceneId = currentSceneId || currentProjectId
       if (finalSceneId !== undefined) {
@@ -2095,6 +2102,131 @@ const projectSlice = createSlice({
     setCanvasInteracting: (state, action) => {
       state.isCanvasInteracting = !!action.payload
     },
+
+    // =========================================================================
+    // Audio Track actions (project-level, not scene-level)
+    // =========================================================================
+
+    /** Add a new audio track from an uploaded asset */
+    addAudioTrack: (state, action) => {
+      const { assetId, assetUrl, name, duration, waveform, id, ...rest } = action.payload
+      // Find the lowest rowIndex not currently occupied at startOffset 0
+      const usedRows = new Set(state.audioTracks.map(t => t.rowIndex))
+      let rowIndex = 0
+      while (usedRows.has(rowIndex)) rowIndex++
+
+      state.audioTracks.push({
+        id: id || uid(),
+        assetId: assetId || null,
+        assetUrl,
+        name: name || 'Audio',
+        startOffset: 0,
+        duration: duration || 0,
+        totalDuration: duration || 0,
+        trimStart: 0,
+        rowIndex,
+        volume: 1,
+        muted: false,
+        waveform: waveform || [],
+        ...rest
+      })
+      state.isDirty = true
+      state.version++
+    },
+
+    /** Update any fields on an existing audio track */
+    updateAudioTrack: (state, action) => {
+      const { id, ...updates } = action.payload
+      const track = state.audioTracks.find(t => t.id === id)
+      if (!track) return
+      Object.assign(track, updates)
+      state.isDirty = true
+      state.version++
+    },
+
+    /** Remove an audio track */
+    deleteAudioTrack: (state, action) => {
+      const id = action.payload
+      state.audioTracks = state.audioTracks.filter(t => t.id !== id)
+
+      // Compact rowIndices so no empty rows exist between active rows
+      const activeRows = Array.from(new Set(state.audioTracks.map(t => t.rowIndex ?? 0))).sort((a, b) => a - b)
+      const rowMap = {}
+      activeRows.forEach((oldRowIndex, newRowIndex) => {
+        rowMap[oldRowIndex] = newRowIndex
+      })
+      state.audioTracks.forEach(t => {
+        t.rowIndex = rowMap[t.rowIndex ?? 0] ?? 0
+      })
+
+      state.isDirty = true
+      state.version++
+    },
+
+    /** Paste an audio track directly below the original */
+    pasteAudioTrack: (state, action) => {
+      const copiedTrack = action.payload
+      if (!copiedTrack) return
+
+      const targetRow = (copiedTrack.rowIndex ?? 0) + 1
+      state.audioTracks.forEach(t => {
+        if ((t.rowIndex ?? 0) >= targetRow) {
+          t.rowIndex = (t.rowIndex ?? 0) + 1
+        }
+      })
+
+      state.audioTracks.push({
+        ...copiedTrack,
+        rowIndex: targetRow,
+      })
+      state.isDirty = true
+      state.version++
+    },
+
+    /**
+     * Cut an audio track at a given point (in project seconds).
+     * Splits one track into two: left half keeps original ID, right half gets a new ID
+     * and is placed on the next available row.
+     */
+    cutAudioTrack: (state, action) => {
+      const { id, cutAtSeconds } = action.payload
+      const idx = state.audioTracks.findIndex(t => t.id === id)
+      if (idx === -1) return
+
+      const track = state.audioTracks[idx]
+      const relCut = cutAtSeconds - track.startOffset // seconds into the TRIMMED block
+      if (relCut <= 0 || relCut >= track.duration) return // cut is outside the block
+
+      // Right segment is placed in a new row below the cut track
+      const targetRow = (track.rowIndex ?? 0) + 1
+      state.audioTracks.forEach(t => {
+        if ((t.rowIndex ?? 0) >= targetRow) {
+          t.rowIndex = (t.rowIndex ?? 0) + 1
+        }
+      })
+
+      const rightHalf = {
+        id: uid(),
+        assetId: track.assetId,
+        assetUrl: track.assetUrl,
+        name: track.name,
+        startOffset: track.startOffset + relCut,
+        duration: track.duration - relCut,
+        totalDuration: track.totalDuration || track.duration,
+        trimStart: (track.trimStart || 0) + relCut,
+        rowIndex: targetRow,
+        volume: track.volume,
+        muted: track.muted,
+        waveform: track.waveform || [],
+      }
+
+      // Shorten the original track to the left half
+      track.duration = relCut
+
+      state.audioTracks.push(rightHalf)
+      state.isDirty = true
+      state.version++
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -2109,6 +2241,7 @@ const projectSlice = createSlice({
         state.scenes = data.scenes || []
         state.layers = data.layers || {}
         state.sceneMotionFlows = data.sceneMotionFlows || {}
+        state.audioTracks = data.audioTracks || []
         state.aspectRatio = data.aspectRatio || '16:9' // Restore aspect ratio
         state.currentSceneId = state.scenes.length > 0 ? state.scenes[0].id : null
         state.status = 'succeeded'
@@ -2193,6 +2326,12 @@ export const {
   toggleFrameLock,
   setTimelineDragging,
   setCanvasInteracting,
+  // Audio track actions (project-level)
+  addAudioTrack,
+  updateAudioTrack,
+  deleteAudioTrack,
+  cutAudioTrack,
+  pasteAudioTrack,
 } = projectSlice.actions
 
 // Stable default references to prevent unnecessary rerenders
@@ -2282,14 +2421,29 @@ export const selectProjectTimelineInfo = createSelector(
   }
 )
 
+// Audio track selectors
+export const selectAudioTracks = (state) => state.project.audioTracks
+
 /**
  * Selector to get the total project duration in seconds.
  */
 export const selectTotalProjectDuration = createSelector(
-  [selectProjectTimelineInfo],
-  (timelineInfo) => {
-    if (timelineInfo.length === 0) return 0
-    return timelineInfo[timelineInfo.length - 1].endTime
+  [selectProjectTimelineInfo, selectAudioTracks],
+  (timelineInfo, audioTracks) => {
+    let maxSceneTime = 0
+    if (timelineInfo.length > 0) {
+      maxSceneTime = timelineInfo[timelineInfo.length - 1].endTime
+    }
+    let maxAudioTime = 0
+    if (Array.isArray(audioTracks)) {
+      audioTracks.forEach(track => {
+        const end = (track.startOffset || 0) + (track.duration || 0)
+        if (end > maxAudioTime) {
+          maxAudioTime = end
+        }
+      })
+    }
+    return Math.max(maxSceneTime, maxAudioTime)
   }
 )
 

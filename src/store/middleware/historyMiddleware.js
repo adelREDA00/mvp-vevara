@@ -26,6 +26,11 @@ const CANVAS_ACTIONS = [
   'project/reorderSceneMotionSteps',
   'project/updateSceneMotionStep',
   'project/clearSceneMotionFlow',
+  // Audio track actions
+  'project/addAudioTrack',
+  'project/updateAudioTrack',
+  'project/deleteAudioTrack',
+  'project/cutAudioTrack',
 ]
 
 // Actions that should NOT be tracked (app-level actions)
@@ -65,6 +70,7 @@ function cloneProjectState(state) {
     layers: JSON.parse(JSON.stringify(state.project.layers)),
     sceneMotionFlows: JSON.parse(JSON.stringify(state.project.sceneMotionFlows || {})),
     segmentsByLayer: JSON.parse(JSON.stringify(state.project.segmentsByLayer || {})),
+    audioTracks: JSON.parse(JSON.stringify(state.project.audioTracks || [])),
     currentSceneId: state.project.currentSceneId,
   }
 }

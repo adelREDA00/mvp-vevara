@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   Eye,
@@ -56,6 +56,40 @@ function MotionInspector({
 
   // Use Redux selected layer if available, otherwise use prop
   const selectedLayer = selectedLayerProp || (selectedLayerId ? layers[selectedLayerId] : null)
+
+  const [localFontSize, setLocalFontSize] = useState(
+    selectedLayer?.data?.fontSize ? selectedLayer.data.fontSize.toString() : '16'
+  )
+
+  useEffect(() => {
+    if (selectedLayer?.data?.fontSize) {
+      setLocalFontSize(selectedLayer.data.fontSize.toString())
+    }
+  }, [selectedLayer?.data?.fontSize])
+
+  const globalBlurListenerRef = useRef(null)
+
+  const handleInputFocus = () => {
+    if (globalBlurListenerRef.current) return
+    const listener = (e) => {
+      const activeEl = document.activeElement
+      if (activeEl && activeEl.classList.contains('font-size-input')) {
+        if (e.target !== activeEl) {
+          activeEl.blur()
+        }
+      }
+    }
+    globalBlurListenerRef.current = listener
+    document.addEventListener('pointerdown', listener, true)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (globalBlurListenerRef.current) {
+        document.removeEventListener('pointerdown', globalBlurListenerRef.current, true)
+      }
+    }
+  }, [])
 
   // Calculate current layer index
   const currentLayerIndex = selectedLayer && currentScene
@@ -268,11 +302,41 @@ function MotionInspector({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Size</label>
-                <input
+                 <input
                   type="number"
-                  value={selectedLayer.data?.fontSize || 16}
-                  onChange={(e) => handleLayerUpdate({ data: { fontSize: parseFloat(e.target.value) || 16 } })}
-                  className="w-full bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-sm text-white outline-none focus:border-purple-500"
+                  value={localFontSize}
+                  onChange={(e) => setLocalFontSize(e.target.value)}
+                  onFocus={handleInputFocus}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const val = parseFloat(localFontSize)
+                      if (!isNaN(val) && val > 0) {
+                        handleLayerUpdate({
+                          data: { ...selectedLayer.data, fontSize: val },
+                          scaleX: 1,
+                          scaleY: 1
+                        })
+                        e.currentTarget.blur()
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    if (globalBlurListenerRef.current) {
+                      document.removeEventListener('pointerdown', globalBlurListenerRef.current, true)
+                      globalBlurListenerRef.current = null
+                    }
+                    const val = parseFloat(localFontSize)
+                    if (!isNaN(val) && val > 0) {
+                      handleLayerUpdate({
+                        data: { ...selectedLayer.data, fontSize: val },
+                        scaleX: 1,
+                        scaleY: 1
+                      })
+                    } else {
+                      setLocalFontSize(selectedLayer?.data?.fontSize ? selectedLayer.data.fontSize.toString() : '16')
+                    }
+                  }}
+                  className="font-size-input w-full bg-gray-900 border border-gray-800 rounded px-2 py-1.5 text-sm text-white outline-none focus:border-purple-500"
                 />
               </div>
               <div>

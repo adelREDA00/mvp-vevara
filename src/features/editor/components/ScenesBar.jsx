@@ -4,9 +4,10 @@ import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useContext, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming, setTimelineDragging } from '../../../store/slices/projectSlice'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming, setTimelineDragging, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
 import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
+import AudioBar from './AudioBar'
 
 
 // Custom hook for debouncing values
@@ -27,10 +28,13 @@ function useDebounce(value, delay) {
 }
 
 // Standalone utility to auto-scroll a container based on cursor X coordinate
-const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll) => {
+export const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll, speedMultiplier = 1) => {
   if (!container) {
     if (scrollTimerRef.current) {
-      clearInterval(scrollTimerRef.current)
+      const timer = typeof scrollTimerRef.current === 'object' && 'timer' in scrollTimerRef.current
+        ? scrollTimerRef.current.timer
+        : scrollTimerRef.current
+      if (timer) clearInterval(timer)
       scrollTimerRef.current = null
     }
     return
@@ -50,24 +54,43 @@ const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll) => {
     speed = -Math.round(ratio * 12) - 4
   }
 
+  speed = Math.round(speed * speedMultiplier)
+
   if (speed !== 0) {
-    if (!scrollTimerRef.current) {
-      scrollTimerRef.current = setInterval(() => {
+    const currentSpeed = scrollTimerRef.current && typeof scrollTimerRef.current === 'object'
+      ? scrollTimerRef.current.speed
+      : null
+
+    if (!scrollTimerRef.current || currentSpeed !== speed) {
+      if (scrollTimerRef.current) {
+        const oldTimer = typeof scrollTimerRef.current === 'object' && 'timer' in scrollTimerRef.current
+          ? scrollTimerRef.current.timer
+          : scrollTimerRef.current
+        if (oldTimer) clearInterval(oldTimer)
+      }
+      const timer = setInterval(() => {
         container.scrollLeft += speed
         if (onScroll) onScroll(speed)
       }, 16)
+      scrollTimerRef.current = { timer, speed }
     }
   } else {
     if (scrollTimerRef.current) {
-      clearInterval(scrollTimerRef.current)
+      const timer = typeof scrollTimerRef.current === 'object' && 'timer' in scrollTimerRef.current
+        ? scrollTimerRef.current.timer
+        : scrollTimerRef.current
+      if (timer) clearInterval(timer)
       scrollTimerRef.current = null
     }
   }
 }
 
-const stopAutoScroll = (scrollTimerRef) => {
+export const stopAutoScroll = (scrollTimerRef) => {
   if (scrollTimerRef.current) {
-    clearInterval(scrollTimerRef.current)
+    const timer = typeof scrollTimerRef.current === 'object' && 'timer' in scrollTimerRef.current
+      ? scrollTimerRef.current.timer
+      : scrollTimerRef.current
+    if (timer) clearInterval(timer)
     scrollTimerRef.current = null
   }
 }
@@ -251,7 +274,7 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
               const hasFill = fillCss != null
               const hasStroke = strokeCss != null && strokeWidth > 0
               const outlineForTransparent = !hasFill && !hasStroke
-                ? { border: '1px dashed rgba(156,163,175,0.7)', backgroundColor: 'transparent' }
+                ? { border: '1px solid rgba(156,163,175,0.7)', backgroundColor: 'transparent' }
                 : {}
 
               // Triangle, hexagon, star: use SVG so stroke follows the shape outline (clip-path + div border fails for stroke-only)
@@ -636,8 +659,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       data-tutorial="steps-area"
       className="absolute left-0 right-0 z-[120]"
       style={{
-        top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '-52px' : '-44px',
-        height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '42px' : '40px',
+        top: '-40px',
+        height: '34px',
         pointerEvents: 'auto',
       }}
     >
@@ -712,7 +735,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                 style={{
                   left: `${fillLeftPct}%`,
                   width: `${fillWidthPct}%`,
-                  height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '36px' : '28px',
+                  height: '30px',
                 }}
               />
             )
@@ -743,7 +766,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
               style={{
                 left: `${leftPct}%`,
                 width: `${widthPct}%`,
-                height: typeof window !== 'undefined' && window.innerWidth < 1024 ? '36px' : '28px',
+                height: '30px',
               }}
             >
               {/* Left resize handle */}
@@ -848,14 +871,14 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const scenes = useSelector(selectScenes)
   // Get responsive card dimensions
   const getCardDimensions = () => {
-    if (typeof window === 'undefined') return { width: 120, height: 72 }
+    if (typeof window === 'undefined') return { width: 120, height: 60 }
 
     if (window.innerWidth >= 1024) {
-      return { width: 180, height: 60 }
+      return { width: 180, height: 48 }
     } else if (window.innerWidth >= 640) {
-      return { width: 150, height: 76 }
+      return { width: 150, height: 64 }
     } else {
-      return { width: 130, height: 72 }
+      return { width: 130, height: 60 }
     }
   }
 
@@ -1106,7 +1129,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
 
     // Scroll delta increases the effective drag distance
     const scrollDelta = scrollContainer ? (scrollContainer.scrollLeft - startScrollLeftRef.current) : 0
-    const adjustedDeltaX = resizeSideRef.current === 'right' ? (deltaX + scrollDelta) : (deltaX - scrollDelta)
+    const adjustedDeltaX = deltaX + scrollDelta
 
     let leftOffset = 0
     let gapSize = 0
@@ -1198,9 +1221,12 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     })() : null
 
     if (scrollContainer) {
+      const deltaX = clientX - startXRef.current
+      const isShrinking = (resizeSideRef.current === 'right' && deltaX < 0) || (resizeSideRef.current === 'left' && deltaX > 0)
+      const speedMultiplier = isShrinking ? 0 : 1.0
       checkAutoScroll(clientX, scrollContainer, resizeScrollTimerRef, () => {
         performResize(lastClientXRef.current)
-      })
+      }, speedMultiplier)
     }
   }
 
@@ -1376,7 +1402,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             height: `${height}px`,
             backgroundColor: 'rgba(255,255,255,0.06)',
             borderRadius: '6px',
-            border: '1px dashed rgba(255,255,255,0.15)',
+            border: '1px solid rgba(255,255,255,0.15)',
             opacity: 1,
           }}
         />
@@ -1886,7 +1912,9 @@ const ScenesBar = React.memo(React.forwardRef(({
   onPlay, // Optional: to resume playback after split
   onPause, // Optional: to pause during split
   onOpenTransitionsPanel,
-  onPlayheadInteractionDuringCapture // Callback when playhead is interacted with during motion capture mode
+  onPlayheadInteractionDuringCapture, // Callback when playhead is interacted with during motion capture mode
+  selectedAudioBlockId = null,
+  onSelectAudioBlock = null,
 }, ref) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
@@ -1898,6 +1926,7 @@ const ScenesBar = React.memo(React.forwardRef(({
   const timelineInfo = useSelector(selectProjectTimelineInfo)
   const allLayers = useSelector(state => state.project.layers)
   const sceneMotionFlows = useSelector(selectSceneMotionFlows)
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
 
   // [PERFORMANCE] Debounce layers update to prevent live re-renders of all scene cards
   // during active transforms on the canvas. Previews will catch up after 500ms of inactivity.
@@ -1912,6 +1941,7 @@ const ScenesBar = React.memo(React.forwardRef(({
   const [playheadTooltipPosition, setPlayheadTooltipPosition] = useState({ top: 0, left: 0 })
   const timelineRef = useRef(null)
   const cardsContainerRef = useRef(null)
+  const audioBarRef = useRef(null)
   const playheadElementRef = useRef(null) // Ref for direct DOM manipulation
   const isTimelineInteractingRef = useRef(false)
   const dragScrollTimerRef = useRef(null)
@@ -1949,10 +1979,10 @@ const ScenesBar = React.memo(React.forwardRef(({
   }, [getDefaultCardWidth, timelineZoom])
 
   const getDefaultCardHeight = useCallback(() => {
-    if (typeof window === 'undefined') return 72
-    if (window.innerWidth >= 1024) return 60
-    if (window.innerWidth >= 640) return 76
-    return 72
+    if (typeof window === 'undefined') return 60
+    if (window.innerWidth >= 1024) return 48
+    if (window.innerWidth >= 640) return 64
+    return 60
   }, [])
 
   // Utility Formatters
@@ -2238,6 +2268,12 @@ const ScenesBar = React.memo(React.forwardRef(({
     const { scenes: sceneOffsets, totalTime: tTime, totalWidth: tWidth } = cumulativeOffsets
     if (tTime <= 0 || sceneOffsets.length === 0) return 0
 
+    if (time > tTime) {
+      const extraTime = time - tTime
+      const extraWidth = calculateWidthFromDuration(extraTime)
+      return tWidth + extraWidth
+    }
+
     const clampedTime = Math.max(0, Math.min(time, tTime))
 
     // Find the scene containing this time
@@ -2255,11 +2291,15 @@ const ScenesBar = React.memo(React.forwardRef(({
     return calculatePlayheadPosition(currentTime)
   }, [currentTime, cumulativeOffsets])
 
-  // Clamp playhead position to never exceed the end of the last card
+  // Clamp playhead position to never exceed the end of the timeline (scenes + audio)
   const playheadPosition = useMemo(() => {
-    return Math.min(playheadPositionPx, totalCardsWidth)
-  }, [playheadPositionPx, totalCardsWidth])
+    const maxPx = calculatePlayheadPosition(totalTime)
+    return Math.min(playheadPositionPx, maxPx)
+  }, [playheadPositionPx, totalTime, calculatePlayheadPosition])
 
+  // Scroll sync: fire onScrollChange when the outer scrollable wrapper scrolls.
+  // We read scroll from the grandparent because ScenesBar renders inside the
+  // scenesBarRef div (overflowX:auto) in EditorPage.
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
       const container = timelineRef.current?.parentElement?.parentElement
@@ -2292,8 +2332,18 @@ const ScenesBar = React.memo(React.forwardRef(({
         }
         setTimelineZoom(newZoom)
       }
-    }
-  }), [timelineZoom, currentTime, calculatePlayheadPosition])
+    },
+    getTotalCardsWidth: () => totalCardsWidth,
+    getScrollLeft: () => {
+      const container = timelineRef.current?.parentElement?.parentElement
+      return container?.scrollLeft ?? 0
+    },
+    getSelectedBlock: () => audioBarRef.current?.getSelectedBlock?.(),
+    updateBlock: (id, updates) => audioBarRef.current?.updateBlock?.(id, updates),
+    deleteBlock: (id) => audioBarRef.current?.deleteBlock?.(id),
+    addAudioBlock: (name, durationSeconds) => audioBarRef.current?.addBlock?.(name, durationSeconds),
+    cutBlock: (id, cutAtSeconds) => audioBarRef.current?.cutBlock?.(id, cutAtSeconds),
+  }), [timelineZoom, currentTime, calculatePlayheadPosition, totalCardsWidth, totalTime])
 
   // Calculate pixel position for a given time
   const calculateTimePosition = useCallback((time) => {
@@ -2363,20 +2413,27 @@ const ScenesBar = React.memo(React.forwardRef(({
 
     const containerRect = cardsContainerRef.current.getBoundingClientRect()
     const mouseX = e.clientX - containerRect.left
-    const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+    const totalTimelineWidth = calculatePlayheadPosition(totalTime)
+    const clampedX = Math.max(0, Math.min(mouseX, totalTimelineWidth))
 
     const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
     let seekTime = 0
 
-    const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
-    const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
-
-    if (targetScene) {
-      const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
-      const progressInCard = Math.min(1, positionInCard / targetScene.width)
-      seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+    if (clampedX > totalCardsWidth) {
+      const extraWidth = clampedX - totalCardsWidth
+      const extraTime = calculateDurationFromWidth(extraWidth)
+      seekTime = tTime + extraTime
     } else {
-      seekTime = tTime
+      const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+      const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+      if (targetScene) {
+        const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+        const progressInCard = Math.min(1, positionInCard / targetScene.width)
+        seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+      } else {
+        seekTime = tTime
+      }
     }
 
     onSeek(seekTime)
@@ -2384,18 +2441,38 @@ const ScenesBar = React.memo(React.forwardRef(({
 
   const handleSeekMouseEnter = (e) => {
     if (isTouchDevice()) return
-    if (isDraggingPlayhead || !cardsContainerRef.current) return
+    if (isDraggingPlayhead || isTimelineDragging || draggedIndex !== null || resizingSceneIdRef.current !== null || !cardsContainerRef.current) return
     if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'block'
     if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'block'
   }
 
   const handleSeekMouseMove = (e) => {
     if (isTouchDevice()) return
-    if (isDraggingPlayhead || !cardsContainerRef.current || !ghostPlayheadRef.current) return
+
+    // Reset any stuck drag states if no mouse buttons are pressed
+    if (e.buttons === 0) {
+      if (isDraggingPlayhead) setIsDraggingPlayhead(false)
+      if (draggedIndex !== null) setDraggedIndex(null)
+      if (isTimelineDragging) dispatch(setTimelineDragging(false))
+    }
+
+    if (isDraggingPlayhead || isTimelineDragging || draggedIndex !== null || resizingSceneIdRef.current !== null || !cardsContainerRef.current || !ghostPlayheadRef.current) {
+      if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
+      if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
+      return
+    }
+
+    if (ghostPlayheadRef.current.style.display !== 'block') {
+      ghostPlayheadRef.current.style.display = 'block'
+    }
+    if (ghostTooltipRef.current && ghostTooltipRef.current.style.display !== 'block') {
+      ghostTooltipRef.current.style.display = 'block'
+    }
 
     const containerRect = cardsContainerRef.current.getBoundingClientRect()
     const mouseX = e.clientX - containerRect.left
-    const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+    const totalTimelineWidth = calculatePlayheadPosition(totalTime)
+    const clampedX = Math.max(0, Math.min(mouseX, totalTimelineWidth))
 
     // Position ghost playhead
     ghostPlayheadRef.current.style.left = `${16 + clampedX}px`
@@ -2404,15 +2481,21 @@ const ScenesBar = React.memo(React.forwardRef(({
     const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
     let seekTime = 0
 
-    const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
-    const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
-
-    if (targetScene) {
-      const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
-      const progressInCard = Math.min(1, positionInCard / targetScene.width)
-      seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+    if (clampedX > totalCardsWidth) {
+      const extraWidth = clampedX - totalCardsWidth
+      const extraTime = calculateDurationFromWidth(extraWidth)
+      seekTime = tTime + extraTime
     } else {
-      seekTime = tTime
+      const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+      const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+      if (targetScene) {
+        const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+        const progressInCard = Math.min(1, positionInCard / targetScene.width)
+        seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+      } else {
+        seekTime = tTime
+      }
     }
 
     // Position ghost tooltip
@@ -2458,20 +2541,27 @@ const ScenesBar = React.memo(React.forwardRef(({
 
       const containerRect = cardsContainerRef.current.getBoundingClientRect()
       const mouseX = clientX - containerRect.left
-      const clampedX = Math.max(0, Math.min(mouseX, totalCardsWidth))
+      const totalTimelineWidth = calculatePlayheadPosition(totalTime)
+      const clampedX = Math.max(0, Math.min(mouseX, totalTimelineWidth))
 
       const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
       let seekTime = 0
 
-      const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
-      const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
-
-      if (targetScene) {
-        const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
-        const progressInCard = Math.min(1, positionInCard / targetScene.width)
-        seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+      if (clampedX > totalCardsWidth) {
+        const extraWidth = clampedX - totalCardsWidth
+        const extraTime = calculateDurationFromWidth(extraWidth)
+        seekTime = tTime + extraTime
       } else {
-        seekTime = tTime
+        const sceneIndex = sceneOffsets.findIndex(s => clampedX <= s.startWidth + s.width)
+        const targetScene = sceneIndex !== -1 ? sceneOffsets[sceneIndex] : sceneOffsets[sceneOffsets.length - 1]
+
+        if (targetScene) {
+          const positionInCard = Math.max(0, clampedX - targetScene.startWidth)
+          const progressInCard = Math.min(1, positionInCard / targetScene.width)
+          seekTime = targetScene.startTime + (progressInCard * targetScene.duration)
+        } else {
+          seekTime = tTime
+        }
       }
 
       // Update playhead position directly for instant visual feedback (no throttle needed)
@@ -2591,6 +2681,7 @@ const ScenesBar = React.memo(React.forwardRef(({
   const handleSwitchScene = (sceneId) => {
     // Stop playback if switching scenes manually
     if (onMotionStop) onMotionStop()
+    onSelectAudioBlock?.(null)
 
     // Clear layer selection when switching scenes to prevent selection box flash
     dispatch(clearLayerSelection())
@@ -2915,11 +3006,27 @@ const ScenesBar = React.memo(React.forwardRef(({
   return (
     <div
       className="relative block px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
+      onMouseMove={handleSeekMouseMove}
+      onMouseEnter={handleSeekMouseEnter}
+      onMouseLeave={handleSeekMouseLeave}
+      onClick={(e) => {
+        // Prevent click seeking only if we clicked on buttons, inputs, or resize handles
+        if (e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+        onSelectAudioBlock?.(null) // Clear audio selection when clicking timeline background
+        handleTimelineClick(e)
+      }}
+      onTouchStart={(e) => {
+        if (isTimelineInteractingRef.current) return
+        if (e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+        onSelectAudioBlock?.(null)
+        const touch = e.touches[0]
+        handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
+      }}
       style={{
         minWidth: '100%',
-        width: `${Math.max(totalCardsWidth + 32, 100)}px`,
+        width: `${Math.max(calculatePlayheadPosition(totalTime) + 32, 100)}px`,
         backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
-        paddingTop: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
+        paddingTop: '0px',
         touchAction: 'pan-x',
       }}
     >
@@ -2927,14 +3034,16 @@ const ScenesBar = React.memo(React.forwardRef(({
 
       {/* Timeline Ruler */}
       <div
-        className="absolute left-0 z-20"
+        className="z-20"
         ref={timelineRef}
         style={{
-          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
+          position: 'sticky',
+          top: 0,
           height: '24px',
           pointerEvents: 'none',
-          width: `${totalCardsWidth + 32}px`,
+          width: `${calculatePlayheadPosition(totalTime) + 32}px`,
           minWidth: '100%',
+          backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
         }}
       >
         {majorMarkers.map((marker) => (
@@ -2982,125 +3091,116 @@ const ScenesBar = React.memo(React.forwardRef(({
           />
         ))}
 
-        {/* Seek overlay */}
-        {!isDraggingPlayhead && !isHoveringPlayhead && (
-          <div
-            className="absolute top-0 left-0 right-0 cursor-pointer"
-            onClick={handleTimelineClick}
-            onMouseEnter={handleSeekMouseEnter}
-            onMouseMove={handleSeekMouseMove}
-            onMouseLeave={handleSeekMouseLeave}
-            onTouchStart={(e) => {
-              if (isTimelineInteractingRef.current) return
-              const touch = e.touches[0]
-              handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
-            }}
-            style={{
-              zIndex: 10,
-              height: isTouchDevice() ? '24px' : '36px',
-              pointerEvents: 'auto',
-              touchAction: 'none',
-            }}
-          />
-        )}
-      </div>
-
-      {/* Playhead */}
-      <div
-        ref={playheadElementRef}
-        className="absolute bottom-0"
-        style={{
-          top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
-          left: `${16 + playheadPosition}px`,
-          transform: 'translateX(-50%)',
-          cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
-          zIndex: 50,
-          width: '16px',
-          userSelect: 'none',
-          touchAction: 'none',
-          pointerEvents: 'auto',
-          willChange: 'transform, left',
-        }}
-        onMouseDown={(e) => {
-          handlePlayheadMouseDown(e)
-
-          setPlayheadTooltipTime(currentTime)
-          if (timelineRef.current) {
-            const timelineRect = timelineRef.current.getBoundingClientRect()
-            setPlayheadTooltipPosition({
-              top: timelineRect.top - 16 - 28,
-              left: timelineRect.left + 16 + playheadPosition,
-            })
-          }
-        }}
-        onMouseEnter={() => {
-          setIsHoveringPlayhead(true)
-        }}
-        onMouseLeave={() => {
-          setIsHoveringPlayhead(false)
-        }}
-        onTouchStart={(e) => {
-          handlePlayheadMouseDown(e)
-          const touch = e.touches[0]
-          setPlayheadTooltipTime(currentTime)
-          if (timelineRef.current) {
-            const timelineRect = timelineRef.current.getBoundingClientRect()
-            setPlayheadTooltipPosition({
-              top: timelineRect.top - 16 - 28,
-              left: touch.clientX,
-            })
-          }
-        }}
-      >
-        {/* Playhead diamond/triangle marker at top */}
-        <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{ top: '-4px' }}>
-          <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
-            <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#7c4af0' : '#ffffff'} />
-          </svg>
-        </div>
-
-        {/* Playhead line */}
+        {/* Playhead */}
         <div
-          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
+          ref={playheadElementRef}
+          className="absolute"
           style={{
-            backgroundColor: isLight ? '#7c4af0' : '#ffffff',
-            width: isDraggingPlayhead ? '3px' : '2.5px',
-            top: '8px',
-            borderRadius: '1px',
-            boxShadow: isDraggingPlayhead
-              ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)')
-              : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
-            transition: 'width 0.1s, box-shadow 0.1s',
-          }}
-        />
-      </div>
-
-      {/* Ghost Playhead */}
-      {!isTouchDevice() && (
-        <div
-          ref={ghostPlayheadRef}
-          className="absolute bottom-0 pointer-events-none"
-          style={{
-            top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '8px',
-            left: '16px',
+            top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '4px',
+            left: `${16 + playheadPosition}px`,
             transform: 'translateX(-50%)',
-            zIndex: 45,
+            cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
+            zIndex: 50,
             width: '16px',
-            display: 'none',
-            willChange: 'left',
+            height: `${bottomSectionHeight || 200}px`,
+            userSelect: 'none',
+            touchAction: 'none',
+            pointerEvents: 'auto',
+            willChange: 'transform, left',
+          }}
+          onMouseDown={(e) => {
+            handlePlayheadMouseDown(e)
+
+            setPlayheadTooltipTime(currentTime)
+            if (timelineRef.current) {
+              const timelineRect = timelineRef.current.getBoundingClientRect()
+              setPlayheadTooltipPosition({
+                top: timelineRect.top - 16 - 28,
+                left: timelineRect.left + 16 + playheadPosition,
+              })
+            }
+          }}
+          onMouseEnter={() => {
+            setIsHoveringPlayhead(true)
+          }}
+          onMouseLeave={() => {
+            setIsHoveringPlayhead(false)
+          }}
+          onTouchStart={(e) => {
+            handlePlayheadMouseDown(e)
+            const touch = e.touches[0]
+            setPlayheadTooltipTime(currentTime)
+            if (timelineRef.current) {
+              const timelineRect = timelineRef.current.getBoundingClientRect()
+              setPlayheadTooltipPosition({
+                top: timelineRect.top - 16 - 28,
+                left: touch.clientX,
+              })
+            }
           }}
         >
-          {/* Ghost Playhead line */}
+          {/* Playhead diamond/triangle marker at top */}
           <div
-            className="absolute bottom-0 left-1/2 transform -translate-x-1/2 pointer-events-none"
+            className="pointer-events-none"
             style={{
-              borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
-              width: '0px',
-              top: '8px',
+              position: 'absolute',
+              top: 0,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 51,
+            }}
+          >
+            <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
+              <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#7c4af0' : '#ffffff'} />
+            </svg>
+          </div>
+
+          {/* Playhead line */}
+          <div
+            className="absolute left-1/2 transform -translate-x-1/2 pointer-events-none"
+            style={{
+              backgroundColor: isLight ? '#7c4af0' : '#ffffff',
+              width: isDraggingPlayhead ? '3px' : '2.5px',
+              top: '4px',
+              height: '100%',
+              borderRadius: '1px',
+              boxShadow: isDraggingPlayhead
+                ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)')
+                : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
+              transition: 'width 0.1s, box-shadow 0.1s',
             }}
           />
         </div>
-      )}
+
+        {/* Ghost Playhead */}
+        {!isTouchDevice() && (
+          <div
+            ref={ghostPlayheadRef}
+            className="absolute pointer-events-none"
+            style={{
+              top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '4px',
+              left: '16px',
+              transform: 'translateX(-50%)',
+              zIndex: 45,
+              width: '16px',
+              height: `${bottomSectionHeight || 200}px`,
+              display: 'none',
+              willChange: 'left',
+            }}
+          >
+            {/* Ghost Playhead line */}
+            <div
+              className="absolute left-1/2 transform -translate-x-1/2 pointer-events-none"
+              style={{
+                borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
+                width: '0px',
+                top: '4px',
+                height: '100%',
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Scene Cards */}
       <div
@@ -3111,8 +3211,9 @@ const ScenesBar = React.memo(React.forwardRef(({
         }}
         style={{
           gap: 0,
-          marginTop: typeof window !== 'undefined' && window.innerWidth < 1024 ? '78px' : '72px',
-          paddingBottom: '8px',
+          marginLeft: '16px',
+          marginTop: '48px',
+          paddingBottom: '0px',
           minWidth: 'max-content',
           width: 'max-content',
         }}
@@ -3323,7 +3424,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               width: '36px',
               height: `${getDefaultCardHeight()}px`,
               backgroundColor: isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
-              border: isLight ? '1px dashed rgba(0,0,0,0.12)' : '1px dashed rgba(255,255,255,0.12)',
+              border: isLight ? '1px solid rgba(0,0,0,0.12)' : '1px solid rgba(255,255,255,0.12)',
               borderRadius: '6px',
             }}
           >
@@ -3332,6 +3433,20 @@ const ScenesBar = React.memo(React.forwardRef(({
 
         </div>
       </div>
+
+      {/* Audio Tracks Row — integrated inside the unified scrollable ScenesBar */}
+      <AudioBar
+        ref={audioBarRef}
+        totalProjectWidth={calculatePlayheadPosition(totalTime)}
+        totalDuration={totalTime}
+        selectedAudioBlockId={selectedAudioBlockId}
+        onSelectAudioBlock={onSelectAudioBlock}
+        calculateTimePosition={calculateTimePosition}
+        calculateWidthFromDuration={calculateWidthFromDuration}
+        onMotionPause={onMotionPause}
+        onDragStart={() => dispatch(setTimelineDragging(true))}
+        onDragEnd={() => dispatch(setTimelineDragging(false))}
+      />
 
       {/* Playhead time tooltip */}
       {isDraggingPlayhead && playheadTooltipTime !== null && typeof document !== 'undefined'

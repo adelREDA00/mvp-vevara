@@ -1,4 +1,4 @@
-import { Trash2, Film, Loader2, Check } from 'lucide-react'
+import { Trash2, Film, Loader2, Check, Music, Play, Pause } from 'lucide-react'
 import { useSelector } from 'react-redux'
 import { useContext } from 'react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
@@ -11,13 +11,16 @@ export function AssetCard({
   onDelete, 
   onAdd,
   isSelected,
-  onToggleSelect
+  onToggleSelect,
+  isPlaying,
+  onPlayPause
 }) {
   const assetUrl = image.url || image.src
   const isPreparing = useSelector(state => selectIsAssetPreparing(state, assetUrl))
   const assetId = image.id || image._id
   const isDeleting = deletingId != null && deletingId === assetId
   const isVideo = image.metadata?.type?.startsWith('video/') || image.type === 'video'
+  const isAudio = image.metadata?.type?.startsWith('audio/') || image.assetType === 'audio'
 
   const { status, progress, error, name } = image
   const isPending = status === 'pending'
@@ -28,6 +31,100 @@ export function AssetCard({
   const isLight = theme === 'light'
 
   const isDisabled = isUploading || isDeleting || isPreparing || isPending || isFailed
+
+  if (isAudio) {
+    const gradients = [
+      'from-pink-500 to-rose-500',
+      'from-purple-600 to-indigo-600',
+      'from-amber-400 to-orange-500',
+      'from-teal-400 to-cyan-500',
+      'from-green-400 to-emerald-500'
+    ]
+    const gradIndex = Math.abs((name || '').charCodeAt(0) || 0) % gradients.length
+    const gradientClass = gradients[gradIndex]
+
+    return (
+      <div
+        className={`group relative aspect-square rounded-xl overflow-hidden border transition-all ${
+          isSelected 
+            ? 'border-[#7c4af0] shadow-[0_0_12px_rgba(124,74,240,0.3)]' 
+            : (isLight ? 'border-slate-100 hover:border-slate-200' : 'border-white/10 hover:border-purple-500/50')
+        } ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+        onClick={() => {
+          if (!isDisabled) onAdd(image)
+        }}
+        draggable={!isDisabled}
+        onDragStart={(e) => {
+          if (isDisabled) { e.preventDefault(); return }
+          e.dataTransfer.setData('application/vevara-asset', JSON.stringify({
+            url: assetUrl,
+            name: name || 'Audio',
+            type: 'audio',
+            duration: image.metadata?.duration || 0,
+            waveform: image.metadata?.waveform || [],
+          }))
+          e.dataTransfer.effectAllowed = 'copy'
+        }}
+      >
+        {/* Gradient background with Music icon */}
+        <div className={`absolute inset-0 bg-gradient-to-tr ${gradientClass} flex flex-col items-center justify-center p-3 text-center`}>
+          <Music className="h-8 w-8 text-white/50 mb-1" />
+          <span className="text-[10px] font-semibold text-white/90 truncate w-full px-1">{name || 'Audio'}</span>
+          <span className="text-[9px] text-white/60 mt-0.5">{image.metadata?.duration ? `${Math.round(image.metadata.duration)}s` : ''}</span>
+        </div>
+
+        {/* Centered play button overlay */}
+        {!isDisabled && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              data-audio-preview-btn
+              onClick={(e) => {
+                e.stopPropagation()
+                onPlayPause?.(image, e)
+              }}
+              className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all"
+            >
+              {isPlaying ? (
+                <Pause className="h-5 w-5 fill-black text-black" />
+              ) : (
+                <Play className="h-5 w-5 fill-black text-black ml-0.5" />
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Selection Checkbox (Top-Left) */}
+        {!isDisabled && (
+          <div 
+            className={`absolute top-2.5 left-2.5 w-5 h-5 rounded-md border text-white flex items-center justify-center transition-all z-10 ${
+              isSelected 
+                ? 'bg-[#7c4af0] border-[#7c4af0]' 
+                : 'bg-black/40 border-white/20 opacity-0 group-hover:opacity-100'
+            }`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleSelect(image.id)
+            }}
+          >
+            {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
+          </div>
+        )}
+
+        {/* Delete Icon (Top-Right) */}
+        {!isDisabled && onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete(image.id, e)
+            }}
+            className="absolute top-2.5 right-2.5 p-1.5 bg-red-500/80 hover:bg-red-500 rounded-md text-white opacity-0 group-hover:opacity-100 transition-all z-10 shadow-lg"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div

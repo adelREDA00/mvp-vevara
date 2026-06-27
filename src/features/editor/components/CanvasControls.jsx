@@ -7,7 +7,8 @@ import {
   Volume2, VolumeX, Ghost, Droplets, FlipHorizontal2,
   Plus, Rotate3d, Check, Eye, EyeOff, Waves,
   AlignLeft, AlignCenter, AlignRight, RotateCcw,
-  ArrowLeftRight, ArrowUpDown, Undo2, Redo2
+  ArrowLeftRight, ArrowUpDown, Undo2, Redo2,
+  Music, Scissors, Trash2, Copy
 } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { LAYER_TYPES } from '../../../store/models'
@@ -17,6 +18,15 @@ import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import { useSelector, useDispatch } from 'react-redux'
 import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
 import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
+import {
+  duplicateLayer,
+  deleteLayer,
+  deleteScene,
+  copyScene,
+  pasteScene,
+  selectScenes
+} from '../../../store/slices/projectSlice'
+import { clearLayerSelection } from '../../../store/slices/selectionSlice'
 import * as PIXI from 'pixi.js'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { syncTiltMesh, applyTiltToObject } from '../../engine/pixi/perspectiveTilt'
@@ -87,11 +97,25 @@ function CanvasControls({
   isMobileBottom = false,
   onSubmenuChange,
   onUndo,
-  onRedo
+  onRedo,
+  // ── Audio block props ──────────────────────────────────────────────────────
+  selectedAudioBlock = null,   // { id, name, volume, muted } from AudioBar local state
+  onAudioBlockUpdate = null,   // fn({ id, ...updates })
+  onAudioBlockDelete = null,   // fn(id)
+  onAudioBlockCut   = null,    // fn(id) — cut at playhead (Phase 2)
 }) {
   const { theme } = useContext(ThemeContext)
   const dispatch = useDispatch()
+  const scenes = useSelector(selectScenes)
   const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
+
+  const [isMobileScreen, setIsMobileScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024)
+  useEffect(() => {
+    const onResize = () => setIsMobileScreen(window.innerWidth < 1024)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const canUndo = useSelector(selectCanUndo)
   const canRedo = useSelector(selectCanRedo)
 
@@ -104,6 +128,38 @@ function CanvasControls({
   const [showSizeMenu, setShowSizeMenu] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showAddStepHint, setShowAddStepHint] = useState(false)
+  
+  const currentFontSize = getFontSize()
+  const [localFontSize, setLocalFontSize] = useState(currentFontSize.toString())
+
+  useEffect(() => {
+    setLocalFontSize(currentFontSize.toString())
+  }, [currentFontSize])
+
+  const globalBlurListenerRef = useRef(null)
+
+  const handleInputFocus = () => {
+    if (globalBlurListenerRef.current) return
+    const listener = (e) => {
+      const activeEl = document.activeElement
+      if (activeEl && activeEl.classList.contains('font-size-input')) {
+        if (e.target !== activeEl) {
+          activeEl.blur()
+        }
+      }
+    }
+    globalBlurListenerRef.current = listener
+    document.addEventListener('pointerdown', listener, true)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (globalBlurListenerRef.current) {
+        document.removeEventListener('pointerdown', globalBlurListenerRef.current, true)
+      }
+    }
+  }, [])
+
   // [PERF] Local state to track slider values during drag (bypasses Redux for smooth UX)
   const [dragTiltX, setDragTiltX] = useState(null)
   const [dragTiltY, setDragTiltY] = useState(null)
@@ -118,6 +174,163 @@ function CanvasControls({
   const scrollContainerRef = useRef(null)
   const containerRef = useRef(null)
   const animateButtonRef = useRef(null)
+
+  // ── Audio controls local state ─────────────────────────────────────────────
+  const [audioVolume, setAudioVolume] = useState(selectedAudioBlock?.volume ?? 1)
+  const [audioMuted, setAudioMuted] = useState(selectedAudioBlock?.muted ?? false)
+  const [showAudioVolume, setShowAudioVolume] = useState(false)
+  const audioVolumeBtnRef = useRef(null)
+
+  useEffect(() => {
+    if (selectedAudioBlock) {
+      setAudioVolume(selectedAudioBlock.volume ?? 1)
+      setAudioMuted(selectedAudioBlock.muted ?? false)
+    }
+  }, [selectedAudioBlock?.id, selectedAudioBlock?.volume, selectedAudioBlock?.muted])
+
+  // Render audio pill content (shown when audio block is selected, no canvas/layer selected)
+  const renderAudioControls = () => {
+    if (!selectedAudioBlock || selectedLayer || selectedCanvas) return null
+    const isLight = theme === 'light'
+
+    return (
+      <>
+        {/* Audio track label (desktop only) */}
+        {!isMobileBottom && (
+          <div className={`flex items-center gap-1.5 flex-shrink-0 pr-2 mr-1 border-r ${
+            isLight ? 'border-black/10' : 'border-white/10'
+          }`}>
+            <Music className="h-3.5 w-3.5 text-purple-400" strokeWidth={1.5} />
+            <span className={`text-[11px] font-semibold max-w-[100px] truncate ${
+              isLight ? 'text-gray-600' : 'text-white/70'
+            }`}>{selectedAudioBlock.name || 'Audio'}</span>
+          </div>
+        )}
+
+        {/* Volume & Mute Button - speaker icon only, opens slider panel */}
+        <div className="relative flex-shrink-0" ref={audioVolumeBtnRef}>
+          <button
+            onClick={() => {
+              if (isMobileBottom) {
+                toggleSubmenu('audioVolume')
+              } else {
+                setShowAudioVolume(v => !v)
+              }
+            }}
+            className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center touch-manipulation border ${
+              showAudioVolume
+                ? theme === 'light'
+                  ? 'bg-purple-500/10 border-purple-500/30 text-purple-600'
+                  : 'bg-white/20 border-white/20 text-white'
+                : theme === 'light'
+                  ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+                  : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
+            }`}
+            title="Volume & Mute"
+          >
+            {audioMuted ? (
+              <VolumeX className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <Volume2 className="h-4 w-4" strokeWidth={2} />
+            )}
+          </button>
+
+          {/* Volume slider popover — portaled to avoid clip (desktop only) */}
+          {!isMobileBottom && (
+            <ControlPopover open={showAudioVolume} anchorRef={audioVolumeBtnRef}>
+              <div
+                className="h-9 flex items-center gap-3 px-4 rounded-lg backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200"
+                style={{
+                  backgroundColor: 'var(--editor-panel-bg)',
+                  backdropFilter: 'blur(24px)',
+                  WebkitBackdropFilter: 'blur(24px)',
+                  border: '1px solid var(--editor-panel-border)',
+                  boxShadow: 'var(--editor-panel-shadow)',
+                  minWidth: '240px',
+                  pointerEvents: 'auto',
+                }}
+              >
+                {/* Speaker icon inside the panel for instant mute/unmute */}
+                <button
+                  onClick={() => {
+                    const newMuted = !audioMuted
+                    setAudioMuted(newMuted)
+                    onAudioBlockUpdate?.({ id: selectedAudioBlock.id, muted: newMuted })
+                  }}
+                  className={`p-1 rounded transition-colors ${
+                    theme === 'light' ? 'hover:bg-black/5 text-gray-700' : 'hover:bg-white/10 text-white'
+                  }`}
+                  title={audioMuted ? 'Unmute' : 'Mute'}
+                >
+                  {audioMuted ? (
+                    <VolumeX className="h-4 w-4" strokeWidth={2} />
+                  ) : (
+                    <Volume2 className="h-4 w-4" strokeWidth={2} />
+                  )}
+                </button>
+
+                <Slider.Root
+                  className="relative flex items-center select-none touch-none grow h-5"
+                  value={[audioMuted ? 0 : Math.round(audioVolume * 100)]}
+                  onValueChange={(value) => {
+                    const v = value[0] / 100
+                    setAudioVolume(v)
+                    onAudioBlockUpdate?.({ id: selectedAudioBlock.id, volume: v, muted: v === 0 })
+                    if (v > 0 && audioMuted) {
+                      setAudioMuted(false)
+                    } else if (v === 0 && !audioMuted) {
+                      setAudioMuted(true)
+                    }
+                  }}
+                  min={0} max={100} step={1}
+                >
+                  <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
+                    <Slider.Range className="absolute bg-[#7c4af0] rounded-full h-full" />
+                  </Slider.Track>
+                  <Slider.Thumb className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`} aria-label="Audio Volume" />
+                </Slider.Root>
+                <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
+                  {audioMuted ? '0%' : `${Math.round(audioVolume * 100)}%`}
+                </span>
+              </div>
+            </ControlPopover>
+          )}
+        </div>
+
+        {/* Separator */}
+        <div className={`w-px h-5 flex-shrink-0 ${
+          theme === 'light' ? 'bg-black/10' : 'bg-white/10'
+        }`} />
+
+        {/* Cut at playhead */}
+        <button
+          onClick={() => onAudioBlockCut?.(selectedAudioBlock.id)}
+          className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center touch-manipulation flex-shrink-0 border ${
+            theme === 'light'
+              ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+              : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
+          }`}
+          title="Cut audio at playhead"
+        >
+          <Scissors className="h-4 w-4" strokeWidth={2} />
+        </button>
+
+        {/* Delete */}
+        <button
+          onClick={() => onAudioBlockDelete?.(selectedAudioBlock.id)}
+          className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center touch-manipulation flex-shrink-0 border ${
+            theme === 'light'
+              ? 'text-red-500 hover:bg-red-50 border-transparent hover:border-red-200'
+              : 'text-red-400 hover:bg-red-500/15 border-transparent hover:border-red-500/25'
+          }`}
+          title="Delete audio block"
+        >
+          <Trash2 className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </>
+    )
+  }
+
   // [SLIDER CLIP FIX] Anchors for the portaled control popovers (opacity/blur/radius/tilt).
   const opacityBtnRef = useRef(null)
   const blurBtnRef = useRef(null)
@@ -166,6 +379,7 @@ function CanvasControls({
       if (menuName === 'font') return !showFontMenu
       if (menuName === 'size') return !showSizeMenu
       if (menuName === 'align') return !showAlignMenu
+      if (menuName === 'audioVolume') return !showAudioVolume
       return false
     })()
 
@@ -177,6 +391,7 @@ function CanvasControls({
     setShowFontMenu(false)
     setShowSizeMenu(false)
     setShowAlignMenu(false)
+    setShowAudioVolume(false)
 
     if (turnOn) {
       if (menuName === 'opacity') setShowOpacitySlider(true)
@@ -187,6 +402,7 @@ function CanvasControls({
       if (menuName === 'font') setShowFontMenu(true)
       if (menuName === 'size') setShowSizeMenu(true)
       if (menuName === 'align') setShowAlignMenu(true)
+      if (menuName === 'audioVolume') setShowAudioVolume(true)
       onSubmenuChange?.(menuName)
     } else {
       onSubmenuChange?.(null)
@@ -203,6 +419,7 @@ function CanvasControls({
     setShowFontMenu(false)
     setShowSizeMenu(false)
     setShowAlignMenu(false)
+    setShowAudioVolume(false)
     onSubmenuChange?.(null)
   }, [selectedLayer?.id, selectedCanvas])
 
@@ -251,7 +468,7 @@ function CanvasControls({
 
   const handleLayerUpdate = (updates) => {
     if (onLayerUpdate) {
-      onLayerUpdate(updates)
+      onLayerUpdate(updates, selectedLayer?.id)
     }
   }
 
@@ -313,7 +530,7 @@ function CanvasControls({
   }
 
   // Get font size for text
-  const getFontSize = () => {
+  function getFontSize() {
     if (!selectedLayer || selectedLayer.type !== LAYER_TYPES.TEXT) return 16
     const baseFontSize = selectedLayer.data?.fontSize || 16
     const scale = selectedLayer.scaleX || 1
@@ -453,6 +670,13 @@ function CanvasControls({
     )
   }
 
+  if (!isMobileBottom && isMobileScreen) {
+    return null
+  }
+  if (isMobileBottom && !isMobileScreen) {
+    return null
+  }
+
   return (
     <div
       ref={containerRef}
@@ -506,6 +730,12 @@ function CanvasControls({
               className="flex items-center gap-3 px-3 h-full overflow-x-auto scrollbar-none"
               style={{ pointerEvents: 'auto' }}
             >
+
+        {/* ── Audio Block Controls — shown when audio block is selected (no layer/canvas) ── */}
+        {renderAudioControls()}
+
+        {/* ── Normal layer/canvas controls — hidden when audio block active ── */}
+        {(!selectedAudioBlock || selectedLayer || selectedCanvas) && <>
 
         {/* Canvas Background Color Picker - Specific UI */}
         {selectedCanvas && currentScene && (
@@ -579,34 +809,74 @@ function CanvasControls({
               </div>
             </DropdownMenu>
 
-            <DropdownMenu
-              trigger={
-                <button className={`h-8 px-2 rounded-[8px] text-xs transition-all flex items-center gap-2 outline-none min-w-[60px] ${theme === 'light'
-                  ? 'bg-gray-100 text-gray-900 border border-gray-200 hover:bg-gray-200'
-                  : 'bg-white/5 text-white/90 border border-white/5 hover:bg-white/10'}`}>
-                  <span className="flex-1 text-left font-medium">{getFontSize()}</span>
-                  <ChevronDown className="h-3.5 w-3.5 opacity-60" strokeWidth={2} />
-                </button>
-              }
-            >
-              <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
-                {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
-                  <DropdownMenuItem
-                    key={size}
-                    onClick={() => {
-                      const newSize = parseInt(size, 10)
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={localFontSize}
+                onChange={(e) => setLocalFontSize(e.target.value)}
+                onFocus={handleInputFocus}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = parseInt(localFontSize, 10)
+                    if (!isNaN(val) && val > 0) {
                       handleLayerUpdate({
-                        data: { ...selectedLayer.data, fontSize: newSize },
+                        data: { ...selectedLayer.data, fontSize: val },
                         scaleX: 1,
                         scaleY: 1
                       })
-                    }}
-                  >
-                    {size}
-                  </DropdownMenuItem>
-                ))}
-              </div>
-            </DropdownMenu>
+                      e.currentTarget.blur()
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  if (globalBlurListenerRef.current) {
+                    document.removeEventListener('pointerdown', globalBlurListenerRef.current, true)
+                    globalBlurListenerRef.current = null
+                  }
+                  const val = parseInt(localFontSize, 10)
+                  if (!isNaN(val) && val > 0) {
+                    handleLayerUpdate({
+                      data: { ...selectedLayer.data, fontSize: val },
+                      scaleX: 1,
+                      scaleY: 1
+                    })
+                  } else {
+                    setLocalFontSize(currentFontSize.toString())
+                  }
+                }}
+                className={`font-size-input w-12 h-8 px-1.5 rounded-l-[8px] text-xs font-medium outline-none text-center border-y border-l transition-all ${theme === 'light'
+                  ? 'bg-gray-100 text-gray-900 border-gray-200 focus:border-purple-500/50 focus:bg-white'
+                  : 'bg-white/5 text-white/90 border-white/5 focus:border-purple-500/50 focus:bg-white/10'}`}
+                min="1"
+              />
+              <DropdownMenu
+                trigger={
+                  <button className={`h-8 px-1 rounded-r-[8px] transition-all flex items-center justify-center outline-none border-y border-r ${theme === 'light'
+                    ? 'bg-gray-100 text-gray-900 border-gray-200 hover:bg-gray-200'
+                    : 'bg-white/5 text-white/90 border-white/5 hover:bg-white/10'}`}>
+                    <ChevronDown className="h-3 w-3 opacity-60" strokeWidth={2} />
+                  </button>
+                }
+              >
+                <div className="max-h-[300px] overflow-y-auto py-1 scrollbar-hide">
+                  {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map(size => (
+                    <DropdownMenuItem
+                      key={size}
+                      onClick={() => {
+                        const newSize = parseInt(size, 10)
+                        handleLayerUpdate({
+                          data: { ...selectedLayer.data, fontSize: newSize },
+                          scaleX: 1,
+                          scaleY: 1
+                        })
+                      }}
+                    >
+                      {size}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenu>
+            </div>
 
             <DropdownMenu
               trigger={
@@ -1130,6 +1400,7 @@ function CanvasControls({
             )}
           </button>
         )}
+        </> /* end normal controls conditional */}
 
             </div>
             </div>
@@ -1159,6 +1430,12 @@ function CanvasControls({
             className="flex items-center justify-center gap-3 px-2 h-full overflow-x-auto scrollbar-none flex-1 min-w-0"
             style={{ pointerEvents: 'auto' }}
           >
+
+        {/* ── Audio Block Controls — shown when audio block is selected (no layer/canvas) ── */}
+        {renderAudioControls()}
+
+        {/* ── Normal layer/canvas controls — hidden when audio block active ── */}
+        {(!selectedAudioBlock || selectedLayer || selectedCanvas) && <>
 
         {/* Canvas Background Color Picker - Specific UI */}
         {selectedCanvas && currentScene && (
@@ -1448,6 +1725,72 @@ function CanvasControls({
           </button>
         )}
 
+        {/* Mobile Layer/Scene Duplicate & Delete buttons */}
+        {selectedLayer && selectedLayer.type !== 'background' && (
+          <div className={`w-px h-5 flex-shrink-0 ${theme === 'light' ? 'bg-black/10' : 'bg-white/10'}`} />
+        )}
+
+        {selectedLayer && (
+          <button
+            onClick={() => {
+              dispatch(duplicateLayer(selectedLayer.id))
+            }}
+            className={`h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center border flex-shrink-0 ${theme === 'light'
+              ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+              : 'text-white hover:bg-white/10 active:bg-white/15 border-transparent hover:border-white/10'}`}
+            title="Duplicate Layer"
+          >
+            <Copy className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+          </button>
+        )}
+
+        {selectedLayer && selectedLayer.type !== 'background' && (
+          <button
+            onClick={() => {
+              dispatch(deleteLayer(selectedLayer.id))
+              dispatch(clearLayerSelection())
+            }}
+            className={`h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center border flex-shrink-0 ${theme === 'light'
+              ? 'text-red-500 hover:bg-red-50 active:bg-red-100 border-transparent hover:border-red-200'
+              : 'text-red-400 hover:bg-red-500/15 active:bg-red-500/25 border-transparent hover:border-red-500/25'}`}
+            title="Delete Layer"
+          >
+            <Trash2 className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+          </button>
+        )}
+
+        {(!selectedAudioBlock && !selectedLayer && currentScene) && (
+          <>
+            <button
+              onClick={() => {
+                dispatch(copyScene(currentScene.id))
+                dispatch(pasteScene())
+              }}
+              className={`h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center border flex-shrink-0 ${theme === 'light'
+                ? 'text-gray-700 hover:bg-gray-100 active:bg-gray-200 border-transparent hover:border-gray-200'
+                : 'text-white hover:bg-white/10 active:bg-white/15 border-transparent hover:border-white/10'}`}
+              title="Duplicate Scene"
+            >
+              <Copy className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+            </button>
+
+            {!selectedCanvas && scenes.length > 1 && (
+              <button
+                onClick={() => {
+                  dispatch(deleteScene(currentScene.id))
+                }}
+                className={`h-8 px-2 rounded-[8px] transition-colors flex items-center justify-center border flex-shrink-0 ${theme === 'light'
+                  ? 'text-red-500 hover:bg-red-50 active:bg-red-100 border-transparent hover:border-red-200'
+                  : 'text-red-400 hover:bg-red-500/15 active:bg-red-500/25 border-transparent hover:border-red-500/25'}`}
+                title="Delete Scene"
+              >
+                <Trash2 className="h-4 w-4 flex-shrink-0 opacity-70" strokeWidth={2} />
+              </button>
+            )}
+          </>
+        )}
+
+          </>}{/* end normal controls */}
           </div>{/* end scrollable */}
           </div>
           )}{/* end left section */}
@@ -1925,7 +2268,50 @@ function CanvasControls({
             pointerEvents: 'auto'
           }}
         >
-          <span className={`text-[10px] uppercase font-bold tracking-wider select-none shrink-0 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Size</span>
+          <div className="flex items-center gap-1.5 shrink-0 select-none">
+            <span className={`text-[10px] uppercase font-bold tracking-wider ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Size</span>
+            <input
+              type="number"
+              value={localFontSize}
+              onChange={(e) => setLocalFontSize(e.target.value)}
+              onFocus={handleInputFocus}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = parseInt(localFontSize, 10)
+                  if (!isNaN(val) && val > 0) {
+                    handleLayerUpdate({
+                      data: { ...selectedLayer.data, fontSize: val },
+                      scaleX: 1,
+                      scaleY: 1
+                    })
+                    e.currentTarget.blur()
+                  }
+                }
+              }}
+              onBlur={() => {
+                if (globalBlurListenerRef.current) {
+                  document.removeEventListener('pointerdown', globalBlurListenerRef.current, true)
+                  globalBlurListenerRef.current = null
+                }
+                const val = parseInt(localFontSize, 10)
+                if (!isNaN(val) && val > 0) {
+                  handleLayerUpdate({
+                    data: { ...selectedLayer.data, fontSize: val },
+                    scaleX: 1,
+                    scaleY: 1
+                  })
+                } else {
+                  setLocalFontSize(currentFontSize.toString())
+                }
+              }}
+              className={`font-size-input w-12 h-7 px-1 rounded-lg text-xs font-mono font-bold text-center border focus:outline-none focus:border-purple-500/50 ${
+                theme === 'light' 
+                  ? 'bg-gray-100 border-gray-200 text-gray-900 focus:bg-white' 
+                  : 'bg-white/5 border-white/10 text-white focus:bg-white/10'
+              }`}
+              min="1"
+            />
+          </div>
           
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none grow px-2 py-1">
             {[8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120].map((size) => {
@@ -2088,6 +2474,67 @@ function CanvasControls({
               hide
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Audio Volume Sub-tab (Modal) — mobile only */}
+      {showAudioVolume && selectedAudioBlock && isMobileBottom && (
+        <div
+          className="absolute bottom-full mb-3 left-4 right-4 h-12 flex items-center justify-between gap-3 px-4 rounded-xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          style={{
+            backgroundColor: 'var(--editor-panel-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid var(--editor-panel-border)',
+            boxShadow: 'var(--editor-panel-shadow)',
+            pointerEvents: 'auto'
+          }}
+        >
+          <button
+            onClick={() => {
+              const newMuted = !audioMuted
+              setAudioMuted(newMuted)
+              onAudioBlockUpdate?.({ id: selectedAudioBlock.id, muted: newMuted })
+            }}
+            className={`p-1 rounded transition-colors ${
+              theme === 'light' ? 'hover:bg-black/5 text-gray-700' : 'hover:bg-white/10 text-white'
+            }`}
+            title={audioMuted ? 'Unmute' : 'Mute'}
+          >
+            {audioMuted ? (
+              <VolumeX className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <Volume2 className="h-4 w-4" strokeWidth={2} />
+            )}
+          </button>
+
+          <Slider.Root
+            className="relative flex items-center select-none touch-none grow h-5"
+            value={[audioMuted ? 0 : Math.round(audioVolume * 100)]}
+            onValueChange={(value) => {
+              const v = value[0] / 100
+              setAudioVolume(v)
+              onAudioBlockUpdate?.({ id: selectedAudioBlock.id, volume: v, muted: v === 0 })
+              if (v > 0 && audioMuted) {
+                setAudioMuted(false)
+              } else if (v === 0 && !audioMuted) {
+                setAudioMuted(true)
+              }
+            }}
+            min={0} max={100} step={1}
+          >
+            <Slider.Track className={`${theme === 'light' ? 'bg-gray-200' : 'bg-white/10'} relative grow rounded-full h-1`}>
+              <Slider.Range className="absolute bg-[#7c4af0] rounded-full h-full" />
+            </Slider.Track>
+            <Slider.Thumb className={`block w-4 h-4 rounded-full transition-all focus:outline-none cursor-pointer ${theme === 'light' ? 'bg-white border-2 border-[#7c4af0] shadow-sm' : 'bg-white shadow-md hover:scale-110'}`} aria-label="Audio Volume" />
+          </Slider.Root>
+          <span className={`text-xs font-mono min-w-[32px] text-right shrink-0 ${theme === 'light' ? 'text-gray-700' : 'text-white'}`}>
+            {audioMuted ? '0%' : `${Math.round(audioVolume * 100)}%`}
+          </span>
+          <button
+            onClick={() => { setShowAudioVolume(false); onSubmenuChange?.(null) }}
+            className={`p-1 rounded-md transition-colors shrink-0 ${theme === 'light' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-white/10 text-white/40'}`}
+          ><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
 

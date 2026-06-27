@@ -86,6 +86,56 @@ function getVideoDimensions(file) {
   })
 }
 
+/**
+ * Extract duration and waveform data from an audio file before uploading.
+ * Uses the Web Audio API (no external library).
+ * Returns { duration, waveform: Float32Array→Array of 100 amplitude samples }
+ */
+function getAudioMetadata(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const cleanup = () => URL.revokeObjectURL(url)
+
+    fetch(url)
+      .then(r => r.arrayBuffer())
+      .then(buf => {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)()
+        return ctx.decodeAudioData(buf).then(decoded => {
+          const duration = decoded.duration
+
+          // Downsample channel 0 to 100 amplitude points for waveform display
+          const channel = decoded.getChannelData(0)
+          const sampleCount = 100
+          const blockSize = Math.floor(channel.length / sampleCount)
+          const waveform = []
+          let maxVal = 0
+          for (let i = 0; i < sampleCount; i++) {
+            let sum = 0
+            for (let j = 0; j < blockSize; j++) {
+              sum += Math.abs(channel[i * blockSize + j])
+            }
+            const avg = sum / blockSize
+            if (avg > maxVal) maxVal = avg
+            waveform.push(avg)
+          }
+
+          // Normalize waveform array to [0.0, 1.0] range
+          const normalizedWaveform = maxVal > 0
+            ? waveform.map(v => Math.min(1, v / maxVal))
+            : waveform
+
+          ctx.close().catch(() => {})
+          cleanup()
+          resolve({ duration, waveform: normalizedWaveform })
+        })
+      })
+      .catch(() => {
+        cleanup()
+        resolve({ duration: 0, waveform: [] })
+      })
+  })
+}
+
 export const uploadFile = createAsyncThunk(
   'uploads/upload',
   async ({ tempId, file, isPublic = true, assetType = 'image' }, { dispatch, rejectWithValue }) => {
@@ -118,6 +168,9 @@ export const uploadFile = createAsyncThunk(
         })
       } else if (file.type.startsWith('video/')) {
         dimensions = await getVideoDimensions(file)
+      } else if (file.type.startsWith('audio/')) {
+        const audioMeta = await getAudioMetadata(file)
+        dimensions = { width: 0, height: 0, duration: audioMeta.duration, waveform: audioMeta.waveform }
       }
 
       formData.append('metadata', JSON.stringify(dimensions))
@@ -233,7 +286,7 @@ const initialState = {
 function normalizeAsset(item) {
   // Use metadata.mimeType from backend if available, fall back to type field
   const mimeType = item.metadata?.mimeType ||
-    (item.type === 'video' ? 'video/mp4' : 'image/jpeg')
+    (item.type === 'video' ? 'video/mp4' : item.type === 'audio' ? 'audio/mpeg' : 'image/jpeg')
 
   return {
     id: item._id,
@@ -421,6 +474,16 @@ export const selectIconCount = createSelector(
 export const selectVideoCount = createSelector(
   [selectUploadedImagesArray],
   (images) => images.filter(img => img.metadata?.type?.startsWith('video/') || img.type === 'video').length
+)
+
+export const selectAudioCount = createSelector(
+  [selectUploadedImagesArray],
+  (images) => images.filter(img => img.metadata?.type?.startsWith('audio/') || img.assetType === 'audio').length
+)
+
+export const selectAudioAssetsArray = createSelector(
+  [selectUploadedImagesArray],
+  (images) => images.filter(img => img.metadata?.type?.startsWith('audio/') || img.assetType === 'audio')
 )
 
 export const selectTotalCount = createSelector(

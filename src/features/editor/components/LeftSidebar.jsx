@@ -10,6 +10,7 @@ import {
   Image,
   Zap,
   Frame,
+  Music,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'

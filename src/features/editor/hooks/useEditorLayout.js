@@ -103,7 +103,7 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
   }, [customBottomHeight])
 
   useEffect(() => {
-    setMinBottomHeight(200)
+    setMinBottomHeight(218)
 
     const handleResize = () => {
       setTimeout(() => centerCanvas(), 150)
@@ -167,7 +167,40 @@ export function useEditorLayout({ aspectRatio, selectedLayerIds }) {
   }, [centerCanvas])
 
   const handleBottomResizeMouseDown = useCallback((event) => {
-    // Resizing disabled as per user request
+    event.preventDefault()
+    setIsResizingBottom(true)
+    isResizingBottomRef.current = true
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+
+    const handleMouseMove = (e) => {
+      if (!isResizingBottomRef.current) return
+      const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY)
+      if (clientY === undefined) return
+
+      const newHeight = window.innerHeight - clientY
+      const minHeight = 218
+      const maxHeight = window.innerHeight * 0.6
+
+      const clampedHeight = Math.max(minHeight, Math.min(newHeight, maxHeight))
+      setCustomBottomHeight(clampedHeight)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizingBottom(false)
+      isResizingBottomRef.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('touchmove', handleMouseMove)
+      window.removeEventListener('touchend', handleMouseUp)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('touchmove', handleMouseMove, { passive: true })
+    window.addEventListener('touchend', handleMouseUp)
   }, [])
 
   return {

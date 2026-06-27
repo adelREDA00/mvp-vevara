@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
-import { selectProjectTimelineInfo, setCurrentScene, selectCurrentSceneId } from '../../../store/slices/projectSlice'
+import { selectProjectTimelineInfo, setCurrentScene, selectCurrentSceneId, selectTotalProjectDuration } from '../../../store/slices/projectSlice'
 
 export function useEditorPlayback(scenes) {
   const dispatch = useDispatch()
@@ -19,10 +19,7 @@ export function useEditorPlayback(scenes) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [segments, setSegments] = useState([])
 
-  const totalTime = useMemo(() => {
-    if (!timelineInfo || timelineInfo.length === 0) return 0
-    return timelineInfo[timelineInfo.length - 1].endTime
-  }, [timelineInfo])
+  const totalTime = useSelector(selectTotalProjectDuration)
 
   const formatTime = useCallback((seconds) => {
     const mins = Math.floor(seconds / 60)
@@ -112,12 +109,24 @@ export function useEditorPlayback(scenes) {
       if (playheadTime < timelineInfo[0].startTime) {
         activeScene = timelineInfo[0]
       } else {
-        activeScene = timelineInfo[timelineInfo.length - 1]
+        const lastScene = timelineInfo[timelineInfo.length - 1]
+        // If playheadTime is beyond the last scene's endTime (audio-only section), set activeScene to null
+        if (playheadTime >= lastScene.endTime - 0.002) {
+          activeScene = null
+        } else {
+          activeScene = lastScene
+        }
       }
     }
 
-    if (activeScene && activeScene.id !== currentSceneId) {
-      dispatch(setCurrentScene(activeScene.id))
+    if (activeScene) {
+      if (activeScene.id !== currentSceneId) {
+        dispatch(setCurrentScene(activeScene.id))
+      }
+    } else {
+      if (currentSceneId !== null) {
+        dispatch(setCurrentScene(null))
+      }
     }
   }, [playheadTime, timelineInfo, currentSceneId, dispatch])
 

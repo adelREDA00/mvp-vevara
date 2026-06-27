@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2, Globe, Lock, Smile } from 'lucide-react'
+import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2, Globe, Lock, Smile, Music } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
 import { AssetCard } from './AssetCard'
 import {
@@ -13,6 +13,7 @@ import {
   selectImageCount,
   selectIconCount,
   selectVideoCount,
+  selectAudioCount,
   selectTotalCount,
   uploadFile,
   startBatchUpload,
@@ -27,7 +28,7 @@ import {
   cancelUpload,
 } from '../../../store/slices/uploadsSlice'
 
-import { addLayerAndSelect, selectCurrentSceneId, selectLayers, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
+import { addLayerAndSelect, addAudioTrack, selectCurrentSceneId, selectLayers, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 import Modal from './Modal'
 import { assetCacheWarmer } from '../../engine/pixi/textureUtils'
 
@@ -81,6 +82,62 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const [assetType, setAssetType] = useState('image')
   const fileInputRef = useRef(null)
 
+  // Audio preview state
+  const [playingTrackId, setPlayingTrackId] = useState(null)
+  const previewAudioRef = useRef(null)
+  const previewTimeoutRef = useRef(null)
+
+  const stopPreview = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause()
+      previewAudioRef.current = null
+    }
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current)
+      previewTimeoutRef.current = null
+    }
+    setPlayingTrackId(null)
+  }, [])
+
+  const handlePlayPause = useCallback((track, e) => {
+    if (e && e.stopPropagation) e.stopPropagation()
+    if (playingTrackId === track.id) {
+      stopPreview()
+    } else {
+      stopPreview()
+      const audioUrl = track.url || track.src
+      if (!audioUrl) return
+      const audio = new Audio(audioUrl)
+      audio.volume = 0.5
+      previewAudioRef.current = audio
+      setPlayingTrackId(track.id)
+      audio.play().catch(err => console.warn('Preview failed', err))
+
+      audio.onended = () => {
+        stopPreview()
+      }
+
+      // Stop after 7 seconds (5-8 seconds requirement)
+      previewTimeoutRef.current = setTimeout(() => {
+        stopPreview()
+      }, 7000)
+    }
+  }, [playingTrackId, stopPreview])
+
+  // Stop preview when clicking anywhere else
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      if (!e.target.closest('[data-audio-preview-btn]')) {
+        stopPreview()
+      }
+    }
+    document.addEventListener('click', handleGlobalClick, { capture: true })
+    return () => {
+      document.removeEventListener('click', handleGlobalClick, { capture: true })
+      stopPreview()
+    }
+  }, [stopPreview])
+
   const uploadedImages = useSelector(selectUploadedImagesArray)
   const isUploading = useSelector(selectIsUploading)
   const isFetching = useSelector(selectIsFetching)
@@ -91,6 +148,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const imageCount = useSelector(selectImageCount)
   const iconCount = useSelector(selectIconCount)
   const videoCount = useSelector(selectVideoCount)
+  const audioCount = useSelector(selectAudioCount)
   const hasLargeUpload = useSelector(selectHasLargeUpload)
   const uploadProgress = useSelector(selectUploadProgress)
   const uploadQueue = useSelector(selectUploadQueueArray)
@@ -136,10 +194,16 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const filteredImages = useMemo(() => {
     if (!uploadedImages.length) return []
     return uploadedImages.filter(image => {
+      const isAudio = image.metadata?.type?.startsWith('audio/') || image.assetType === 'audio'
+      const isVideo = image.metadata?.type?.startsWith('video/')
+      const isIcon = image.assetType === 'icon'
+      const isImage = !isAudio && !isVideo && !isIcon
+
       const matchesTab = activeTab === 'All' ||
-        (activeTab === 'Images' && (image.assetType === 'image' || !image.assetType)) ||
-        (activeTab === 'Icons' && image.assetType === 'icon') ||
-        (activeTab === 'Videos' && image.metadata?.type?.startsWith('video/'))
+        (activeTab === 'Images' && isImage) ||
+        (activeTab === 'Icons' && isIcon) ||
+        (activeTab === 'Audio' && isAudio) ||
+        (activeTab === 'Videos' && isVideo)
       return matchesTab
     })
   }, [uploadedImages, activeTab])
@@ -148,8 +212,9 @@ function UploadsPanel({ onClose, aspectRatio }) {
     // Filter queue items based on tab
     const filteredQueue = uploadQueue.filter(item => {
       const matchesTab = activeTab === 'All' ||
-        (activeTab === 'Images' && item.type?.startsWith('image/')) || // Note: queue items don't have assetType yet, default to image
-        (activeTab === 'Icons' && false) || // Queue doesn't support icon filtering yet as it's set on startBatch
+        (activeTab === 'Images' && item.type?.startsWith('image/')) ||
+        (activeTab === 'Icons' && false) || // Queue doesn't support icon filtering yet
+        (activeTab === 'Audio' && item.type?.startsWith('audio/')) ||
         (activeTab === 'Videos' && item.type?.startsWith('video/'))
       return matchesTab
     })
@@ -244,6 +309,19 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const handleRetryFetch = () => { dispatch(clearFetchError()); dispatch(fetchUploads()) }
 
   const handleAddImageLayer = useCallback((image) => {
+    // Audio assets: dispatch addAudioTrack instead of adding a canvas layer
+    const isAudio = image.metadata?.type?.startsWith('audio/') || image.assetType === 'audio'
+    if (isAudio) {
+      dispatch(addAudioTrack({
+        assetId: image.id,
+        assetUrl: image.url,
+        name: image.name || 'Audio',
+        duration: image.metadata?.duration || 0,
+        waveform: image.metadata?.waveform || [],
+      }))
+      return
+    }
+
     if (!currentSceneId) return
     const imageWidth = image.metadata?.width || 300
     const imageHeight = image.metadata?.height || 200
@@ -378,7 +456,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
                 Delete Selected ({selectedIds.length})
                 </button>
             )}
-            <input ref={fileInputRef} type="file" multiple accept="image/*,video/*" onChange={handleFileInputChange} className="hidden" />
+            <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*" onChange={handleFileInputChange} className="hidden" />
           </div>
         ) : (
           <div className={`py-8 px-5 text-center rounded-[20px] border mb-2 shadow-small ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/5'}`}>
@@ -428,13 +506,17 @@ function UploadsPanel({ onClose, aspectRatio }) {
           )}
 
           <div className={`flex border-b px-6 ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-            {['All', 'Images', 'Icons', 'Videos'].map(tab => (
+            {/* Role-based tabs: designers see Icons tab; normal users see Audio tab instead */}
+            {(isDesigner
+              ? ['All', 'Images', 'Icons', 'Audio', 'Videos']
+              : ['All', 'Images', 'Audio', 'Videos']
+            ).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
               >
-                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : videoCount}</span>
+                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : tab === 'Audio' ? audioCount : videoCount}</span>
                 {activeTab === tab && (
                   <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
                 )}
@@ -505,6 +587,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
                     deletingId={deletingId}
                     onDelete={handleDeleteImage}
                     onAdd={handleAddImageLayer}
+                    isPlaying={playingTrackId === image.id}
+                    onPlayPause={handlePlayPause}
                   />
                 ))}
               </div>

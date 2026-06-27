@@ -153,6 +153,7 @@ export default function ExportPage() {
               scenes: project.data.scenes || [],
               layers: project.data.layers || {},
               sceneMotionFlows: project.data.sceneMotionFlows || {},
+              audioTracks: project.data.audioTracks || [],
               aspectRatio: project.data.aspectRatio || '16:9',
             })
             setLoading(false)
@@ -208,6 +209,7 @@ export default function ExportPage() {
           scenes: projectData.scenes,
           layers: projectData.layers,
           sceneMotionFlows: projectData.sceneMotionFlows,
+          audioTracks: projectData.audioTracks || [],
           timelineInfo,
           aspectRatio: projectData.aspectRatio || '16:9',
           resolution,

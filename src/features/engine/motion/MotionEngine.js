@@ -813,7 +813,19 @@ export class MotionEngine {
               //   - Backgrounds: baseLayer.data.color (0xRRGGBB numeric)
               //   - Shapes: baseLayer.data.fill ("#RRGGBB" string)
               //   - Text: baseLayer.data.color ("#RRGGBB" string)
-              if (startState.color != null) {
+              const hasColorAnimationInScene = steps.some(s => {
+                const actions = s.layerActions?.[layerId] || []
+                const hasCustomColorChange = actions.some(a => a.type === 'colorChange')
+                const preset = s.layerPresets?.[layerId]
+                let hasPresetColorChange = false
+                if (preset && PRESET_REGISTRY[preset.id]) {
+                  const presetActions = PRESET_REGISTRY[preset.id].getActions(startState, s.duration || stepDurationMs)
+                  hasPresetColorChange = presetActions.some(a => a.type === 'colorChange')
+                }
+                return hasCustomColorChange || hasPresetColorChange
+              })
+
+              if (hasColorAnimationInScene && startState.color != null) {
                 const baseRgb = hexToRgb(startState.color)
                 if (!pixiObject._animatedColorState || typeof pixiObject._animatedColorState !== 'object') {
                   pixiObject._animatedColorState = { r: baseRgb.r, g: baseRgb.g, b: baseRgb.b }
@@ -1183,8 +1195,10 @@ export class MotionEngine {
       }
     })
 
-    // Set total duration based on the last scene's end time
-    if (timelineInfo.length > 0) {
+    // Set total duration based on options.totalDuration or the last scene's end time
+    if (options.totalDuration !== undefined) {
+      this.setTotalDuration(options.totalDuration)
+    } else if (timelineInfo.length > 0) {
       const lastScene = timelineInfo[timelineInfo.length - 1]
       this.setTotalDuration(lastScene.endTime)
     }
@@ -1851,6 +1865,7 @@ export class MotionEngine {
       delete obj._animatedColorState
       delete obj._applyAnimatedColor
       delete obj._lastAppliedColor
+      delete obj._animatedFillColor
 
       // [TILT] Only clear the animation hook — do NOT destroy the PerspectiveMesh.
       // The mesh represents Redux base state and applyTransformInline (called by
@@ -2042,7 +2057,7 @@ export class MotionEngine {
     // syncTiltMesh.  For video layers, requestVideoFrameCallback marks the
     // texture dirty after a new video frame decodes, which triggers the
     // recapture on the next natural tick — we don't need to force it here.
-    this._syncTiltedLayers(false)
+    this._syncTiltedLayers(true)
 
     // [FLOW TEXT FIX] Ensure word wrapping calculates the latest layout synchronously
     this.refreshFlows()
@@ -2122,7 +2137,7 @@ export class MotionEngine {
     // [PERF] Non-forced sync — mesh corners are re-applied (CPU-only).
     // GPU RTT recaptures happen only when the video frame callback marks
     // the texture dirty (after a new frame decodes), not on every scrub event.
-    this._syncTiltedLayers(false)
+    this._syncTiltedLayers(true)
 
     // [PERF] Throttle text reflow during scrubbing (~150ms)
     if (!this._lastScrubFlowRefresh || now - this._lastScrubFlowRefresh > 150) {

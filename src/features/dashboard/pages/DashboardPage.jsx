@@ -425,10 +425,13 @@ const DashboardPage = () => {
             >
                 <div className="min-h-full bg-[var(--dashboard-bg)] rounded-[16px] md:rounded-[24px] border border-[var(--dashboard-border)] shadow-md dashboard-page-container flex flex-col relative">
                     {/* Updates Banner */}
-                    <div className="w-full bg-slate-900 dark:bg-slate-950 py-2.5 px-4 md:px-10 border-b border-slate-800 dark:border-slate-900 flex items-center justify-center z-20 rounded-t-[15px] md:rounded-t-[23px] text-white">
+                    <div className="w-full bg-pink-600 py-2.5 px-4 md:px-10 border-b border-pink-750 flex items-center justify-center z-20 rounded-t-[15px] md:rounded-t-[23px] text-white">
                         <div className="text-[11px] font-extrabold text-center tracking-wider uppercase flex items-center gap-2 justify-center">
-                            <span className="bg-emerald-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide">Update</span>
-                            <span className="opacity-90">new 2d tilt enging now live (2d persepcive titl is now imporved )</span>
+                            <span className="bg-white text-pink-600 text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide">Update</span>
+                            <span className="opacity-95 flex items-center gap-1.5">
+                                <Music size={11} strokeWidth={2.5} />
+                                <span>audio support is now live (you can add multiple audio tracks to your project)</span>
+                            </span>
                         </div>
                     </div>
 
@@ -811,10 +814,10 @@ const DashboardPage = () => {
                                     {[
                                         { label: "Transition between pages", done: true },
                                         { label: "Preset animation for text & elements", done: true },
+                                        { label: "Audio support", done: true, statusText: "Released (In Development to make it better)" },
                                         { label: "Templates system", done: false },
                                         { label: "Drag & drop ready motion videos for app walkthrough and launches", done: false },
                                         { label: "Color gradient support", done: false },
-                                        { label: "Audio support", done: false },
                                         { label: "Device mockups", done: false },
                                         { label: "Presentation mode", done: false }
                                     ].map((item, idx) => (
@@ -822,8 +825,8 @@ const DashboardPage = () => {
                                             {/* Dot on line */}
                                             <div className={`absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
                                                 item.done 
-                                                    ? 'bg-emerald-500 border-[var(--dashboard-bg)] text-white shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
-                                                    : 'bg-zinc-700 border-[var(--dashboard-bg)] text-zinc-400 dark:bg-zinc-800'
+                                                     ? 'bg-emerald-500 border-[var(--dashboard-bg)] text-white shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                                                     : 'bg-zinc-700 border-[var(--dashboard-bg)] text-zinc-400 dark:bg-zinc-800'
                                             }`}>
                                                 {item.done && (
                                                     <svg className="w-1.5 h-1.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}>
@@ -836,7 +839,7 @@ const DashboardPage = () => {
                                                     {item.label}
                                                 </p>
                                                 <span className={`text-[9px] font-extrabold uppercase tracking-wider mt-0.5 ${item.done ? 'text-emerald-500' : 'text-slate-500'}`}>
-                                                    {item.done ? 'Released' : 'Coming soon'}
+                                                    {item.statusText || (item.done ? 'Released' : 'Coming soon')}
                                                 </span>
                                             </div>
                                         </div>

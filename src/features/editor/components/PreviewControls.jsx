@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Play, Pause, X, Loader2 } from 'lucide-react'
+import { Play, Pause, X, Loader2, Volume2, VolumeX } from 'lucide-react'
 
 /**
  * PreviewControls — minimal, video-player-style overlay for Preview Mode.
@@ -26,12 +26,18 @@ function PreviewControls({
   isBuffering = false,
   currentTime = 0,
   totalTime = 0,
+  globalVolume = 1,
+  globalMuted = false,
   onPlayPause,
   onSeek,
   onExit,
+  onVolumeChange,
+  onMuteChange,
 }) {
   const trackRef = useRef(null)
+  const volumeContainerRef = useRef(null)
   const [isScrubbing, setIsScrubbing] = useState(false)
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [visible, setVisible] = useState(true)
   const idleTimerRef = useRef(null)
 
@@ -62,6 +68,17 @@ function PreviewControls({
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
     }
   }, [revealControls, scheduleHide])
+
+  // Close volume popover when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (volumeContainerRef.current && !volumeContainerRef.current.contains(e.target)) {
+        setShowVolumeSlider(false)
+      }
+    }
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
+  }, [])
 
   // Keep controls visible while actively scrubbing.
   useEffect(() => {
@@ -162,6 +179,66 @@ function PreviewControls({
           <span className="flex-shrink-0 text-[10px] sm:text-[11px] font-semibold tabular-nums text-white/70 w-9 text-left">
             {formatTime(totalTime)}
           </span>
+
+          {/* Separator */}
+          <div className="w-px h-4 bg-white/10 flex-shrink-0" />
+
+          {/* Volume Control */}
+          <div className="relative flex items-center flex-shrink-0" ref={volumeContainerRef}>
+            <button
+              onClick={() => setShowVolumeSlider(v => !v)}
+              className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 text-white transition-all active:scale-90"
+              title={globalMuted ? 'Unmute' : 'Mute'}
+              type="button"
+            >
+              {globalMuted ? (
+                <VolumeX className="h-4 w-4 text-red-400" />
+              ) : (
+                <Volume2 className="h-4 w-4 text-white" />
+              )}
+            </button>
+
+            {showVolumeSlider && (
+              <div
+                className="absolute bottom-full mb-3 right-0 rounded-xl p-2.5 flex flex-col items-center gap-2.5 bg-black/55 backdrop-blur-xl border border-white/10 shadow-[0_6px_30px_-12px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-bottom-2 duration-150"
+                style={{
+                  width: '36px',
+                  zIndex: 10000,
+                }}
+              >
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={globalMuted ? 0 : globalVolume}
+                  disabled={globalMuted}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    onVolumeChange?.(v)
+                    if (globalMuted && v > 0) onMuteChange?.(false)
+                  }}
+                  className="h-20 w-1.5 cursor-pointer accent-white"
+                  style={{
+                    writingMode: 'bt-lr',
+                    WebkitAppearance: 'slider-vertical',
+                  }}
+                />
+
+                <button
+                  onClick={() => onMuteChange?.(!globalMuted)}
+                  className="p-1 rounded hover:bg-white/10 text-white transition-colors"
+                  title={globalMuted ? 'Unmute' : 'Mute'}
+                >
+                  {globalMuted ? (
+                    <VolumeX className="h-4 w-4 text-red-400" strokeWidth={2} />
+                  ) : (
+                    <Volume2 className="h-4 w-4 text-white" strokeWidth={2} />
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>

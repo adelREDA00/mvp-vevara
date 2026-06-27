@@ -982,7 +982,7 @@ function MotionPanel({
             data-tutorial="add-moment-button"
             onClick={() => onStartMotionCapture?.()}
             className={`
-              w-full rounded-xl cursor-pointer border-2 border-dashed transition-all duration-200 overflow-hidden
+              w-full rounded-xl cursor-pointer border-2 border-solid transition-all duration-200 overflow-hidden
               flex items-center justify-center gap-2
               ${isLight
                 ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50 text-[#7c4af0] bg-[#7c4af0]/[0.02]'
@@ -1035,7 +1035,9 @@ function MotionPanel({
                 ? isLight
                   ? 'border-[#b89eff] bg-white shadow-sm'
                   : 'border-[#5a4b81] bg-white/[0.05] shadow-sm'
-                : 'border-transparent bg-white dark:bg-white/[0.02]'
+                : isLight
+                  ? 'border-transparent bg-white'
+                  : 'border-transparent bg-[#090a0d]'
               }`}>
               {/* Delete confirmation — consistent min-height, no layout shift */}
               {isConfirmingDelete ? (
@@ -1147,7 +1149,7 @@ function MotionPanel({
             [ONBOARDING] Elevated z-index so it stays above the dimmed overlay during Step 1. */}
         <div
           data-tutorial="add-moment-button"
-          className={`relative z-20 border-2 border-dashed rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'} ${isLight ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50' : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45'
+          className={`relative z-20 border-2 border-solid rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'} ${isLight ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50' : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45'
             }`}
           onClick={() => onStartMotionCapture?.()}
         >
@@ -1171,6 +1173,10 @@ function MotionPanel({
         const open = () => { setSelectedLayerId(layerId); setMotionModeState('element'); setExpandedFamilyKey(null); dispatch(setSelectedLayer(layerId)) }
         const color = layer?.data?.color || layer?.data?.fill || (isLight ? '#111827' : '#ffffff')
         const contrastBg = getContrastCardBg(color, isLight)
+        const hasPreset = !!step?.layerPresets?.[layerId]
+        const customCount = (step?.layerActions?.[layerId] || []).length
+        const totalAnimations = (hasPreset ? 1 : 0) + customCount
+
         return (
           <button key={layerId} onClick={open}
             className={`group w-full flex items-center gap-3 border rounded-lg cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
@@ -1183,7 +1189,13 @@ function MotionPanel({
             </div>
             <div className="min-w-0 flex-1">
               <h4 className={`font-medium truncate ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-200'}`}>{getLayerDisplayName(layer)}</h4>
-              <p className={`truncate ${isMobile ? 'text-[10px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Tap to animate</p>
+              {totalAnimations > 0 ? (
+                <p className={`truncate font-semibold ${isMobile ? 'text-[10px]' : 'text-xs'} text-[#7c4af0] dark:text-[#a78bfa]`}>
+                  {totalAnimations} animation action{totalAnimations > 1 ? 's' : ''}
+                </p>
+              ) : (
+                <p className={`truncate ${isMobile ? 'text-[10px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>Tap to animate</p>
+              )}
             </div>
             <ChevronRight className={`shrink-0 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isSelected ? 'text-[#7c4af0]' : (isLight ? 'text-slate-300 group-hover:text-slate-500' : 'text-zinc-600 group-hover:text-zinc-400')}`} />
           </button>
@@ -1345,7 +1357,7 @@ function MotionPanel({
                 }
 
                 return (
-                  <div key={fam.familyKey} className="snap-center shrink-0 w-[136px]">
+                  <div key={fam.familyKey} className="snap-center shrink-0 w-[100px]">
                     <PresetPreviewCard
                       preset={repPreset}
                       layer={previewLayer}
@@ -1656,7 +1668,7 @@ function MotionPanel({
                 }
 
                 return (
-                  <div key={actionType} className="snap-center shrink-0 w-[136px]">
+                  <div key={actionType} className="snap-center shrink-0 w-[100px]">
                     <div
                       onClick={handleRowClick}
                       className={`w-full aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-200 relative ${isAct
@@ -1781,16 +1793,31 @@ function MotionPanel({
         </div>
 
         {/* Exit element footer */}
-        <div className="flex-shrink-0">
+        <div className={`flex-shrink-0 border-t flex flex-col items-center ${
+          isMobile ? 'p-1.5 gap-1' : 'p-3 gap-2'
+        } ${
+          isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/[0.05] bg-[#0d0e12]/50'
+        }`}>
+          {/* Animated layers badge/chip */}
+          <div className={`rounded-full font-bold tracking-wide transition-all ${
+            isMobile ? 'px-2 py-0.5 text-[9px]' : 'px-2.5 py-1 text-[10px]'
+          } ${
+            isLight ? 'bg-slate-200/60 text-slate-500' : 'bg-zinc-800/60 text-zinc-400'
+          }`}>
+            Animating {sceneLayers.filter(l => step?.layerPresets?.[l.id] || (step?.layerActions?.[l.id] || []).length > 0).length} of {sceneLayers.length} layers
+          </div>
           <button
             onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
-            className={`w-full py-3 rounded-none text-[12px] font-bold flex items-center justify-center gap-2 border-t transition-all duration-150 ${isLight
-              ? 'bg-slate-250/70 border-slate-300 text-slate-700 hover:bg-slate-300/80 active:bg-slate-400/60'
-              : 'bg-zinc-800/80 border-white/[0.04] text-zinc-300 hover:bg-zinc-700 active:bg-zinc-650'
-              }`}
+            className={`w-full font-bold flex items-center justify-center gap-2 border-2 border-dashed border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${
+              isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
+            }`}
+            style={{
+              backgroundColor: 'rgb(228, 217, 249)',
+              color: '#7c4af0',
+            }}
           >
-            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2.5} />
-            Back to elements
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Add Element
           </button>
         </div>
       </div>
@@ -1902,7 +1929,7 @@ function MotionPanel({
                 data-tutorial="add-moment-button"
                 onClick={() => onStartMotionCapture?.()}
                 title="Add Moment"
-                className={`w-9 h-9 rounded-lg border-2 border-dashed flex items-center justify-center transition-colors shrink-0 ${isLight
+                className={`w-9 h-9 rounded-lg border-2 border-solid flex items-center justify-center transition-colors shrink-0 ${isLight
                   ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
                   : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#7c4af0]/45 hover:text-[#c084fc]'
                   }`}

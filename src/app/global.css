@@ -440,3 +440,41 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }
+
+/* Custom scrollbar for Timeline */
+.timeline-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(156, 163, 175, 0.3) transparent !important;
+}
+
+body.theme-light .timeline-scrollbar {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent !important;
+}
+
+.timeline-scrollbar::-webkit-scrollbar {
+  width: 5px !important;
+  height: 5px !important;
+  display: block !important;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.35) !important;
+  border-radius: 3px !important;
+  transition: background-color 0.2s ease !important;
+}
+
+body.theme-light .timeline-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.18) !important;
+}
+
+.timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.55) !important;
+}
+
+body.theme-light .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.35) !important;
+}

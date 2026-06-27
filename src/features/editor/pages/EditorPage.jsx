@@ -6,7 +6,7 @@ import { Link, useParams, useLocation } from 'react-router-dom'
 import { ADS_TEMPLATE, SAAS_TEMPLATE } from '../utils/practiceTemplates'
 import { Layers, FileText } from 'lucide-react'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack } from '../../../store/slices/projectSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { store } from '../../../store'
 import { gsap } from 'gsap'
@@ -56,6 +56,7 @@ import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
 import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
+import { useAudioPlayback } from '../hooks/useAudioPlayback'
 
 
 
@@ -87,9 +88,21 @@ function EditorPage() {
   const projectStatus = useSelector(state => state.project.status)
   const isDirty = useSelector(selectIsDirty)
   const projectVersion = useSelector(selectProjectVersion)
+  const audioTracks = useSelector(selectAudioTracks)
   const isSavingRedux = useSelector(selectIsSavingRedux)
   const [isSaving, setIsSaving] = useState(false)
   const timelineControlRef = useRef(null)
+  const [selectedAudioBlockId, setSelectedAudioBlockId] = useState(null)
+  const selectedAudioBlock = useMemo(() =>
+    audioTracks.find(t => t.id === selectedAudioBlockId) || null,
+    [audioTracks, selectedAudioBlockId]
+  )
+
+  useEffect(() => {
+    if (selectedLayerIds.length > 0 || selectedCanvas) {
+      setSelectedAudioBlockId(null)
+    }
+  }, [selectedLayerIds, selectedCanvas])
   const [isNavigating, setIsNavigating] = useState(false)
   const editingStepActionCount = useSelector(selectEditingStepActionCount)
   const aspectRatio = useSelector(selectAspectRatio)
@@ -262,6 +275,12 @@ function EditorPage() {
     handleToggleSegmentBypass,
   } = useEditorPlayback(scenes)
 
+  const [globalVolume, setGlobalVolume] = useState(1)
+  const [globalMuted, setGlobalMuted] = useState(false)
+
+  // ── In-editor audio playback (Web Audio API, zero new dependencies) ────────
+  useAudioPlayback({ audioTracks, isPlaying, playheadTime, globalVolume, globalMuted })
+
   // On exit from Preview Mode: pause playback (leaving preview should never keep
   // the editor "playing") and re-center/re-fit the canvas. The latter is needed
   // because Stage only recenters the viewport when the zoom *scale* changes — on
@@ -307,6 +326,8 @@ function EditorPage() {
     isResizingBottom,
     handleBottomResizeMouseDown,
   } = useEditorLayout({ aspectRatio, selectedLayerIds })
+
+  const [isHoveringHandle, setIsHoveringHandle] = useState(false)
 
   // Preload assets before showing editor to ensure smooth UX, especially for duplicated templates
   const [isPixiReady, setIsPixiReady] = useState(false)
@@ -789,6 +810,7 @@ function EditorPage() {
       scenes,
       layers,
       sceneMotionFlows,
+      audioTracks,
       aspectRatio: aspectRatio || '16:9'
     }
 
@@ -3031,6 +3053,7 @@ function EditorPage() {
    */
   const handleSelectStep = useCallback((stepId) => {
     if (!currentSceneId) return
+    setSelectedAudioBlockId(null)
 
     // If currently in capture mode, apply or cancel first
     if (isMotionCaptureActive) {
@@ -3995,10 +4018,17 @@ function EditorPage() {
         // Handle snap toggle
       }
 
-      // Delete/Backspace — Delete selected layer(s) or current scene
+      // Delete/Backspace — Delete selected layer(s), selected audio, or current scene
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isTyping) {
         e.preventDefault()
-        if (selectedLayerIds && selectedLayerIds.length > 0) {
+        if (selectedAudioBlockId) {
+          if (motionControls) {
+            motionControls.pauseAll()
+          }
+          setIsPlaying(false)
+          dispatch(deleteAudioTrack(selectedAudioBlockId))
+          setSelectedAudioBlockId(null)
+        } else if (selectedLayerIds && selectedLayerIds.length > 0) {
           // Delete all selected layers
           selectedLayerIds.forEach(layerId => {
             dispatch(deleteLayer(layerId))
@@ -4017,10 +4047,16 @@ function EditorPage() {
         handleSplitScene()
       }
 
-      // Cmd/Ctrl+C — Copy selected layers or current scene
+      // Cmd/Ctrl+C — Copy selected layers, selected audio track, or current scene
       if ((e.metaKey || e.ctrlKey) && e.key === 'c' && !isTyping) {
         e.preventDefault()
-        if (selectedLayerIds && selectedLayerIds.length > 0) {
+        if (selectedAudioBlockId) {
+          const block = audioTracks.find(t => t.id === selectedAudioBlockId)
+          if (block) {
+            localStorage.setItem('vevara_audio_clipboard', JSON.stringify(block))
+            localStorage.setItem('vevara_last_copied_type', 'audio')
+          }
+        } else if (selectedLayerIds && selectedLayerIds.length > 0) {
           // Copy selected layers
           dispatch(copyLayers(selectedLayerIds))
         } else if (currentSceneId) {
@@ -4029,13 +4065,21 @@ function EditorPage() {
         }
       }
 
-      // Cmd/Ctrl+V — Paste layers or scene
+      // Cmd/Ctrl+V — Paste layers, scene, or audio track
       if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !isTyping) {
         e.preventDefault()
 
         try {
           const lastCopiedType = localStorage.getItem('vevara_last_copied_type')
-          if (lastCopiedType === 'scene') {
+          if (lastCopiedType === 'audio') {
+            const copiedStr = localStorage.getItem('vevara_audio_clipboard')
+            if (copiedStr) {
+              const copiedTrack = JSON.parse(copiedStr)
+              const newId = crypto.randomUUID()
+              dispatch(pasteAudioTrack({ ...copiedTrack, id: newId }))
+              setSelectedAudioBlockId(newId)
+            }
+          } else if (lastCopiedType === 'scene') {
             dispatch(pasteScene())
           } else if (lastCopiedType === 'layers') {
             dispatch(pasteLayers())
@@ -4089,7 +4133,7 @@ function EditorPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isPlaying, showGrid, zoom, selectedLayerIds, currentSceneId, dispatch, playheadTime, totalTime, isMotionCaptureActive])
+  }, [isPlaying, showGrid, zoom, selectedLayerIds, currentSceneId, dispatch, playheadTime, totalTime, isMotionCaptureActive, selectedAudioBlockId, audioTracks])
 
   // Select pasted layers after paste
   useEffect(() => {
@@ -5382,6 +5426,15 @@ function EditorPage() {
                 currentScene={currentSceneData}
                 editingStepActionCount={editingStepActionCount}
                 isDoneEnabled={isDoneEnabled}
+                selectedAudioBlock={selectedAudioBlock}
+                onAudioBlockUpdate={({ id, ...updates }) => timelineControlRef.current?.updateBlock?.(id, updates)}
+                onAudioBlockDelete={(id) => {
+                  timelineControlRef.current?.deleteBlock?.(id)
+                  setSelectedAudioBlockId(null)
+                }}
+                onAudioBlockCut={(id) => {
+                  timelineControlRef.current?.cutBlock?.(id, playheadTime)
+                }}
                 onUndo={() => {
                   if (isMotionCaptureActive) captureUndoSyncRef.current = true
                   dispatch(undo())
@@ -5390,9 +5443,9 @@ function EditorPage() {
                   if (isMotionCaptureActive) captureUndoSyncRef.current = true
                   dispatch(redo())
                 }}
-                onLayerUpdate={(updates) => {
-                  if (selectedLayerIds[0]) {
-                    const layerId = selectedLayerIds[0]
+                onLayerUpdate={(updates, targetLayerId) => {
+                  const layerId = targetLayerId || selectedLayerIds[0]
+                  if (layerId) {
 
                     // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
                     // We do NOT dispatch updateLayer here because that pollutes the base layer state
@@ -5700,17 +5753,29 @@ function EditorPage() {
               WebkitBackdropFilter: 'blur(20px)',
               borderTop: 'none',
               paddingBottom: (isMobileMotionMinimized && isMotionCaptureActive) ? '48px' : 'env(safe-area-inset-bottom, 8px)',
-              height: 'auto',
-              maxHeight: '40vh',
+              height: customBottomHeight !== null ? `${bottomSectionHeight}px` : '218px',
+              maxHeight: customBottomHeight !== null ? `${bottomSectionHeight}px` : '218px',
               transition: isResizingBottom ? 'none' : 'height 0.3s ease, padding-bottom 0.22s ease'
             }}
           >
-            {/* Top border line */}
+            {/* Top border line & Resize Handle */}
             <div
-              className="absolute top-0 left-0 right-0 h-[1px]"
+              className="absolute top-0 left-0 right-0 h-[6px] -mt-[3px] cursor-ns-resize z-50 pointer-events-auto"
+              onMouseDown={handleBottomResizeMouseDown}
+              onTouchStart={handleBottomResizeMouseDown}
+              onMouseEnter={() => setIsHoveringHandle(true)}
+              onMouseLeave={() => setIsHoveringHandle(false)}
+            />
+            <div
+              className="absolute top-0 left-0 right-0 h-[1px] transition-all duration-150"
               style={{
                 top: '-1px',
-                backgroundColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'
+                background: (isResizingBottom || isHoveringHandle)
+                  ? (theme === 'light'
+                      ? 'linear-gradient(to right, rgba(0, 0, 0, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(0, 0, 0, 0.08) 100%)'
+                      : 'linear-gradient(to right, rgba(255, 255, 255, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(255, 255, 255, 0.08) 100%)')
+                  : (theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'),
+                pointerEvents: 'none'
               }}
             />
 
@@ -5721,26 +5786,26 @@ function EditorPage() {
               paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
             }}>
               {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
-              <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-visible ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
+              <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-hidden ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
                 minHeight: 0
               }}>
 
                 {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
                 <div
                   ref={scenesBarRef}
-                  className="pointer-events-auto flex-shrink-0"
+                  className="pointer-events-auto flex-1 timeline-scrollbar"
                   style={{
                     width: '100%',
                     minWidth: 0,
                     backgroundColor: 'transparent',
                     overflowX: 'auto',
-                    overflowY: 'visible',
+                    overflowY: 'auto',
                     WebkitOverflowScrolling: 'touch',
                     paddingBottom: '12px',
-                    paddingTop: '4px',
+                    paddingTop: '0px',
                     paddingLeft: '20px',
                     paddingRight: '20px',
-                    touchAction: 'pan-x',
+                    touchAction: 'auto',
                   }}
                 >
                   <ScenesBar
@@ -5760,12 +5825,22 @@ function EditorPage() {
                     onMotionPause={handleMotionPause}
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
                     onPlayheadInteractionDuringCapture={handlePlayheadInteractionDuringCapture}
+                    selectedAudioBlockId={selectedAudioBlockId}
+                    onSelectAudioBlock={(id) => {
+                      setSelectedAudioBlockId(id)
+                      if (id) {
+                        if (document.activeElement && document.activeElement.tagName !== 'BODY') {
+                          document.activeElement.blur()
+                        }
+                        dispatch(clearLayerSelection())
+                      }
+                    }}
                   />
                 </div>
               </div>
 
               {/* Zoom controls - fixed at bottom, outside scroll; minimal height */}
-              <div className="pointer-events-auto flex-shrink-0 hidden lg:grid grid-cols-3 items-center px-4 py-1.5" style={{ paddingBottom: 'max(6px, env(safe-area-inset-bottom, 0px))' }}>
+              <div className="pointer-events-auto flex-shrink-0 hidden lg:grid grid-cols-3 items-center px-4 py-1" style={{ paddingBottom: 'max(4px, env(safe-area-inset-bottom, 0px))' }}>
                 {/* Left side empty placeholder */}
                 <div></div>
 
@@ -5787,7 +5862,7 @@ function EditorPage() {
                       const newZoom = 10 * Math.pow(200 / 10, t)
                       setZoom(Math.max(10, Math.min(200, newZoom)))
                     }}
-                    className={`w-32 sm:w-36 lg:w-44 h-1.5 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 lg:[&::-webkit-slider-thumb]:w-[18px] lg:[&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 lg:[&::-moz-range-thumb]:w-[18px] lg:[&::-moz-range-thumb]:h-[18px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
+                    className={`w-32 sm:w-36 lg:w-44 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 lg:[&::-webkit-slider-thumb]:w-[15px] lg:[&::-webkit-slider-thumb]:h-[15px] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 lg:[&::-moz-range-thumb]:w-[15px] lg:[&::-moz-range-thumb]:h-[15px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
                   />
                   <span className={`text-xs lg:text-sm font-mono tabular-nums w-10 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
                     {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
@@ -5799,19 +5874,19 @@ function EditorPage() {
                   <span className={`text-xs lg:text-sm font-medium tracking-wide mr-1 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Timeline:</span>
                   <button
                     onClick={() => timelineControlRef.current?.zoomOut()}
-                    className={`p-2 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    className={`p-1.5 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
                     title="Zoom out timeline"
                     type="button"
                   >
-                    <ZoomOut className="h-[18px] w-[18px] lg:h-[19px] lg:w-[19px]" />
+                    <ZoomOut className="h-[16px] w-[16px] lg:h-[17px] lg:w-[17px]" />
                   </button>
                   <button
                     onClick={() => timelineControlRef.current?.zoomIn()}
-                    className={`p-2 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    className={`p-1.5 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
                     title="Zoom in timeline"
                     type="button"
                   >
-                    <ZoomIn className="h-[18px] w-[18px] lg:h-[19px] lg:w-[19px]" />
+                    <ZoomIn className="h-[16px] w-[16px] lg:h-[17px] lg:w-[17px]" />
                   </button>
                 </div>
               </div>
@@ -5829,6 +5904,15 @@ function EditorPage() {
                   currentScene={currentSceneData}
                   editingStepActionCount={editingStepActionCount}
                   isDoneEnabled={isDoneEnabled}
+                  selectedAudioBlock={selectedAudioBlock}
+                  onAudioBlockUpdate={({ id, ...updates }) => timelineControlRef.current?.updateBlock?.(id, updates)}
+                  onAudioBlockDelete={(id) => {
+                    timelineControlRef.current?.deleteBlock?.(id)
+                    setSelectedAudioBlockId(null)
+                  }}
+                  onAudioBlockCut={(id) => {
+                    timelineControlRef.current?.cutBlock?.(id, playheadTime)
+                  }}
                   onUndo={() => {
                     if (isMotionCaptureActive) captureUndoSyncRef.current = true
                     dispatch(undo())
@@ -5837,9 +5921,9 @@ function EditorPage() {
                     if (isMotionCaptureActive) captureUndoSyncRef.current = true
                     dispatch(redo())
                   }}
-                  onLayerUpdate={(updates) => {
-                    if (selectedLayerIds[0]) {
-                      const layerId = selectedLayerIds[0]
+                  onLayerUpdate={(updates, targetLayerId) => {
+                    const layerId = targetLayerId || selectedLayerIds[0]
+                    if (layerId) {
 
                       // [MOTION CAPTURE FIX] During capture, we ONLY update the capture session/action.
                       if (isMotionCaptureActive && effectiveMotionCaptureMode?.onPositionUpdate) {
@@ -5981,6 +6065,10 @@ function EditorPage() {
               isBuffering={motionControls?.isBuffering || false}
               currentTime={playheadTime}
               totalTime={totalTime}
+              globalVolume={globalVolume}
+              globalMuted={globalMuted}
+              onVolumeChange={setGlobalVolume}
+              onMuteChange={setGlobalMuted}
               onPlayPause={() => {
                 if (motionControls) {
                   if (isPlaying) {

@@ -154,7 +154,7 @@ function MobileMotionBar({
           <div
             data-tutorial="add-moment-button"
             onClick={onAddMoment}
-            className={`rounded-lg cursor-pointer border-2 border-dashed transition-all duration-200 overflow-hidden flex items-center justify-center gap-1.5 px-3 shadow-sm active:scale-[0.99] ${
+            className={`rounded-lg cursor-pointer border-2 border-solid transition-all duration-200 overflow-hidden flex items-center justify-center gap-1.5 px-3 shadow-sm active:scale-[0.99] ${
               isLight
                 ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50 text-[#7c4af0] bg-[#7c4af0]/[0.02]'
                 : 'border-[#a78bfa]/20 hover:border-[#a78bfa]/40 text-[#a78bfa] hover:text-[#c084fc] bg-white/[0.02]'
@@ -287,7 +287,7 @@ function MobileMotionBar({
               data-tutorial="add-moment-button"
               onClick={onAddMoment}
               style={{ scrollSnapAlign: 'start', minWidth: 120 }}
-              className={`shrink-0 flex items-center justify-center gap-1.5 cursor-pointer rounded-lg border-2 border-dashed transition-colors ${isTutorialStep1 ? 'relative z-20 pointer-events-auto' : ''} ${
+              className={`shrink-0 flex items-center justify-center gap-1.5 cursor-pointer rounded-lg border-2 border-solid transition-colors ${isTutorialStep1 ? 'relative z-20 pointer-events-auto' : ''} ${
                 isLight
                   ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:bg-slate-50'
                   : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#c084fc]/40 hover:bg-white/[0.02]'

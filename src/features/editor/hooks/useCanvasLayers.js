@@ -388,6 +388,40 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
   if (force) {
     if (layer.x !== undefined) displayObject.x = layer.x
     if (layer.y !== undefined) displayObject.y = layer.y
+
+    // Reset colors to base Redux values
+    if (layer.type === 'text') {
+      const reduxBaseTextColor = layer.data?.color || '#000000'
+      if (displayObject.isFlowText && typeof displayObject.updateColor === 'function') {
+        displayObject.updateColor(reduxBaseTextColor)
+      } else if (displayObject.style) {
+        displayObject.style.fill = reduxBaseTextColor
+      }
+      displayObject._lastReduxFillApplied = reduxBaseTextColor
+    } else if (layer.type === 'shape') {
+      const reduxBaseFill = layer.data?.fill || null
+      const currentWidth = layer.width || 100
+      const currentHeight = layer.height || 100
+      const liveShapeData = {
+        ...layer.data,
+        fill: reduxBaseFill
+      }
+      redrawShapeWithColors(displayObject, liveShapeData, currentWidth, currentHeight, layer.anchorX ?? 0.5, layer.anchorY ?? 0.5)
+      displayObject._storedFill = reduxBaseFill
+      displayObject._lastReduxFillApplied = reduxBaseFill
+    } else if (layer.type === 'background') {
+      const reduxBaseBgColor = layer.data?.color !== undefined ? layer.data.color : 0xffffff
+      const targetWidth = layer.width || displayObject._storedWidth || 1920
+      const targetHeight = layer.height || displayObject._storedHeight || 1080
+      const graphics = displayObject._backgroundGraphics
+      if (graphics) {
+        graphics.clear()
+        graphics.rect(0, 0, targetWidth, targetHeight)
+        graphics.fill(reduxBaseBgColor)
+      }
+      displayObject._storedColor = reduxBaseBgColor
+      displayObject._lastReduxBgColorApplied = reduxBaseBgColor
+    }
   } else if (!isDragging) {
     if (capturedLayer && capturedLayer.currentPosition && !isActuallyPlaying) {
       displayObject.x = capturedLayer.currentPosition.x
@@ -1563,6 +1597,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
           if (style.fontSize !== (layer.data.fontSize || 16)) {
             style.fontSize = layer.data.fontSize || 16
+            style.lineHeight = style.fontSize * 1.2
+            if (pixiObject.updateText) pixiObject.updateText(true)
             // Recalculate height on font size change
             calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
             markTiltTextureDirty(pixiObject)
