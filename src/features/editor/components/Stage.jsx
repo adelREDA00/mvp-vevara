@@ -1977,6 +1977,7 @@ function Stage({
           url: assetUrl,
           src: assetUrl,
           thumbnail: asset.thumbnail || null,
+          ...(asset.metadata || {}),
           ...(isVideo && asset.duration ? { duration: asset.duration } : {}),
         }
       }))

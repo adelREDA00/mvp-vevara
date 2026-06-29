@@ -107,7 +107,8 @@ export const AssetCard = React.memo(function AssetCard({
           thumbnail: image.metadata?.thumbnail || image.thumbnail || null,
           name: image.name,
           duration: image.metadata?.duration || 0,
-          waveform: image.metadata?.waveform || []
+          waveform: image.metadata?.waveform || [],
+          metadata: image.metadata || null
         }
       }
     }

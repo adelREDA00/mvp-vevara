@@ -667,7 +667,7 @@ const AudioBar = React.forwardRef(function AudioBar(
           assetId: asset.id,
           assetUrl: asset.url,
           name: asset.name || 'Audio',
-          duration: Math.min(asset.duration || 5, totalDuration),
+          duration: asset.duration || 0,
           waveform: asset.waveform || [],
           // By not passing rowIndex, we let the reducer use its existing insertion logic
         }))
@@ -683,7 +683,7 @@ const AudioBar = React.forwardRef(function AudioBar(
       window.removeEventListener('asset-drag-move', handleCustomDragMove)
       window.removeEventListener('asset-drag-drop', handleCustomDragDrop)
     }
-  }, [dispatch, audioTracks, totalDuration])
+  }, [dispatch, audioTracks])
 
   const audioTracksWithProgress = useMemo(() => {
     return audioTracks.map(track => {
