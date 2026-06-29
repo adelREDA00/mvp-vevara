@@ -815,7 +815,9 @@ function _createPlaceholder(layer, layerId) {
     g.stroke({ color: 0x7c4af0, width: 1.5, alpha: 0.40 })
     container.addChild(g)
 
-    const thumbnailUrl = layer.data?.thumbnail || layer.data?.metadata?.thumbnail
+    const thumbnailUrl = layer.data?.thumbnail || 
+      layer.data?.metadata?.thumbnail || 
+      (layer.type === 'image' ? (layer.data?.url || layer.data?.src) : null)
     if (thumbnailUrl) {
       try {
         const img = new Image()

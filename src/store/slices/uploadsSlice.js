@@ -87,6 +87,54 @@ function getVideoDimensions(file) {
 }
 
 /**
+ * Helper to extract dimensions and a highly compressed base64 thumbnail from an image file before uploading.
+ * Keeps thumbnails extremely small (max 200px, 0.6 quality) to optimize payload size.
+ */
+function getImageThumbnail(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const img = new window.Image()
+    const cleanup = () => {
+      URL.revokeObjectURL(url)
+    }
+
+    img.onload = () => {
+      const maxDim = 200
+      let w = img.width
+      let h = img.height
+      if (w > maxDim || h > maxDim) {
+        const scale = maxDim / Math.max(w, h)
+        w *= scale
+        h *= scale
+      }
+
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      canvas.width = w
+      canvas.height = h
+      ctx.drawImage(img, 0, 0, w, h)
+
+      const thumbnailDataUrl = canvas.toDataURL('image/jpeg', 0.6)
+      resolve({
+        width: img.width || 0,
+        height: img.height || 0,
+        duration: 0,
+        thumbnail: thumbnailDataUrl
+      })
+      cleanup()
+    }
+
+    img.onerror = () => {
+      resolve({ width: 0, height: 0, duration: 0 })
+      cleanup()
+    }
+
+    img.src = url
+  })
+}
+
+
+/**
  * Extract duration and waveform data from an audio file before uploading.
  * Uses the Web Audio API (no external library).
  * Returns { duration, waveform: Float32Array→Array of 100 amplitude samples }
@@ -153,19 +201,7 @@ export const uploadFile = createAsyncThunk(
       // Extract media dimensions before upload
       let dimensions = { width: 0, height: 0, duration: 0 }
       if (file.type.startsWith('image/')) {
-        const url = URL.createObjectURL(file)
-        const img = new window.Image()
-        dimensions = await new Promise((resolve) => {
-          img.onload = () => {
-            URL.revokeObjectURL(url)
-            resolve({ width: img.width, height: img.height, duration: 0 })
-          }
-          img.onerror = () => {
-            URL.revokeObjectURL(url)
-            resolve({ width: 0, height: 0, duration: 0 })
-          }
-          img.src = url
-        })
+        dimensions = await getImageThumbnail(file)
       } else if (file.type.startsWith('video/')) {
         dimensions = await getVideoDimensions(file)
       } else if (file.type.startsWith('audio/')) {
