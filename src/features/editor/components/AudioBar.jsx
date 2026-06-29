@@ -573,6 +573,118 @@ const AudioBar = React.forwardRef(function AudioBar(
   const uploadQueue = useSelector(state => state.uploads?.uploadQueue || {})
   const fileInputRef = useRef(null)
 
+  const tracksContainerRef = useRef(null)
+  const [draggedOverRow, setDraggedOverRow] = useState(null)
+  const lastHoveredRowRef = useRef(null)
+
+  useEffect(() => {
+    const handleCustomDragMove = (e) => {
+      const asset = window.activeDraggedAsset
+      if (!asset || asset.type !== 'audio') {
+        if (lastHoveredRowRef.current !== null) {
+          lastHoveredRowRef.current = null
+          setDraggedOverRow(null)
+        }
+        return
+      }
+
+      if (!tracksContainerRef.current) return
+
+      const rect = tracksContainerRef.current.getBoundingClientRect()
+      const { x, y } = e.detail
+
+      // Check if pointer is over sidebar/panel
+      const elem = document.elementFromPoint(x, y)
+      if (elem && (
+        elem.closest('.editor-panel-container') || 
+        elem.closest('[class*="Sidebar"]') || 
+        elem.closest('[class*="sidebar"]') ||
+        elem.closest('[data-panel]') ||
+        elem.closest('.left-sidebar')
+      )) {
+        if (lastHoveredRowRef.current !== null) {
+          lastHoveredRowRef.current = null
+          setDraggedOverRow(null)
+        }
+        return
+      }
+
+      const isOver = 
+        x >= rect.left && 
+        x <= rect.right && 
+        y >= rect.top - 10 && 
+        y <= rect.bottom + 10
+
+      if (isOver) {
+        // Find the lowest rowIndex not currently occupied (matches existing projectSlice logic)
+        const usedRows = new Set(audioTracks.map(t => t.rowIndex ?? 0))
+        let targetRowIndex = 0
+        while (usedRows.has(targetRowIndex)) targetRowIndex++
+
+        if (targetRowIndex !== lastHoveredRowRef.current) {
+          lastHoveredRowRef.current = targetRowIndex
+          setDraggedOverRow(targetRowIndex)
+        }
+      } else {
+        if (lastHoveredRowRef.current !== null) {
+          lastHoveredRowRef.current = null
+          setDraggedOverRow(null)
+        }
+      }
+    }
+
+    const handleCustomDragDrop = (e) => {
+      const asset = window.activeDraggedAsset
+      if (!asset || asset.type !== 'audio') return
+
+      if (!tracksContainerRef.current) return
+
+      const rect = tracksContainerRef.current.getBoundingClientRect()
+      const { x, y } = e.detail
+
+      // Check if dropped inside a sidebar or panel container
+      const elem = document.elementFromPoint(x, y)
+      if (elem && (
+        elem.closest('.editor-panel-container') || 
+        elem.closest('[class*="Sidebar"]') || 
+        elem.closest('[class*="sidebar"]') ||
+        elem.closest('[data-panel]') ||
+        elem.closest('.left-sidebar')
+      )) {
+        lastHoveredRowRef.current = null
+        setDraggedOverRow(null)
+        return
+      }
+
+      const isOver = 
+        x >= rect.left && 
+        x <= rect.right && 
+        y >= rect.top - 10 && 
+        y <= rect.bottom + 10
+
+      if (isOver) {
+        dispatch(addAudioTrack({
+          assetId: asset.id,
+          assetUrl: asset.url,
+          name: asset.name || 'Audio',
+          duration: Math.min(asset.duration || 5, totalDuration),
+          waveform: asset.waveform || [],
+          // By not passing rowIndex, we let the reducer use its existing insertion logic
+        }))
+      }
+
+      lastHoveredRowRef.current = null
+      setDraggedOverRow(null)
+    }
+
+    window.addEventListener('asset-drag-move', handleCustomDragMove)
+    window.addEventListener('asset-drag-drop', handleCustomDragDrop)
+    return () => {
+      window.removeEventListener('asset-drag-move', handleCustomDragMove)
+      window.removeEventListener('asset-drag-drop', handleCustomDragDrop)
+    }
+  }, [dispatch, audioTracks, totalDuration])
+
   const audioTracksWithProgress = useMemo(() => {
     return audioTracks.map(track => {
       if (track.isUploading) {
@@ -736,8 +848,8 @@ const AudioBar = React.forwardRef(function AudioBar(
       style={{ width: '100%', marginTop: '2px' }}
       onClick={handleContainerClick}
     >
-      {/* Track rows container — aligned to start level of scene cards/motion blocks */}
       <div
+        ref={tracksContainerRef}
         style={{
           marginLeft: '16px',
           width: `${totalProjectWidth}px`,
@@ -750,12 +862,17 @@ const AudioBar = React.forwardRef(function AudioBar(
           return (
             <div
               key={rowIdx}
-              className="relative flex-shrink-0"
+              className="relative flex-shrink-0 transition-colors"
               style={{
                 height: `${ROW_HEIGHT}px`,
                 width: '100%',
               }}
             >
+              {draggedOverRow === rowIdx && (
+                <div 
+                  className="absolute inset-0 bg-sky-400/20 border border-sky-400/35 rounded-lg pointer-events-none z-[5]"
+                />
+              )}
               {isEmptyRow ? (
                 <EmptyAudioPlaceholder
                   totalProjectWidth={totalProjectWidth}

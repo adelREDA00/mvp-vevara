@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useContext } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useContext, useRef } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { X, Search, Image as ImageIcon, Film, Loader2, AlertCircle } from 'lucide-react'
@@ -33,6 +33,10 @@ function ImagesPanel({ onClose, aspectRatio }) {
     const dispatch = useDispatch()
     const [searchQuery, setSearchQuery] = useState('')
     const [activeTab, setActiveTab] = useState('All')
+
+    // Infinite Scroll State
+    const [visibleCount, setVisibleCount] = useState(16)
+    const sentinelRef = useRef(null)
 
     const [sharedAssets, setSharedAssets] = useState([])
     const [isFetching, setIsFetching] = useState(true)
@@ -107,6 +111,34 @@ function ImagesPanel({ onClose, aspectRatio }) {
         })
     }, [sharedAssets, searchQuery, activeTab])
 
+    const visibleItems = useMemo(() => {
+        return filteredImages.slice(0, visibleCount)
+    }, [filteredImages, visibleCount])
+
+    useEffect(() => {
+        setVisibleCount(16)
+    }, [activeTab, searchQuery])
+
+    useEffect(() => {
+        const sentinel = sentinelRef.current
+        if (!sentinel) return
+
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+                setVisibleCount((prev) => prev + 16)
+            }
+        }, {
+            root: null,
+            rootMargin: '150px',
+            threshold: 0.1
+        })
+
+        observer.observe(sentinel)
+        return () => {
+            if (sentinel) observer.unobserve(sentinel)
+        }
+    }, [sentinelRef.current, filteredImages.length])
+
     const handleAddImageLayer = useCallback((image) => {
         if (!currentSceneId) return
         const imageWidth = image.metadata?.width || 300
@@ -138,6 +170,7 @@ function ImagesPanel({ onClose, aspectRatio }) {
             data: {
                 url: image.url || image.src,
                 src: image.url || image.src,
+                thumbnail: image.metadata?.thumbnail || image.thumbnail || null,
                 ...(image.metadata || {}),
                 ...(isVideo && image.metadata?.duration ? { duration: image.metadata.duration } : {}),
             }
@@ -246,19 +279,26 @@ function ImagesPanel({ onClose, aspectRatio }) {
                         </p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                        {filteredImages.map((image) => (
-                            <AssetCard
-                                key={image._id || image.id}
-                                image={image}
-                                onAdd={handleAddImageLayer}
-                            />
-                        ))}
-                    </div>
+                    <>
+                        <div className="grid grid-cols-2 gap-4">
+                            {visibleItems.map((image) => (
+                                <AssetCard
+                                    key={image._id || image.id}
+                                    image={image}
+                                    onAdd={handleAddImageLayer}
+                                />
+                            ))}
+                        </div>
+                        {visibleCount < filteredImages.length && (
+                            <div ref={sentinelRef} className="h-14 flex items-center justify-center mt-4">
+                                <Loader2 className="h-5 w-5 animate-spin text-[#7c4af0]" />
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
     )
 }
 
-export default ImagesPanel
+export default React.memo(ImagesPanel)

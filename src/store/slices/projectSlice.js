@@ -238,7 +238,12 @@ const projectSlice = createSlice({
       state.loadingMode = action.payload // 'global' or 'local'
     },
     startPreparingLayer: (state, action) => {
-      state.preparingLayers[action.payload] = true
+      if (action.payload && typeof action.payload === 'object') {
+        const { layerId, assetUrl } = action.payload
+        state.preparingLayers[layerId] = assetUrl || true
+      } else {
+        state.preparingLayers[action.payload] = true
+      }
     },
     finishPreparingLayer: (state, action) => {
       delete state.preparingLayers[action.payload]
@@ -2112,11 +2117,15 @@ const projectSlice = createSlice({
 
     /** Add a new audio track from an uploaded asset */
     addAudioTrack: (state, action) => {
-      const { assetId, assetUrl, name, duration, waveform, id, ...rest } = action.payload
-      // Find the lowest rowIndex not currently occupied at startOffset 0
-      const usedRows = new Set(state.audioTracks.map(t => t.rowIndex))
-      let rowIndex = 0
-      while (usedRows.has(rowIndex)) rowIndex++
+      const { assetId, assetUrl, name, duration, waveform, id, rowIndex: customRowIndex, ...rest } = action.payload
+      
+      let rowIndex = customRowIndex
+      if (rowIndex === undefined || rowIndex === null) {
+        // Find the lowest rowIndex not currently occupied at startOffset 0
+        const usedRows = new Set(state.audioTracks.map(t => t.rowIndex))
+        rowIndex = 0
+        while (usedRows.has(rowIndex)) rowIndex++
+      }
 
       state.audioTracks.push({
         id: id || uid(),
@@ -2519,20 +2528,18 @@ export const selectIsLayerPreparing = (state, layerId) => !!state.project.prepar
 
 // Returns true if any layer with the given asset URL is being prepared
 export const selectIsAssetPreparing = createSelector(
-  [selectLayers, selectPreparingLayers, (state, assetUrl) => assetUrl],
-  (layers, preparingLayers, assetUrl) => {
+  [selectPreparingLayers, (state, assetUrl) => assetUrl],
+  (preparingLayers, assetUrl) => {
     if (!assetUrl) return false
 
-    // Convert to absolute path or standardized format if needed for matching
     const normalize = (url) => typeof url === 'string' ? url.split('?')[0].split('#')[0] : url;
     const target = normalize(assetUrl);
 
-    return Object.keys(preparingLayers).some(layerId => {
-      const layer = layers[layerId]
-      if (!layer || !layer.data) return false
-
-      const layerUrl = normalize(layer.data.url || layer.data.src);
-      return layerUrl === target;
+    return Object.values(preparingLayers).some(val => {
+      if (typeof val === 'string') {
+        return normalize(val) === target
+      }
+      return false
     })
   }
 )

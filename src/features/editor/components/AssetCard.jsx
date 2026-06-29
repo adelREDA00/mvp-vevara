@@ -1,10 +1,10 @@
+import React, { useContext, useRef, useCallback } from 'react'
 import { Trash2, Film, Loader2, Check, Music, Play, Pause } from 'lucide-react'
 import { useSelector } from 'react-redux'
-import { useContext } from 'react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 
-export function AssetCard({ 
+export const AssetCard = React.memo(function AssetCard({ 
   image, 
   isUploading: isLegacyUploading, 
   deletingId, 
@@ -32,6 +32,133 @@ export function AssetCard({
 
   const isDisabled = isUploading || isDeleting || isPreparing || isPending || isFailed
 
+  const dragInfoRef = useRef({
+    isDown: false,
+    startX: 0,
+    startY: 0,
+    offsetX: 0,
+    offsetY: 0,
+    ghostEl: null,
+    hasStarted: false,
+    cardEl: null,
+  })
+
+  const handlePointerDown = useCallback((e) => {
+    if (isDisabled) return
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    if (e.target.closest('button') || e.target.closest('[data-prevent-drag="true"]')) return
+
+    const cardEl = e.currentTarget
+    const rect = cardEl.getBoundingClientRect()
+
+    dragInfoRef.current = {
+      isDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      ghostEl: null,
+      hasStarted: false,
+      cardEl: cardEl,
+    }
+
+    cardEl.setPointerCapture(e.pointerId)
+  }, [isDisabled])
+
+  const handlePointerMove = useCallback((e) => {
+    const info = dragInfoRef.current
+    if (!info.isDown) return
+
+    if (!info.hasStarted) {
+      const dist = Math.hypot(e.clientX - info.startX, e.clientY - info.startY)
+      if (dist > 5) {
+        info.hasStarted = true
+
+        const originalCard = info.cardEl
+        if (originalCard) {
+          const rect = originalCard.getBoundingClientRect()
+          const ghost = originalCard.cloneNode(true)
+          
+          ghost.style.cssText = [
+            'position: fixed',
+            'width: ' + rect.width + 'px',
+            'height: ' + rect.height + 'px',
+            'opacity: 0.85',
+            'pointer-events: none',
+            'z-index: 9999',
+            'background: ' + (isLight ? '#ffffff' : '#0e0f12'),
+            'border: 1px solid ' + (isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)'),
+            'border-radius: 12px',
+            'left: ' + (e.clientX - info.offsetX) + 'px',
+            'top: ' + (e.clientY - info.offsetY) + 'px',
+            'transition: none',
+            'overflow: hidden'
+          ].join(';')
+          document.body.appendChild(ghost)
+          info.ghostEl = ghost
+        }
+
+        window.activeDraggedAsset = {
+          id: image.id || image._id,
+          url: assetUrl,
+          width: image.metadata?.width || 300,
+          height: image.metadata?.height || 200,
+          type: isVideo ? 'video' : (isAudio ? 'audio' : 'image'),
+          thumbnail: image.metadata?.thumbnail || image.thumbnail || null,
+          name: image.name,
+          duration: image.metadata?.duration || 0,
+          waveform: image.metadata?.waveform || []
+        }
+      }
+    }
+
+    if (info.hasStarted && info.ghostEl) {
+      info.ghostEl.style.left = (e.clientX - info.offsetX) + 'px'
+      info.ghostEl.style.top = (e.clientY - info.offsetY) + 'px'
+
+      window.dispatchEvent(new CustomEvent('asset-drag-move', {
+        detail: { x: e.clientX, y: e.clientY }
+      }))
+    }
+  }, [isLight, image, assetUrl, isVideo, isAudio])
+
+  const handlePointerUp = useCallback((e) => {
+    const info = dragInfoRef.current
+    if (!info.isDown) return
+
+    try {
+      info.cardEl?.releasePointerCapture(e.pointerId)
+    } catch (err) {}
+
+    if (info.ghostEl) {
+      info.ghostEl.remove()
+    }
+
+    const wasDragging = info.hasStarted
+
+    dragInfoRef.current = {
+      isDown: false,
+      startX: 0,
+      startY: 0,
+      offsetX: 0,
+      offsetY: 0,
+      ghostEl: null,
+      hasStarted: false,
+      cardEl: null,
+    }
+
+    if (wasDragging) {
+      window.dispatchEvent(new CustomEvent('asset-drag-drop', {
+        detail: { x: e.clientX, y: e.clientY }
+      }))
+      setTimeout(() => {
+        window.activeDraggedAsset = null
+      }, 0)
+    } else {
+      onAdd(image)
+    }
+  }, [onAdd, image])
+
   if (isAudio) {
     const gradients = [
       'from-pink-500 to-rose-500',
@@ -50,21 +177,9 @@ export function AssetCard({
             ? 'border-[#7c4af0] shadow-[0_0_12px_rgba(124,74,240,0.3)]' 
             : (isLight ? 'border-slate-100 hover:border-slate-200' : 'border-white/10 hover:border-purple-500/50')
         } ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-        onClick={() => {
-          if (!isDisabled) onAdd(image)
-        }}
-        draggable={!isDisabled}
-        onDragStart={(e) => {
-          if (isDisabled) { e.preventDefault(); return }
-          e.dataTransfer.setData('application/vevara-asset', JSON.stringify({
-            url: assetUrl,
-            name: name || 'Audio',
-            type: 'audio',
-            duration: image.metadata?.duration || 0,
-            waveform: image.metadata?.waveform || [],
-          }))
-          e.dataTransfer.effectAllowed = 'copy'
-        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
       >
         {/* Gradient background with Music icon */}
         <div className={`absolute inset-0 bg-gradient-to-tr ${gradientClass} flex flex-col items-center justify-center p-3 text-center`}>
@@ -96,6 +211,7 @@ export function AssetCard({
         {/* Selection Checkbox (Top-Left) */}
         {!isDisabled && (
           <div 
+            data-prevent-drag="true"
             className={`absolute top-2.5 left-2.5 w-5 h-5 rounded-md border text-white flex items-center justify-center transition-all z-10 ${
               isSelected 
                 ? 'bg-[#7c4af0] border-[#7c4af0]' 
@@ -138,23 +254,9 @@ export function AssetCard({
         ? 'opacity-40 cursor-not-allowed'
         : 'cursor-pointer'
         }`}
-      onClick={(e) => {
-        if (isDisabled) return
-        // If clicking the top area, toggle selection
-        onAdd(image)
-      }}
-      draggable={!isDisabled}
-      onDragStart={(e) => {
-        if (isDisabled) { e.preventDefault(); return }
-        e.dataTransfer.setData('application/vevara-asset', JSON.stringify({
-          url: assetUrl,
-          width: image.metadata?.width || 300,
-          height: image.metadata?.height || 200,
-          type: isVideo ? 'video' : 'image',
-          thumbnail: image.metadata?.thumbnail || image.thumbnail || null
-        }))
-        e.dataTransfer.effectAllowed = 'copy'
-      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
     >
       {/* Thumbnail / Placeholder */}
       {isVideo ? (
@@ -197,6 +299,7 @@ export function AssetCard({
       {/* Selection Checkbox (Top-Left) */}
       {!isDisabled && (
         <div 
+          data-prevent-drag="true"
           className={`absolute top-2.5 left-2.5 w-5 h-5 rounded-md border text-white flex items-center justify-center transition-all z-10 ${
             isSelected 
               ? 'bg-[#7c4af0] border-[#7c4af0]' 
@@ -293,4 +396,4 @@ export function AssetCard({
       )}
     </div>
   )
-}
+})

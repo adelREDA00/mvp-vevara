@@ -1229,120 +1229,104 @@ export async function createVideoLayer(config) {
   }
 
   try {
-    if (videoUrl.startsWith('blob:')) {
-      // If NOT in cache, create and prepare
-      if (!videoElement) {
-        // PERFORMANCE: For blob URLs, we use a native element to ensure parsing.
-        videoElement = document.createElement('video')
-        videoElement.crossOrigin = 'anonymous'
-        videoElement.src = videoUrl
-        videoElement.muted = data.muted !== false
-        videoElement.loop = false
-        videoElement.playsInline = true
-        videoElement.preload = 'auto'
-        videoElement.autoplay = false
-        videoElement.setAttribute('autoplay', 'false')
-        videoElement.pause()
+    // If NOT in cache, create and prepare
+    if (!videoElement) {
+      // PERFORMANCE: Use a native element to ensure progressive loading and streaming.
+      videoElement = document.createElement('video')
+      videoElement.crossOrigin = 'anonymous'
+      videoElement.src = videoUrl
+      videoElement.muted = data.muted !== false
+      videoElement.loop = false
+      videoElement.playsInline = true
+      videoElement.preload = 'auto'
+      videoElement.autoplay = false
+      videoElement.setAttribute('autoplay', 'false')
+      videoElement.pause()
 
-        // [SCENE CUT FIX] Intercept play() to prevent PIXI VideoSource from auto-playing
-        // PIXI v8 VideoSource often ignores autoPlay: false and calls play() when media is ready.
-        // We block these accidental calls if the MotionEngine is currently paused.
-        const originalPlay = videoElement.play
-        videoElement.play = function () {
-          const engine = getGlobalMotionEngine()
-          if (engine && !engine.isPlaying) {
-            return Promise.resolve()
-          }
-          return originalPlay.apply(this, arguments)
+      // [SCENE CUT FIX] Intercept play() to prevent PIXI VideoSource from auto-playing
+      // PIXI v8 VideoSource often ignores autoPlay: false and calls play() when media is ready.
+      // We block these accidental calls if the MotionEngine is currently paused.
+      const originalPlay = videoElement.play
+      videoElement.play = function () {
+        const engine = getGlobalMotionEngine()
+        if (engine && !engine.isPlaying) {
+          return Promise.resolve()
         }
-
-        // Cache it immediately with the partitioned key
-        videoElementCache.set(cacheKey, videoElement)
-
-        // WEBGL FIX: We must wait for metadata and enough data for smooth playback
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-        const targetReadyState = isMobile ? 4 : 3 // HAVE_ENOUGH_DATA for mobile, HAVE_FUTURE_DATA for desktop
-        const timeoutMs = isMobile ? 20000 : 10000 // Higher timeout for mobile network/decoding
-
-        await new Promise((resolve, reject) => {
-          let timeoutId
-          const cleanup = () => {
-            videoElement.removeEventListener('loadedmetadata', onMetadata)
-            videoElement.removeEventListener('canplay', onCanPlay)
-            videoElement.removeEventListener('canplaythrough', onCanPlay)
-            videoElement.removeEventListener('error', onError)
-            if (timeoutId) clearTimeout(timeoutId)
-          }
-          const onMetadata = () => {
-            if (videoElement.readyState >= targetReadyState) {
-              cleanup()
-              resolve()
-            }
-          }
-
-          const onCanPlay = () => {
-            if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
-              cleanup()
-              resolve()
-            }
-          }
-
-          // [404 FIX] Reject immediately if the video element fires an error
-          // (e.g. 404 Not Found). Without this, the promise hangs until the
-          // timeout — keeping asyncLoadCounterRef > 0 and freezing the loader.
-          const onError = (e) => {
-            cleanup()
-            const code = videoElement.error?.code
-            reject(new Error(`Video load error (code ${code}) for: ${videoUrl}`))
-          }
-
-          if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
-            resolve()
-          } else {
-            videoElement.addEventListener('loadedmetadata', onMetadata)
-            videoElement.addEventListener('canplay', onCanPlay)
-            videoElement.addEventListener('canplaythrough', onCanPlay)
-            videoElement.addEventListener('error', onError)
-            timeoutId = setTimeout(() => {
-              console.warn(`[createVideoLayer] readiness timeout (${timeoutMs / 1000}s) for: ${videoUrl}`)
-              cleanup()
-              if (videoElement.videoWidth > 0) {
-                resolve()
-              } else {
-                reject(new Error(`Video load timed out with 0 dimensions: ${videoUrl}`))
-              }
-            }, timeoutMs)
-          }
-        })
-        videoElement.pause()
+        return originalPlay.apply(this, arguments)
       }
 
-      texture = PIXI.Texture.from(videoElement, {
-        resourceOptions: {
-          autoPlay: false,
-          muted: data.muted !== false,
-          loop: false,
-          playsinline: true,
-          crossOrigin: 'anonymous'
+      // Cache it immediately with the partitioned key
+      videoElementCache.set(cacheKey, videoElement)
+
+      // WEBGL FIX: We must wait for metadata and enough data for smooth playback
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      const targetReadyState = isMobile ? 4 : 3 // HAVE_ENOUGH_DATA for mobile, HAVE_FUTURE_DATA for desktop
+      const timeoutMs = isMobile ? 20000 : 10000 // Higher timeout for mobile network/decoding
+
+      await new Promise((resolve, reject) => {
+        let timeoutId
+        const cleanup = () => {
+          videoElement.removeEventListener('loadedmetadata', onMetadata)
+          videoElement.removeEventListener('canplay', onCanPlay)
+          videoElement.removeEventListener('canplaythrough', onCanPlay)
+          videoElement.removeEventListener('error', onError)
+          if (timeoutId) clearTimeout(timeoutId)
         }
-      })
-      texture._nativeVideo = videoElement
-      videoElement.pause() // Ensure it's paused after texture assignment
-    } else {
-      // Network URL handle
-      texture = await PIXI.Assets.load({
-        src: videoUrl,
-        data: {
-          resourceOptions: {
-            autoPlay: false,
-            muted: data.muted !== false,
-            loop: false,
-            playsinline: true,
-            crossOrigin: 'anonymous',
+        const onMetadata = () => {
+          if (videoElement.readyState >= targetReadyState) {
+            cleanup()
+            resolve()
           }
         }
+
+        const onCanPlay = () => {
+          if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
+            cleanup()
+            resolve()
+          }
+        }
+
+        // [404 FIX] Reject immediately if the video element fires an error
+        // (e.g. 404 Not Found). Without this, the promise hangs until the
+        // timeout — keeping asyncLoadCounterRef > 0 and freezing the loader.
+        const onError = (e) => {
+          cleanup()
+          const code = videoElement.error?.code
+          reject(new Error(`Video load error (code ${code}) for: ${videoUrl}`))
+        }
+
+        if (videoElement.readyState >= targetReadyState && videoElement.videoWidth > 0) {
+          resolve()
+        } else {
+          videoElement.addEventListener('loadedmetadata', onMetadata)
+          videoElement.addEventListener('canplay', onCanPlay)
+          videoElement.addEventListener('canplaythrough', onCanPlay)
+          videoElement.addEventListener('error', onError)
+          timeoutId = setTimeout(() => {
+            console.warn(`[createVideoLayer] readiness timeout (${timeoutMs / 1000}s) for: ${videoUrl}`)
+            cleanup()
+            if (videoElement.videoWidth > 0) {
+              resolve()
+            } else {
+              reject(new Error(`Video load timed out with 0 dimensions: ${videoUrl}`))
+            }
+          }, timeoutMs)
+        }
       })
+      videoElement.pause()
     }
+
+    texture = PIXI.Texture.from(videoElement, {
+      resourceOptions: {
+        autoPlay: false,
+        muted: data.muted !== false,
+        loop: false,
+        playsinline: true,
+        crossOrigin: 'anonymous'
+      }
+    })
+    texture._nativeVideo = videoElement
+    videoElement.pause() // Ensure it's paused after texture assignment
   } catch (loadError) {
     try {
       texture = await PIXI.Assets.load({

@@ -68,6 +68,14 @@ export function useAudioPlayback({ audioTracks, isPlaying, playheadTime, globalV
 
     try {
       const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch audio: HTTP status ${response.status}`)
+      }
+      const contentType = response.headers.get('content-type')
+      if (contentType && contentType.includes('text/html')) {
+        throw new Error(`Failed to fetch audio: Received HTML instead of audio data (possibly SPA fallback/redirect)`)
+      }
+      
       const arrayBuffer = await response.arrayBuffer()
       const ctx = getAudioContext()
       const decoded = await ctx.decodeAudioData(arrayBuffer)

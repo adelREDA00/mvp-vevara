@@ -801,25 +801,63 @@ function _createPlaceholder(layer, layerId) {
     const h = layer.height || 100
     const ax = layer.anchorX ?? 0.5
     const ay = layer.anchorY ?? 0.5
+
+    const container = new PIXI.Container()
+    container.label = `placeholder-layer-${layerId}`
+    container.eventMode = 'none'
+    container.x = layer.x || 0
+    container.y = layer.y || 0
+
+    // Base background shape (shimmering purple outline/fill)
     const g = new PIXI.Graphics()
-    g.label = `placeholder-layer-${layerId}`
-    g.eventMode = 'none'
-    // Rounded-rect outline + semi-transparent purple fill to match brand
     g.roundRect(-w * ax, -h * ay, w, h, 10)
     g.fill({ color: 0x7c4af0, alpha: 0.14 })
     g.stroke({ color: 0x7c4af0, width: 1.5, alpha: 0.40 })
-    g.x = layer.x || 0
-    g.y = layer.y || 0
-    // Lightweight shimmer: oscillate alpha via the shared ticker
+    container.addChild(g)
+
+    const thumbnailUrl = layer.data?.thumbnail || layer.data?.metadata?.thumbnail
+    if (thumbnailUrl) {
+      try {
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.src = thumbnailUrl
+        
+        const texture = PIXI.Texture.from(img)
+        img.onload = () => {
+          if (texture.source) {
+            texture.source.update()
+          }
+        }
+
+        const sprite = new PIXI.Sprite(texture)
+        sprite.width = w
+        sprite.height = h
+        sprite.anchor.set(ax, ay)
+        sprite.alpha = 0.55
+        
+        // Rounded crop mask to match the placeholder border
+        const mask = new PIXI.Graphics()
+        mask.roundRect(-w * ax, -h * ay, w, h, 10)
+        mask.fill(0xffffff)
+        container.addChild(mask)
+        sprite.mask = mask
+
+        container.addChild(sprite)
+      } catch (err) {
+        console.warn('[_createPlaceholder] Failed to load thumbnail sprite:', err)
+      }
+    }
+
+    // Lightweight shimmer: oscillate container alpha via the shared ticker
     let _phase = 0
     const _tick = () => {
-      if (g.destroyed) return
+      if (container.destroyed) return
       _phase += 0.06
-      g.alpha = 0.55 + 0.25 * Math.sin(_phase)
+      container.alpha = 0.65 + 0.25 * Math.sin(_phase)
     }
     PIXI.Ticker.shared.add(_tick)
-    g._placeholderTick = _tick
-    return g
+    container._placeholderTick = _tick
+    return container
   } catch (e) {
     return null
   }
@@ -835,7 +873,7 @@ function _destroyPlaceholder(placeholder, stageContainer) {
     if (stageContainer && !stageContainer.destroyed) {
       stageContainer.removeChild(placeholder)
     }
-    placeholder.destroy()
+    placeholder.destroy({ children: true })
   } catch (e) { /* silent — placeholder already cleaned up */ }
 }
 
@@ -1136,7 +1174,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.IMAGE) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
-        dispatch(startPreparingLayer(layerId))
+        dispatch(startPreparingLayer({ layerId, assetUrl: layer.data?.url || layer.data?.src }))
         // [FIX] Reset isStageReady when new async loads are queued — this ensures
         // the loading modal stays visible until ALL async layers are created
         if (loadingMode === 'global') {
@@ -1178,6 +1216,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           checkReadiness()
         }).catch((error) => {
           asyncLoadCounterRef.current--
+          dispatch(finishPreparingLayer(layerId))
           _destroyPlaceholder(_placeholder, stageContainer)
           // Keep in createdLayers to prevent infinite loop of failed retries
           checkReadiness()
@@ -1193,7 +1232,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
       else if (layer.type === LAYER_TYPES.VIDEO) {
         createdLayers.add(layerId)
         asyncLoadCounterRef.current++
-        dispatch(startPreparingLayer(layerId))
+        dispatch(startPreparingLayer({ layerId, assetUrl: layer.data?.url || layer.data?.src }))
         if (loadingMode === 'global') {
           setIsStageReady(false)
         }
@@ -1239,6 +1278,7 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
           checkReadiness()
         }).catch((error) => {
           asyncLoadCounterRef.current--
+          dispatch(finishPreparingLayer(layerId))
           _destroyPlaceholder(_videoPlaceholder, stageContainer)
           // Keep in createdLayers to prevent infinite loop of failed retries
           checkReadiness()
@@ -1305,7 +1345,8 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
 
           if (promises.length > 0) {
             asyncLoadCounterRef.current++
-            dispatch(startPreparingLayer(layerId))
+            const frameAssetUrl = assetUrl || backAssetUrl
+            dispatch(startPreparingLayer({ layerId, assetUrl: frameAssetUrl }))
 
             Promise.all(promises).then(() => {
               asyncLoadCounterRef.current--

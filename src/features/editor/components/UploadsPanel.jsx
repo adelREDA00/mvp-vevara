@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
-import { useDispatch, useSelector } from 'react-redux'
+import React, { useState, useRef, useEffect, useMemo, useCallback, useContext } from 'react'
+import { useDispatch, useSelector, useStore } from 'react-redux'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { X, Search, Upload as UploadIcon, Image, Video, File, Trash2, AlertCircle, Film, RefreshCw, Loader2, Globe, Lock, Smile, Music } from 'lucide-react'
 import { DragToCloseHandle } from './DragToCloseHandle'
@@ -28,7 +28,7 @@ import {
   cancelUpload,
 } from '../../../store/slices/uploadsSlice'
 
-import { addLayerAndSelect, addAudioTrack, selectCurrentSceneId, selectLayers, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
+import { addLayerAndSelect, addAudioTrack, selectCurrentSceneId, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 import Modal from './Modal'
 import { assetCacheWarmer } from '../../engine/pixi/textureUtils'
 
@@ -73,6 +73,7 @@ function SkeletonGrid({ isLight }) {
 
 function UploadsPanel({ onClose, aspectRatio }) {
   const dispatch = useDispatch()
+  const store = useStore()
   const [selectedIds, setSelectedIds] = useState([])
   const [activeTab, setActiveTab] = useState('All')
   const [isDragOver, setIsDragOver] = useState(false)
@@ -81,6 +82,10 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const [isPublic, setIsPublic] = useState(true)
   const [assetType, setAssetType] = useState('image')
   const fileInputRef = useRef(null)
+
+  // Infinite Scroll State
+  const [visibleCount, setVisibleCount] = useState(16)
+  const sentinelRef = useRef(null)
 
   // Audio preview state
   const [playingTrackId, setPlayingTrackId] = useState(null)
@@ -153,7 +158,6 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const uploadProgress = useSelector(selectUploadProgress)
   const uploadQueue = useSelector(selectUploadQueueArray)
   const currentSceneId = useSelector(selectCurrentSceneId)
-  const allLayers = useSelector(selectLayers)
   const { theme, user } = useContext(ThemeContext)
   // Get user from state if not in context
   const authUser = useSelector((state) => state.auth.user)
@@ -221,6 +225,34 @@ function UploadsPanel({ onClose, aspectRatio }) {
     return [...filteredQueue, ...filteredImages]
   }, [uploadQueue, filteredImages, activeTab])
 
+  const visibleItems = useMemo(() => {
+    return displayItems.slice(0, visibleCount)
+  }, [displayItems, visibleCount])
+
+  useEffect(() => {
+    setVisibleCount(16)
+  }, [activeTab])
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount((prev) => prev + 16)
+      }
+    }, {
+      root: null,
+      rootMargin: '150px',
+      threshold: 0.1
+    })
+
+    observer.observe(sentinel)
+    return () => {
+      if (sentinel) observer.unobserve(sentinel)
+    }
+  }, [sentinelRef.current, displayItems.length])
+
   const handleFileSelect = useCallback((files) => {
     if (!files || files.length === 0) return
     dispatch(startBatchUpload({ files, isPublic, assetType }))
@@ -238,11 +270,12 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
   // Check if an asset is used by any layer in the project
   const isAssetInUse = useCallback((assetUrl) => {
+    const allLayers = store.getState().project.layers || {}
     return Object.values(allLayers).some(layer => {
       const layerUrl = layer.data?.url || layer.data?.src
       return layerUrl && (layerUrl === assetUrl || layerUrl.endsWith(assetUrl?.split('/').pop()))
     })
-  }, [allLayers])
+  }, [store])
 
   const handleDeleteImage = useCallback((imageId, e) => {
     e.stopPropagation()
@@ -352,6 +385,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
       data: {
         url: image.url,
         src: image.url,
+        thumbnail: image.metadata?.thumbnail || image.thumbnail || null,
         ...(image.metadata || {}),
         // For videos, include duration for proper scene timing
         ...(isVideo && image.metadata?.duration ? { duration: image.metadata.duration } : {}),
@@ -576,22 +610,29 @@ function UploadsPanel({ onClose, aspectRatio }) {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4">
-                {displayItems.map((image) => (
-                  <AssetCard
-                    key={image.id}
-                    image={image}
-                    isUploading={image.status === 'uploading'}
-                    isSelected={selectedIds.includes(image.id)}
-                    onToggleSelect={handleToggleSelect}
-                    deletingId={deletingId}
-                    onDelete={handleDeleteImage}
-                    onAdd={handleAddImageLayer}
-                    isPlaying={playingTrackId === image.id}
-                    onPlayPause={handlePlayPause}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  {visibleItems.map((image) => (
+                    <AssetCard
+                      key={image.id}
+                      image={image}
+                      isUploading={image.status === 'uploading'}
+                      isSelected={selectedIds.includes(image.id)}
+                      onToggleSelect={handleToggleSelect}
+                      deletingId={deletingId}
+                      onDelete={handleDeleteImage}
+                      onAdd={handleAddImageLayer}
+                      isPlaying={playingTrackId === image.id}
+                      onPlayPause={handlePlayPause}
+                    />
+                  ))}
+                </div>
+                {visibleCount < displayItems.length && (
+                  <div ref={sentinelRef} className="h-14 flex items-center justify-center mt-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-[#7c4af0]" />
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
@@ -633,4 +674,4 @@ function UploadsPanel({ onClose, aspectRatio }) {
   )
 }
 
-export default UploadsPanel
+export default React.memo(UploadsPanel)

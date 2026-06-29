@@ -39,8 +39,8 @@ import TextEditOverlay from './TextEditOverlay'
 import { isLayerCompletelyOutside, getEffectiveLayerDimensions } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
-import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock } from '../../../store/slices/projectSlice'
-import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget, showFramePlaceholderFallback } from '../../engine/pixi/createLayer'
+import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock, addAudioTrack } from '../../../store/slices/projectSlice'
+import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget, showFramePlaceholderFallback, highlightFrameDropTarget } from '../../engine/pixi/createLayer'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 
@@ -155,6 +155,7 @@ function Stage({
   const stageContainerRef = useRef(null)
   const viewportInitializedRef = useRef(false)
   const prevAspectRatioRef = useRef(aspectRatio)
+  const htmlHighlightedFrameIdRef = useRef(null)
 
   // Cache PIXI objects to avoid recreating them
   const maskRef = useRef(null)
@@ -1638,11 +1639,360 @@ function Stage({
     if (onRightClick) onRightClick(e)
   }, [pixiApp, viewport, layerObjects, stageContainer, selectedLayerIds, layers, currentSceneId, dispatch, onRightClick])
 
+  const handleDragOver = useCallback((e) => {
+    if (previewMode) return
+    const isVevAsset = e.dataTransfer.types.includes('application/vevara-asset')
+    if (isVevAsset) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
 
+      // Find if we are hovering over any Frame layer
+      let overlappingFrameId = null
+      let overlappingFrameLayer = null
 
+      if (containerRef.current && viewport && layers) {
+        const rect = containerRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        const worldPos = viewport.toWorld(x, y)
+        
+        if (worldPos) {
+          const dropX = worldPos.x
+          const dropY = worldPos.y
 
+          for (const [frameId, frameLayer] of Object.entries(layers)) {
+            if (frameLayer.type !== 'frame') continue
+            if (frameLayer.sceneId !== currentSceneId) continue
+            
+            const frameObj = layerObjects?.get(frameId)
+            if (!frameObj || frameObj.destroyed) continue
+            
+            const fx = frameLayer.x || 0
+            const fy = frameLayer.y || 0
+            const fw = frameLayer.width || 100
+            const fh = frameLayer.height || 100
+            const fax = frameLayer.anchorX ?? 0.5
+            const fay = frameLayer.anchorY ?? 0.5
+            
+            const left = fx - fw * fax
+            const right = fx + fw * (1 - fax)
+            const top = fy - fh * fay
+            const bottom = fy + fh * (1 - fay)
+            
+            if (dropX >= left && dropX <= right && dropY >= top && dropY <= bottom) {
+              const isCardFrame = frameLayer.data?.isCardFrame
+              const currentShowingFront = frameObj?._showingFront !== undefined
+                ? frameObj._showingFront
+                : (frameLayer.data?.showingFront !== false)
+              const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+              
+              const isLocked = !!(isCardFrame
+                ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+                : frameLayer.data?.isLockedDrop)
+                
+              if (!isLocked) {
+                overlappingFrameId = frameId
+                overlappingFrameLayer = frameLayer
+                break
+              }
+            }
+          }
+        }
+      }
 
+      const prevHighlighted = htmlHighlightedFrameIdRef.current
+      if (overlappingFrameId !== prevHighlighted) {
+        // Clear previous highlight
+        if (prevHighlighted) {
+          const prevObj = layerObjects?.get(prevHighlighted)
+          const prevLayer = layers[prevHighlighted]
+          if (prevObj && !prevObj.destroyed && prevLayer) {
+            const w = prevLayer.cropWidth ?? prevLayer.width
+            const h = prevLayer.cropHeight ?? prevLayer.height
+            unhighlightFrameDropTarget(prevObj, w, h)
+          }
+        }
+        // Highlight new target
+        if (overlappingFrameId && overlappingFrameLayer) {
+          const frameObj = layerObjects?.get(overlappingFrameId)
+          if (frameObj && !frameObj.destroyed) {
+            const w = overlappingFrameLayer.cropWidth ?? overlappingFrameLayer.width
+            const h = overlappingFrameLayer.cropHeight ?? overlappingFrameLayer.height
+            highlightFrameDropTarget(frameObj, w, h, overlappingFrameLayer.data)
+          }
+        }
+        htmlHighlightedFrameIdRef.current = overlappingFrameId
+      }
+    }
+  }, [previewMode, layers, layerObjects, currentSceneId, viewport])
 
+  const handleDragLeave = useCallback(() => {
+    const prevHighlighted = htmlHighlightedFrameIdRef.current
+    if (prevHighlighted) {
+      const prevObj = layerObjects?.get(prevHighlighted)
+      const prevLayer = layers[prevHighlighted]
+      if (prevObj && !prevObj.destroyed && prevLayer) {
+        const w = prevLayer.cropWidth ?? prevLayer.width
+        const h = prevLayer.cropHeight ?? prevLayer.height
+        unhighlightFrameDropTarget(prevObj, w, h)
+      }
+      htmlHighlightedFrameIdRef.current = null
+    }
+  }, [layers, layerObjects])
+
+  const handleDrop = useCallback((e) => {
+    if (previewMode) return
+    const dataStr = e.dataTransfer.getData('application/vevara-asset')
+    if (!dataStr) return
+    e.preventDefault()
+
+    try {
+      const asset = JSON.parse(dataStr)
+      if (!currentSceneId) return
+
+      let dropX = worldWidth / 2
+      let dropY = worldHeight / 2
+
+      if (containerRef.current && viewport) {
+        const rect = containerRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+        const worldPos = viewport.toWorld(x, y)
+        if (worldPos) {
+          dropX = worldPos.x
+          dropY = worldPos.y
+        }
+      }
+
+      if (asset.type === 'audio') {
+        dispatch(addAudioTrack({
+          assetId: asset.id,
+          assetUrl: asset.url,
+          name: asset.name || 'Audio',
+          duration: asset.duration || 0,
+          waveform: asset.waveform || [],
+        }))
+        return
+      }
+
+      const imageWidth = asset.width || 300
+      const imageHeight = asset.height || 200
+      const maxSize = 400
+      let finalWidth = imageWidth
+      let finalHeight = imageHeight
+
+      if (finalWidth > maxSize || finalHeight > maxSize) {
+        const scale = maxSize / Math.max(finalWidth, finalHeight)
+        finalWidth *= scale
+        finalHeight *= scale
+      }
+
+      const isVideo = asset.type === 'video'
+      const assetUrl = asset.url
+
+      // Check if dropped onto a Frame layer
+      let overlappingFrameId = null
+      let overlappingFrameLayer = null
+      
+      for (const [frameId, frameLayer] of Object.entries(layers)) {
+        if (frameLayer.type !== 'frame') continue
+        if (frameLayer.sceneId !== currentSceneId) continue
+        
+        const frameObj = layerObjects?.get(frameId)
+        if (!frameObj || frameObj.destroyed) continue
+        
+        const fx = frameLayer.x || 0
+        const fy = frameLayer.y || 0
+        const fw = frameLayer.width || 100
+        const fh = frameLayer.height || 100
+        const fax = frameLayer.anchorX ?? 0.5
+        const fay = frameLayer.anchorY ?? 0.5
+        
+        const left = fx - fw * fax
+        const right = fx + fw * (1 - fax)
+        const top = fy - fh * fay
+        const bottom = fy + fh * (1 - fay)
+        
+        if (dropX >= left && dropX <= right && dropY >= top && dropY <= bottom) {
+          const isCardFrame = frameLayer.data?.isCardFrame
+          const currentShowingFront = frameObj?._showingFront !== undefined
+            ? frameObj._showingFront
+            : (frameLayer.data?.showingFront !== false)
+          const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+          
+          const isLocked = !!(isCardFrame
+            ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
+            : frameLayer.data?.isLockedDrop)
+            
+          if (!isLocked) {
+            overlappingFrameId = frameId
+            overlappingFrameLayer = frameLayer
+            break
+          }
+        }
+      }
+
+      if (overlappingFrameId && overlappingFrameLayer) {
+        const frameObj = layerObjects?.get(overlappingFrameId)
+        const isCardFrame = overlappingFrameLayer.data?.isCardFrame
+        const currentShowingFront = frameObj?._showingFront !== undefined
+          ? frameObj._showingFront
+          : (overlappingFrameLayer.data?.showingFront !== false)
+        const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
+
+        const frameW = overlappingFrameLayer.width
+        const frameH = overlappingFrameLayer.height
+        const scale = Math.min(frameW / imageWidth, frameH / imageHeight)
+        const newFrameW = imageWidth * scale
+        const newFrameH = imageHeight * scale
+
+        dispatch(attachAssetToFrame({
+          layerId: overlappingFrameId,
+          assetUrl,
+          assetWidth: imageWidth,
+          assetHeight: imageHeight,
+          side,
+          assetIsVideo: isVideo,
+          duration: asset.duration || null,
+          thumbnail: asset.thumbnail || null
+        }))
+
+        if (frameObj) {
+          unhighlightFrameDropTarget(frameObj, newFrameW, newFrameH)
+          loadTextureRobust(assetUrl, isVideo).then(texture => {
+            if (!texture || frameObj.destroyed) return
+            if (side === 'back') {
+              attachBackAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
+              if (frameObj._backSprite) frameObj._backSprite.visible = true
+              if (frameObj._imageSprite) frameObj._imageSprite.visible = false
+            } else {
+              attachAssetToFramePixi(frameObj, texture, newFrameW, newFrameH)
+            }
+            if (frameObj._framePlaceholder) frameObj._framePlaceholder.visible = false
+          })
+        }
+      } else {
+        dispatch(addLayerAndSelect({
+          sceneId: currentSceneId,
+          type: isVideo ? 'video' : 'image',
+          name: asset.name || (isVideo ? 'Video' : 'Image'),
+          x: dropX,
+          y: dropY,
+          width: finalWidth,
+          height: finalHeight,
+          anchorX: 0.5,
+          anchorY: 0.5,
+          mediaWidth: imageWidth,
+          mediaHeight: imageHeight,
+          data: {
+            url: assetUrl,
+            src: assetUrl,
+            thumbnail: asset.thumbnail || null,
+            ...(isVideo && asset.duration ? { duration: asset.duration } : {}),
+          }
+        }))
+      }
+      htmlHighlightedFrameIdRef.current = null
+    } catch (err) {
+      console.error('Error handling drop asset:', err)
+    }
+  }, [dispatch, currentSceneId, worldWidth, worldHeight, viewport, previewMode, layers, layerObjects])
+
+  const handleCustomDragMove = useCallback((e) => {
+    // No need to track positions or highlight frames
+  }, [])
+
+  const handleCustomDragDrop = useCallback((e) => {
+    if (previewMode) return
+    const asset = window.activeDraggedAsset
+    if (!asset) return
+
+    try {
+      if (!currentSceneId) return
+
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect()
+        const x = e.detail.x
+        const y = e.detail.y
+
+        // Check if dropped inside a sidebar or a panel container
+        const elem = document.elementFromPoint(x, y)
+        if (elem && (
+          elem.closest('.editor-panel-container') || 
+          elem.closest('[class*="Sidebar"]') || 
+          elem.closest('[class*="sidebar"]') ||
+          elem.closest('[data-panel]') ||
+          elem.closest('.left-sidebar')
+        )) {
+          return
+        }
+
+        // Check canvas container bounds
+        const relativeX = x - rect.left
+        const relativeY = y - rect.top
+        if (relativeX < 0 || relativeX > rect.width || relativeY < 0 || relativeY > rect.height) {
+          return
+        }
+      }
+
+      if (asset.type === 'audio') {
+        dispatch(addAudioTrack({
+          assetId: asset.id,
+          assetUrl: asset.url,
+          name: asset.name || 'Audio',
+          duration: asset.duration || 0,
+          waveform: asset.waveform || [],
+        }))
+        return
+      }
+
+      const imageWidth = asset.width || 300
+      const imageHeight = asset.height || 200
+      const maxSize = 400
+      let finalWidth = imageWidth
+      let finalHeight = imageHeight
+
+      if (finalWidth > maxSize || finalHeight > maxSize) {
+        const scale = maxSize / Math.max(finalWidth, finalHeight)
+        finalWidth *= scale
+        finalHeight *= scale
+      }
+
+      const isVideo = asset.type === 'video'
+      const assetUrl = asset.url
+
+      dispatch(addLayerAndSelect({
+        sceneId: currentSceneId,
+        type: isVideo ? 'video' : 'image',
+        name: asset.name || (isVideo ? 'Video' : 'Image'),
+        x: worldWidth / 2,
+        y: worldHeight / 2,
+        width: finalWidth,
+        height: finalHeight,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        mediaWidth: imageWidth,
+        mediaHeight: imageHeight,
+        data: {
+          url: assetUrl,
+          src: assetUrl,
+          thumbnail: asset.thumbnail || null,
+          ...(isVideo && asset.duration ? { duration: asset.duration } : {}),
+        }
+      }))
+    } catch (err) {
+      console.error('Error handling drop asset:', err)
+    }
+  }, [dispatch, currentSceneId, worldWidth, worldHeight, previewMode])
+
+  useEffect(() => {
+    window.addEventListener('asset-drag-move', handleCustomDragMove)
+    window.addEventListener('asset-drag-drop', handleCustomDragDrop)
+    return () => {
+      window.removeEventListener('asset-drag-move', handleCustomDragMove)
+      window.removeEventListener('asset-drag-drop', handleCustomDragDrop)
+    }
+  }, [handleCustomDragMove, handleCustomDragDrop])
 
   // =============================================================================
   // RENDER
@@ -1652,6 +2002,9 @@ function Stage({
     <div
       ref={stageContainerRef}
       className="relative flex w-full h-full stage-container"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       {/* Canvas Stage - Fills container, camera zoom handled in viewport */}
       <div
