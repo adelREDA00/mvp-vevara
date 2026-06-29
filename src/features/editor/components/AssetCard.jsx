@@ -62,10 +62,14 @@ export const AssetCard = React.memo(function AssetCard({
       cardEl: cardEl,
     }
 
-    cardEl.setPointerCapture(e.pointerId)
+    if (e.pointerType !== 'touch') {
+      cardEl.setPointerCapture(e.pointerId)
+    }
   }, [isDisabled])
 
   const handlePointerMove = useCallback((e) => {
+    if (e.pointerType === 'touch') return
+
     const info = dragInfoRef.current
     if (!info.isDown) return
 
@@ -128,7 +132,9 @@ export const AssetCard = React.memo(function AssetCard({
     if (!info.isDown) return
 
     try {
-      info.cardEl?.releasePointerCapture(e.pointerId)
+      if (e.pointerType !== 'touch') {
+        info.cardEl?.releasePointerCapture(e.pointerId)
+      }
     } catch (err) {}
 
     if (info.ghostEl) {
@@ -156,6 +162,10 @@ export const AssetCard = React.memo(function AssetCard({
         window.activeDraggedAsset = null
       }, 0)
     } else {
+      if (e.pointerType === 'touch') {
+        const dist = Math.hypot(e.clientX - info.startX, e.clientY - info.startY)
+        if (dist > 10) return
+      }
       onAdd(image)
     }
   }, [onAdd, image])
