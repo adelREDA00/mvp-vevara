@@ -375,7 +375,7 @@ function Stage({
         // when synchronising from PIXI to Redux.
         tiltX: typeof obj._tiltXDeg === 'number' ? obj._tiltXDeg : 0,
         tiltY: typeof obj._tiltYDeg === 'number' ? obj._tiltYDeg : 0,
-        blur: (obj.filters && obj._blurFilter && obj.filters.includes(obj._blurFilter)) ? obj._blurFilter.strength : 0,
+        blur: typeof obj._blurLogicalStrength === 'number' ? obj._blurLogicalStrength : 0,
         color: obj._storedFill ?? (obj.style?.fill) ?? (obj._storedColor !== undefined ? (typeof obj._storedColor === 'string' ? obj._storedColor : '#' + obj._storedColor.toString(16).padStart(6, '0')) : null) ?? null,
         mediaWidth: obj.mediaWidth ?? obj._mediaWidth ?? obj._originalWidth ?? obj.width ?? 100,
         mediaHeight: obj.mediaHeight ?? obj._mediaHeight ?? obj._originalWidth ?? obj.height ?? 100,

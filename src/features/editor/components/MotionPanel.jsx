@@ -304,6 +304,7 @@ function MotionPanel({
   editingStepActionCount = 0,
   activeStepId = null,
   onMobileMinimizedChange = null,
+  onSelectStepEnd = null,
 }) {
   const dispatch = useDispatch()
   const currentSceneId = useSelector(selectCurrentSceneId)
@@ -443,6 +444,14 @@ function MotionPanel({
 
   // Normal mode: which moment card is expanded (one at a time)
   const [expandedStepId, setExpandedStepId] = useState(null)
+
+  // Auto-close moment card if it is no longer the active one
+  useEffect(() => {
+    if (expandedStepId && expandedStepId !== activeStepId) {
+      setExpandedStepId(null)
+    }
+  }, [activeStepId, expandedStepId])
+
   // Inline delete confirmation
   const [confirmDeleteStepId, setConfirmDeleteStepId] = useState(null)
 
@@ -499,6 +508,56 @@ function MotionPanel({
   const prevIsCollapsedRef = useRef(isCollapsed)
   const prevIsMobileMinimizedRef = useRef(isMobileMinimized)
   const prevCaptureActiveRef = useRef(false)
+  const previewingObjectRef = useRef(null)
+
+  const cancelAndRestoreActivePreview = useCallback((pixiObj) => {
+    if (!pixiObj || pixiObj.destroyed) return
+    if (pixiObj._previewTimeline) {
+      try { pixiObj._previewTimeline.kill() } catch {}
+      pixiObj._previewTimeline = null
+    }
+    if (pixiObj._isPlayingPresetPreview) {
+      pixiObj._isPlayingPresetPreview = false
+      const snap = pixiObj._originalPreviewSnap
+      if (snap) {
+        pixiObj.x = snap.x
+        pixiObj.y = snap.y
+        pixiObj.alpha = snap.alpha
+        pixiObj.rotation = snap.rotation
+        if (pixiObj.scale) pixiObj.scale.set(snap.scaleX, snap.scaleY)
+        if (pixiObj.revealProgress !== undefined && snap.revealProgress !== undefined) {
+          pixiObj.revealProgress = snap.revealProgress
+        }
+        if (pixiObj._blurFilter) {
+          pixiObj._blurFilter.strength = snap.blurStrength
+          const has = pixiObj.filters?.includes(pixiObj._blurFilter)
+          if (snap.hadBlurFilter && !has) {
+            pixiObj.filters = pixiObj.filters ? [...pixiObj.filters, pixiObj._blurFilter] : [pixiObj._blurFilter]
+          } else if (!snap.hadBlurFilter && has) {
+            pixiObj.filters = pixiObj.filters.filter(f => f !== pixiObj._blurFilter)
+            if (!pixiObj.filters.length) pixiObj.filters = null
+          }
+        }
+        if (snap.intendedAlpha !== undefined) {
+          pixiObj._intendedAlpha = snap.intendedAlpha
+        }
+        if (pixiObj._tiltMesh) {
+          syncTiltedDisplay(pixiObj)
+        }
+        pixiObj._originalPreviewSnap = null
+      }
+    }
+  }, [])
+
+  // Cleanup active preview on unmount or selection/state changes
+  useEffect(() => {
+    return () => {
+      if (previewingObjectRef.current) {
+        cancelAndRestoreActivePreview(previewingObjectRef.current)
+        previewingObjectRef.current = null
+      }
+    }
+  }, [selectedLayerId, editingStepId, isMotionCaptureActive, currentSceneId, cancelAndRestoreActivePreview])
 
   useEffect(() => {
     const el = collapsedOuterRef.current
@@ -652,18 +711,32 @@ function MotionPanel({
     const presetDef = PRESET_REGISTRY[presetId]
     if (!presetDef) return
 
-    if (pixiObject._previewTimeline) { pixiObject._previewTimeline.kill(); pixiObject._previewTimeline = null }
+    // If another layer has a preview running, cancel and restore it first
+    if (previewingObjectRef.current && previewingObjectRef.current !== pixiObject) {
+      cancelAndRestoreActivePreview(previewingObjectRef.current)
+    }
+    previewingObjectRef.current = pixiObject
+
+    if (pixiObject._previewTimeline) { 
+      try { pixiObject._previewTimeline.kill() } catch {}
+      pixiObject._previewTimeline = null 
+    }
     const previewEngine = getGlobalMotionEngine()
     gsap.killTweensOf(previewEngine.masterTimeline, { time: true })
     previewEngine.masterTimeline.pause()
 
-    const snap = {
+    // If we're already playing a preview, we reuse the existing original snap
+    const snap = pixiObject._originalPreviewSnap || {
       x: pixiObject.x, y: pixiObject.y, alpha: pixiObject.alpha, rotation: pixiObject.rotation,
       scaleX: pixiObject.scale?.x ?? 1, scaleY: pixiObject.scale?.y ?? 1,
       blurStrength: pixiObject._blurFilter?.strength ?? 0,
       hadBlurFilter: !!(pixiObject.filters && pixiObject._blurFilter && pixiObject.filters.includes(pixiObject._blurFilter)),
       revealProgress: pixiObject.revealProgress ?? 1,
       intendedAlpha: pixiObject._intendedAlpha,
+    }
+
+    if (!pixiObject._originalPreviewSnap) {
+      pixiObject._originalPreviewSnap = snap
     }
 
     pixiObject._isPlayingPresetPreview = true
@@ -724,10 +797,18 @@ function MotionPanel({
 
     const restore = () => {
       if (pixiObject.destroyed) return
-      pixiObject._isPlayingPresetPreview = false; pixiObject._previewTimeline = null
+      pixiObject._isPlayingPresetPreview = false
+      pixiObject._previewTimeline = null
+      
+      if (previewingObjectRef.current === pixiObject) {
+        previewingObjectRef.current = null
+      }
+      
       pixiObject.x = snap.x; pixiObject.y = snap.y; pixiObject.alpha = snap.alpha; pixiObject.rotation = snap.rotation
       if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
-      if (hasTypewriter && pixiObject.revealProgress !== undefined) pixiObject.revealProgress = snap.revealProgress
+      if (pixiObject.revealProgress !== undefined && snap.revealProgress !== undefined) {
+        pixiObject.revealProgress = snap.revealProgress
+      }
       if (pixiObject._blurFilter) {
         pixiObject._blurFilter.strength = snap.blurStrength
         const has = pixiObject.filters?.includes(pixiObject._blurFilter)
@@ -740,6 +821,7 @@ function MotionPanel({
       if (pixiObject._tiltMesh) {
         syncTiltedDisplay(pixiObject)
       }
+      pixiObject._originalPreviewSnap = null
       if (!isMotionCaptureActive) { const eng = getGlobalMotionEngine(); eng.seek(eng.masterTimeline?.time() || 0, { force: true }) }
     }
 
@@ -773,10 +855,14 @@ function MotionPanel({
   const applyPreset = (presetId, type) => {
     if (!selectedLayerId || !editingStepId || !currentSceneId) return
 
-
-
     const activePreset = step?.layerPresets?.[selectedLayerId]
     if (activePreset?.id === presetId) {
+      if (motionControls?.layerObjects) {
+        const pixiObj = motionControls.layerObjects.get(selectedLayerId)
+        if (pixiObj) {
+          cancelAndRestoreActivePreview(pixiObj)
+        }
+      }
       dispatch(clearPresetFromStep({ sceneId: currentSceneId, stepId: editingStepId, layerId: selectedLayerId }))
       return
     }
@@ -784,21 +870,24 @@ function MotionPanel({
     if (motionControls?.layerObjects) {
       pixiObj = motionControls.layerObjects.get(selectedLayerId)
       if (pixiObj) {
-
         const eng = getGlobalMotionEngine()
         gsap.killTweensOf(eng.masterTimeline, { time: true })
         eng.masterTimeline.pause()
-        pixiObj._isPlayingPresetPreview = true
-
-        // Capture the correct step-start visual values from PIXI instead of base scene start coordinates
-        const currentX = pixiObj.x
-        const currentY = pixiObj.y
-        const currentAlpha = pixiObj._tiltHidden && typeof pixiObj._intendedAlpha === 'number'
-          ? pixiObj._intendedAlpha
-          : (Math.abs(pixiObj.alpha - 0.000001) < 1e-7 ? 1.0 : pixiObj.alpha)
-        const currentRotation = pixiObj.rotation
-        const currentScaleX = pixiObj.scale?.x ?? 1
-        const currentScaleY = pixiObj.scale?.y ?? 1
+        
+        // If a preview is already active, we MUST reuse the existing original preview snap to prevent locking mid-animation values
+        const hasSnap = !!pixiObj._originalPreviewSnap
+        const snap = pixiObj._originalPreviewSnap
+        
+        const currentX = hasSnap ? snap.x : pixiObj.x
+        const currentY = hasSnap ? snap.y : pixiObj.y
+        const currentAlpha = hasSnap 
+          ? snap.alpha 
+          : (pixiObj._tiltHidden && typeof pixiObj._intendedAlpha === 'number'
+            ? pixiObj._intendedAlpha
+            : (Math.abs(pixiObj.alpha - 0.000001) < 1e-7 ? 1.0 : pixiObj.alpha))
+        const currentRotation = hasSnap ? snap.rotation : pixiObj.rotation
+        const currentScaleX = hasSnap ? snap.scaleX : (pixiObj.scale?.x ?? 1)
+        const currentScaleY = hasSnap ? snap.scaleY : (pixiObj.scale?.y ?? 1)
 
         cleanState = {
           x: currentX,
@@ -1031,7 +1120,13 @@ function MotionPanel({
                 pointerEvents: isTutorialStep1 ? 'none' : 'auto',
                 opacity: isTutorialStep1 ? 0.5 : 1,
               }}
-              className={`overflow-hidden border rounded-xl transition-all duration-150 ${isPlayheadActive
+              onClick={(e) => {
+                const isActionButton = e.target.closest('button');
+                if (isActionButton) return;
+
+                onSelectStepEnd?.(step.id);
+              }}
+              className={`overflow-hidden border rounded-xl transition-all duration-150 cursor-pointer ${isPlayheadActive
                 ? isLight
                   ? 'border-[#b89eff] bg-white shadow-sm'
                   : 'border-[#5a4b81] bg-white/[0.05] shadow-sm'
@@ -1043,14 +1138,14 @@ function MotionPanel({
               {isConfirmingDelete ? (
                 <div className="flex w-full overflow-hidden" style={{ minHeight: 52 }}>
                   <button
-                    onClick={() => setConfirmDeleteStepId(null)}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteStepId(null) }}
                     className={`flex-1 flex items-center justify-center transition-colors ${isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/[0.05] text-zinc-200 hover:bg-white/[0.08]'
                       }`}
                   >
                     <span className="text-sm font-bold">No</span>
                   </button>
                   <button
-                    onClick={() => { onDeleteStep?.(step.id); setConfirmDeleteStepId(null) }}
+                    onClick={(e) => { e.stopPropagation(); onDeleteStep?.(step.id); setConfirmDeleteStepId(null) }}
                     className="flex-1 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors"
                   >
                     Delete
@@ -1058,9 +1153,8 @@ function MotionPanel({
                 </div>
               ) : (
                 <div className={`w-full flex items-center gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
-                  {/* Number badge + title/subtitle (clickable to expand) */}
-                  <button
-                    onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                  {/* Number badge + title/subtitle */}
+                  <div
                     className="flex items-center gap-3 min-w-0 flex-1 text-left"
                   >
                     <div className="min-w-0 flex-1">
@@ -1069,7 +1163,7 @@ function MotionPanel({
                         {layerCount > 0 ? `${layerCount} animated element${layerCount !== 1 ? 's' : ''}` : 'No effects'}
                       </p>
                     </div>
-                  </button>
+                  </div>
                   {/* Edit → Delete → Expand (always at far right) */}
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
@@ -1089,7 +1183,17 @@ function MotionPanel({
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const isActive = activeStepId === step.id;
+                        if (isActive) {
+                          setExpandedStepId(isExpanded ? null : step.id);
+                        } else {
+                          onSelectStepEnd?.(step.id);
+                          setExpandedStepId(step.id);
+                        }
+                      }}
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isExpanded
                         ? (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
                         : (isLight ? 'text-slate-400 hover:bg-slate-100' : 'text-zinc-500 hover:bg-white/10')

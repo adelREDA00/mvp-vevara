@@ -756,8 +756,13 @@ function captureToTexture(pixiObject, renderer) {
   const largestDim = Math.max(rttW, rttH)
   const capResolution = largestDim > 0 ? (MAX_RTT_DIMENSION / largestDim) : rendererRes
 
+  // [CROP PERF] If cropping, cap the resolution to avoid GPU stall during active drag.
+  const isCropping = !!pixiObject._isCropping
+  const isVideo = !!(pixiObject._videoElement || (pixiObject._videoSprite?.texture?.source?.resource instanceof HTMLVideoElement))
+  const cropResCap = isCropping ? (isVideo ? 0.75 : 1.25) : 99
+
   // Final resolution is the lower of what we need vs what we can afford.
-  const resolution = Math.max(0.5, Math.min(targetRes, capResolution, MAX_RTT_RESOLUTION))
+  const resolution = Math.max(0.5, Math.min(targetRes, capResolution, MAX_RTT_RESOLUTION, cropResCap))
 
   const label = pixiObject.label || pixiObject.constructor?.name || 'unlabeled'
 
@@ -1559,13 +1564,9 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
   const tiltXDeg = pixiObject._tiltXDeg || 0
   const tiltYDeg = pixiObject._tiltYDeg || 0
 
-  // [PERF] During active resize/scaling interactions, skip full RTT capture to maintain 60fps.
-  // Instead, allow the mesh corners to stretch based on live dimensions. We will trigger
-  // a full recapture when the user releases the resize handles (handleResizeEnd resets _isResizing).
-  // [Bug 3 Fix] `force` option bypasses all interaction guards — used by the deferred
-  // recapture mechanism in handleResizeEnd to ensure the RTT is re-captured AFTER
-  // applyTransformInline has synced the PIXI state from the final Redux dispatch.
-  const isActivelyResizing = !options.force && !!pixiObject._isResizing
+  // [CROP FIX] Detect cropping from options or property flag
+  const isCropping = !!options.isCropping || !!pixiObject._isCropping
+  const isActivelyResizing = !options.force && !isCropping && !!pixiObject._isResizing
 
   // [PERF-CRITICAL] Global capture throttle — gates ALL code paths.
   // syncTiltMesh is called from 4+ different sites (applyTransformInline,
@@ -1577,6 +1578,7 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
   //   - Video playback: per-video interval (typically 33-100ms)
   //   - Scrubbed/paused: 50ms (~20fps) — responsive enough for seeking
   //   - Force/export: immediate (0ms) — for resize-end sync and export
+  //   - Cropping: throttled to 33ms (30fps) for images, 66ms (15fps) for video to keep it smooth and fast
   // [COLOR-ANIMATION FIX] When _tiltTextureDirty is set every frame (e.g. during a
   // ColorChangeAction animation), the 100ms throttle causes the mesh RTT to show
   // stale color for ~6 frames before snapping to the fresh capture — visible as
@@ -1586,7 +1588,7 @@ export function syncTiltMesh(pixiObject, layer, options = {}) {
   const isVideo = !!(pixiObject._videoElement || (pixiObject._videoSprite?.texture?.source?.resource instanceof HTMLVideoElement))
   const captureInterval = options.force
     ? 0
-    : (pixiObject._tiltTextureDirty ? 0 : (isVideo ? _getVideoCaptureInterval() : 100))
+    : (isCropping ? (isVideo ? 66 : 33) : (pixiObject._tiltTextureDirty ? 0 : (isVideo ? _getVideoCaptureInterval() : 100)))
   const now = performance.now()
   const elapsedSinceCapture = now - (pixiObject._tiltLastCaptureTime || 0)
   const isCaptureThrottled = !isExport && captureInterval > 0 && elapsedSinceCapture < captureInterval

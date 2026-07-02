@@ -1099,10 +1099,18 @@ function EditorPage() {
     return maxTimeMs / 1000;
   }, [currentSceneMotionFlow]);
 
+  const hasPausedAtEndRef = useRef(false)
+  useEffect(() => {
+    if (isPlaying) {
+      hasPausedAtEndRef.current = false
+    }
+  }, [isPlaying])
+
   // Auto-pause at the end of the last step during autoplay (on load and after adding a step)
   useEffect(() => {
     if (isPlaying && (autoPlayState === 'initial' || autoPlayState === 'final') && !isStarterCopy && motionControls && lastStepEndTime > 0) {
-      if (playheadTime >= lastStepEndTime) {
+      if (playheadTime >= lastStepEndTime && !hasPausedAtEndRef.current) {
+        hasPausedAtEndRef.current = true;
         motionControls.pauseAll();
         setIsPlaying(false);
         seek(lastStepEndTime);
@@ -1355,6 +1363,59 @@ function EditorPage() {
   // True only when editing an EXISTING moment (not when creating a brand-new one)
   const [isEditingExistingStep, setIsEditingExistingStep] = useState(false)
 
+  // Helper to compare if two motion steps are identical in duration, presets, and action contents.
+  const areStepsIdentical = (stepA, stepB) => {
+    if (!stepA || !stepB) return false
+    if (stepA.duration !== stepB.duration) return false
+
+    // Compare presets
+    const presetsA = stepA.layerPresets || {}
+    const presetsB = stepB.layerPresets || {}
+    const keysA = Object.keys(presetsA)
+    const keysB = Object.keys(presetsB)
+    if (keysA.length !== keysB.length) return false
+    for (const key of keysA) {
+      if (!presetsB[key] || presetsA[key].id !== presetsB[key].id) return false
+    }
+
+    // Compare actions
+    const actionsMapA = stepA.layerActions || {}
+    const actionsMapB = stepB.layerActions || {}
+    const layersA = Object.keys(actionsMapA)
+    const layersB = Object.keys(actionsMapB)
+
+    const activeLayersA = layersA.filter(l => actionsMapA[l]?.length > 0)
+    const activeLayersB = layersB.filter(l => actionsMapB[l]?.length > 0)
+    if (activeLayersA.length !== activeLayersB.length) return false
+
+    for (const layerId of activeLayersA) {
+      const listA = actionsMapA[layerId] || []
+      const listB = actionsMapB[layerId] || []
+      if (listA.length !== listB.length) return false
+
+      for (const actA of listA) {
+        const actB = listB.find(b => b.type === actA.type)
+        if (!actB) return false
+
+        const valA = actA.values || {}
+        const valB = actB.values || {}
+        const valKeys = new Set([...Object.keys(valA), ...Object.keys(valB)])
+        for (const k of valKeys) {
+          const vA = valA[k]
+          const vB = valB[k]
+          if (typeof vA === 'string' && typeof vB === 'string') {
+            if (vA.toLowerCase() !== vB.toLowerCase()) return false
+          } else if (typeof vA === 'number' && typeof vB === 'number') {
+            if (Math.abs(vA - vB) > 0.001) return false
+          } else if (JSON.stringify(vA) !== JSON.stringify(vB)) {
+            return false
+          }
+        }
+      }
+    }
+    return true
+  }
+
   // Label shown in canvas controls during motion editing: "Editing Moment N"
   // Only shown when editing an existing moment — hidden during new-moment creation
   const editingMomentLabel = useMemo(() => {
@@ -1370,8 +1431,7 @@ function EditorPage() {
     ? JSON.stringify(currentSceneMotionFlow.steps.find(s => s.id === editingStepId).layerPresets)
     : ''
   const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
-  // [PRESET CHANGE FIX] isDoneEnabled also checks hasPresetChanges so changing a preset (same count, different ID) activates the button.
-  const isDoneEnabled = editingStepActionCount !== captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges
+
   const isNewStepRef = useRef(false) // Track if the current session is for a NEW step vs editing an EXISTING one
   const motionCaptureRef = useRef(null) // Ref to hold capture data for apply/cancel
   const savedStepTimingsRef = useRef(null) // Snapshot of step timings before adding a new step (for cancel restoration)
@@ -1379,6 +1439,16 @@ function EditorPage() {
   const captureUndoSyncRef = useRef(false) // Signals that trackedLayers needs syncing from Redux after undo/redo
   const captureActionIdsRef = useRef(new Map()) // Tracks dispatched action IDs during capture: "layerId:type" -> actionId
   const [captureVersion, setCaptureVersion] = useState(0) // Internal state to force re-renders on Ref updates
+
+  const isStepUnchanged = useMemo(() => {
+    if (!isEditingExistingStep || !editingStepId) return false
+    const original = savedStepTimingsRef.current?.find(s => s.id === editingStepId)
+    const current = currentSceneMotionFlow?.steps?.find(s => s.id === editingStepId)
+    return areStepsIdentical(original, current)
+  }, [isEditingExistingStep, editingStepId, currentSceneMotionFlow, captureVersion])
+
+  // [PRESET CHANGE FIX] isDoneEnabled also checks hasPresetChanges so changing a preset (same count, different ID) activates the button.
+  const isDoneEnabled = !isStepUnchanged && (editingStepActionCount !== captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges)
 
 
   // Get timeline info for seeking
@@ -1911,7 +1981,9 @@ function EditorPage() {
             entry.scaleX = transform.scaleX
             entry.scaleY = transform.scaleY
             entry.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.opacity
-            entry.blur = transform.blur !== undefined ? transform.blur : (transform._blurFilter ? transform._blurFilter.strength : entry.blur)
+            const cleanBlur = transform.blur !== undefined ? transform.blur : (transform._blurFilter ? transform._blurFilter.strength : entry.blur)
+            entry.blur = cleanBlur
+            entry.initialTransform.blur = cleanBlur
 
             // [TILT] Preserve the live tilt angles produced by the fast-play
             // preview so that the freshly opened capture step starts from the
@@ -1985,290 +2057,313 @@ function EditorPage() {
           const init = tracked.initialTransform
 
           // Move
-          const hasMoved = (tracked.didMove) || (tracked.controlPoints?.length > 0)
-          if (hasMoved) {
-            const key = `${layerId}:move`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
-              }))
+          if (tracked.didMove) {
+            const hasMoved = (tracked.deltaX !== 0 || tracked.deltaY !== 0 || (tracked.controlPoints && tracked.controlPoints.length > 0))
+            const moveDeltaChanged = Math.abs(tracked.deltaX) > 0.5 || Math.abs(tracked.deltaY) > 0.5 || (tracked.controlPoints && tracked.controlPoints.length > 0)
+            if (hasMoved && moveDeltaChanged) {
+              const key = `${layerId}:move`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-move-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-move-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
+              // Moved back to original
+              const key = `${layerId}:move`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Scale
-          const initialScaleX = init.scaleX || 1
-          const initialScaleY = init.scaleY || 1
-          const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
-            (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
-          if (scaleChanged) {
-            const key = `${layerId}:scale`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
-              }))
+          if (tracked.didScale) {
+            const initialScaleX = init.scaleX || 1
+            const initialScaleY = init.scaleY || 1
+            const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
+              (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
+            if (scaleChanged) {
+              const key = `${layerId}:scale`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-scale-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-scale-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            // Scale returned to initial — remove the action if it exists
-            const key = `${layerId}:scale`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // Scale returned to initial — remove the action if it exists
+              const key = `${layerId}:scale`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Rotate
-          const initialRotation = init.rotation || 0
-          const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
-          if (rotateChanged) {
-            const key = `${layerId}:rotate`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { dangle: tracked.rotation - initialRotation }
-              }))
+          if (tracked.didRotate) {
+            const initialRotation = init.rotation || 0
+            const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
+            if (rotateChanged) {
+              const key = `${layerId}:rotate`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { dangle: tracked.rotation - initialRotation }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-rotate-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-rotate-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            // Rotation returned to initial — remove the action if it exists
-            const key = `${layerId}:rotate`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // Rotation returned to initial — remove the action if it exists
+              const key = `${layerId}:rotate`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
-          // [SYNC FIX] Crop: Dispatch crop changes immediately on mouse-up
-          // This keeps Move (center) and Crop (bounds) in sync in Redux, preventing jumps.
-          const initialCropX = init.cropX || 0
-          const initialCropY = init.cropY || 0
-          const initialCropW = init.cropWidth || 100
-          const initialCropH = init.cropHeight || 100
+          // Crop
+          if (tracked.didCrop) {
+            const initialCropX = init.cropX || 0
+            const initialCropY = init.cropY || 0
+            const initialCropW = init.cropWidth || 100
+            const initialCropH = init.cropHeight || 100
 
-          const hasCropChanged = (
-            (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
-            (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
-            (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
-            (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
-          )
+            const hasCropChanged = (
+              (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
+              (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
+              (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
+              (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
+            )
 
-          if (hasCropChanged) {
-            const key = `${layerId}:crop`
-            const existingId = captureActionIdsRef.current.get(key)
-            const cropValues = {
-              cropX: tracked.cropX ?? initialCropX,
-              cropY: tracked.cropY ?? initialCropY,
-              cropWidth: tracked.cropWidth ?? initialCropW,
-              cropHeight: tracked.cropHeight ?? initialCropH,
-              mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
-              mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
-              easing: 'power4.out'
-            }
+            if (hasCropChanged) {
+              const key = `${layerId}:crop`
+              const existingId = captureActionIdsRef.current.get(key)
+              const cropValues = {
+                cropX: tracked.cropX ?? initialCropX,
+                cropY: tracked.cropY ?? initialCropY,
+                cropWidth: tracked.cropWidth ?? initialCropW,
+                cropHeight: tracked.cropHeight ?? initialCropH,
+                mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
+                mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
+                easing: 'power4.out'
+              }
 
-            // Important: dx/dy are handled by the Move action if it exists.
-            // If No move action, the crop action itself carries the displacement.
-            if (!tracked.didMove && !tracked.controlPoints?.length) {
-              cropValues.dx = tracked.deltaX
-              cropValues.dy = tracked.deltaY
-            }
+              // Important: dx/dy are handled by the Move action if it exists.
+              // If No move action, the crop action itself carries the displacement.
+              if (!tracked.didMove && !tracked.controlPoints?.length) {
+                cropValues.dx = tracked.deltaX
+                cropValues.dy = tracked.deltaY
+              }
 
-            if (existingId) {
-              dispatch(updateSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId, values: cropValues }))
+              if (existingId) {
+                dispatch(updateSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId, values: cropValues }))
+              } else {
+                const actionId = `action-${Date.now()}-crop-${layerId}`
+                dispatch(addSceneMotionAction({ sceneId, stepId, layerId, actionId, type: 'crop', values: cropValues }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-crop-${layerId}`
-              dispatch(addSceneMotionAction({ sceneId, stepId, layerId, actionId, type: 'crop', values: cropValues }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            // [REVEAL BUG FIX] If crop returned to base, clean up the action
-            const key = `${layerId}:crop`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // [REVEAL BUG FIX] If crop returned to base, clean up the action
+              const key = `${layerId}:crop`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Fade (Opacity)
-          const initialOpacity = init.opacity !== undefined ? init.opacity : 1
-          const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
+          if (tracked.didFade) {
+            const initialOpacity = init.opacity !== undefined ? init.opacity : 1
+            const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
 
-          if (opacityChanged) {
-            const key = `${layerId}:fade`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { opacity: tracked.opacity }
-              }))
+            if (opacityChanged) {
+              const key = `${layerId}:fade`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { opacity: tracked.opacity }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-fade-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-fade-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:fade`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:fade`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Blur
-          const initialBlur = init.blur !== undefined ? init.blur : 0
-          const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
-          const shouldCreateBlurAction = blurChanged || tracked.didBlur
+          if (tracked.didBlur) {
+            const initialBlur = init.blur !== undefined ? init.blur : 0
+            const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
 
-          if (shouldCreateBlurAction) {
-            const key = `${layerId}:blur`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { blur: tracked.blur }
-              }))
+            if (blurChanged) {
+              const key = `${layerId}:blur`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { blur: tracked.blur }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-blur-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-blur-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:blur`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:blur`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Corner Radius
-          const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
-          const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
-          const shouldCreateRadiusAction = radiusChanged || tracked.didCornerRadius
+          if (tracked.didCornerRadius) {
+            const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
+            const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
 
-          if (shouldCreateRadiusAction) {
-            const key = `${layerId}:cornerRadius`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { cornerRadius: tracked.cornerRadius }
-              }))
+            if (radiusChanged) {
+              const key = `${layerId}:cornerRadius`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { cornerRadius: tracked.cornerRadius }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-radius-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-radius-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:cornerRadius`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:cornerRadius`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Tilt
-          const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
-          const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
-          const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
-          const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
-          const shouldCreateTiltAction = tiltXChanged || tiltYChanged
+          if (tracked.didTilt) {
+            const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
+            const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
+            const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
+            const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
+            const shouldCreateTiltAction = tiltXChanged || tiltYChanged
 
-          if (shouldCreateTiltAction) {
-            const key = `${layerId}:tilt`
-            const existingId = captureActionIdsRef.current.get(key)
-            const tiltValues = {
-              tiltX: tracked.tiltX ?? initialTiltX,
-              tiltY: tracked.tiltY ?? initialTiltY,
-              easing: 'power4.out'
-            }
+            if (shouldCreateTiltAction) {
+              const key = `${layerId}:tilt`
+              const existingId = captureActionIdsRef.current.get(key)
+              const tiltValues = {
+                tiltX: tracked.tiltX ?? initialTiltX,
+                tiltY: tracked.tiltY ?? initialTiltY,
+                easing: 'power4.out'
+              }
 
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: tiltValues
-              }))
-              captureActionIdsRef.current.set(key, existingId)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: tiltValues
+                }))
+                captureActionIdsRef.current.set(key, existingId)
+              } else {
+                const actionId = `action-${Date.now()}-tilt-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'tilt', values: tiltValues
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-tilt-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'tilt', values: tiltValues
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:tilt`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:tilt`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Color Change
-          const colorChanged = tracked.color !== undefined && tracked.color !== init.color
-          const shouldCreateColorAction = colorChanged || tracked.didColor
-          if (shouldCreateColorAction) {
-            const key = `${layerId}:colorChange`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId, layerId, actionId: existingId,
-                values: { color: tracked.color }
-              }))
+          if (tracked.didColor) {
+            const colorChanged = tracked.color !== undefined && tracked.color !== init.color
+            if (colorChanged) {
+              const key = `${layerId}:colorChange`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId, layerId, actionId: existingId,
+                  values: { color: tracked.color }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-color-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId, layerId, actionId,
+                  type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-color-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId, layerId, actionId,
-                type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:colorChange`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:colorChange`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
@@ -2986,6 +3081,11 @@ function EditorPage() {
       const scaleAction = actions.find(a => a.type === 'scale')
       const rotateAction = actions.find(a => a.type === 'rotate')
       const cropAction = actions.find(a => a.type === 'crop')
+      const fadeAction = actions.find(a => a.type === 'fade')
+      const blurAction = actions.find(a => a.type === 'blur')
+      const radiusAction = actions.find(a => a.type === 'cornerRadius')
+      const tiltAction = actions.find(a => a.type === 'tilt')
+      const colorAction = actions.find(a => a.type === 'colorChange')
 
       const deltaX = moveAction?.values?.dx || 0
       const deltaY = moveAction?.values?.dy || 0
@@ -3002,6 +3102,13 @@ function EditorPage() {
         ? init.rotation + (rotateAction.values?.dangle ?? 0)
         : init.rotation
 
+      const opacity = fadeAction?.values?.opacity !== undefined ? fadeAction.values.opacity : init.opacity
+      const blur = blurAction?.values?.blur !== undefined ? blurAction.values.blur : init.blur
+      const cornerRadius = radiusAction?.values?.cornerRadius !== undefined ? radiusAction.values.cornerRadius : init.cornerRadius
+      const tiltX = tiltAction?.values?.tiltX !== undefined ? tiltAction.values.tiltX : init.tiltX
+      const tiltY = tiltAction?.values?.tiltY !== undefined ? tiltAction.values.tiltY : init.tiltY
+      const color = colorAction?.values?.color !== undefined ? colorAction.values.color : init.color
+
       newTrackedLayers.set(layerId, {
         ...entry,
         currentPosition: { x: init.x + deltaX, y: init.y + deltaY },
@@ -3017,7 +3124,27 @@ function EditorPage() {
         cropHeight: cropAction?.values?.cropHeight ?? init.cropHeight ?? entry.height,
         mediaWidth: cropAction?.values?.mediaWidth ?? init.mediaWidth ?? entry.mediaWidth,
         mediaHeight: cropAction?.values?.mediaHeight ?? init.mediaHeight ?? entry.mediaHeight,
+        opacity,
+        blur,
+        cornerRadius,
+        tiltX,
+        tiltY,
+        color,
         didMove: Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5 || controlPoints.length > 0,
+        didScale: scaleAction ? (Math.abs(scaleX - init.scaleX) > 0.001 || Math.abs(scaleY - init.scaleY) > 0.001) : false,
+        didRotate: rotateAction ? Math.abs(rotation - init.rotation) > 0.1 : false,
+        didFade: fadeAction ? Math.abs(opacity - init.opacity) > 0.001 : false,
+        didBlur: blurAction ? Math.abs(blur - init.blur) > 0.1 : false,
+        didCornerRadius: radiusAction ? Math.abs(cornerRadius - init.cornerRadius) > 0.1 : false,
+        didTilt: tiltAction ? (Math.abs(tiltX - init.tiltX) > 0.01 || Math.abs(tiltY - init.tiltY) > 0.01) : false,
+        didColor: colorAction ? colorAction.values.color !== init.color : false,
+        didCrop: cropAction ? (
+          Math.abs((cropAction.values.cropX ?? init.cropX) - init.cropX) > 0.1 ||
+          Math.abs((cropAction.values.cropY ?? init.cropY) - init.cropY) > 0.1 ||
+          Math.abs((cropAction.values.cropWidth ?? init.cropWidth) - init.cropWidth) > 0.1 ||
+          Math.abs((cropAction.values.cropHeight ?? init.cropHeight) - init.cropHeight) > 0.1
+        ) : false,
+        didFlip: actions.some(a => a.type === 'flip') !== (savedStepTimingsRef.current?.find(s => s.id === editingStepId)?.layerActions?.[layerId]?.some(a => a.type === 'flip') ?? false),
         interactionType: null,
       })
     })
@@ -3044,6 +3171,9 @@ function EditorPage() {
       ...prev,
       trackedLayers: newTrackedLayers,
     }))
+
+    // Force canvas stage and controls repaint/re-sync
+    setCaptureVersion(v => v + 1)
   }, [currentSceneMotionFlow, isMotionCaptureActive, editingStepId, currentSceneId])
 
   /**
@@ -3089,6 +3219,51 @@ function EditorPage() {
 
     seek(stepStartTimeSeconds)
   }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow])
+
+  /**
+   * Select a step (highlight + seek to END of moment) WITHOUT entering capture mode.
+   * Clicking a card in the Animation Panel calls this to snap the playhead to the end of the moment.
+   */
+  const handleSelectStepEnd = useCallback((stepId) => {
+    if (!currentSceneId || !currentSceneMotionFlow) return
+    setSelectedAudioBlockId(null)
+
+    // If currently in capture mode, apply or cancel first
+    if (isMotionCaptureActive) {
+      if (stepId === 'base') {
+        handleCancelMotion()
+      } else {
+        handleApplyMotion({ skipPreview: true })
+      }
+    }
+
+    // Set the visual selection
+    setEditingStepId(stepId)
+
+    if (stepId === 'base') {
+      seek(startTimeOffset)
+      setMotionCaptureMode(null)
+      motionCaptureRef.current = null
+      return
+    }
+
+    const motionFlow = currentSceneMotionFlow.steps || []
+    const stepIndex = motionFlow.findIndex(s => s.id === stepId)
+    if (stepIndex === -1) return
+
+    const step = motionFlow[stepIndex]
+    const pageDuration = currentSceneMotionFlow.pageDuration || 5000
+    const stepCount = motionFlow.length
+    const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+    const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
+    const stepDurMs = step.duration != null ? step.duration : stepDuration
+    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs) / 1000
+
+    const epsilon = 0.002
+    if (Math.abs(playheadTimeRef.current - stepEndTimeSeconds) > epsilon) {
+      seek(stepEndTimeSeconds)
+    }
+  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow, playheadTimeRef])
 
   /**
    * Edit an existing motion step (Centralized logic for both Panel and Timeline)
@@ -3416,11 +3591,11 @@ function EditorPage() {
         didRotate: false,
         didFade: false,
         didBlur: false,
-        didColor: !!currentColorAction,
-        didCornerRadius: !!currentStepActions.find(a => a.type === 'cornerRadius'),
-        // Pre-set didFlip if the step already has a flip action (re-editing)
-        didFlip: !!currentStepActions.find(a => a.type === 'flip'),
-        didTilt: !!currentStepActions.find(a => a.type === 'tilt'),
+        didColor: false,
+        didCornerRadius: false,
+        didFlip: false,
+        didTilt: false,
+        didCrop: false,
         interactionType: null
       })
 
@@ -3470,7 +3645,6 @@ function EditorPage() {
             // Sync color from PIXI object (post fast-preview)
             if (transform.color !== undefined && transform.color !== null) {
               entry.color = transform.color
-              entry.initialTransform.color = transform.color
             }
           }
         })
@@ -3513,298 +3687,312 @@ function EditorPage() {
           const init = tracked.initialTransform
 
           // Move
-          const hasMoved = (tracked.didMove) || (tracked.controlPoints?.length > 0)
-          if (hasMoved) {
-            const key = `${layerId}:move`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
-              }))
+          if (tracked.didMove) {
+            const hasMoved = (tracked.deltaX !== 0 || tracked.deltaY !== 0 || (tracked.controlPoints && tracked.controlPoints.length > 0))
+            const moveDeltaChanged = Math.abs(tracked.deltaX) > 0.5 || Math.abs(tracked.deltaY) > 0.5 || (tracked.controlPoints && tracked.controlPoints.length > 0)
+            if (hasMoved && moveDeltaChanged) {
+              const key = `${layerId}:move`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                // Pass controlPoints as-is (undefined lets reducer preserve existing curve data)
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-move-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-move-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'move', values: { dx: tracked.deltaX, dy: tracked.deltaY, controlPoints: tracked.controlPoints || [], easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
+              // Moved back to original
+              const key = `${layerId}:move`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
-          // Scale — only persist/remove when the user GENUINELY scaled this session.
-          // [PRESET COMPOSITION FIX] On edit, tracked.scaleX is seeded to the preset's
-          // END scale (e.g. grow_in: 0.01 → 1) while init.scaleX is the START (0.01), so
-          // a raw value-diff reads as a "scale change" and persists a bogus custom dsx
-          // (= end/start = 100) that then composes with the preset on reload, exploding
-          // the scale. `didScale` is set only by real user interaction (onPositionUpdate),
-          // never by the engine animating a preset — so it cleanly separates the two.
-          const initialScaleX = init.scaleX || 1
-          const initialScaleY = init.scaleY || 1
-          const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
-            (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
-          if (scaleChanged && tracked.didScale) {
-            const key = `${layerId}:scale`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
-              }))
+          // Scale
+          if (tracked.didScale) {
+            const initialScaleX = init.scaleX || 1
+            const initialScaleY = init.scaleY || 1
+            const scaleChanged = tracked.scaleX !== undefined && tracked.scaleY !== undefined &&
+              (Math.abs(tracked.scaleX - initialScaleX) > 0.001 || Math.abs(tracked.scaleY - initialScaleY) > 0.001)
+            if (scaleChanged) {
+              const key = `${layerId}:scale`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-scale-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-scale-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'scale', values: { dsx: tracked.scaleX / initialScaleX, dsy: tracked.scaleY / initialScaleY, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else if (tracked.didScale) {
-            // Scale returned to initial — remove the action if it exists
-            const key = `${layerId}:scale`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // Scale returned to initial — remove the action if it exists
+              const key = `${layerId}:scale`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
-          // Rotate — gated on didRotate for the same reason as scale (a spin preset's
-          // -360 → 0 envelope must not be persisted as a bogus custom rotate).
-          const initialRotation = init.rotation || 0
-          const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
-          if (rotateChanged && tracked.didRotate) {
-            const key = `${layerId}:rotate`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { dangle: tracked.rotation - initialRotation }
-              }))
+          // Rotate
+          if (tracked.didRotate) {
+            const initialRotation = init.rotation || 0
+            const rotateChanged = tracked.rotation !== undefined && Math.abs(tracked.rotation - initialRotation) > 0.1
+            if (rotateChanged) {
+              const key = `${layerId}:rotate`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { dangle: tracked.rotation - initialRotation }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-rotate-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-rotate-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'rotate', values: { dangle: tracked.rotation - initialRotation, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else if (tracked.didRotate) {
-            // Rotation returned to initial — remove the action if it exists
-            const key = `${layerId}:rotate`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // Rotation returned to initial — remove the action if it exists
+              const key = `${layerId}:rotate`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // [SYNC FIX] Crop: Dispatch crop changes immediately on mouse-up
           // This keeps Move (center) and Crop (bounds) in sync in Redux, preventing jumps.
-          const initialCropX = init.cropX || 0
-          const initialCropY = init.cropY || 0
-          const initialCropW = init.cropWidth || 100
-          const initialCropH = init.cropHeight || 100
+          if (tracked.didCrop) {
+            const initialCropX = init.cropX || 0
+            const initialCropY = init.cropY || 0
+            const initialCropW = init.cropWidth || 100
+            const initialCropH = init.cropHeight || 100
 
-          const hasCropChanged = (
-            (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
-            (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
-            (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
-            (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
-          )
+            const hasCropChanged = (
+              (tracked.cropX !== undefined && Math.abs(tracked.cropX - initialCropX) > 0.1) ||
+              (tracked.cropY !== undefined && Math.abs(tracked.cropY - initialCropY) > 0.1) ||
+              (tracked.cropWidth !== undefined && Math.abs(tracked.cropWidth - initialCropW) > 0.1) ||
+              (tracked.cropHeight !== undefined && Math.abs(tracked.cropHeight - initialCropH) > 0.1)
+            )
 
-          if (hasCropChanged) {
-            const key = `${layerId}:crop`
-            const existingId = captureActionIdsRef.current.get(key)
-            const cropValues = {
-              cropX: tracked.cropX ?? initialCropX,
-              cropY: tracked.cropY ?? initialCropY,
-              cropWidth: tracked.cropWidth ?? initialCropW,
-              cropHeight: tracked.cropHeight ?? initialCropH,
-              mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
-              mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
-              easing: 'power4.out'
-            }
+            if (hasCropChanged) {
+              const key = `${layerId}:crop`
+              const existingId = captureActionIdsRef.current.get(key)
+              const cropValues = {
+                cropX: tracked.cropX ?? initialCropX,
+                cropY: tracked.cropY ?? initialCropY,
+                cropWidth: tracked.cropWidth ?? initialCropW,
+                cropHeight: tracked.cropHeight ?? initialCropH,
+                mediaWidth: tracked.mediaWidth ?? init.mediaWidth,
+                mediaHeight: tracked.mediaHeight ?? init.mediaHeight,
+                easing: 'power4.out'
+              }
 
-            // Important: dx/dy are handled by the Move action if it exists.
-            // If No move action, the crop action itself carries the displacement.
-            if (!tracked.didMove && !tracked.controlPoints?.length) {
-              cropValues.dx = tracked.deltaX
-              cropValues.dy = tracked.deltaY
-            }
+              // Important: dx/dy are handled by the Move action if it exists.
+              // If No move action, the crop action itself carries the displacement.
+              if (!tracked.didMove && !tracked.controlPoints?.length) {
+                cropValues.dx = tracked.deltaX
+                cropValues.dy = tracked.deltaY
+              }
 
-            if (existingId) {
-              dispatch(updateSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId, values: cropValues }))
+              if (existingId) {
+                dispatch(updateSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId, values: cropValues }))
+              } else {
+                const actionId = `action-${Date.now()}-crop-${layerId}`
+                dispatch(addSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId, type: 'crop', values: cropValues }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-crop-${layerId}`
-              dispatch(addSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId, type: 'crop', values: cropValues }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            // [REVEAL BUG FIX] If crop returned to base, clean up the action
-            const key = `${layerId}:crop`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              // [REVEAL BUG FIX] If crop returned to base, clean up the action
+              const key = `${layerId}:crop`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Tilt
-          const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
-          const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
-          const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
-          const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
-          const shouldCreateTiltAction = tiltXChanged || tiltYChanged
+          if (tracked.didTilt) {
+            const initialTiltX = init.tiltX !== undefined ? init.tiltX : 0
+            const initialTiltY = init.tiltY !== undefined ? init.tiltY : 0
+            const tiltXChanged = tracked.tiltX !== undefined && Math.abs(tracked.tiltX - initialTiltX) > 0.01
+            const tiltYChanged = tracked.tiltY !== undefined && Math.abs(tracked.tiltY - initialTiltY) > 0.01
+            const shouldCreateTiltAction = tiltXChanged || tiltYChanged
 
-          if (shouldCreateTiltAction) {
-            const key = `${layerId}:tilt`
-            const existingId = captureActionIdsRef.current.get(key)
-            const tiltValues = {
-              tiltX: tracked.tiltX ?? initialTiltX,
-              tiltY: tracked.tiltY ?? initialTiltY,
-              easing: 'power4.out'
-            }
+            if (shouldCreateTiltAction) {
+              const key = `${layerId}:tilt`
+              const existingId = captureActionIdsRef.current.get(key)
+              const tiltValues = {
+                tiltX: tracked.tiltX ?? initialTiltX,
+                tiltY: tracked.tiltY ?? initialTiltY,
+                easing: 'power4.out'
+              }
 
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: tiltValues
-              }))
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: tiltValues
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-tilt-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'tilt', values: { ...tiltValues, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-tilt-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'tilt', values: { ...tiltValues, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:tilt`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:tilt`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
-          // Fade (Opacity) — gated on didFade. Nearly every IN/OUT preset animates
-          // opacity (0 → base for IN), so without this gate a spurious fade action is
-          // persisted on every edit and composes with the preset's own fade.
-          const initialOpacity = init.opacity !== undefined ? init.opacity : 1
-          const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
-          if (opacityChanged && tracked.didFade) {
-            const key = `${layerId}:fade`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { opacity: tracked.opacity }
-              }))
+          // Fade (Opacity)
+          if (tracked.didFade) {
+            const initialOpacity = init.opacity !== undefined ? init.opacity : 1
+            const opacityChanged = tracked.opacity !== undefined && Math.abs(tracked.opacity - initialOpacity) > 0.001
+            if (opacityChanged) {
+              const key = `${layerId}:fade`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { opacity: tracked.opacity }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-fade-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-fade-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'fade', values: { opacity: tracked.opacity, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else if (tracked.didFade) {
-            const key = `${layerId}:fade`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:fade`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
-          // Blur — gated on didBlur (a blur preset's 20 → 0 envelope must not persist
-          // as a bogus custom blur action that composes with the preset on reload).
-          const initialBlur = init.blur !== undefined ? init.blur : 0
-          const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
-          const shouldCreateBlurAction = blurChanged && tracked.didBlur
+          // Blur
+          if (tracked.didBlur) {
+            const initialBlur = init.blur !== undefined ? init.blur : 0
+            const blurChanged = tracked.blur !== undefined && Math.abs(tracked.blur - initialBlur) > 0.1
 
-          if (shouldCreateBlurAction) {
-            const key = `${layerId}:blur`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { blur: tracked.blur }
-              }))
+            if (blurChanged) {
+              const key = `${layerId}:blur`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { blur: tracked.blur }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-blur-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-blur-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'blur', values: { blur: tracked.blur, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else if (tracked.didBlur) {
-            const key = `${layerId}:blur`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:blur`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Corner Radius
-          const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
-          const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
-          const shouldCreateRadiusAction = radiusChanged || tracked.didCornerRadius
+          if (tracked.didCornerRadius) {
+            const initialRadius = init.cornerRadius !== undefined ? init.cornerRadius : 0
+            const radiusChanged = tracked.cornerRadius !== undefined && Math.abs(tracked.cornerRadius - initialRadius) > 0.1
 
-          if (shouldCreateRadiusAction) {
-            const key = `${layerId}:cornerRadius`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { cornerRadius: tracked.cornerRadius }
-              }))
+            if (radiusChanged) {
+              const key = `${layerId}:cornerRadius`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { cornerRadius: tracked.cornerRadius }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-radius-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-radius-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'cornerRadius', values: { cornerRadius: tracked.cornerRadius, easing: 'power4.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:cornerRadius`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:cornerRadius`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
           // Color Change
-          const colorChanged = tracked.color !== undefined && tracked.color !== init.color
-          const shouldCreateColorAction = colorChanged || tracked.didColor
-          if (shouldCreateColorAction) {
-            const key = `${layerId}:colorChange`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(updateSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId: existingId,
-                values: { color: tracked.color }
-              }))
+          if (tracked.didColor) {
+            const colorChanged = tracked.color !== undefined && tracked.color !== init.color
+            if (colorChanged) {
+              const key = `${layerId}:colorChange`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(updateSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId: existingId,
+                  values: { color: tracked.color }
+                }))
+              } else {
+                const actionId = `action-${Date.now()}-color-${layerId}`
+                dispatch(addSceneMotionAction({
+                  sceneId, stepId: captureStepId, layerId, actionId,
+                  type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
+                }))
+                captureActionIdsRef.current.set(key, actionId)
+              }
             } else {
-              const actionId = `action-${Date.now()}-color-${layerId}`
-              dispatch(addSceneMotionAction({
-                sceneId, stepId: captureStepId, layerId, actionId,
-                type: 'colorChange', values: { color: tracked.color, easing: 'power1.out' }
-              }))
-              captureActionIdsRef.current.set(key, actionId)
-            }
-          } else {
-            const key = `${layerId}:colorChange`
-            const existingId = captureActionIdsRef.current.get(key)
-            if (existingId) {
-              dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
-              captureActionIdsRef.current.delete(key)
+              const key = `${layerId}:colorChange`
+              const existingId = captureActionIdsRef.current.get(key)
+              if (existingId) {
+                dispatch(deleteSceneMotionAction({ sceneId, stepId: captureStepId, layerId, actionId: existingId }))
+                captureActionIdsRef.current.delete(key)
+              }
             }
           }
 
@@ -3855,12 +4043,12 @@ function EditorPage() {
             if (data.scaleX !== undefined) { entry.scaleX = data.scaleX; entry.didScale = true }
             if (data.scaleY !== undefined) { entry.scaleY = data.scaleY; entry.didScale = true }
             if (data.rotation !== undefined) { entry.rotation = data.rotation; entry.didRotate = true }
-            if (data.cropX !== undefined) entry.cropX = data.cropX
-            if (data.cropY !== undefined) entry.cropY = data.cropY
-            if (data.cropWidth !== undefined) entry.cropWidth = data.cropWidth
-            if (data.cropHeight !== undefined) entry.cropHeight = data.cropHeight
-            if (data.mediaWidth !== undefined) entry.mediaWidth = data.mediaWidth
-            if (data.mediaHeight !== undefined) entry.mediaHeight = data.mediaHeight
+            if (data.cropX !== undefined) { entry.cropX = data.cropX; entry.didCrop = true }
+            if (data.cropY !== undefined) { entry.cropY = data.cropY; entry.didCrop = true }
+            if (data.cropWidth !== undefined) { entry.cropWidth = data.cropWidth; entry.didCrop = true }
+            if (data.cropHeight !== undefined) { entry.cropHeight = data.cropHeight; entry.didCrop = true }
+            if (data.mediaWidth !== undefined) { entry.mediaWidth = data.mediaWidth; entry.didCrop = true }
+            if (data.mediaHeight !== undefined) { entry.mediaHeight = data.mediaHeight; entry.didCrop = true }
             if (data.opacity !== undefined) { entry.opacity = data.opacity; entry.didFade = true }
             if (data.blur !== undefined) { entry.blur = data.blur; entry.didBlur = true }
             if (data.cornerRadius !== undefined) {
@@ -4651,13 +4839,10 @@ function EditorPage() {
           l => l.didMove || l.didScale || l.didRotate || l.didFade || l.didBlur || l.didCrop
         )
       : false
-    // Check if actions were modified/added/removed beyond the baseline
-    const hasActionChanges = editingStepActionCount !== captureBaselineActionCount
-    // [PRESET CHANGE FIX] Detect when a user changes a preset to a different preset (same count, different ID)
-    const hasPresetChanges = captureBaselinePresetSignature && currentPresetSignature !== captureBaselinePresetSignature
-    // hasSizeChanges covers color/flip/tilt/cornerRadius which are non-positional edits
-    // tracked via editingStepActionCount changes
-    const hasChanges = hasLiveChanges || hasActionChanges || hasPresetChanges
+    const originalStep = savedStepTimingsRef.current?.find(s => s.id === stepId)
+    const currentStep = currentSceneMotionFlow?.steps?.find(s => s.id === stepId)
+    const isStepUnchanged = isEditingExistingStep && areStepsIdentical(originalStep, currentStep)
+    const hasChanges = isStepUnchanged ? false : (hasLiveChanges || hasActionChanges || hasPresetChanges)
 
     if (hasChanges) {
       // CASE 1: Changes detected → Auto-save silently (no fast-play preview)
@@ -4693,7 +4878,7 @@ function EditorPage() {
       // CASE 2: No changes detected → Silent exit (same as Cancel)
       handleCancelMotion()
     }
-  }, [isMotionCaptureActive, editingStepId, editingStepActionCount, captureBaselineActionCount, currentSceneMotionFlow, currentSceneId, dispatch, handleApplyMotion, handleCancelMotion])
+  }, [isMotionCaptureActive, editingStepId, editingStepActionCount, captureBaselineActionCount, currentSceneMotionFlow, currentSceneId, dispatch, handleApplyMotion, handleCancelMotion, isEditingExistingStep, captureVersion])
 
   // [TOAST AUTO-DISMISS] Auto-dismiss after 3 seconds
   useEffect(() => {
@@ -5404,6 +5589,7 @@ function EditorPage() {
                 onRedo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(redo()) }}
                 sceneLayers={sceneLayersForMotion}
                 activeStepId={playheadStepId}
+                onSelectStepEnd={handleSelectStepEnd}
               />
               </div>
             )}
@@ -5433,6 +5619,8 @@ function EditorPage() {
                   setSelectedAudioBlockId(null)
                 }}
                 onAudioBlockCut={(id) => {
+                  if (motionControls) motionControls.pauseAll()
+                  setIsPlaying(false)
                   timelineControlRef.current?.cutBlock?.(id, playheadTime)
                 }}
                 onUndo={() => {
@@ -5826,13 +6014,16 @@ function EditorPage() {
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
                     onPlayheadInteractionDuringCapture={handlePlayheadInteractionDuringCapture}
                     selectedAudioBlockId={selectedAudioBlockId}
-                    onSelectAudioBlock={(id) => {
+                    onSelectAudioBlock={(id, seekTime) => {
                       setSelectedAudioBlockId(id)
                       if (id) {
                         if (document.activeElement && document.activeElement.tagName !== 'BODY') {
                           document.activeElement.blur()
                         }
                         dispatch(clearLayerSelection())
+                        if (seekTime !== undefined) {
+                          seek(seekTime)
+                        }
                       }
                     }}
                   />
@@ -5911,6 +6102,8 @@ function EditorPage() {
                     setSelectedAudioBlockId(null)
                   }}
                   onAudioBlockCut={(id) => {
+                    if (motionControls) motionControls.pauseAll()
+                    setIsPlaying(false)
                     timelineControlRef.current?.cutBlock?.(id, playheadTime)
                   }}
                   onUndo={() => {
@@ -6054,6 +6247,7 @@ function EditorPage() {
             editingStepId={editingStepId}
             editingStepActionCount={editingStepActionCount}
             activeStepId={playheadStepId}
+            onSelectStepEnd={handleSelectStepEnd}
             onMobileMinimizedChange={setIsMobileMotionMinimized}
           />
           )}

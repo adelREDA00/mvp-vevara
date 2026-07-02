@@ -754,10 +754,13 @@ export class MotionEngine {
                 blur: cumulativeStartOffset.blur !== undefined ? cumulativeStartOffset.blur : (startState.blur !== undefined ? startState.blur : 0),
               }
 
+              // [TILT] Always set baseline.alpha so GSAP manages the alpha property on the
+              // display object, which is required for timeline seeking and scrubbing to produce
+              // correct/stable opacity states on tilted layers. The perspective tilt system (syncTiltMesh)
+              // intercepts changes to pixiObject.alpha and routes them to _intendedAlpha/mesh.alpha.
+              baseline.alpha = baselineOpacity
               if (willStartTilted) {
                 pixiObject._intendedAlpha = baselineOpacity
-              } else {
-                baseline.alpha = baselineOpacity
               }
 
               // [TYPEWRITER] Only apply revealProgress if the object supports it
@@ -1828,6 +1831,9 @@ export class MotionEngine {
       // Redux tiltX/tiltY transitions to/from zero.
       delete obj._applyAnimatedTilt
       delete obj._tiltProxy
+
+      obj._blur = -1
+      delete obj._applyAnimatedBlur
     }
   }
 
@@ -1882,7 +1888,7 @@ export class MotionEngine {
       // is the root cause of the "blur resets after layer interaction" bug.
       // Only remove the animation hook so the reloaded GSAP timeline can re-attach
       // a fresh _applyAnimatedBlur; the filter itself stays at its current strength.
-      obj._blurLogicalStrength = 0
+      obj._blur = -1
       delete obj._applyAnimatedBlur
     })
     this.masterTimeline.clear()

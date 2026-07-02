@@ -1265,7 +1265,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     document.removeEventListener('touchmove', resizeMouseMoveWrapper)
     document.removeEventListener('touchend', resizeMouseUpWrapper)
 
-    if (onResizeEnd) onResizeEnd()
+    if (onResizeEnd) onResizeEnd(wasLeftResize ? 'left' : 'right', index)
   }
 
   // Update refs on each render to avoid stale closures
@@ -1956,6 +1956,15 @@ const ScenesBar = React.memo(React.forwardRef(({
   const zoomScrollRef = useRef(null)
   const touchZoomRef = useRef(null)
 
+  // Hide ghost playhead immediately during any timeline interaction
+  useEffect(() => {
+    const isInteracting = isDraggingPlayhead || isTimelineDragging || draggedIndex !== null
+    if (isInteracting) {
+      if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
+      if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
+    }
+  }, [isDraggingPlayhead, isTimelineDragging, draggedIndex])
+
   // Track card widths - initialize with default widths
   const getDefaultCardWidth = useCallback(() => {
     if (typeof window === 'undefined') return 180
@@ -2223,14 +2232,27 @@ const ScenesBar = React.memo(React.forwardRef(({
     dispatch(setTimelineDragging(true))
   }, [scenes, dispatch])
 
-  const handleResizeEnd = useCallback(() => {
+  const handleResizeEnd = useCallback((side, index) => {
     resizingSceneIdRef.current = null
     isTimelineInteractingRef.current = false
     dispatch(setTimelineDragging(false))
     // [PLAYHEAD PRESERVE] Pause in place on resize end — do not reset to project start.
     if (onMotionPause) onMotionPause()
     else if (onMotionStop) onMotionStop()
-  }, [onMotionStop, onMotionPause, dispatch])
+
+    if (side && index !== undefined && index !== null && onSeek) {
+      setTimeout(() => {
+        const sceneOffset = cumulativeOffsetsRef.current.scenes[index]
+        if (sceneOffset) {
+          if (side === 'left') {
+            onSeek(sceneOffset.startTime)
+          } else {
+            onSeek(sceneOffset.startTime + sceneOffset.duration)
+          }
+        }
+      }, 0)
+    }
+  }, [onMotionStop, onMotionPause, dispatch, onSeek])
 
   // Calculate offsets for fast lookups
   const cumulativeOffsets = useMemo(() => {
@@ -2260,6 +2282,11 @@ const ScenesBar = React.memo(React.forwardRef(({
       totalWidth: accumulatedWidth
     }
   }, [scenes, cardWidths, getDefaultCardWidth, calculateDurationFromWidth])
+
+  const cumulativeOffsetsRef = useRef(cumulativeOffsets)
+  useEffect(() => {
+    cumulativeOffsetsRef.current = cumulativeOffsets
+  }, [cumulativeOffsets])
 
   const totalCardsWidth = cumulativeOffsets.totalWidth
 
@@ -2874,6 +2901,15 @@ const ScenesBar = React.memo(React.forwardRef(({
       // Update sceneIdToWidth mapping to match new scene order
       // The widths stay with their respective scenes during reordering
       setSceneIdToWidth(prev => ({ ...prev }))
+
+      if (onSeek) {
+        setTimeout(() => {
+          const sceneOffset = cumulativeOffsetsRef.current.scenes[finalIndex]
+          if (sceneOffset) {
+            onSeek(sceneOffset.startTime)
+          }
+        }, 0)
+      }
     }
 
     setDraggedIndex(null)
@@ -3010,14 +3046,14 @@ const ScenesBar = React.memo(React.forwardRef(({
       onMouseEnter={handleSeekMouseEnter}
       onMouseLeave={handleSeekMouseLeave}
       onClick={(e) => {
-        // Prevent click seeking only if we clicked on buttons, inputs, or resize handles
-        if (e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+        // Prevent click seeking only if we clicked on buttons, inputs, or resize handles, or audio blocks
+        if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
         onSelectAudioBlock?.(null) // Clear audio selection when clicking timeline background
         handleTimelineClick(e)
       }}
       onTouchStart={(e) => {
         if (isTimelineInteractingRef.current) return
-        if (e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+        if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
         onSelectAudioBlock?.(null)
         const touch = e.touches[0]
         handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
@@ -3034,7 +3070,7 @@ const ScenesBar = React.memo(React.forwardRef(({
 
       {/* Timeline Ruler */}
       <div
-        className="z-20"
+        className="z-40"
         ref={timelineRef}
         style={{
           position: 'sticky',
@@ -3100,7 +3136,7 @@ const ScenesBar = React.memo(React.forwardRef(({
             left: `${16 + playheadPosition}px`,
             transform: 'translateX(-50%)',
             cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
-            zIndex: 50,
+            zIndex: 100,
             width: '16px',
             height: `${bottomSectionHeight || 200}px`,
             userSelect: 'none',
@@ -3147,7 +3183,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               top: 0,
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 51,
+              zIndex: 101,
             }}
           >
             <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
@@ -3181,7 +3217,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '4px',
               left: '16px',
               transform: 'translateX(-50%)',
-              zIndex: 45,
+              zIndex: 95,
               width: '16px',
               height: `${bottomSectionHeight || 200}px`,
               display: 'none',
@@ -3445,7 +3481,16 @@ const ScenesBar = React.memo(React.forwardRef(({
         calculateWidthFromDuration={calculateWidthFromDuration}
         onMotionPause={onMotionPause}
         onDragStart={() => dispatch(setTimelineDragging(true))}
-        onDragEnd={() => dispatch(setTimelineDragging(false))}
+        onDragEnd={(type, blockState) => {
+          dispatch(setTimelineDragging(false))
+          if (type && blockState && onSeek) {
+            if (type === 'move' || type === 'resize-left') {
+              onSeek(blockState.startOffset)
+            } else if (type === 'resize-right') {
+              onSeek(blockState.startOffset + blockState.duration)
+            }
+          }
+        }}
       />
 
       {/* Playhead time tooltip */}

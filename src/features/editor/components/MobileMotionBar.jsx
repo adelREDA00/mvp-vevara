@@ -23,6 +23,7 @@ function MobileMotionBar({
   onRedo,
   sceneLayers = [],
   activeStepId = null,
+  onSelectStepEnd = null,
 }) {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
@@ -31,6 +32,13 @@ function MobileMotionBar({
   const { active: tutorialActive, step: tutorialStep } = useSelector(state => state.tutorial)
 
   const [expandedCardId, setExpandedCardId] = useState(null)
+
+  // Auto-close moment card if it is no longer the active one
+  useEffect(() => {
+    if (expandedCardId && expandedCardId !== activeStepId) {
+      setExpandedCardId(null)
+    }
+  }, [activeStepId, expandedCardId])
   const carouselRef = useRef(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const cardRefs = useRef({})
@@ -207,7 +215,13 @@ function MobileMotionBar({
                     opacity: isTutorialStep1 ? 0.4 : 1,
                     pointerEvents: isTutorialStep1 ? 'none' : 'auto',
                   }}
-                  className={`shrink-0 transition-all duration-150 flex flex-col rounded-lg border-2 ${
+                  onClick={(e) => {
+                    const isActionButton = e.target.closest('button');
+                    if (isActionButton) return;
+
+                    onSelectStepEnd?.(step.id);
+                  }}
+                  className={`shrink-0 transition-all duration-150 flex flex-col rounded-lg border-2 cursor-pointer ${
                     isActive
                       ? (isLight ? 'border-[#b89eff]' : 'border-[#5a4b81]')
                       : (isLight ? 'border-slate-200' : 'border-white/10')
@@ -219,7 +233,7 @@ function MobileMotionBar({
                     // Delete confirmation — fixed height matches normal card height, no resize
                     <div className="flex overflow-hidden rounded-md" style={{ height: 26 }}>
                       <button
-                        onClick={() => setConfirmDeleteId(null)}
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null) }}
                         className={`flex-1 flex items-center justify-center transition-colors ${
                           isLight ? 'bg-slate-100 text-slate-700 active:bg-slate-200' : 'bg-white/[0.06] text-zinc-300 active:bg-white/[0.1]'
                         }`}
@@ -227,7 +241,7 @@ function MobileMotionBar({
                         <span className="text-[11px] font-bold">No</span>
                       </button>
                       <button
-                        onClick={() => { onDeleteStep?.(step.id); setConfirmDeleteId(null); setExpandedCardId(null) }}
+                        onClick={(e) => { e.stopPropagation(); onDeleteStep?.(step.id); setConfirmDeleteId(null); setExpandedCardId(null) }}
                         className="flex-1 flex items-center justify-center bg-red-500 active:bg-red-600 text-white text-[11px] font-bold transition-colors"
                       >
                         Delete
@@ -266,7 +280,17 @@ function MobileMotionBar({
 
                         {/* Expand toggle */}
                         <button
-                          onClick={() => setExpandedCardId(isExpanded ? null : step.id)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const isActive = activeStepId === step.id;
+                            if (isActive) {
+                              setExpandedCardId(isExpanded ? null : step.id);
+                            } else {
+                              onSelectStepEnd?.(step.id);
+                              setExpandedCardId(step.id);
+                            }
+                          }}
                           className={`h-6 w-6 flex items-center justify-center rounded-lg transition-colors shrink-0 ${
                             isExpanded
                               ? (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#c084fc] bg-white/10')

@@ -2538,7 +2538,8 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       // Per-tick mesh slave: transforms + corners only. Mesh creation / teardown
       // lives in useCanvasLayers' applyTransformInline.
       if (currentLayerObject._tiltMesh) {
-        syncTiltMesh(currentLayerObject, latestLayerRef.current)
+        const isCropping = state.isMediaElement && ['n', 's', 'e', 'w'].includes(state.handleType)
+        syncTiltMesh(currentLayerObject, latestLayerRef.current, { isCropping })
       }
     }
   }, [syncBoxVisuals, immediateTextUpdate, calculateTextDimensions, updateHoverBox, throttledUpdate, resolveAnchors, getCurrentLayerScale, updateSnappingGuides, latestViewportRef])
@@ -2687,6 +2688,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       // corners that were already correctly set above.
       currentLayerObject._lastResizeEndTime = performance.now()
       currentLayerObject._isResizing = false
+      currentLayerObject._isCropping = false
 
       // [FLINCH FIX v3] Skip the non-force syncTiltMesh here entirely.
       // This call would capture the RTT at pre-Redux dimensions (stale),
@@ -2708,7 +2710,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       // tick — bypasses the dimensionsChanged guard that would otherwise keep
       // the outline at pre-stamp values if lastKnownWidth/Height already match.
       forceRedrawRef.current = true
-
+ 
       // [SYNC FIX] Force one-shot sync from Redux to PIXI to ensure final state is correct
       // This bridges the timing gap between clearing _isResizing and Redux state propagation.
       // [POST-CLIP FIX] Only force sync if NOT in motion capture mode to prevent
@@ -2717,10 +2719,11 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (!isCapture) {
         currentLayerObject._forceNextSync = true
       }
-
+ 
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite._isInteracting = false
         currentLayerObject._cachedSprite._isResizing = false
+        currentLayerObject._cachedSprite._isCropping = false
       }
 
       // RTT recapture is deferred to the GSAP ticker's next syncTiltedDisplay call
@@ -3017,10 +3020,13 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     if (!currentLayerObject.destroyed) {
       currentLayerObject._isInteracting = true
       currentLayerObject._isResizing = true
+      const isCropping = initialState.isMediaElement && ['n', 's', 'e', 'w'].includes(handleType)
+      currentLayerObject._isCropping = isCropping
       currentLayerObject.eventMode = 'none'
       if (currentLayerObject._cachedSprite && !currentLayerObject._cachedSprite.destroyed) {
         currentLayerObject._cachedSprite._isInteracting = true
         currentLayerObject._cachedSprite._isResizing = true
+        currentLayerObject._cachedSprite._isCropping = isCropping
         currentLayerObject._cachedSprite.eventMode = 'none'
       }
     }
@@ -3501,6 +3507,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       if (latestLayerObjectRef.current) {
         latestLayerObjectRef.current._isResizing = false
         latestLayerObjectRef.current._isRotating = false
+        latestLayerObjectRef.current._isCropping = false
       }
     }
   }, [layersContainer]) // Update dependency

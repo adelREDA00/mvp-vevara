@@ -27,7 +27,7 @@ import {
   deleteAudioTrack,
   cutAudioTrack,
 } from '../../../store/slices/projectSlice'
-import { pause } from '../../../store/slices/playbackSlice'
+import { pause, seekBySeconds } from '../../../store/slices/playbackSlice'
 import { uploadFile, enqueueUpload, cancelUpload } from '../../../store/slices/uploadsSlice'
 import { checkAutoScroll, stopAutoScroll } from './ScenesBar'
 
@@ -35,6 +35,9 @@ import { checkAutoScroll, stopAutoScroll } from './ScenesBar'
 
 const BLOCK_HEIGHT = 32          // px — matches motion block visual height
 const ROW_HEIGHT = BLOCK_HEIGHT + 4  // px — row height with top/bottom breathing room
+
+// Cache to deduplicate on-the-fly audio decodes
+const decodedWaveformPromises = {}
 
 // Generate a pseudo-random hue from a block id for subtle color variation
 function blockHue(id) {
@@ -59,9 +62,39 @@ const AudioBlock = React.memo(function AudioBlock({
   calculateWidthFromDuration,
   onDragStart,
   onDragEnd,
+  onMotionPause,
 }) {
-  const leftPx = calculateTimePosition(block.startOffset)
-  const rightPx = calculateTimePosition(block.startOffset + block.duration)
+  const [localStartOffset, setLocalStartOffset] = useState(block.startOffset)
+  const [localDuration, setLocalDuration] = useState(block.duration)
+  const [localTrimStart, setLocalTrimStart] = useState(block.trimStart || 0)
+
+  const [isInteracting, setIsInteracting] = useState(false)
+
+  const localStateRef = useRef({
+    startOffset: block.startOffset,
+    duration: block.duration,
+    trimStart: block.trimStart || 0,
+  })
+
+  // Keep local state in sync when not interacting
+  useEffect(() => {
+    if (!isInteracting) {
+      setLocalStartOffset(block.startOffset)
+      setLocalDuration(block.duration)
+      setLocalTrimStart(block.trimStart || 0)
+      localStateRef.current = {
+        startOffset: block.startOffset,
+        duration: block.duration,
+        trimStart: block.trimStart || 0,
+      }
+    }
+  }, [block.startOffset, block.duration, block.trimStart, isInteracting])
+
+  const currentStartOffset = isInteracting ? localStartOffset : block.startOffset
+  const currentDuration = isInteracting ? localDuration : block.duration
+
+  const leftPx = calculateTimePosition(currentStartOffset)
+  const rightPx = calculateTimePosition(currentStartOffset + currentDuration)
   const blockPx = Math.max(8, rightPx - leftPx) // min width of 8px to keep handles grabable
 
 
@@ -70,6 +103,78 @@ const AudioBlock = React.memo(function AudioBlock({
   const resizeScrollTimerRef = useRef(null)
   const startScrollLeftRef = useRef(0)
   const lastClientXRef = useRef(0)
+
+  // Refs to avoid stale closures in event listeners
+  const blockRef = useRef(block)
+  const onDragEndRef = useRef(onDragEnd)
+  const onSelectRef = useRef(onSelect)
+  const onResizeRef = useRef(onResize)
+  const onMotionPauseRef = useRef(onMotionPause)
+
+  useEffect(() => {
+    blockRef.current = block
+    onDragEndRef.current = onDragEnd
+    onSelectRef.current = onSelect
+    onResizeRef.current = onResize
+    onMotionPauseRef.current = onMotionPause
+  }, [block, onDragEnd, onSelect, onResize, onMotionPause])
+
+  // ── Decode waveform if missing ─────────────────────────────────────────────
+  const waveformLength = block.waveform?.length || 0
+  useEffect(() => {
+    if (block.isUploading || !block.assetUrl) return
+    if (waveformLength > 0) return
+
+    const url = block.assetUrl
+    if (!decodedWaveformPromises[url]) {
+      decodedWaveformPromises[url] = (async () => {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)()
+        try {
+          const r = await fetch(url)
+          if (!r.ok) throw new Error("Network response not ok")
+          const buf = await r.arrayBuffer()
+          const decoded = await ctx.decodeAudioData(buf)
+          const channel = decoded.getChannelData(0)
+          const sampleCount = 100
+          const blockSize = Math.max(1, Math.floor(channel.length / sampleCount))
+          const rawWaveform = []
+          let maxVal = 0
+          for (let i = 0; i < sampleCount; i++) {
+            let sum = 0
+            for (let j = 0; j < blockSize; j++) {
+              const idx = i * blockSize + j
+              if (idx < channel.length) {
+                sum += Math.abs(channel[idx])
+              }
+            }
+            const avg = sum / blockSize
+            if (avg > maxVal) maxVal = avg
+            rawWaveform.push(avg)
+          }
+          const normalized = maxVal > 0
+            ? rawWaveform.map(v => Math.min(1, v / maxVal))
+            : rawWaveform
+          await ctx.close().catch(() => {})
+          return { waveform: normalized, totalDuration: decoded.duration }
+        } catch (err) {
+          await ctx.close().catch(() => {})
+          throw err
+        }
+      })()
+
+      decodedWaveformPromises[url]
+        .then(res => {
+          dispatch(updateAudioTrack({
+            id: block.id,
+            waveform: res.waveform,
+            totalDuration: res.totalDuration
+          }))
+        })
+        .catch(err => {
+          console.warn("Failed to generate waveform on the fly for", url, err)
+        })
+    }
+  }, [block.id, block.assetUrl, waveformLength, block.isUploading, dispatch])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -80,7 +185,6 @@ const AudioBlock = React.memo(function AudioBlock({
 
   // ── Drag / resize state (local, no Redux during drag — commit on mouseup) ──
   const dragRef = useRef(null)
-  const [isInteracting, setIsInteracting] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [showMobileCancel, setShowMobileCancel] = useState(false)
   const touchTimerRef = useRef(null)
@@ -109,14 +213,22 @@ const AudioBlock = React.memo(function AudioBlock({
   }, [showMobileCancel])
 
   const startDrag = useCallback((e, type) => {
-    if (block.isUploading) return
+    if (blockRef.current.isUploading) return
     if (e.button !== undefined && e.button !== 0) return
     e.stopPropagation()
     e.preventDefault()
-    onSelect(block.id)
-    onDragStart?.()
-    setIsInteracting(true)
 
+    // PAUSE PLAYBACK IMMEDIATELY ON POINTER DOWN
+    dispatch(pause())
+    onMotionPauseRef.current?.()
+
+    const startX = e.clientX
+    const startY = e.clientY
+    const startTimeMs = Date.now()
+
+    let hasMoved = false
+    let dragActive = false
+    
     // Find nearest overflow-x scroll container
     const scrollContainer = blockOuterRef.current ? (() => {
       let el = blockOuterRef.current.parentElement
@@ -130,15 +242,21 @@ const AudioBlock = React.memo(function AudioBlock({
       return null
     })() : null
 
+    const selectAndBegin = () => {
+      onSelectRef.current(blockRef.current.id)
+      onDragStart?.()
+      setIsInteracting(true)
+    }
+
     startScrollLeftRef.current = scrollContainer ? scrollContainer.scrollLeft : 0
     lastClientXRef.current = e.clientX
 
     dragRef.current = {
       type,
       startX: e.clientX,
-      origStart: block.startOffset,
-      origDuration: block.duration,
-      origTrimStart: block.trimStart || 0,
+      origStart: blockRef.current.startOffset,
+      origDuration: blockRef.current.duration,
+      origTrimStart: blockRef.current.trimStart || 0,
     }
 
     const performAudioResize = (clientX) => {
@@ -149,9 +267,12 @@ const AudioBlock = React.memo(function AudioBlock({
       const secPerPx = 1.0 / calculateWidthFromDuration(1.0)
       const dSec = adjustedDeltaX * secPerPx
 
+      let newStart = dragRef.current.origStart
+      let newDuration = dragRef.current.origDuration
+      let newTrimStart = dragRef.current.origTrimStart
+
       if (dragRef.current.type === 'move') {
-        const newStart = Math.max(0, dragRef.current.origStart + dSec)
-        onResize(block.id, { startOffset: newStart })
+        newStart = Math.max(0, dragRef.current.origStart + dSec)
       } else if (dragRef.current.type === 'resize-left') {
         const origStart = dragRef.current.origStart
         const origDuration = dragRef.current.origDuration
@@ -160,39 +281,64 @@ const AudioBlock = React.memo(function AudioBlock({
         const minStart = Math.max(0, origStart - origTrimStart)
         const maxStart = origStart + origDuration - 0.3
 
-        let newStart = origStart + dSec
+        newStart = origStart + dSec
         newStart = Math.max(minStart, Math.min(newStart, maxStart))
 
-        const newDuration = origDuration - (newStart - origStart)
-        const newTrimStart = Math.max(0, origTrimStart + (newStart - origStart))
-
-        onResize(block.id, {
-          startOffset: newStart,
-          duration: newDuration,
-          trimStart: newTrimStart
-        })
+        newDuration = origDuration - (newStart - origStart)
+        newTrimStart = Math.max(0, origTrimStart + (newStart - origStart))
       } else if (dragRef.current.type === 'resize-right') {
         const origDuration = dragRef.current.origDuration
         const origStart = dragRef.current.origStart
         const origTrimStart = dragRef.current.origTrimStart
-        const totalAssetDur = block.totalDuration || (origDuration + origTrimStart)
+        const totalAssetDur = blockRef.current.totalDuration || (origDuration + origTrimStart)
 
         const maxDuration = Math.max(0.3, totalAssetDur - origTrimStart)
 
-        const newDuration = Math.max(
+        newDuration = Math.max(
           0.3,
           Math.min(
             origDuration + dSec,
             maxDuration
           )
         )
-        onResize(block.id, { duration: newDuration })
+      }
+
+      setLocalStartOffset(newStart)
+      setLocalDuration(newDuration)
+      setLocalTrimStart(newTrimStart)
+      localStateRef.current = {
+        startOffset: newStart,
+        duration: newDuration,
+        trimStart: newTrimStart,
       }
     }
 
+    // Set hold timer for drag initiation
+    const holdTimer = setTimeout(() => {
+      if (!hasMoved && !dragActive) {
+        dragActive = true
+        selectAndBegin()
+        if (navigator.vibrate) {
+          navigator.vibrate(30)
+        }
+      }
+    }, 200)
+
     const onMove = (moveE) => {
-      if (!dragRef.current) return
       const clientX = moveE.touches ? moveE.touches[0].clientX : moveE.clientX
+      const clientY = moveE.touches ? moveE.touches[0].clientY : moveE.clientY
+
+      const dist = Math.sqrt(Math.pow(clientX - startX, 2) + Math.pow(clientY - startY, 2))
+      if (dist > 5) {
+        hasMoved = true
+        if (!dragActive) {
+          clearTimeout(holdTimer)
+          dragActive = true
+          selectAndBegin()
+        }
+      }
+
+      if (!dragActive || !dragRef.current) return
       lastClientXRef.current = clientX
       performAudioResize(clientX)
 
@@ -206,18 +352,45 @@ const AudioBlock = React.memo(function AudioBlock({
       }
     }
 
-    const onUp = () => {
+    const onUp = (upE) => {
+      clearTimeout(holdTimer)
       stopAutoScroll(resizeScrollTimerRef)
+
+      const durationMs = Date.now() - startTimeMs
+
+      if (!dragActive && !hasMoved && durationMs < 300) {
+        // Quick tap / click -> Select audio block AND snap playhead to clicked position
+        const rect = blockOuterRef.current.parentElement.getBoundingClientRect()
+        const clickX = startX - rect.left
+        const secPerPx = 1.0 / calculateWidthFromDuration(1.0)
+        const seekTime = clickX * secPerPx
+        onSelectRef.current(blockRef.current.id, seekTime)
+      } else if (dragActive) {
+        // Drag/trim finished -> Snap playhead to start or end depending on operation
+        const currentType = dragRef.current?.type
+        const finalBlockState = {
+          startOffset: localStateRef.current.startOffset,
+          duration: localStateRef.current.duration,
+          trimStart: localStateRef.current.trimStart,
+        }
+
+        // Commit final state to Redux synchronously so that the store updates before we trigger callbacks or history log
+        onResizeRef.current(blockRef.current.id, finalBlockState)
+
+        if (onDragEndRef.current) {
+          onDragEndRef.current(currentType, finalBlockState)
+        }
+      }
+
       dragRef.current = null
       setIsInteracting(false)
       document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerup', onUp)
-      onDragEnd?.()
     }
 
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
-  }, [block, calculateWidthFromDuration, onSelect, onResize, onDragStart, onDragEnd])
+  }, [calculateWidthFromDuration, onDragStart, dispatch])
 
   const isDefaultOrSelected = isSelected || !hasAnySelected
 
@@ -250,9 +423,7 @@ const AudioBlock = React.memo(function AudioBlock({
         userSelect: 'none',
       }}
       onClick={(e) => {
-        if (block.isUploading) return
         e.stopPropagation()
-        onSelect(block.id)
       }}
       onContextMenu={(e) => {
         if (block.isUploading) return
@@ -305,8 +476,8 @@ const AudioBlock = React.memo(function AudioBlock({
           isSelected={isSelected}
           hasAnySelected={hasAnySelected}
           hue={224}
-          blockTrimStart={block.trimStart || 0}
-          blockDuration={block.duration}
+          blockTrimStart={isInteracting ? localTrimStart : (block.trimStart || 0)}
+          blockDuration={currentDuration}
           blockTotalDuration={block.totalDuration}
           pixelsPerSecond={calculateWidthFromDuration(1.0)}
           isUploading={block.isUploading}
@@ -802,10 +973,8 @@ const AudioBar = React.forwardRef(function AudioBar(
 
   // ── Resize / update a block (dispatches to Redux) ─────────────────────────
   const handleResize = useCallback((id, updates) => {
-    dispatch(pause())
-    onMotionPause?.()
     dispatch(updateAudioTrack({ id, ...updates }))
-  }, [dispatch, onMotionPause])
+  }, [dispatch])
 
   // ── Delete a block ────────────────────────────────────────────────────────
   const handleDelete = useCallback((id) => {
@@ -887,7 +1056,7 @@ const AudioBar = React.forwardRef(function AudioBar(
                     totalDuration={totalDuration}
                     isSelected={selectedAudioBlockId === block.id}
                     hasAnySelected={hasAnySelected}
-                    onSelect={(id) => onSelectAudioBlock?.(id)}
+                    onSelect={(id, seekTime) => onSelectAudioBlock?.(id, seekTime)}
                     onResize={handleResize}
                     onDelete={handleDelete}
                     onContextMenu={(e, blk) => {
@@ -907,6 +1076,7 @@ const AudioBar = React.forwardRef(function AudioBar(
                       onDragStart?.()
                     }}
                     onDragEnd={onDragEnd}
+                    onMotionPause={onMotionPause}
                   />
                 ))
               )}

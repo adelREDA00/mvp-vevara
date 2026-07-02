@@ -539,7 +539,34 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                         try { pixiObject._previewTimeline.kill() } catch {}
                         pixiObject._previewTimeline = null
                     }
-                    pixiObject._isPlayingPresetPreview = false
+                    if (pixiObject._isPlayingPresetPreview) {
+                        pixiObject._isPlayingPresetPreview = false
+                        const snap = pixiObject._originalPreviewSnap
+                        if (snap) {
+                            pixiObject.x = snap.x
+                            pixiObject.y = snap.y
+                            pixiObject.alpha = snap.alpha
+                            pixiObject.rotation = snap.rotation
+                            if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
+                            if (pixiObject.revealProgress !== undefined && snap.revealProgress !== undefined) {
+                                pixiObject.revealProgress = snap.revealProgress
+                            }
+                            if (pixiObject._blurFilter) {
+                                pixiObject._blurFilter.strength = snap.blurStrength
+                                const has = pixiObject.filters?.includes(pixiObject._blurFilter)
+                                if (snap.hadBlurFilter && !has) {
+                                    pixiObject.filters = pixiObject.filters ? [...pixiObject.filters, pixiObject._blurFilter] : [pixiObject._blurFilter]
+                                } else if (!snap.hadBlurFilter && has) {
+                                    pixiObject.filters = pixiObject.filters.filter(f => f !== pixiObject._blurFilter)
+                                    if (!pixiObject.filters.length) pixiObject.filters = null
+                                }
+                            }
+                            if (snap.intendedAlpha !== undefined) {
+                                pixiObject._intendedAlpha = snap.intendedAlpha
+                            }
+                            pixiObject._originalPreviewSnap = null
+                        }
+                    }
                 }
             })
         }
@@ -641,7 +668,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
                         rotation: (obj.rotation * 180) / Math.PI,
                         scaleX: obj.scale.x,
                         scaleY: obj.scale.y,
-                        blur: obj._blurFilter ? obj._blurFilter.strength : 0,
+                        blur: typeof obj._blurLogicalStrength === 'number' ? obj._blurLogicalStrength : 0,
                         // Visual crop properties (reactive)
                         cropX: obj.cropX,
                         cropY: obj.cropY,
