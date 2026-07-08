@@ -478,3 +478,16 @@ body.theme-light .timeline-scrollbar::-webkit-scrollbar-thumb {
 body.theme-light .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: rgba(0, 0, 0, 0.35) !important;
 }
+
+/* Remove browser-default number input spinners from Font Size Control */
+.font-size-input::-webkit-outer-spin-button,
+.font-size-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.font-size-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+

@@ -210,9 +210,6 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
   }, [anchorElement, isInline])
 
   // Handle click outside to close.
-  // NOTE: We intentionally do NOT remove/re-add this listener around the eyedropper
-  // session. Instead, isPickingRef suppresses the close call while picking is active.
-  // This avoids the stale-closure race condition that caused the editor freeze.
   useEffect(() => {
     if (isInline) return
 
@@ -318,6 +315,8 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
       return newHsl
     })
   }
+
+
 
   // Cleanup
   useEffect(() => {
@@ -459,6 +458,8 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
                   placeholder="#000000"
                 />
               </div>
+
+
             </div>
           </div>
         </div>
@@ -484,4 +485,3 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 }
 
 export default AdvancedColorPickerModal
-
