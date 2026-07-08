@@ -419,7 +419,7 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 // Detect touch device for adaptive interaction sizing
 const isTouchDevice = () => typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, onPlayheadInteractionDuringCapture, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   // Compute active step from playhead position (synchronous, no re-render lag)
@@ -496,6 +496,12 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     if (e.pointerType === 'touch') return
     e.stopPropagation()
     e.preventDefault()
+
+    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     didDragRef.current = false
     setIsDragging(true)
 
@@ -554,10 +560,16 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
 
     document.addEventListener('pointermove', handlePointerMove)
     document.addEventListener('pointerup', handlePointerUp)
-  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX, onMotionPause])
+  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX, onMotionPause, isMotionCaptureActive, onPlayheadInteractionDuringCapture])
 
   const handleStepTouchStart = useCallback((e, step, type) => {
     e.stopPropagation()
+
+    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     const touch = e.touches[0]
     const startX = touch.clientX
     const startY = touch.clientY
@@ -649,7 +661,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     document.addEventListener('touchend', onTouchEnd, { once: true })
     document.addEventListener('touchcancel', onTouchEnd, { once: true })
-  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, onMotionPause, onStepContextMenu])
+  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, onMotionPause, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture])
 
   return (
     <div
@@ -865,7 +877,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
 
 
 
-const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, editingStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive, currentTime = 0 }) => {
+const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, editingStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture, currentTime = 0 }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   const scenes = useSelector(selectScenes)
@@ -1710,6 +1722,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           onStepClick={onStepClick}
           onStepContextMenu={onStepContextMenu}
           isMotionCaptureActive={isMotionCaptureActive}
+          onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
           cardWidth={actualWidth}
           pageDuration={calculateDurationFromWidth(actualWidth) * 1000}
           sceneId={scene.id}
@@ -3353,6 +3366,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   hasMotionSteps={sceneMotionFlows?.[scene.id]?.steps?.length > 0}
                   motionStepCount={sceneMotionFlows?.[scene.id]?.steps?.length || 0}
                   motionFlow={sceneMotionFlows?.[scene.id]}
+                  onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
                   activeStepId={isCurrentScene ? currentTimeStepId : null}
                   editingStepId={isCurrentScene ? editingStepId : null}
                   onStepClick={(stepId) => {
@@ -3369,13 +3383,17 @@ const ScenesBar = React.memo(React.forwardRef(({
                       if (step && cumulativeOffsets.scenes[index]) {
                         const sceneStartTime = cumulativeOffsets.scenes[index].startTime || 0
                         const stepStartMs = step.startTime ?? 0
-                        const stepStartSeconds = sceneStartTime + stepStartMs / 1000
+                        const pageDuration = flow.pageDuration || 5000
+                        const stepCount = flow.steps?.length || 0
+                        const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+                        const stepDurMs = step.duration != null ? step.duration : stepDuration
+                        const stepEndSeconds = sceneStartTime + (stepStartMs + stepDurMs) / 1000
                         // Stop playback first
                         if (onMotionStop) onMotionStop()
                         dispatch(clearLayerSelection())
                         dispatch(setCurrentScene(scene.id))
                         // Seek directly to the exact step position (not scene start)
-                        if (onSeek) onSeek(stepStartSeconds)
+                        if (onSeek) onSeek(stepEndSeconds)
                       } else {
                         // Fallback: switch scene and rely on standard flow
                         handleSwitchScene(scene.id)

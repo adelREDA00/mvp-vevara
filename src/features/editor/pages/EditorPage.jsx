@@ -1513,15 +1513,35 @@ function EditorPage() {
   // - Playhead before the first step → null (no step active yet)
   // - Playhead after the last step → the last step is active
   const playheadStepId = useMemo(() => {
-    if (!currentSceneId || !currentSceneMotionFlow?.steps?.length) return null
+    if (!currentSceneId) return null
     if (!currentSceneTimelineInfo) return null
 
     const timeInSceneMs = (playheadTime - currentSceneTimelineInfo.startTime) * 1000
-    if (timeInSceneMs < 0) return null
+    if (timeInSceneMs < -2.1) return null
 
-    const steps = currentSceneMotionFlow.steps
+    const steps = currentSceneMotionFlow?.steps || []
+    if (steps.length === 0) return 'base'
+    if (timeInSceneMs <= 2.1) return 'base'
+
     // Sort steps by startTime to ensure correct ordering
     const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+
+    // If editingStepId is set, and playhead is extremely close to its end boundary (within 5ms), prioritize it
+    // so that the clicked moment controls the final seek position and doesn't flip to the next block.
+    if (editingStepId && editingStepId !== 'base') {
+      const activeStep = sortedSteps.find(s => s.id === editingStepId)
+      if (activeStep) {
+        const start = activeStep.startTime || 0
+        const duration = activeStep.duration || 0
+        if (Math.abs(timeInSceneMs - (start + duration)) < 5) {
+          return activeStep.id
+        }
+      }
+    }
+
+    // 3. Playhead is before the first step — Design state
+    const firstStep = sortedSteps[0]
+    if (firstStep && timeInSceneMs < (firstStep.startTime || 0)) return 'base'
 
     // 1. Check if playhead is exactly within any step's range
     for (let i = 0; i < sortedSteps.length; i++) {
@@ -1554,12 +1574,8 @@ function EditorPage() {
       }
     }
 
-    // 3. Playhead is before the first step — no step is active yet
-    const firstStep = sortedSteps[0]
-    if (firstStep && timeInSceneMs < (firstStep.startTime || 0)) return null
-
     return null
-  }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime])
+  }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime, editingStepId])
 
   // Virtual layer for UI controls during motion capture
   // This combines the base Redux layer with live capture transforms to prevent slider snapping
@@ -3205,7 +3221,7 @@ function EditorPage() {
       return
     }
 
-    // Find step timing and seek to its start position
+    // Find step timing and seek to its end position
     const motionFlow = currentSceneMotionFlow?.steps || []
     const stepIndex = motionFlow.findIndex(s => s.id === stepId)
     if (stepIndex === -1) return
@@ -3215,9 +3231,10 @@ function EditorPage() {
     const stepCount = motionFlow.length
     const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
     const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
-    const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+    const stepDurMs = step.duration != null ? step.duration : stepDuration
+    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs) / 1000
 
-    seek(stepStartTimeSeconds)
+    seek(stepEndTimeSeconds)
   }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow])
 
   /**

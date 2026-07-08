@@ -8,6 +8,7 @@ import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { PRESET_REGISTRY, getPresetGroups } from '../../engine/motion/presets.js'
 import { getContrastCardBg } from '../utils/contrast'
 import PresetPreviewCard from './PresetPreviewCard'
+import AdvancedColorPickerModal from './AdvancedColorPickerModal'
 import {
   Move, RotateCw, Maximize2, Eye, X, Crop, FlipHorizontal2,
   ChevronDown, ChevronUp, Droplets, Palette, Film, Type, Rotate3d,
@@ -307,6 +308,8 @@ function MotionPanel({
   onSelectStepEnd = null,
 }) {
   const dispatch = useDispatch()
+  const [showAdvancedPicker, setShowAdvancedPicker] = useState(false)
+  const customColorButtonRef = useRef(null)
   const currentSceneId = useSelector(selectCurrentSceneId)
   const layers = useSelector(selectLayers)
   const tutorialState = useSelector(selectTutorialState)
@@ -1064,32 +1067,6 @@ function MotionPanel({
   // NORMAL MODE — VIEW-ONLY MOMENT CARDS
   // ============================================================================
   const renderNormalMode = () => {
-    if (motionFlow.length === 0) {
-      return (
-        <div className={`flex-1 ${isMobile ? 'p-3' : 'p-4'}`}>
-          <div
-            data-tutorial="add-moment-button"
-            onClick={() => onStartMotionCapture?.()}
-            className={`
-              w-full rounded-xl cursor-pointer border-2 border-solid transition-all duration-200 overflow-hidden
-              flex items-center justify-center gap-2
-              ${isLight
-                ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50 text-[#7c4af0] bg-[#7c4af0]/[0.02]'
-                : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45 text-[#a78bfa] hover:text-[#c084fc] bg-white/[0.02]'
-              }
-              active:scale-[0.99]
-              ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}
-            `}
-            style={{ minHeight: 52 }}
-          >
-            <Plus className="h-4 w-4 shrink-0" strokeWidth={2.5} />
-            <span className={`font-semibold tracking-wide ${isMobile ? 'text-[11px]' : 'text-xs'}`}>
-              Create your first moment
-            </span>
-          </div>
-        </div>
-      )
-    }
     // [ONBOARDING] During Step 1, dim all moment cards with a semi-transparent overlay.
     // Only the Add Moment button at the bottom remains fully interactive.
     const isTutorialStep1 = tutorialState?.active && tutorialState?.step === 1;
@@ -1107,6 +1084,35 @@ function MotionPanel({
             }}
           />
         )}
+        
+        {/* Design Base State Card */}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectStepEnd?.('base');
+          }}
+          className={`overflow-hidden border rounded-xl transition-all duration-150 cursor-pointer ${
+            activeStepId === 'base'
+              ? isLight
+                ? 'border-[#b89eff] bg-white shadow-sm'
+                : 'border-[#5a4b81] bg-white/[0.05] shadow-sm'
+              : isLight
+                ? 'border-transparent bg-white'
+                : 'border-transparent bg-[#090a0d]'
+          }`}
+        >
+          <div className={`w-full flex items-center gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
+            <div className="min-w-0 flex-1 text-left">
+              <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>
+                Design
+              </h4>
+              <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+                Starting point
+              </p>
+            </div>
+          </div>
+        </div>
+
         {motionFlow.map((step, stepIndex) => {
           const isExpanded = expandedStepId === step.id
           const allLayerIds = new Set([...Object.keys(step.layerActions || {}), ...Object.keys(step.layerPresets || {})])
@@ -1663,11 +1669,29 @@ function MotionPanel({
       if (actionType === 'colorChange') {
         const current = v.color ?? inherited.color ?? getLayerColorHex()
         const safeCurrent = /^#[0-9a-fA-F]{6}$/.test(String(current)) ? current : '#ffffff'
+        
+        if (isMobile) {
+          return wrap(
+            <div className="flex flex-col gap-2.5">
+              <span className={labelCls}>Color</span>
+              <div className="w-full">
+                <AdvancedColorPickerModal
+                  initialColor={safeCurrent}
+                  onColorSelect={(color) => commit({ color })}
+                  onClose={() => {}}
+                  isInline={true}
+                  hideHeader={true}
+                />
+              </div>
+            </div>
+          )
+        }
+
         return wrap(
           <div className="flex flex-col gap-2.5">
             <span className={labelCls}>Color</span>
             <div className="flex items-center gap-2 flex-wrap">
-              {COLOR_SWATCHES.slice(0, isMobile ? 6 : 8).map((c) => (
+              {COLOR_SWATCHES.slice(0, 8).map((c) => (
                 <button
                   key={c}
                   onClick={() => commit({ color: c })}
@@ -1676,18 +1700,21 @@ function MotionPanel({
                   title={c}
                 />
               ))}
-              <label
-                className={`w-6 h-6 rounded-full border cursor-pointer overflow-hidden relative ${isLight ? 'border-slate-200' : 'border-white/10'}`}
+              <button
+                ref={customColorButtonRef}
+                onClick={() => setShowAdvancedPicker(true)}
+                className={`w-6 h-6 rounded-full border cursor-pointer overflow-hidden relative transition-transform hover:scale-110 ${isLight ? 'border-slate-200' : 'border-white/10'}`}
                 title="Custom color"
                 style={{ background: 'conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)' }}
-              >
-                <input
-                  type="color"
-                  value={safeCurrent}
-                  onChange={(e) => commit({ color: e.target.value })}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+              {showAdvancedPicker && (
+                <AdvancedColorPickerModal
+                  onClose={() => setShowAdvancedPicker(false)}
+                  initialColor={safeCurrent}
+                  onColorSelect={(color) => commit({ color })}
+                  anchorElement={customColorButtonRef.current}
                 />
-              </label>
+              )}
             </div>
           </div>
         )
@@ -2006,11 +2033,26 @@ function MotionPanel({
             })
           ) : (
             <>
+              <button
+                onClick={() => onSelectStepEnd?.('base')}
+                title="Design / Starting Point"
+                className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${
+                  activeStepId === 'base'
+                    ? isLight
+                      ? 'border-[#b89eff] text-[#7c4af0] bg-[#b89eff]/10'
+                      : 'border-[#5a4b81] text-[#c084fc] bg-[#5a4b81]/10'
+                    : isLight
+                      ? 'border-slate-200 text-slate-500 hover:border-[#b89eff]/50 hover:text-[#7c4af0]'
+                      : 'border-white/10 text-zinc-500 hover:border-[#5a4b81]/50 hover:text-[#c084fc]'
+                }`}
+              >
+                D
+              </button>
               {motionFlow.map((step, idx) => (
                 <button
                   key={step.id}
-                  onClick={() => onStepEdit?.(step.id)}
-                  title={`Edit Moment ${idx + 1}`}
+                  onClick={() => onSelectStepEnd?.(step.id)}
+                  title={`Select Moment ${idx + 1}`}
                   className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${activeStepId === step.id
                     ? isLight
                       ? 'border-[#b89eff] text-[#b89eff] bg-[#b89eff]/10'

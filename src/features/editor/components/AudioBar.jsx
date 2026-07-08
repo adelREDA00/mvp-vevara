@@ -395,18 +395,18 @@ const AudioBlock = React.memo(function AudioBlock({
   const isDefaultOrSelected = isSelected || !hasAnySelected
 
   const normalColor = isDefaultOrSelected
-    ? isLight ? 'hsl(224, 76%, 50%)' : 'hsl(224, 70%, 45%)'
-    : isLight ? 'hsl(224, 45%, 85%)' : 'hsl(224, 30%, 25%)'
+    ? isLight ? 'hsl(204, 86%, 53%)' : 'hsl(204, 70%, 45%)'
+    : isLight ? 'hsl(204, 45%, 85%)' : 'hsl(204, 30%, 25%)'
 
-  const dimmedColor = isLight ? 'hsl(224, 45%, 85%)' : 'hsl(224, 30%, 25%)'
+  const dimmedColor = isLight ? 'hsl(204, 45%, 85%)' : 'hsl(204, 30%, 25%)'
 
   const blockBackground = block.isUploading
     ? `linear-gradient(to right, ${normalColor} ${block.progress || 0}%, ${dimmedColor} ${block.progress || 0}%)`
     : normalColor
 
   const blockBorder = isDefaultOrSelected
-    ? isLight ? '1.5px solid hsl(224, 85%, 65%)' : '1.5px solid hsl(224, 80%, 55%)'
-    : isLight ? '1px solid hsl(224, 40%, 75%)' : '1px solid hsl(224, 25%, 20%)'
+    ? isLight ? '1.5px solid hsl(204, 86%, 65%)' : '1.5px solid hsl(204, 80%, 55%)'
+    : isLight ? '1px solid hsl(204, 40%, 75%)' : '1px solid hsl(204, 25%, 20%)'
 
 
   return (
@@ -475,7 +475,7 @@ const AudioBlock = React.memo(function AudioBlock({
           height={BLOCK_HEIGHT - 8}
           isSelected={isSelected}
           hasAnySelected={hasAnySelected}
-          hue={224}
+          hue={204}
           blockTrimStart={isInteracting ? localTrimStart : (block.trimStart || 0)}
           blockDuration={currentDuration}
           blockTotalDuration={block.totalDuration}
@@ -569,8 +569,8 @@ const WaveformDisplay = React.memo(function WaveformDisplay({
     ctx.fillStyle = isUploading
       ? 'rgba(255, 255, 255, 0.4)'
       : isDefaultOrSelected
-        ? `hsla(224, 90%, 88%, 0.65)`
-        : `hsla(224, 50%, 70%, 0.25)`
+        ? `hsla(204, 90%, 88%, 0.65)`
+        : `hsla(204, 50%, 70%, 0.25)`
 
     let maxVal = 0
     if (hasReal) {

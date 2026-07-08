@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Droplet } from 'lucide-react'
+import { X } from 'lucide-react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 
 // Helper functions for color conversion
@@ -131,7 +131,7 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
   })
   
   const [hex, setHex] = useState(initialColor)
-  const [position, setPosition] = useState({ top: 0, left: 0 })
+  const [position, setPosition] = useState(null)
   const colorAreaRef = useRef(null)
   const hueSliderRef = useRef(null)
   const modalRef = useRef(null)
@@ -209,19 +209,24 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
     }
   }, [anchorElement, isInline])
 
-  // Handle click outside to close
+  // Handle click outside to close.
+  // NOTE: We intentionally do NOT remove/re-add this listener around the eyedropper
+  // session. Instead, isPickingRef suppresses the close call while picking is active.
+  // This avoids the stale-closure race condition that caused the editor freeze.
   useEffect(() => {
     if (isInline) return
 
     const handleClickOutside = (e) => {
-      if (modalRef.current && !modalRef.current.contains(e.target) && 
+      if (modalRef.current && !modalRef.current.contains(e.target) &&
           anchorElement && !anchorElement.contains(e.target)) {
         onClose()
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [onClose, anchorElement, isInline])
 
   // Update HSL when hex input changes
@@ -314,27 +319,6 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
     })
   }
 
-  // Eyedropper tool
-  const handleEyedropper = async () => {
-    if (!window.EyeDropper) {
-      // Fallback: show message or use alternative method
-      alert('Eyedropper API not supported in this browser')
-      return
-    }
-
-    try {
-      const eyeDropper = new window.EyeDropper()
-      const result = await eyeDropper.open()
-      if (result.sRGBHex) {
-        const newHsl = hexToHsl(result.sRGBHex)
-        setHex(result.sRGBHex)
-        setHsl(newHsl)
-      }
-    } catch (e) {
-      // User cancelled or error
-    }
-  }
-
   // Cleanup
   useEffect(() => {
     return () => {
@@ -384,8 +368,10 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
         WebkitBackdropFilter: 'blur(24px)',
       } : {
         width: '280px',
-        top: `${position.top}px`,
-        left: `${position.left}px`,
+        top: position ? `${position.top}px` : '0px',
+        left: position ? `${position.left}px` : '0px',
+        opacity: position ? 1 : 0,
+        pointerEvents: position ? 'auto' : 'none',
         backgroundColor: isLight ? 'rgba(255, 255, 255, 0.9)' : 'rgba(15, 16, 21, 0.7)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -473,19 +459,6 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
                   placeholder="#000000"
                 />
               </div>
-              
-              {/* Eyedropper Button */}
-              <button
-                onClick={handleEyedropper}
-                className={`transition-all p-2 rounded-lg active:scale-95 flex-shrink-0 ${
-                  isLight 
-                    ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50' 
-                    : 'text-white/60 hover:text-white hover:bg-white/5'
-                }`}
-                title="Eyedropper"
-              >
-                <Droplet className="h-4 w-4" strokeWidth={2} />
-              </button>
             </div>
           </div>
         </div>
