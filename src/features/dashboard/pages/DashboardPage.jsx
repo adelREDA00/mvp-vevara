@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate, Link } from 'react-router-dom'
 import api from '../../../api/client'
 import { logoutUser, updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
+import { resetProject } from '../../../store/slices/projectSlice'
 import {
     Plus, Folder, Layout, LogOut, Settings, User as UserIcon,
     ExternalLink, Trash2, ChevronDown, Layers, Loader2, X,
@@ -222,6 +223,9 @@ const DashboardPage = () => {
 
     const handleLogout = async () => {
         await dispatch(logoutUser())
+        dispatch(resetProject())
+        setProjects([])
+        loadLocalProjects()
     }
 
     const handleCreateProject = async () => {
@@ -560,7 +564,7 @@ const DashboardPage = () => {
         <div className="min-h-screen bg-[var(--dashboard-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[var(--dashboard-accent)]/10 flex overflow-x-hidden">
             {toast && (
                 <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] animate-in fade-in slide-in-from-top-4 duration-300 select-none">
-                    <div className={`text-white px-4 py-2 rounded-[8px] flex items-center justify-center gap-2 text-[13px] font-semibold tracking-wide shadow-lg border border-white/10 ${toast.type === 'error' ? 'bg-rose-550 dark:bg-rose-500' : 'bg-emerald-550 dark:bg-emerald-500'}`}>
+                    <div className={`text-white px-4 py-2 rounded-[8px] flex items-center justify-center gap-2 text-[13px] font-semibold tracking-wide shadow-lg border border-white/10 ${toast.type === 'error' ? 'bg-rose-600 dark:bg-rose-500' : 'bg-emerald-600 dark:bg-emerald-500'}`}>
                         {toast.type === 'error' ? (
                             <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

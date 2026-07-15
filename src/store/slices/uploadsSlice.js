@@ -260,6 +260,7 @@ export const startBatchUpload = createAsyncThunk(
     const limit = 3
     let active = 0
     let index = 0
+    const results = []
 
     const next = async () => {
       if (index >= uploads.length) return
@@ -268,12 +269,15 @@ export const startBatchUpload = createAsyncThunk(
       active++
       
       try {
-        await dispatch(uploadFile({ 
+        const res = await dispatch(uploadFile({ 
           tempId: current.tempId, 
           file: current.file,
           isPublic,
           assetType
         })).unwrap()
+        if (res && res.data) {
+          results.push(res.data)
+        }
       } catch (err) {
         // Error handled by uploadFile.rejected
       } finally {
@@ -289,6 +293,7 @@ export const startBatchUpload = createAsyncThunk(
     }
     
     await Promise.all(initialBatch)
+    return results
   }
 )
 

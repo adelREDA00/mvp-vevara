@@ -2020,6 +2020,21 @@ function Stage({
   // EMPTY STATE HANDLERS
   // =============================================================================
 
+  const getExtensionFromMimeType = (mimeType) => {
+    if (!mimeType) return ''
+    if (mimeType.startsWith('image/png')) return '.png'
+    if (mimeType.startsWith('image/jpeg') || mimeType.startsWith('image/jpg')) return '.jpg'
+    if (mimeType.startsWith('image/gif')) return '.gif'
+    if (mimeType.startsWith('image/webp')) return '.webp'
+    if (mimeType.startsWith('video/mp4')) return '.mp4'
+    if (mimeType.startsWith('video/quicktime')) return '.mov'
+    if (mimeType.startsWith('video/webm')) return '.webm'
+    if (mimeType.startsWith('audio/mpeg') || mimeType.startsWith('audio/mp3')) return '.mp3'
+    if (mimeType.startsWith('audio/wav')) return '.wav'
+    if (mimeType.startsWith('audio/ogg')) return '.ogg'
+    return ''
+  }
+
   const handleEmptyStateUpload = useCallback(() => {
     // Create a synthetic click on a hidden file input to start the upload
     // After file selection, we dispatch addLayerAndSelect via existing logic
@@ -2132,23 +2147,15 @@ function Stage({
         // Authenticated: upload to server via existing startBatchUpload
         dispatch(startBatchUpload({ files }))
           .unwrap()
-          .then(() => {
-            // After batch upload completes, fetch the updated upload list
-            return dispatch(fetchUploads()).unwrap()
-          })
-          .then((uploadedData) => {
-            // Find the newly uploaded asset in the response
-            if (Array.isArray(uploadedData) && uploadedData.length > 0) {
-              const newAsset = uploadedData.find(
-                (item) => item.name === file.name || item.originalName === file.name
-              )
-              if (newAsset && newAsset.url) {
-                const assetWidth = newAsset.metadata?.width || 300
-                const assetHeight = newAsset.metadata?.height || 200
-                const assetDuration = newAsset.metadata?.duration || 0
-                insertLayerFromAsset(newAsset.url, file.name, assetWidth, assetHeight, isVideo, assetDuration, newAsset.metadata)
-                dispatch(consumeEmptyState(currentSceneId))
-              }
+          .then((results) => {
+            // Find the newly uploaded asset in the response results directly
+            const newAsset = results && results[0]
+            if (newAsset && newAsset.url) {
+              const assetWidth = newAsset.metadata?.width || 300
+              const assetHeight = newAsset.metadata?.height || 200
+              const assetDuration = newAsset.metadata?.duration || 0
+              insertLayerFromAsset(newAsset.url, file.name, assetWidth, assetHeight, isVideo, assetDuration, newAsset.metadata)
+              dispatch(consumeEmptyState(currentSceneId))
             }
           })
           .catch(() => {
@@ -2223,22 +2230,25 @@ function Stage({
     try {
       const response = await fetch(sampleUrl)
       const blob = await response.blob()
-      const file = new File([blob], sample.name || 'sample.png', { type: blob.type || 'image/png' })
+      
+      const ext = getExtensionFromMimeType(blob.type) || '.png'
+      const filename = `${sample.name || 'Sample Image'}${ext}`
+      const file = new File([blob], filename, { type: blob.type || 'image/png' })
 
       if (isAuthenticated) {
         // Upload to server via existing pipeline
         dispatch(startBatchUpload({ files: [file] }))
           .unwrap()
-          .then(() => dispatch(fetchUploads()).unwrap())
-          .then((uploadedData) => {
-            if (Array.isArray(uploadedData) && uploadedData.length > 0) {
-              const newAsset = uploadedData.find(
-                (item) => item.name === file.name || item.originalName === file.name
-              )
-              const assetUrl = newAsset?.url || sampleUrl
-              const assetWidth = newAsset?.metadata?.width || 400
-              const assetHeight = newAsset?.metadata?.height || 250
+          .then((results) => {
+            const newAsset = results && results[0]
+            if (newAsset) {
+              const assetUrl = newAsset.url || sampleUrl
+              const assetWidth = newAsset.metadata?.width || 400
+              const assetHeight = newAsset.metadata?.height || 250
               insertLayerFromAsset(assetUrl, sample.name || 'Sample Image', assetWidth, assetHeight, false)
+              dispatch(consumeEmptyState(currentSceneId))
+            } else {
+              insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
               dispatch(consumeEmptyState(currentSceneId))
             }
           })

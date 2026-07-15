@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
 import { selectTutorialState } from '../../../store/slices/tutorialSlice';
 import { X } from 'lucide-react';
@@ -6,11 +6,34 @@ import { X } from 'lucide-react';
 const TutorialOverlay = () => {
   const { active, step } = useSelector(selectTutorialState);
   const [isHintDismissed, setIsHintDismissed] = useState(false);
+  const videoRef = useRef(null);
 
   // Reset dismissed state on step changes
   useEffect(() => {
     setIsHintDismissed(false);
   }, [step]);
+
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.src = "";
+          videoRef.current.load();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isHintDismissed && videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.src = "";
+        videoRef.current.load();
+      } catch (_) {}
+    }
+  }, [isHintDismissed]);
 
   if (!active) return null;
 
@@ -24,7 +47,7 @@ const TutorialOverlay = () => {
 
             {/* Video preview framed inside card, object-cover to remove borders */}
             <div className="relative w-full overflow-hidden bg-black flex items-center justify-center border border-white/10 aspect-[16/10]">
-              <video className="w-full h-full object-cover" src="/videos/mini1.mp4" autoPlay muted loop />
+              <video ref={videoRef} className="w-full h-full object-cover" src="/videos/mini1.mp4" autoPlay muted loop playsInline webkit-playsinline="true" />
             </div>
 
             {/* Content Text: Clean visual hierarchy with white text */}

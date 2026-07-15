@@ -111,9 +111,29 @@ function AppContent() {
         currentItem: `Moving asset "${record.name || 'Unnamed Asset'}"...`,
       }))
 
+      const getExtensionFromMimeType = (mimeType) => {
+        if (!mimeType) return ''
+        if (mimeType.startsWith('image/png')) return '.png'
+        if (mimeType.startsWith('image/jpeg') || mimeType.startsWith('image/jpg')) return '.jpg'
+        if (mimeType.startsWith('image/gif')) return '.gif'
+        if (mimeType.startsWith('image/webp')) return '.webp'
+        if (mimeType.startsWith('video/mp4')) return '.mp4'
+        if (mimeType.startsWith('video/quicktime')) return '.mov'
+        if (mimeType.startsWith('video/webm')) return '.webm'
+        if (mimeType.startsWith('audio/mpeg') || mimeType.startsWith('audio/mp3')) return '.mp3'
+        if (mimeType.startsWith('audio/wav')) return '.wav'
+        if (mimeType.startsWith('audio/ogg')) return '.ogg'
+        return ''
+      }
+
       try {
         const blob = new Blob([record.data], { type: record.type })
-        const file = new File([blob], record.name, { type: record.type })
+        let filename = record.name
+        if (filename && !filename.includes('.')) {
+          const ext = getExtensionFromMimeType(record.type) || '.png'
+          filename = `${filename}${ext}`
+        }
+        const file = new File([blob], filename, { type: record.type })
         
         const formData = new FormData()
         formData.append('file', file)

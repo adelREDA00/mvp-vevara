@@ -157,6 +157,7 @@ function SampleModal({ isOpen, samples = FALLBACK_SAMPLES, onSelect, onClose, th
                   className="flex-shrink-0 cursor-pointer transition-all duration-300 hover:scale-[1.03] outline-none"
                   style={{
                     height: 'min(160px, 22vh)',
+                    aspectRatio: '1.5',
                     border: `2px solid ${isSelected ? '#7c3aed' : 'transparent'
                       }`,
                     borderRadius: '12px',

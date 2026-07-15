@@ -306,6 +306,7 @@ function MotionPanel({
   activeStepId = null,
   onMobileMinimizedChange = null,
   onSelectStepEnd = null,
+  isMobileMinimizedProp = false,
 }) {
   const dispatch = useDispatch()
   const [showAdvancedPicker, setShowAdvancedPicker] = useState(false)
@@ -333,12 +334,19 @@ function MotionPanel({
   }, [])
 
   // Mobile: minimized state — collapses to small handle bar
-  const [isMobileMinimized, setIsMobileMinimized] = useState(false)
+  const [isMobileMinimized, setIsMobileMinimized] = useState(isMobileMinimizedProp)
+
+  useEffect(() => {
+    setIsMobileMinimized(isMobileMinimizedProp)
+  }, [isMobileMinimizedProp])
+
   useEffect(() => {
     if (isMobile && isMotionCaptureActive) {
-      setIsMobileMinimized(false) // Auto-expand when capture starts on mobile
+      if (tutorialState?.active) {
+        setIsMobileMinimized(false) // Auto-expand when capture starts on mobile only during onboarding tutorial
+      }
     }
-  }, [isMobile, isMotionCaptureActive])
+  }, [isMobile, isMotionCaptureActive, tutorialState?.active])
 
   useEffect(() => {
     onMobileMinimizedChange?.(isMobileMinimized)

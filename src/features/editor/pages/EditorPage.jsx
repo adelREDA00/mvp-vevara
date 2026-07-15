@@ -217,6 +217,30 @@ function EditorPage() {
   const userPrefCollapsedRef = useRef(false)
   const userPrefMobileMinimizedRef = useRef(false)
 
+  const exampleIntroVideoRef = useRef(null)
+
+  useEffect(() => {
+    if (!showExampleIntro && exampleIntroVideoRef.current) {
+      try {
+        exampleIntroVideoRef.current.pause()
+        exampleIntroVideoRef.current.src = ""
+        exampleIntroVideoRef.current.load()
+      } catch (_) {}
+    }
+  }, [showExampleIntro])
+
+  useEffect(() => {
+    return () => {
+      if (exampleIntroVideoRef.current) {
+        try {
+          exampleIntroVideoRef.current.pause()
+          exampleIntroVideoRef.current.src = ""
+          exampleIntroVideoRef.current.load()
+        } catch (_) {}
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!tutorialActive) {
       userPrefOpenRef.current = isMotionPanelOpen
@@ -6527,6 +6551,7 @@ function EditorPage() {
               editingStepActionCount={editingStepActionCount}
               activeStepId={playheadStepId}
               onSelectStepEnd={handleSelectStepEnd}
+              isMobileMinimizedProp={isMobileMotionMinimized}
               onMobileMinimizedChange={setIsMobileMotionMinimized}
             />
           )}
@@ -6623,7 +6648,7 @@ function EditorPage() {
 
                     {/* Video preview framed inside card, object-cover to remove borders */}
                     <div className="relative w-full overflow-hidden bg-black flex items-center justify-center border border-white/10 aspect-[16/10]">
-                      <video className="w-full h-full object-cover" src="/videos/Untitled Project_2160p (3).mp4" autoPlay muted loop />
+                      <video ref={exampleIntroVideoRef} className="w-full h-full object-cover" src="/videos/Untitled Project_2160p (3).mp4" autoPlay muted loop playsInline webkit-playsinline="true" />
                     </div>
 
                     {/* Content Text: Clean visual hierarchy with white text */}
