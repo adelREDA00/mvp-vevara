@@ -2066,7 +2066,7 @@ function Stage({
   /**
    * Helper: insert a layer into the scene with standard sizing and correct metadata
    */
-  const insertLayerFromAsset = useCallback((url, name, assetWidth, assetHeight, isVideo, duration = 0, metadata = {}, localAssetId = null) => {
+  const insertLayerFromAsset = useCallback((url, name, assetWidth, assetHeight, isVideo, duration = 0, metadata = {}, localAssetId = null, customLayerId = null) => {
     const maxSize = 400
     let finalWidth = assetWidth
     let finalHeight = assetHeight
@@ -2077,6 +2077,7 @@ function Stage({
     }
 
     dispatch(addLayerAndSelect({
+      id: customLayerId || undefined,
       sceneId: currentSceneId,
       type: isVideo ? 'video' : 'image',
       name: name || (isVideo ? 'Video' : 'Image'),
@@ -2143,34 +2144,48 @@ function Stage({
       const file = files[0]
       const isVideo = file.type.startsWith('video/')
 
+      const blobUrl = URL.createObjectURL(file)
+      const dimensions = await getAssetMetadata(file)
+      const layerId = uid()
+
       if (isAuthenticated) {
-        // Authenticated: upload to server via existing startBatchUpload
+        // Authenticated: insert immediately with local blob and thumbnail placeholder
+        insertLayerFromAsset(
+          blobUrl,
+          file.name,
+          dimensions.width || 300,
+          dimensions.height || 200,
+          isVideo,
+          dimensions.duration,
+          { thumbnail: dimensions.thumbnail || blobUrl },
+          null,
+          layerId
+        )
+        dispatch(consumeEmptyState(currentSceneId))
+
+        // Upload in background
         dispatch(startBatchUpload({ files }))
           .unwrap()
           .then((results) => {
-            // Find the newly uploaded asset in the response results directly
             const newAsset = results && results[0]
             if (newAsset && newAsset.url) {
-              const assetWidth = newAsset.metadata?.width || 300
-              const assetHeight = newAsset.metadata?.height || 200
-              const assetDuration = newAsset.metadata?.duration || 0
-              insertLayerFromAsset(newAsset.url, file.name, assetWidth, assetHeight, isVideo, assetDuration, newAsset.metadata)
-              dispatch(consumeEmptyState(currentSceneId))
+              dispatch(updateLayer({
+                id: layerId,
+                data: {
+                  url: newAsset.url,
+                  src: newAsset.url,
+                  thumbnail: newAsset.metadata?.thumbnail || dimensions.thumbnail || newAsset.url
+                }
+              }))
             }
           })
-          .catch(() => {
-            // Upload failed — still add to canvas with blob URL as fallback
-            imageFallbackInsert(file, isVideo)
+          .catch((err) => {
+            console.warn('[EmptyState] Background upload failed:', err)
           })
       } else {
         // Guest: store via localAssetService, same flow as UploadsPanel
         try {
           const stored = await storeAsset(file)
-          const blobUrl = URL.createObjectURL(file)
-
-          // Get metadata using uploads thunk helpers
-          const dimensions = await getAssetMetadata(file)
-
           // Register in UploadsPanel via localStorage + event
           registerGuestAsset(
             stored.id,
@@ -2191,20 +2206,21 @@ function Stage({
             dimensions.height || 200,
             isVideo,
             dimensions.duration,
-            dimensions,
-            stored.id
+            { ...dimensions, thumbnail: dimensions.thumbnail || blobUrl },
+            stored.id,
+            layerId
           )
           dispatch(consumeEmptyState(currentSceneId))
         } catch (err) {
           console.warn('[EmptyState] Guest asset storage failed:', err)
-          imageFallbackInsert(file, isVideo)
+          imageFallbackInsert(file, isVideo, layerId)
         }
       }
 
       e.target.value = ''
     }
 
-    const imageFallbackInsert = async (file, isVideo) => {
+    const imageFallbackInsert = async (file, isVideo, customLayerId) => {
       const blobUrl = URL.createObjectURL(file)
       const dimensions = await getAssetMetadata(file)
       insertLayerFromAsset(
@@ -2214,7 +2230,9 @@ function Stage({
         dimensions.height || 200,
         isVideo,
         dimensions.duration,
-        dimensions
+        { ...dimensions, thumbnail: dimensions.thumbnail || blobUrl },
+        null,
+        customLayerId
       )
       dispatch(consumeEmptyState(currentSceneId))
     }
@@ -2235,33 +2253,47 @@ function Stage({
       const filename = `${sample.name || 'Sample Image'}${ext}`
       const file = new File([blob], filename, { type: blob.type || 'image/png' })
 
+      const blobUrl = URL.createObjectURL(file)
+      const layerId = uid()
+
       if (isAuthenticated) {
-        // Upload to server via existing pipeline
+        // Authenticated: insert immediately with local blob and the sample's local thumbnail
+        insertLayerFromAsset(
+          blobUrl,
+          sample.name || 'Sample Image',
+          400,
+          250,
+          false,
+          0,
+          { thumbnail: sample.thumbnail },
+          null,
+          layerId
+        )
+        dispatch(consumeEmptyState(currentSceneId))
+
+        // Upload in background
         dispatch(startBatchUpload({ files: [file] }))
           .unwrap()
           .then((results) => {
             const newAsset = results && results[0]
-            if (newAsset) {
-              const assetUrl = newAsset.url || sampleUrl
-              const assetWidth = newAsset.metadata?.width || 400
-              const assetHeight = newAsset.metadata?.height || 250
-              insertLayerFromAsset(assetUrl, sample.name || 'Sample Image', assetWidth, assetHeight, false)
-              dispatch(consumeEmptyState(currentSceneId))
-            } else {
-              insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
-              dispatch(consumeEmptyState(currentSceneId))
+            if (newAsset && newAsset.url) {
+              dispatch(updateLayer({
+                id: layerId,
+                data: {
+                  url: newAsset.url,
+                  src: newAsset.url,
+                  thumbnail: newAsset.metadata?.thumbnail || sample.thumbnail
+                }
+              }))
             }
           })
-          .catch(() => {
-            // Fallback: insert directly with sample URL
-            insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
-            dispatch(consumeEmptyState(currentSceneId))
+          .catch((err) => {
+            console.warn('[SampleSelect] Background upload failed:', err)
           })
       } else {
         // Guest: store locally then insert
         try {
           const stored = await storeAsset(file)
-          const blobUrl = URL.createObjectURL(file)
           const dimensions = await getAssetMetadata(file)
           registerGuestAsset(
             stored.id,
@@ -2280,17 +2312,18 @@ function Stage({
             dimensions.height || 250,
             false,
             dimensions.duration,
-            dimensions,
-            stored.id
+            { ...dimensions, thumbnail: sample.thumbnail },
+            stored.id,
+            layerId
           )
         } catch (_) {
-          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
+          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false, 0, { thumbnail: sample.thumbnail }, null, layerId)
         }
         dispatch(consumeEmptyState(currentSceneId))
       }
     } catch (_) {
       // Network fetch failed — insert directly
-      insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
+      insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false, 0, { thumbnail: sample.thumbnail })
       dispatch(consumeEmptyState(currentSceneId))
     }
 

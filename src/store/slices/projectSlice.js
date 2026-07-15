@@ -2557,7 +2557,7 @@ export const selectLayerActionsInStep = createSelector(
 // Thunk action to add a layer and automatically select it
 export const addLayerAndSelect = (layerConfig) => (dispatch, getState) => {
   // Generate the layer ID first
-  const newLayerId = generateId()
+  const newLayerId = layerConfig.id || generateId()
 
   // Add the layer with the pre-generated ID
   dispatch(addLayer({ ...layerConfig, id: newLayerId }))
