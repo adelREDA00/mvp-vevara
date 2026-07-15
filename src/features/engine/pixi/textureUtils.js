@@ -167,7 +167,9 @@ export const loadTextureRobust = async (imageUrl, isVideo = false) => {
     if (imageUrl.startsWith('blob:') || _isMobile) {
         return new Promise((resolve, reject) => {
             const img = new Image()
-            img.crossOrigin = 'anonymous'
+            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('blob:')) {
+                img.crossOrigin = 'anonymous'
+            }
             img.onload = () => {
                 try {
                     const source = getCappedSource(img)

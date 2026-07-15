@@ -2254,19 +2254,22 @@ function Stage({
       const file = new File([blob], filename, { type: blob.type || 'image/png' })
 
       const blobUrl = URL.createObjectURL(file)
-      const dimensions = await getAssetMetadata(file)
       const layerId = uid()
+
+      const dimensions = await getAssetMetadata(file)
+      const w = dimensions.width || 400
+      const h = dimensions.height || 250
 
       if (isAuthenticated) {
         // Authenticated: insert immediately with local blob and the sample's local thumbnail
         insertLayerFromAsset(
           blobUrl,
           sample.name || 'Sample Image',
-          dimensions.width || 400,
-          dimensions.height || 250,
+          w,
+          h,
           false,
           0,
-          { thumbnail: sample.thumbnail },
+          { ...dimensions, thumbnail: dimensions.thumbnail || sample.thumbnail },
           null,
           layerId
         )
@@ -2308,22 +2311,36 @@ function Stage({
           insertLayerFromAsset(
             blobUrl,
             sample.name || 'Sample Image',
-            dimensions.width || 400,
-            dimensions.height || 250,
+            w,
+            h,
             false,
             dimensions.duration,
-            { ...dimensions, thumbnail: sample.thumbnail },
+            { ...dimensions, thumbnail: dimensions.thumbnail || sample.thumbnail },
             stored.id,
             layerId
           )
         } catch (_) {
-          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', dimensions.width || 400, dimensions.height || 250, false, 0, { thumbnail: sample.thumbnail }, null, layerId)
+          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', w, h, false, 0, { thumbnail: dimensions.thumbnail || sample.thumbnail }, null, layerId)
         }
         dispatch(consumeEmptyState(currentSceneId))
       }
     } catch (_) {
       // Network fetch failed — insert directly
-      insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false, 0, { thumbnail: sample.thumbnail })
+      let w = 400
+      let h = 250
+      try {
+        const dims = await new Promise((resolve, reject) => {
+          const img = new window.Image()
+          img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+          img.onerror = reject
+          img.src = sampleUrl
+        })
+        w = dims.width || 400
+        h = dims.height || 250
+      } catch (e) {
+        // ignore
+      }
+      insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', w, h, false, 0, { thumbnail: sample.thumbnail })
       dispatch(consumeEmptyState(currentSceneId))
     }
 

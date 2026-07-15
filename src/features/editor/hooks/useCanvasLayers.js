@@ -829,8 +829,9 @@ function _createPlaceholder(layer, layerId) {
     if (thumbnailUrl) {
       try {
         const img = new Image()
-        img.crossOrigin = 'anonymous'
-        img.src = thumbnailUrl
+        if (thumbnailUrl && !thumbnailUrl.startsWith('data:') && !thumbnailUrl.startsWith('blob:')) {
+          img.crossOrigin = 'anonymous'
+        }
         
         const texture = PIXI.Texture.from(img)
         img.onload = () => {
@@ -838,6 +839,7 @@ function _createPlaceholder(layer, layerId) {
             texture.source.update()
           }
         }
+        img.src = thumbnailUrl
 
         const sprite = new PIXI.Sprite(texture)
         sprite.width = w
