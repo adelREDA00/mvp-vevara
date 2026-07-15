@@ -19,7 +19,8 @@ import React from 'react'
 export const SIDEBAR_ITEMS = [
   { icon: Grid3x3, label: 'Elements' },
   { icon: Frame, label: 'Frames' },
-  { icon: Image, label: 'Media' },
+  { icon: Image, label: 'Bg wall' },
+  { icon: Music, label: 'Audio' },
   { icon: Type, label: 'Text' },
   { icon: Upload, label: 'Uploads' },
   // { icon: Wand2, label: 'Tools' },

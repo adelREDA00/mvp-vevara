@@ -13,7 +13,8 @@ export const AssetCard = React.memo(function AssetCard({
   isSelected,
   onToggleSelect,
   isPlaying,
-  onPlayPause
+  onPlayPause,
+  isSelectionMode = false
 }) {
   const assetUrl = image.url || image.src
   const isPreparing = useSelector(state => selectIsAssetPreparing(state, assetUrl))
@@ -166,9 +167,13 @@ export const AssetCard = React.memo(function AssetCard({
         const dist = Math.hypot(e.clientX - info.startX, e.clientY - info.startY)
         if (dist > 10) return
       }
-      onAdd(image)
+      if (isSelectionMode && onToggleSelect) {
+        onToggleSelect(image.id || image._id)
+      } else {
+        onAdd(image)
+      }
     }
-  }, [onAdd, image])
+  }, [onAdd, image, isSelectionMode, onToggleSelect])
 
   if (isAudio) {
     const gradients = [

@@ -153,7 +153,7 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 
   return (
     <div
-      className="absolute inset-0 overflow-hidden rounded-lg"
+      className="absolute inset-0 overflow-hidden"
       style={{
         width: `${cardWidth}px`,
         height: `${cardHeight}px`,
@@ -1413,7 +1413,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             width: `${width}px`,
             height: `${height}px`,
             backgroundColor: 'rgba(255,255,255,0.06)',
-            borderRadius: '6px',
+            borderRadius: '0px',
             border: '1px solid rgba(255,255,255,0.15)',
             opacity: 1,
           }}
@@ -1442,7 +1442,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             }}
           >
             <div
-              className="rounded-md overflow-hidden"
+              className="overflow-hidden"
               style={{
                 width: '100%',
                 height: `${height}px`,
@@ -1611,7 +1611,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             e.currentTarget.addEventListener('touchend', onTouchEnd, { once: true })
             e.currentTarget.addEventListener('touchcancel', onTouchEnd, { once: true })
           }}
-          className="rounded-md touch-manipulation flex-shrink-0 relative"
+          className="touch-manipulation flex-shrink-0 relative"
           style={{
             width: '100%',
             height: `${height}px`,
@@ -1625,7 +1625,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
                   ? '2px solid rgba(124,74,240,0.8)'
                   : '2px solid rgba(167,139,250,0.5)'
                 : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
-            borderRadius: '6px',
+            borderRadius: '0px',
             boxShadow: isTouchGrabbed
               ? '0 0 0 2px rgba(124,74,240,0.4)'
               : isActive
@@ -1734,7 +1734,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         {/* Left Visual Resize Grab Area */}
         {showHandles && (
           <div
-            className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 transition-opacity duration-150 rounded-l-md flex items-center justify-center"
+            className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 transition-opacity duration-150 flex items-center justify-center"
             style={{
               width: isTouchDevice() ? '28px' : '16px',
               background: 'linear-gradient(to right, rgba(0, 0, 0, 0.35) 0%, rgba(255, 255, 255, 0.1) 100%)',
@@ -1745,7 +1745,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               style={{
                 width: '2px',
                 height: '24px',
-                borderRadius: '1px',
+                borderRadius: '0px',
                 backgroundColor: '#ffffff',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
               }}
@@ -1756,7 +1756,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         {/* Right Visual Resize Grab Area */}
         {showHandles && (
           <div
-            className="pointer-events-none absolute right-0 top-0 bottom-0 z-20 transition-opacity duration-150 rounded-r-md flex items-center justify-center"
+            className="pointer-events-none absolute right-0 top-0 bottom-0 z-20 transition-opacity duration-150 flex items-center justify-center"
             style={{
               width: isTouchDevice() ? '28px' : '16px',
               background: 'linear-gradient(to left, rgba(0, 0, 0, 0.35) 0%, rgba(255, 255, 255, 0.1) 100%)',
@@ -1767,7 +1767,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
               style={{
                 width: '2px',
                 height: '24px',
-                borderRadius: '1px',
+                borderRadius: '0px',
                 backgroundColor: '#ffffff',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
               }}
@@ -3468,7 +3468,7 @@ const ScenesBar = React.memo(React.forwardRef(({
             onMouseDown={(e) => {
               e.stopPropagation()
             }}
-            className="flex items-center justify-center touch-manipulation rounded-md transition-all duration-150"
+            className="flex items-center justify-center touch-manipulation transition-all duration-150"
             title="Add Scene"
             style={{
               cursor: 'pointer',
@@ -3479,7 +3479,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               height: `${getDefaultCardHeight()}px`,
               backgroundColor: isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
               border: isLight ? '1px solid rgba(0,0,0,0.12)' : '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '6px',
+              borderRadius: '0px',
             }}
           >
             <Plus className={`h-4 w-4 pointer-events-none ${isLight ? 'text-black/30 group-hover:text-black/60' : 'text-white/30 hover:text-white/60'}`} strokeWidth={1.5} />

@@ -13,23 +13,25 @@ export const ThemeProvider = ({ children }) => {
 
   const [theme, setTheme] = useState(() => {
     try {
-      return localStorage.getItem('editorTheme') || 'dark';
+      return localStorage.getItem('editorTheme') || 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
   const isLight = theme === 'light';
 
   // Handle automatic theme switching: 
-  // 1. If not logged in, force 'dark' mode by default.
+  // 1. If not logged in, use theme from localStorage (guest preference is persisted).
   // 2. If logged in, sync with the user's saved preference.
   useEffect(() => {
     const currentSyncKey = isAuthenticated ? `user-${user?.id}-${user?.theme || 'light'}` : 'guest';
 
     if (lastSyncRef.current !== currentSyncKey) {
       if (!isAuthenticated) {
-        setTheme('dark');
+        // Read theme from localStorage for guest users (preserve their choice)
+        const saved = localStorage.getItem('editorTheme');
+        if (saved) setTheme(saved);
       } else if (user?.theme) {
         setTheme(user.theme);
       }

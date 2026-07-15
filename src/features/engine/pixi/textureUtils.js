@@ -29,7 +29,11 @@ export const loadTextureRobust = async (imageUrl, isVideo = false) => {
         // Load as a video texture with proper resource options
         try {
             const videoElement = document.createElement('video')
-            videoElement.crossOrigin = 'anonymous'
+            if (imageUrl && imageUrl.startsWith('blob:')) {
+                videoElement.removeAttribute('crossorigin')
+            } else {
+                videoElement.crossOrigin = 'anonymous'
+            }
             videoElement.src = imageUrl
             videoElement.muted = true
             videoElement.loop = false
@@ -122,7 +126,7 @@ export const loadTextureRobust = async (imageUrl, isVideo = false) => {
                     muted: true,
                     loop: false,
                     playsinline: true,
-                    crossOrigin: 'anonymous'
+                    crossOrigin: (imageUrl && imageUrl.startsWith('blob:')) ? '' : 'anonymous'
                 }
             })
             texture._nativeVideo = videoElement

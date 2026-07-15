@@ -77,7 +77,7 @@ const CreateFromScratchModal = ({ isOpen, onClose, onConfirm }) => {
                 <div className="flex flex-col items-center gap-2.5 pt-1.5 w-full max-w-xs">
                     <button
                         onClick={onConfirm}
-                        className="w-full h-11 bg-[#7c4af0] hover:bg-[#6a3fd4] text-white text-[13px] font-extrabold rounded-xl shadow-lg hover:shadow-[#7c4af0]/20 transform hover:-translate-y-0.5 transition-all active:translate-y-0 flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                        className={`w-full h-11 bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent-hover)] ${isLight ? 'text-white' : 'text-[#06121A]'} text-[13px] font-extrabold rounded-xl shadow-lg hover:shadow-[var(--dashboard-accent)]/20 transform hover:-translate-y-0.5 transition-all active:translate-y-0 flex items-center justify-center gap-2 cursor-pointer border border-white/10`}
                     >
                         <span>Create Blank Project</span>
                         <ArrowRight size={13} strokeWidth={2.5} className="animate-pulse" />

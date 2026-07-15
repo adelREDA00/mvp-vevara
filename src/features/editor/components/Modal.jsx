@@ -43,7 +43,7 @@ const Modal = ({
                 className={`relative w-full ${maxWidth} border rounded-2xl shadow-2xl overflow-hidden pointer-events-auto animate-in zoom-in-95 fade-in duration-300 ${className} ${isLight ? 'border-black/5' : 'border-white/10'
                     }`}
                 style={{
-                    backgroundColor: isLight ? '#ffffff' : '#0f1015',
+                    backgroundColor: isLight ? '#ffffff' : '#090A0D',
                 }}
             >
 

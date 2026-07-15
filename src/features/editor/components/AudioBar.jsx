@@ -30,6 +30,7 @@ import {
 import { pause, seekBySeconds } from '../../../store/slices/playbackSlice'
 import { uploadFile, enqueueUpload, cancelUpload } from '../../../store/slices/uploadsSlice'
 import { checkAutoScroll, stopAutoScroll } from './ScenesBar'
+import { storeAsset } from '../../../services/localAssetService'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -742,6 +743,7 @@ const AudioBar = React.forwardRef(function AudioBar(
   const dispatch = useDispatch()
   const audioTracks = useSelector(selectAudioTracks)
   const uploadQueue = useSelector(state => state.uploads?.uploadQueue || {})
+  const { isAuthenticated } = useSelector((state) => state.auth)
   const fileInputRef = useRef(null)
 
   const tracksContainerRef = useRef(null)
@@ -840,7 +842,8 @@ const AudioBar = React.forwardRef(function AudioBar(
           name: asset.name || 'Audio',
           duration: asset.duration || 0,
           waveform: asset.waveform || [],
-          // By not passing rowIndex, we let the reducer use its existing insertion logic
+          // Guest: store the local asset ID for rehydration on project reload
+          _localAssetId: asset.id && !asset.url?.startsWith('/') && !asset.url?.startsWith('http') ? asset.id : undefined,
         }))
       }
 
@@ -874,11 +877,60 @@ const AudioBar = React.forwardRef(function AudioBar(
     if (!file) return
 
     const tempId = crypto.randomUUID()
-    const url = URL.createObjectURL(file)
-    const audio = new Audio(url)
-    audio.addEventListener('loadedmetadata', () => {
+    const blobUrl = URL.createObjectURL(file)
+    const audio = new Audio(blobUrl)
+    audio.addEventListener('loadedmetadata', async () => {
       const duration = audio.duration || 5
-      URL.revokeObjectURL(url)
+
+      // Guest mode: store locally in IndexedDB, no API call
+      if (!isAuthenticated) {
+        try {
+          const stored = await storeAsset(file)
+          // Also save asset metadata so it appears in the Uploads Panel
+          try {
+            const existingAssets = JSON.parse(localStorage.getItem('vevara_guest_assets') || '[]')
+            const assetMeta = {
+              _id: stored.id,
+              id: stored.id,
+              name: file.name,
+              type: 'audio',
+              assetType: 'audio',
+              metadata: {
+                mimeType: file.type,
+                type: file.type,
+                width: 0,
+                height: 0,
+                duration: duration,
+                size: file.size,
+                thumbnail: null,
+              },
+              uploadedAt: Date.now(),
+              createdAt: Date.now(),
+            }
+            localStorage.setItem('vevara_guest_assets', JSON.stringify([assetMeta, ...existingAssets]))
+          } catch { /* non-critical, asset is already in IDB */ }
+          dispatch(addAudioTrack({
+            id: tempId,
+            assetId: stored.id,
+            assetUrl: blobUrl,
+            name: file.name,
+            duration: duration,
+            totalDuration: duration,
+            waveform: [],
+            isUploading: false,
+            progress: 100,
+            _localAssetId: stored.id,
+          }))
+        } catch (err) {
+          console.error('Guest audio upload failed:', err)
+          URL.revokeObjectURL(blobUrl)
+        }
+        e.target.value = ''
+        return
+      }
+
+      // Authenticated: API upload with progress
+      URL.revokeObjectURL(blobUrl)
 
       dispatch(addAudioTrack({
         id: tempId,
@@ -915,7 +967,7 @@ const AudioBar = React.forwardRef(function AudioBar(
     })
 
     e.target.value = ''
-  }, [dispatch, totalDuration])
+  }, [dispatch, totalDuration, isAuthenticated])
 
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, block: null })
 

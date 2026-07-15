@@ -54,20 +54,25 @@
   --editor-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 
   /* Dashboard Theme Variables (Default Dark) */
-  --dashboard-bg: #090a0d;
-  --dashboard-sidebar-bg: #090a0d;
-  --dashboard-text: #ffffff;
-  --dashboard-text-muted: rgba(255, 255, 255, 0.4);
-  --dashboard-border: rgba(255, 255, 255, 0.05);
-  --dashboard-card-bg: rgba(255, 255, 255, 0.02);
-  --dashboard-card-hover: rgba(255, 255, 255, 0.04);
-  --dashboard-hero-bg: linear-gradient(180deg, rgba(139, 92, 246, 0.06) 0%, rgba(9, 10, 13, 0) 600px);
-  --dashboard-accent: #8b5cf6;
+  --dashboard-bg: #0F1720;
+  --dashboard-section: #151F2B;
+  --dashboard-surface: #151F2B;
+  --dashboard-sidebar-bg: #0F1720;
+  --dashboard-text: #F8FAFC;
+  --dashboard-text-muted: #94A3B8;
+  --dashboard-border: #263445;
+  --dashboard-border-hover: #334155;
+  --dashboard-card-bg: #151F2B;
+  --dashboard-card-hover: #1C2937;
+  --dashboard-hero-bg: linear-gradient(180deg, rgba(1, 178, 253, 0.06) 0%, rgba(15, 23, 32, 0) 600px);
+  --dashboard-accent: #01B2FD;
+  --dashboard-accent-hover: #38C5FF;
+  --dashboard-accent-soft: #062B3D;
   
-  --dropdown-bg: rgba(20, 21, 26, 0.95);
-  --dropdown-text: rgba(255, 255, 255, 0.9);
-  --dropdown-hover: rgba(255, 255, 255, 0.08);
-  --dropdown-border: rgba(255, 255, 255, 0.1);
+  --dropdown-bg: #1C2937;
+  --dropdown-text: #F8FAFC;
+  --dropdown-hover: #263445;
+  --dropdown-border: #263445;
 
   --sidebar-width: 64px;
 }
@@ -91,7 +96,7 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background-color: #090a0d;
+  background-color: #0F1720;
 }
 
 /* Light Theme Overrides */
@@ -100,27 +105,32 @@ body.theme-light {
   --editor-panel-bg: rgba(255, 255, 255, 0.85);
   --editor-panel-bg-opaque: #ffffff;
   --editor-panel-border: rgba(0, 0, 0, 0.1);
-  --editor-panel-text: #1a1b1e;
+  --editor-panel-text: #19171C;
   --editor-panel-text-muted: rgba(0, 0, 0, 0.5);
   --editor-panel-item-hover: rgba(0, 0, 0, 0.05);
   --editor-panel-item-active: rgba(0, 0, 0, 0.08);
   --editor-panel-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 
   /* Dashboard Theme Variables (Light Mode) */
-  --dashboard-bg: #f8f9fc;
-  --dashboard-sidebar-bg: #ffffff;
-  --dashboard-text: #1a1b1e;
-  --dashboard-text-muted: rgba(0, 0, 0, 0.5);
-  --dashboard-border: rgba(0, 0, 0, 0.06);
-  --dashboard-card-bg: #ffffff;
-  --dashboard-card-hover: #f1f3f7;
-  --dashboard-sidebar-bg: #f8f5fd;
-  --dashboard-hero-bg: linear-gradient(180deg, rgba(124, 74, 240, 0.08) 0%, rgba(248, 249, 252, 0) 600px);
+  --dashboard-bg: #FFFFFF;
+  --dashboard-section: #F7F8FA;
+  --dashboard-surface: #F7F8FA;
+  --dashboard-sidebar-bg: #FFFFFF;
+  --dashboard-text: #19171C;
+  --dashboard-text-muted: #6B7280;
+  --dashboard-border: #E5E7EB;
+  --dashboard-border-hover: #CBD5E1;
+  --dashboard-card-bg: #FFFFFF;
+  --dashboard-card-hover: #F8FAFC;
+  --dashboard-hero-bg: linear-gradient(180deg, rgba(1, 178, 253, 0.08) 0%, rgba(255, 255, 255, 0) 600px);
+  --dashboard-accent: #01B2FD;
+  --dashboard-accent-hover: #009FE3;
+  --dashboard-accent-soft: #E6F7FF;
 
   --dropdown-bg: #ffffff;
-  --dropdown-text: #1a1b1f;
-  --dropdown-hover: #f4f5f8;
-  --dropdown-border: rgba(0, 0, 0, 0.08);
+  --dropdown-text: #19171C;
+  --dropdown-hover: #F7F8FA;
+  --dropdown-border: #E5E7EB;
 }
 
 body.theme-light .canvas-wrapper {
@@ -139,6 +149,10 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 }
 
 /* Modern minimal scrollbar styling */
+.custom-scrollbar {
+  scrollbar-gutter: stable;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(161, 161, 170, 0.3) transparent;
@@ -325,6 +339,31 @@ body.theme-light *::-webkit-scrollbar-thumb:hover {
 
 .animate-pulse-glow {
   animation: pulse-glow 3s infinite ease-in-out;
+}
+
+@keyframes onboarding-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(124, 74, 240, 0.8), 0 0 0 0 rgba(124, 74, 240, 0.4);
+    border-color: #7C4AF0 !important;
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(124, 74, 240, 0), 0 0 0 20px rgba(124, 74, 240, 0);
+    border-color: #7C4AF0 !important;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 74, 240, 0), 0 0 0 0 rgba(124, 74, 240, 0);
+    border-color: inherit;
+    transform: scale(1);
+  }
+}
+
+.animate-onboarding-pulse {
+  animation: onboarding-pulse 1.8s infinite cubic-bezier(0.25, 0, 0, 1) !important;
+  border-width: 2px !important;
 }
 
 .animate-spin-slow {

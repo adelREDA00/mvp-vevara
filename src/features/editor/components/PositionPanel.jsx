@@ -440,7 +440,7 @@ function PositionPanel({
 
   return (
     <div
-      className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto"
+      className="flex flex-col h-full relative transition-all duration-300 pointer-events-auto pt-0 lg:pt-12"
       style={{
         width: isMobile ? '100%' : '320px',
         backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
@@ -449,20 +449,11 @@ function PositionPanel({
         borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      {/* Header */}
-      <div className={`hidden lg:block px-4 pt-4 pb-3 border-b flex-shrink-0 ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className={`text-[10px] uppercase tracking-[0.2em] mb-0.5 ${isLight ? 'text-gray-500' : 'text-white/40'}`}>Layers</div>
-            <h2 className={`text-lg font-semibold leading-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Position</h2>
-          </div>
-          {onClose && (
-            <button onClick={onClose} className={`transition-colors p-1 rounded-md ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}>
-              <X className="h-4 w-4" strokeWidth={1.5} />
-            </button>
-          )}
-        </div>
-      </div>
+      {onClose && (
+        <button onClick={onClose} className={`absolute top-3 right-3 z-50 transition-colors p-1 rounded-md ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'} hidden lg:block`}>
+          <X className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+      )}
 
       {/* Card list */}
       <div

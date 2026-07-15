@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useParams, useLocation } from 'react-router-dom'
-import { ADS_TEMPLATE, SAAS_TEMPLATE } from '../utils/practiceTemplates'
 import { Layers, FileText } from 'lucide-react'
+import api from '../../../api/client'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack, addAudioTrack } from '../../../store/slices/projectSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { store } from '../../../store'
 import { gsap } from 'gsap'
@@ -31,6 +31,7 @@ import ProfilePanel from '../components/ProfilePanel'
 import TextPanel from '../components/TextPanel'
 import UploadsPanel from '../components/UploadsPanel'
 import ImagesPanel from '../components/ImagesPanel'
+import AudioPanel from '../components/AudioPanel'
 // import ToolsPanel from '../components/ToolsPanel'
 import FramesPanel from '../components/FramesPanel'
 import ProjectsPanel from '../components/ProjectsPanel'
@@ -50,8 +51,10 @@ import { resetGlobalMotionEngine, getGlobalMotionEngine } from '../../engine/mot
 import { PRESET_REGISTRY } from '../../engine/motion/presets.js'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
-import { setGuestMode, startTutorial, endTutorial, selectTutorialState, nextStep, setInteractionLock, setAutoPlayState } from '../../../store/slices/tutorialSlice'
-import { updateUserTheme, setLocalTheme } from '../../../store/slices/authSlice'
+import { startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
+import { updateUserTheme, setLocalTheme, completeOnboarding, completeExampleIntro } from '../../../store/slices/authSlice'
+import { saveProjectFromEditor, getProject as getLocalProject, saveProject as saveLocalProject, duplicateProject } from '../../../services/localProjectService'
+import { getAssetUrl } from '../../../services/localAssetService'
 import ErrorBoundary from '../../../components/ErrorBoundary'
 import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
@@ -67,18 +70,45 @@ function EditorPage() {
   const dispatch = useDispatch()
   const scenes = useSelector(selectScenes)
   const currentSceneId = useSelector(selectCurrentSceneId)
+  const currentSceneData = useSelector(selectCurrentScene)
   const selectedLayerIds = useSelector(selectSelectedLayerIds)
   const selectedCanvas = useSelector(selectSelectedCanvas)
   const layers = useSelector(selectLayers)
   const { isAuthenticated, user } = useSelector((state) => state.auth)
-  const { active: tutorialActive, step: tutorialStep, hasRunSession, autoPlayState, isInteractionLocked } = useSelector(selectTutorialState)
+  const { active: tutorialActive, step: tutorialStep } = useSelector(selectTutorialState)
   const lastPastedLayerIds = useSelector(selectLastPastedLayerIds)
   const { projectId: urlProjectId } = useParams()
   const location = useLocation()
   const projectName = useSelector(selectProjectName)
   const isStarterCopy = projectName && (projectName.endsWith(' (Copy)') || projectName.toLowerCase().includes('starter'))
-  const isAutoPlaying = (autoPlayState === 'initial' || autoPlayState === 'final' || autoPlayState === 'pending_final' || (tutorialActive && tutorialStep === 3 && isInteractionLocked)) && !isStarterCopy;
+  const isAutoPlaying = false;
   const projectId = useSelector(selectProjectId)
+
+  const [wasLoadedAsBlankProject, setWasLoadedAsBlankProject] = useState(false);
+
+  const fromTemplate = new URLSearchParams(location.search).get('fromTemplate') === 'true'
+  const [showExampleIntro, setShowExampleIntro] = useState(false)
+
+  useEffect(() => {
+    if (fromTemplate) {
+      const hasSeen = isAuthenticated
+        ? user?.hasSeenExampleProjectIntro
+        : localStorage.getItem('vevara_seen_example_project_intro') === 'true';
+
+      if (!hasSeen) {
+        setShowExampleIntro(true);
+      }
+    }
+  }, [fromTemplate, isAuthenticated, user]);
+
+  const handleCompleteExampleIntro = async () => {
+    setShowExampleIntro(false);
+    if (isAuthenticated) {
+      dispatch(completeExampleIntro());
+    } else {
+      localStorage.setItem('vevara_seen_example_project_intro', 'true');
+    }
+  };
 
   // Get motion flow for current scene
   const currentSceneMotionFlow = useSelector((state) =>
@@ -111,7 +141,6 @@ function EditorPage() {
   const [showGrid, setShowGrid] = useState(false)
   const [showSafeArea, setShowSafeArea] = useState(false)
   const [showMotionPaths, setShowMotionPaths] = useState(false)
-  const [manualTutorialRect, setManualTutorialRect] = useState(null);
   const isInitialVertical = aspectRatio === '9:16'
   const [zoom, setZoom] = useState(isInitialVertical ? 10 : 24)
   const [showGuestModal, setShowGuestModal] = useState(false)
@@ -138,12 +167,9 @@ function EditorPage() {
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
   const currentSidebarWidth = typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth
-  const [showPasteboard, setShowPasteboard] = useState(isAuthenticated)
-
-  // Set default pasteboard visibility based on auth status
-  useEffect(() => {
-    setShowPasteboard(isAuthenticated)
-  }, [isAuthenticated])
+  // Default pasteboard (workspace) visibility should be ON for everyone.
+  // Guests should see the same outside-of-canvas workspace as auth users.
+  const [showPasteboard, setShowPasteboard] = useState(true)
   const [motionCaptureMode, setMotionCaptureMode] = useState(null)
   const isMotionCaptureActive = !!motionCaptureMode?.isActive
   const [captureBaselineActionCount, setCaptureBaselineActionCount] = useState(0)
@@ -154,8 +180,8 @@ function EditorPage() {
   // captureVersion bumps on every onPositionUpdate, so this re-evaluates on each interaction
   const hasLiveCanvasChanges = motionCaptureMode?.trackedLayers
     ? Array.from(motionCaptureMode.trackedLayers.values()).some(
-        l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
-      )
+      l => l.didMove || l.didBlur || l.didCornerRadius || l.didScale || l.didRotate || l.didFade || l.didCrop || l.didColor || l.didFlip || l.didTilt
+    )
     : false
   const hasInitializedScene = useRef(false)
   const stageRef = useRef(null)
@@ -186,12 +212,39 @@ function EditorPage() {
   const [isMotionPanelCollapsed, setIsMotionPanelCollapsed] = useState(false)
   const [isMobileMotionMinimized, setIsMobileMotionMinimized] = useState(false)
 
+  // Track user preferences (when onboarding tutorial is NOT active)
+  const userPrefOpenRef = useRef(true)
+  const userPrefCollapsedRef = useRef(false)
+  const userPrefMobileMinimizedRef = useRef(false)
+
+  useEffect(() => {
+    if (!tutorialActive) {
+      userPrefOpenRef.current = isMotionPanelOpen
+    }
+  }, [isMotionPanelOpen, tutorialActive])
+
+  useEffect(() => {
+    if (!tutorialActive) {
+      userPrefCollapsedRef.current = isMotionPanelCollapsed
+    }
+  }, [isMotionPanelCollapsed, tutorialActive])
+
+  useEffect(() => {
+    if (!tutorialActive) {
+      userPrefMobileMinimizedRef.current = isMobileMotionMinimized
+    }
+  }, [isMobileMotionMinimized, tutorialActive])
+
   // Force panel expanded whenever motion capture is active — panel must always be visible in motion mode
   useEffect(() => {
     if (isMotionCaptureActive && isMotionPanelCollapsed) {
-      setIsMotionPanelCollapsed(false)
+      if (tutorialActive) {
+        setIsMotionPanelCollapsed(false)
+      } else {
+        setIsMotionPanelCollapsed(userPrefCollapsedRef.current)
+      }
     }
-  }, [isMotionCaptureActive])
+  }, [isMotionCaptureActive, tutorialActive])
   const [requestOpenControl, setRequestOpenControl] = useState(null)
 
   // [PREVIEW MODE] Minimal, distraction-free playback view. Hides all editor
@@ -515,7 +568,7 @@ function EditorPage() {
 
 
     if (sw <= 0 || sh <= 0) return
-    
+
     // Hide scrollbars on mobile devices
     const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth < 1024 || 'ontouchstart' in window)
     if (isMobileDevice) {
@@ -523,7 +576,7 @@ function EditorPage() {
       if (hTrackRef.current) hTrackRef.current.style.display = 'none'
       return
     }
-    
+
     const totalWorldWidth = ww * scale
     const totalWorldHeight = wh * scale
 
@@ -672,16 +725,11 @@ function EditorPage() {
   const lastSavedStateRef = useRef(null)
 
   const handleSave = useCallback(async (options = {}) => {
-    if (!isAuthenticated) {
-      setShowGuestModal(true)
-      return
-    }
     if (isExportActiveRef.current) return
 
     const { force = false, silent = false } = options
 
     // [PERFORMANCE] Dirty check: Compare current state with last saved state
-    // to avoid redundant saves and expensive thumbnail captures.
     const projectState = {
       name: projectName,
       scenes,
@@ -692,23 +740,63 @@ function EditorPage() {
 
     const stateString = JSON.stringify(projectState)
     if (!force && stateString === lastSavedStateRef.current) {
+      return
+    }
 
+    if (!isAuthenticated) {
+      // Guest: save to local storage
+      try {
+        // Capture thumbnail for guest projects too
+        let thumbnail = null
+        try {
+          const app = stageRef.current?.getApp?.()
+          const layersContainer = stageRef.current?.getLayersContainer?.()
+
+          if (app?.renderer && layersContainer) {
+            const targetWidth = 400
+            const targetResolution = Math.min(1, targetWidth / worldWidth)
+            thumbnail = await app.renderer.extract.base64({
+              target: layersContainer,
+              frame: new PIXI.Rectangle(0, 0, worldWidth, worldHeight),
+              format: 'image/webp',
+              quality: 0.8,
+              resolution: targetResolution
+            })
+          }
+        } catch (thumbErr) {
+          // Thumbnail is optional
+        }
+
+        const saved = saveProjectFromEditor({
+          projectId,
+          projectName,
+          scenes,
+          layers,
+          sceneMotionFlows,
+          audioTracks,
+          aspectRatio,
+          thumbnail,
+        })
+        if (saved) {
+          lastSavedStateRef.current = stateString
+          setLastSaved(Date.now())
+        }
+      } catch (error) {
+        console.error('[LocalSave] Failed:', error)
+      }
+      // Reset isDirty in Redux so the save indicator turns green
+      dispatch({ type: 'project/resetDirty' })
       return
     }
 
     if (!silent) setIsSaving(true)
     try {
-      // Capture a high-quality thumbnail from the ARTBOARD area
       let thumbnail = null
       try {
         const app = stageRef.current?.getApp?.()
         const layersContainer = stageRef.current?.getLayersContainer?.()
 
         if (app?.renderer && layersContainer) {
-          // [QUALITY] Target the layersContainer instead of app.stage.
-          // Since layersContainer is a child of the viewport but represents
-          // the world space, capturing it with 1:1 scale ensures the thumbnail
-          // is never affected by editor zoom/pan.
           const targetWidth = 400
           const targetResolution = Math.min(1, targetWidth / worldWidth)
 
@@ -726,7 +814,6 @@ function EditorPage() {
 
       await dispatch(saveProject({ thumbnail })).unwrap()
 
-      // Also sync theme on save to ensure persistence
       if (isAuthenticated) {
         dispatch(setLocalTheme(theme))
         dispatch(updateUserTheme(theme))
@@ -739,17 +826,17 @@ function EditorPage() {
     } finally {
       if (!silent) setIsSaving(false)
     }
-  }, [dispatch, isAuthenticated, theme, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight])
+  }, [dispatch, isAuthenticated, theme, projectName, scenes, layers, sceneMotionFlows, aspectRatio, worldWidth, worldHeight, projectId, audioTracks])
 
-  // handleNavigate ensures we save the project before leaving the editor
-  // when the user clicks the dashboard/user icon.
+  // handleNavigate saves the project before leaving the editor.
+  // Works identically for guest and authenticated users.
   const handleNavigate = useCallback(async (path) => {
     setIsNavigating(true)
+    // Save before leaving — local for guests, backend for auth
+    await handleSave({ silent: true })
     if (isAuthenticated) {
-      // Ensure theme is synced before leaving
       dispatch(setLocalTheme(theme))
       dispatch(updateUserTheme(theme))
-      await handleSave({ silent: true })
     }
     // [FIX] Force full page reload to release WebGL context
     window.location.href = path
@@ -931,11 +1018,12 @@ function EditorPage() {
     }
   }, [selectedLayerIds, selectedCanvas, editingTextLayerId, handleFinishEditing])
   // =============================================================================
-  // AUTO-SAVE LOGIC
+  // AUTO-SAVE LOGIC — Works identically for guest and authenticated users.
+  // The only difference is where the save goes (localStorage vs backend).
   // =============================================================================
   useEffect(() => {
-    // Only auto-save if authenticated, project is dirty, and not currently saving
-    if (!isAuthenticated || !isDirty || isSaving || isSavingRedux || isExportActiveRef.current) return
+    // Auto-save when project is dirty and not currently saving
+    if (!isDirty || isSaving || isSavingRedux || isExportActiveRef.current) return
 
     // Debounce save for 5 seconds of inactivity
     // This gives the user time to finish a "thought" of interactions
@@ -944,7 +1032,7 @@ function EditorPage() {
     }, 5000)
 
     return () => clearTimeout(timer)
-  }, [isDirty, projectVersion, isAuthenticated, isSaving, isSavingRedux, handleSave])
+  }, [isDirty, projectVersion, isSaving, isSavingRedux, handleSave])
 
 
 
@@ -1084,181 +1172,248 @@ function EditorPage() {
   }, [motionControls])
 
   // =============================================================================
-  // TUTORIAL LOGIC & AUTO-PLAY
+  // NEW LIGHTWEIGHT ONBOARDING LOGIC
   // =============================================================================
-  const lastStepEndTime = useMemo(() => {
-    if (!currentSceneMotionFlow?.steps || currentSceneMotionFlow.steps.length === 0) return 0;
-    let maxTimeMs = 0;
-    for (let i = 0; i < currentSceneMotionFlow.steps.length; i++) {
-      const s = currentSceneMotionFlow.steps[i];
-      const end = (s.startTime || 0) + (s.duration || 0);
-      if (end > maxTimeMs) {
-        maxTimeMs = end;
+  // Get onboarding completed status (cached to avoid localStorage/Redux queries on every render)
+  const [isOnboardingDone, setIsOnboardingDone] = useState(() => {
+    try {
+      return localStorage.getItem('vevara_onboarding_completed') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  // Sync completion status from Redux/auth profile
+  useEffect(() => {
+    if (user?.hasCompletedOnboarding) {
+      setIsOnboardingDone(true);
+    }
+  }, [user?.hasCompletedOnboarding]);
+
+  const sceneHasContentLayers = useMemo(() => {
+    if (isOnboardingDone) return false;
+    if (!currentSceneData?.layers) return false;
+    return currentSceneData.layers.some(id => {
+      const l = layers[id];
+      return l && l.type !== 'background' && l.type !== 'camera';
+    });
+  }, [currentSceneData, layers, isOnboardingDone]);
+
+  const currentSceneHasMoments = useMemo(() => {
+    if (isOnboardingDone) return false;
+    if (!currentSceneId || !currentSceneMotionFlow?.steps) return false;
+
+    // Check if there are any steps that animates a non-background layer
+    return currentSceneMotionFlow.steps.some(step => {
+      const presetLayerIds = Object.keys(step.layerPresets || {});
+      const actionLayerIds = Object.keys(step.layerActions || {}).filter(
+        layerId => (step.layerActions[layerId] || []).length > 0
+      );
+
+      const allLayerIds = new Set([...presetLayerIds, ...actionLayerIds]);
+      for (const layerId of allLayerIds) {
+        const layer = layers[layerId];
+        if (layer && layer.type !== 'background') {
+          return true; // Found a real content layer being animated
+        }
+      }
+      return false;
+    });
+  }, [currentSceneId, currentSceneMotionFlow, layers, isOnboardingDone]);
+
+  useEffect(() => {
+    if (projectId && projectName && layers) {
+      const layersList = Object.values(layers);
+      const isUntitled = projectName === 'Untitled Project';
+      const hasOnlyBackground = layersList.length === 1 && layersList[0].type === 'background';
+      const hasNoMotionSteps = !currentSceneMotionFlow || !currentSceneMotionFlow.steps || currentSceneMotionFlow.steps.length === 0;
+
+      if (isUntitled && hasOnlyBackground && hasNoMotionSteps) {
+        setWasLoadedAsBlankProject(true);
       }
     }
-    return maxTimeMs / 1000;
-  }, [currentSceneMotionFlow]);
+  }, [projectId, projectName, layers, currentSceneMotionFlow]);
 
-  const hasPausedAtEndRef = useRef(false)
   useEffect(() => {
-    if (isPlaying) {
-      hasPausedAtEndRef.current = false
+    if (isOnboardingDone) {
+      if (tutorialActive) {
+        dispatch(endTutorial());
+      }
+      return;
     }
-  }, [isPlaying])
 
-  // Auto-pause at the end of the last step during autoplay (on load and after adding a step)
-  useEffect(() => {
-    if (isPlaying && (autoPlayState === 'initial' || autoPlayState === 'final') && !isStarterCopy && motionControls && lastStepEndTime > 0) {
-      if (playheadTime >= lastStepEndTime && !hasPausedAtEndRef.current) {
-        hasPausedAtEndRef.current = true;
-        motionControls.pauseAll();
-        setIsPlaying(false);
-        seek(lastStepEndTime);
+    // If we are in the middle of completing/saving (step 4), do not end prematurely
+    if (tutorialActive && tutorialStep === 4) {
+      return;
+    }
+
+    // Determine onboarding eligibility based on current scene state
+    const hasSavedMoments = currentSceneHasMoments && !isMotionCaptureActive;
+    const shouldTriggerOnboarding = sceneHasContentLayers && !hasSavedMoments;
+
+    if (shouldTriggerOnboarding) {
+      if (!tutorialActive) {
+        dispatch(startTutorial());
+      }
+    } else {
+      if (tutorialActive) {
+        dispatch(endTutorial());
       }
     }
-  }, [isPlaying, autoPlayState, playheadTime, lastStepEndTime, motionControls, seek, setIsPlaying, isStarterCopy]);
+  }, [sceneHasContentLayers, currentSceneHasMoments, isMotionCaptureActive, tutorialActive, tutorialStep, isOnboardingDone, dispatch]);
 
-  useEffect(() => {
-    dispatch(setGuestMode(!isAuthenticated));
-  }, [isAuthenticated, dispatch]);
-
-  useEffect(() => {
-    if (!isAuthenticated && projectStatus === 'succeeded' && isStageReady && !isPreloading && minTimeElapsed && motionControls) {
-      const isPracticeTemplate = projectName === "onb marketing" || projectName === "Mistral AI Studio";
-      if (isPracticeTemplate && !hasRunSession && autoPlayState === 'none' && !hasTriggeredInitialAutoPlay.current) {
-        hasTriggeredInitialAutoPlay.current = true;
-        dispatch(setAutoPlayState('initial'));
-        dispatch(setInteractionLock(true));
-        seek(0);
-        motionControls.playAll();
-        setIsPlaying(true);
-      }
-    }
-  }, [isAuthenticated, projectStatus, isStageReady, isPreloading, minTimeElapsed, projectName, dispatch, hasRunSession, autoPlayState, seek, setIsPlaying, motionControls]);
-
-  // [ONBOARDING] Keep moments panel visible during autoplay — the user should
-  // immediately understand that moments are part of the animation workflow.
-  // Collapse is no longer automatic; the panel remains in its normal state.
-
-  // Handle playback completion for auto-play phases
-  const prevIsPlaying = useRef(isPlaying);
+  const isApplyingRef = useRef(false);
   const prevTutorialActiveRef = useRef(tutorialActive);
-
-  // [ONBOARDING] Cleanup when tutorial ends — ensure no onboarding-specific
-  // restrictions or hidden UI persist after the flow completes.
   useEffect(() => {
     if (!tutorialActive && prevTutorialActiveRef.current) {
-      // Tutorial just ended (active was true, now false)
-      dispatch(setInteractionLock(false))
-      // Cancel any lingering motion capture that was part of the tutorial
-      if (isMotionCaptureActive) {
-        handleCancelMotion()
+      if (isMotionCaptureActive && !isApplyingRef.current) {
+        handleCancelMotion();
       }
     }
-    prevTutorialActiveRef.current = tutorialActive
-  }, [tutorialActive])
+    prevTutorialActiveRef.current = tutorialActive;
+  }, [tutorialActive, isMotionCaptureActive]);
 
   useEffect(() => {
-    if (prevIsPlaying.current && !isPlaying) {
-      if (autoPlayState === 'initial' && !isStarterCopy) {
-        dispatch(setAutoPlayState('none'));
-        dispatch(setInteractionLock(false));
-        dispatch(startTutorial());
-      } else if (autoPlayState === 'final') {
-        dispatch(setAutoPlayState('none'));
-        dispatch(setInteractionLock(false));
+    if (!isMotionCaptureActive) {
+      isApplyingRef.current = false;
+    }
+  }, [isMotionCaptureActive]);
+
+  useEffect(() => {
+    if (tutorialActive && tutorialStep === 4) {
+      // Set local storage synchronously on completion for all users (cache)
+      // to prevent re-triggering during project redirection when the auth slice thunk is still pending
+      localStorage.setItem('vevara_onboarding_completed', 'true');
+      setIsOnboardingDone(true);
+      if (isAuthenticated) {
+        dispatch(completeOnboarding());
       }
+      dispatch(endTutorial());
     }
-    prevIsPlaying.current = isPlaying;
-  }, [isPlaying, autoPlayState, dispatch, isStarterCopy]);
-
-  // Handle trigger for final auto-play when entering pending_final state
-  useEffect(() => {
-    if (autoPlayState === 'pending_final' && !isPlaying && motionControls) {
-      dispatch(setAutoPlayState('final'));
-      dispatch(setInteractionLock(true));
-      seek(0);
-      motionControls.playAll();
-      setIsPlaying(true);
-    }
-  }, [autoPlayState, isPlaying, seek, setIsPlaying, dispatch, motionControls]);
-
-  // Handle manual target rect calculation for Step 2
-  useEffect(() => {
-    if (tutorialActive && tutorialStep === 2) {
-      const updateRect = () => {
-        const isSaaS = projectName === "Mistral AI Studio";
-        const layerId = isSaaS ? "1777822842468-c23ve3rsq" : "1777802757479-4gfgdrm5c";
-        const transforms = motionControls?.getLayerCurrentTransforms();
-        const t = transforms?.get(layerId);
-
-        const canvasEl = document.querySelector('[data-tutorial="canvas-area"]');
-        const pixiCanvas = canvasEl?.querySelector('canvas');
-        const canvasRect = pixiCanvas?.getBoundingClientRect() || canvasEl?.getBoundingClientRect();
-
-        const vp = motionControls?.getViewportData();
-
-        if (t?.visualRect && canvasRect && vp) {
-          const screenX = canvasRect.left + (t.visualRect.x - vp.left) * vp.scale;
-          const screenY = canvasRect.top + (t.visualRect.y - vp.top) * vp.scale;
-          const screenW = t.visualRect.width * vp.scale;
-          const screenH = t.visualRect.height * vp.scale;
-
-          setManualTutorialRect({
-            x: screenX,
-            y: screenY,
-            width: screenW,
-            height: screenH
-          });
-        }
-      };
-      updateRect();
-      const interval = setInterval(updateRect, 32);
-      return () => clearInterval(interval);
-    } else {
-      setManualTutorialRect(null);
-    }
-  }, [tutorialActive, tutorialStep, motionControls, projectName]);
+  }, [tutorialActive, tutorialStep, isAuthenticated, dispatch]);
 
 
   // Load project if ID is provided in URL
   useEffect(() => {
     if (urlProjectId && urlProjectId !== projectId) {
+      // Guest users: load from local storage with asset rehydration
+      if (!isAuthenticated && urlProjectId.startsWith('local_')) {
+        const localProject = getLocalProject(urlProjectId)
+        if (localProject) {
+          // Rehydrate guest layer assets: for each image/video layer with _localAssetId,
+          // fetch a fresh blob URL from IndexedDB and rewrite url/src.
+          // Load sequentially and pre-warm with DOM Image to avoid WebGL memory spikes.
+          const rehydratedLayers = { ...localProject.layers }
+          const hydrateAsset = async (layerId, layer) => {
+            const assetId = layer?.data?._localAssetId
+            const backAssetId = layer?.data?.backLocalAssetId
+            if (layer.type === 'image' || layer.type === 'video') {
+              if (!assetId) return
+              try {
+                const blobUrl = await getAssetUrl(assetId)
+                if (!blobUrl || !rehydratedLayers[layerId]) return
+                // Pre-warm the DOM Image for images so PIXI gets a ready-to-use texture
+                if (layer.type === 'image') {
+                  await new Promise((resolve, reject) => {
+                    const img = new window.Image()
+                    img.onload = resolve
+                    img.onerror = resolve // continue even if preload fails
+                    img.src = blobUrl
+                    // Timeout to avoid blocking indefinitely on corrupt data
+                    const timer = setTimeout(resolve, 10000)
+                    img.onload = () => { clearTimeout(timer); resolve() }
+                    img.onerror = () => { clearTimeout(timer); resolve() }
+                  })
+                }
+                rehydratedLayers[layerId] = {
+                  ...rehydratedLayers[layerId],
+                  data: {
+                    ...rehydratedLayers[layerId].data,
+                    url: blobUrl,
+                    src: blobUrl,
+                  }
+                }
+              } catch (err) {
+                // skip broken assets silently
+              }
+            } else if (layer.type === 'frame') {
+              try {
+                let updatedData = { ...rehydratedLayers[layerId].data }
+                let needsUpdate = false
+                if (assetId) {
+                  const blobUrl = await getAssetUrl(assetId)
+                  if (blobUrl) {
+                    updatedData.assetUrl = blobUrl
+                    needsUpdate = true
+                  }
+                }
+                if (backAssetId) {
+                  const blobUrl = await getAssetUrl(backAssetId)
+                  if (blobUrl) {
+                    updatedData.backAssetUrl = blobUrl
+                    needsUpdate = true
+                  }
+                }
+                if (needsUpdate && rehydratedLayers[layerId]) {
+                  rehydratedLayers[layerId] = {
+                    ...rehydratedLayers[layerId],
+                    data: updatedData
+                  }
+                }
+              } catch (err) {
+                // skip broken assets silently
+              }
+            }
+          }
+            ; (async () => {
+              for (const [layerId, layer] of Object.entries(rehydratedLayers)) {
+                await hydrateAsset(layerId, layer)
+              }
+              // Rehydrate guest audio tracks: for each track with _localAssetId or assetId,
+              // fetch a fresh blob URL from IndexedDB and rewrite assetUrl.
+              const rehydratedAudioTracks = Array.isArray(localProject.audioTracks)
+                ? await Promise.all(localProject.audioTracks.map(async (track) => {
+                  const localId = track._localAssetId || track.assetId
+                  if (!localId) return track
+                  try {
+                    const blobUrl = await getAssetUrl(localId)
+                    if (blobUrl) {
+                      return { ...track, assetUrl: blobUrl }
+                    }
+                  } catch (err) { /* skip broken audio assets */ }
+                  return track
+                }))
+                : []
+              dispatch(initializeProject({
+                ...localProject,
+                layers: rehydratedLayers,
+                audioTracks: rehydratedAudioTracks.length > 0 ? rehydratedAudioTracks : localProject.audioTracks,
+                name: localProject.name || 'Untitled Project',
+              }))
+            })()
+          hasInitializedScene.current = true
+        }
+        return
+      }
       dispatch(fetchProjectById(urlProjectId))
     }
-  }, [urlProjectId, dispatch, projectId])
+  }, [urlProjectId, dispatch, projectId, isAuthenticated])
 
   useEffect(() => {
     if (projectStatus === 'loading') return
 
-    const path = location.pathname;
-    const isPracticePath = path === '/ads' || path === '/sass';
-
-    // 1. Path-based template loading for guests
-    if (!isAuthenticated && isPracticePath && !urlProjectId) {
-      let template = null;
-      if (path === '/ads') template = ADS_TEMPLATE;
-      else if (path === '/sass') template = SAAS_TEMPLATE;
-
-      if (template && projectName !== template.name) {
-        dispatch(initializeProject({ ...template.data, name: template.name }));
-        hasInitializedScene.current = true;
-        return;
-      }
-    }
-
-    // 2. Standard initialization for mount or empty state
+    // Standard initialization for mount or empty state
     if (!hasInitializedScene.current && scenes.length === 0 && !urlProjectId) {
       hasInitializedScene.current = true;
 
-      // Default empty scene for guests (on /) and auth users
+      // Default empty scene for guests and auth users
       dispatch(addScene({
         name: 'Scene 1',
         duration: 10.0,
         transition: 'None',
       }))
     }
-  }, [dispatch, scenes.length, projectStatus, urlProjectId, isAuthenticated, location.pathname, projectName])
+  }, [dispatch, scenes.length, projectStatus, urlProjectId])
 
   // Reset global motion engine and project state on unmount to prevent
   // WebGL/GSAP leaks and stale Redux state on re-entry
@@ -1275,24 +1430,19 @@ function EditorPage() {
     }
   }, [])
 
-  // [FIX] Best-effort auto-save on tab/window closure.
-  // We use beforeunload to trigger a save. Since saveProject is async,
+  // [FIX] Best-effort auto-save on tab/window closure — works for both guest and auth.
+  // We use beforeunload to trigger a save. Since handleSave is async,
   // this is "best effort" and may not always complete depending on the browser.
   useEffect(() => {
-    const handleTabClose = (e) => {
-      if (isAuthenticated && projectId) {
-        // We don't block the exit with a confirmation, just fire the save.
-        // Some browsers allow async work to finish if it's fast enough.
-        handleSave({ silent: true })
-      }
+    const handleTabClose = () => {
+      handleSave({ silent: true })
     }
 
     window.addEventListener('beforeunload', handleTabClose)
     return () => window.removeEventListener('beforeunload', handleTabClose)
-  }, [isAuthenticated, projectId, handleSave])
+  }, [handleSave])
 
-  // Get current scene data from Redux
-  const currentSceneData = useSelector(selectCurrentScene)
+
 
   const sceneLayersOrdered = useMemo(() => {
     if (!currentSceneData?.layers) return []
@@ -1334,6 +1484,90 @@ function EditorPage() {
     const newAspectRatio = calculateAspectRatio(width, height)
     dispatch(setAspectRatio(newAspectRatio))
   }
+
+  const handleCopyAndResize = useCallback(async (width, height) => {
+    const newAspectRatio = calculateAspectRatio(width, height)
+
+    // Save current design before making copy
+    await handleSave({ silent: true })
+
+    // Calculate dimensions
+    let newWidth = 1920
+    let newHeight = 1080
+    if (newAspectRatio === '9:16') {
+      newWidth = 1080
+      newHeight = 1920
+    } else if (newAspectRatio === '1:1') {
+      newWidth = 1080
+      newHeight = 1080
+    }
+
+    if (isAuthenticated) {
+      // Authenticated User: Duplicate and then resize the copy
+      const newProject = await api.post(`/projects/${projectId}/duplicate`)
+      
+      const updatedScenes = (newProject.data.scenes || []).map(scene => ({
+        ...scene,
+        width: newWidth,
+        height: newHeight
+      }))
+
+      const updatedLayers = { ...(newProject.data.layers || {}) }
+      Object.keys(updatedLayers).forEach(layerId => {
+        const layer = updatedLayers[layerId]
+        if (layer && layer.type === 'background') {
+          updatedLayers[layerId] = {
+            ...layer,
+            width: newWidth,
+            height: newHeight
+          }
+        }
+      })
+
+      const updatedPayload = {
+        name: newProject.name,
+        data: {
+          ...newProject.data,
+          aspectRatio: newAspectRatio,
+          scenes: updatedScenes,
+          layers: updatedLayers
+        },
+        thumbnail: newProject.thumbnail
+      }
+      await api.put(`/projects/${newProject._id}`, updatedPayload)
+      return { id: newProject._id, name: newProject.name }
+    } else {
+      // Guest User: Duplicate local project, resize the copy
+      const fullProject = getLocalProject(projectId)
+      if (!fullProject) {
+        throw new Error('Could not find local project data to duplicate')
+      }
+      const duplicated = duplicateProject(fullProject)
+      if (!duplicated) {
+        throw new Error('Failed to duplicate local project')
+      }
+      duplicated.aspectRatio = newAspectRatio
+      duplicated.scenes = (duplicated.scenes || []).map(scene => ({
+        ...scene,
+        width: newWidth,
+        height: newHeight
+      }))
+      if (duplicated.layers) {
+        Object.keys(duplicated.layers).forEach(layerId => {
+          const layer = duplicated.layers[layerId]
+          if (layer && layer.type === 'background') {
+            duplicated.layers[layerId] = {
+              ...layer,
+              width: newWidth,
+              height: newHeight
+            }
+          }
+        })
+      }
+      saveLocalProject(duplicated)
+      return { id: duplicated._id, name: duplicated.name }
+    }
+  }, [projectId, projectName, scenes, layers, sceneMotionFlows, aspectRatio, isAuthenticated, handleSave])
 
 
 
@@ -1461,8 +1695,7 @@ function EditorPage() {
 
 
 
-  // Handle Step 1 -> 2 transition (Clicking Animate)
-
+  // Handle Step 1 -> 2 transition (Clicking Add Moment / Animate)
   useEffect(() => {
     if (tutorialActive && tutorialStep === 1 && isMotionCaptureActive) {
       dispatch(nextStep());
@@ -1472,37 +1705,37 @@ function EditorPage() {
   // Handle Step 2 - Auto-selection and Interaction Gate
   useEffect(() => {
     if (tutorialActive && tutorialStep === 2) {
-      const isSaaS = projectName === "Mistral AI Studio";
-      const targetLayerId = isSaaS ? "1777822842468-c23ve3rsq" : "1777802757479-4gfgdrm5c";
-
-      // Auto-select the target layer immediately
-      if (layers[targetLayerId] && !selectedLayerIds.includes(targetLayerId)) {
-        dispatch(setSelectedLayer(targetLayerId));
+      // Auto-select the first content layer (non-background) in the current scene if nothing is selected
+      const firstContentLayer = currentSceneData?.layers
+        ?.map(id => layers[id])
+        .find(l => l && l.type !== 'background' && l.type !== 'camera');
+      if (firstContentLayer && selectedLayerIds.length === 0) {
+        dispatch(setSelectedLayer(firstContentLayer.id));
       }
 
       // Transition to Step 3 ONLY on real interaction (Move/Scale/Rotate)
-      // This is tracked via editingStepActionCount > 0 OR live movement threshold
       if (editingStepActionCount > 0) {
         dispatch(nextStep());
-      } else if (motionCaptureMode?.isActive) {
-        // [OPTIMIZATION] Immediate transition: Detect meaningful movement while dragging
-        // This removes the "sticky" feel of the overlay during the first interaction.
-        const tracked = motionCaptureMode.trackedLayers?.get(targetLayerId);
-        if (tracked) {
+      } else if (motionCaptureMode?.isActive && motionCaptureMode.trackedLayers) {
+        for (const [layerId, tracked] of motionCaptureMode.trackedLayers.entries()) {
           const initial = tracked.initialTransform;
+          if (!initial) continue;
+
           const dx = Math.abs(tracked.deltaX || 0);
           const dy = Math.abs(tracked.deltaY || 0);
-          const ds = Math.abs((tracked.scaleX || initial.scaleX) - initial.scaleX);
+          const dsX = Math.abs((tracked.scaleX || initial.scaleX) - initial.scaleX);
+          const dsY = Math.abs((tracked.scaleY || initial.scaleY) - initial.scaleY);
           const dr = Math.abs((tracked.rotation || initial.rotation) - initial.rotation);
 
           // Threshold for "intentional" interaction: 5px movement, 5% scale, or 5deg rotation
-          if (dx > 5 || dy > 5 || ds > 0.05 || dr > 5) {
+          if (dx > 5 || dy > 5 || dsX > 0.05 || dsY > 0.05 || dr > 5) {
             dispatch(nextStep());
+            break;
           }
         }
       }
     }
-  }, [tutorialActive, tutorialStep, selectedLayerIds, editingStepActionCount, projectName, layers, dispatch, motionCaptureMode, captureVersion]);
+  }, [tutorialActive, tutorialStep, selectedLayerIds, editingStepActionCount, layers, dispatch, motionCaptureMode, captureVersion]);
 
 
 
@@ -1691,7 +1924,15 @@ function EditorPage() {
     dispatch(clearLayerSelection())
 
     // [NEW] Auto-open motion panel on desktop and mobile when adding a step
-    setIsMotionPanelOpen(true)
+    if (tutorialActive) {
+      setIsMotionPanelOpen(true)
+      setIsMotionPanelCollapsed(false)
+      setIsMobileMotionMinimized(false)
+    } else {
+      setIsMotionPanelOpen(userPrefOpenRef.current)
+      setIsMotionPanelCollapsed(userPrefCollapsedRef.current)
+      setIsMobileMotionMinimized(userPrefMobileMinimizedRef.current)
+    }
 
     // 1. Ensure motion flow exists
     dispatch(initializeSceneMotionFlow({ sceneId: currentSceneId }))
@@ -2048,12 +2289,7 @@ function EditorPage() {
           })
         }
       }
-      // [ONBOARDING – ISSUE 3] Release the interaction lock now that capture mode is active.
-      // From here the normal capture UI (Step 2) takes over; the user can interact freely with
-      // the canvas — the full-div blocker at z-[999999] is removed.
-      if (tutorialActive && tutorialStep === 1) {
-        dispatch(setInteractionLock(false))
-      }
+
 
       setMotionCaptureMode({
         isActive: true,
@@ -2509,11 +2745,7 @@ function EditorPage() {
       })
     }
 
-    // [ONBOARDING – ISSUE 3] During Step 1 the fast-preview tween must not be interruptable.
-    // Lock all clicks until enableCaptureMode() fires (i.e. tween completes and capture activates).
-    if (tutorialActive && tutorialStep === 1) {
-      dispatch(setInteractionLock(true))
-    }
+
 
     // [BUG 1 FIX] Set transitioning state BEFORE the tween starts.
     // This prevents the auto-pause effect in Stage.jsx from interfering
@@ -2591,6 +2823,7 @@ function EditorPage() {
    * Apply captured motion and exit capture mode
    */
   const handleApplyMotion = useCallback((options = {}) => {
+    isApplyingRef.current = true;
     // [ONBOARDING] Immediately end tutorial when user clicks Save Moment in Step 3.
     // This removes the hint/highlight instantly. The fast-preview and auto-play
     // still run, but the onboarding UI is gone.
@@ -2671,7 +2904,7 @@ function EditorPage() {
     // the step is already saved in Redux, and we want to jump directly to a
     // full-project autoplay instead of scrubbing just this one moment.
     // =======================================================================
-    const skipPreview = options?.skipPreview || (tutorialActive && tutorialStep === 3)
+    const skipPreview = options?.skipPreview
     if (motionControls && !skipPreview) {
       const motionFlow = currentFlow.steps || []
       const stepIndex = motionFlow.findIndex(s => s.id === stepId)
@@ -2961,13 +3194,8 @@ function EditorPage() {
           // sync the engine with the latest Redux state without any visible jump.
           motionControls.seek(stepEndTimeSeconds)
 
-          // If we are in the final tutorial step (Step 3: Save Step),
-          // trigger the pending_final auto-play state and end tutorial.
-          // This ensures we wait for the fast preview to complete.
           if (tutorialActive && tutorialStep === 3) {
-            dispatch(endTutorial())
-            dispatch(setInteractionLock(true))
-            dispatch(setAutoPlayState('pending_final'))
+            dispatch(nextStep())
           }
 
           // [FIX] Clear capture mode ONLY AFTER the preview is done.
@@ -2975,6 +3203,7 @@ function EditorPage() {
           // only appears once the engine is idle and isPlaying is false.
           // This prevents the "two clicks to play" issue where the first click
           // would accidentally pause the still-running fast preview.
+
           setMotionCaptureMode(null)
           setEditingStepId(null)
           setIsEditingExistingStep(false)
@@ -2987,6 +3216,7 @@ function EditorPage() {
       })
     } else {
       // No motionControls available, just clear capture mode
+
       setMotionCaptureMode(null)
       setEditingStepId(null)
       setIsEditingExistingStep(false)
@@ -2997,13 +3227,8 @@ function EditorPage() {
       dispatch(stopMotionEditing())
 
       // [ONBOARDING FIX] Ensure tutorial finalizes even without motion controls.
-      // When motionControls is null (e.g. before the engine has loaded),
-      // the user's Save Moment click in Step 3 must still end the tutorial
-      // and trigger the final autoplay sequence.
       if (tutorialActive && tutorialStep === 3) {
-        dispatch(endTutorial())
-        dispatch(setInteractionLock(true))
-        dispatch(setAutoPlayState('pending_final'))
+        dispatch(nextStep())
       }
     }
   }, [motionCaptureMode, editingStepId, currentSceneId, currentSceneMotionFlow, dispatch, motionControls, startTimeOffset, currentSceneTimelineInfo, tutorialActive, tutorialStep])
@@ -3056,11 +3281,10 @@ function EditorPage() {
     // [SYNC FIX] Inform Redux that we are done editing
     dispatch(stopMotionEditing())
 
-    // [ONBOARDING] Cancel during onboarding should end the tutorial flow.
-    // Exit capture mode, end tutorial, restore normal editor state.
+    // [ONBOARDING] Cancel during onboarding should return to Step 1.
+    // Exit capture mode, reset tutorial step to 1, restore normal editor state.
     if (tutorialActive && (tutorialStep === 1 || tutorialStep === 2 || tutorialStep === 3)) {
-      dispatch(endTutorial())
-      dispatch(setInteractionLock(false))
+      dispatch(startTutorial())
     }
   }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset, tutorialActive, tutorialStep])
 
@@ -3321,7 +3545,15 @@ function EditorPage() {
 
     // [UX] Auto-open the motion panel when editing a step, same as Create Step.
     if (stepId !== 'base') {
-      setIsMotionPanelOpen(true)
+      if (tutorialActive) {
+        setIsMotionPanelOpen(true)
+        setIsMotionPanelCollapsed(false)
+        setIsMobileMotionMinimized(false)
+      } else {
+        setIsMotionPanelOpen(userPrefOpenRef.current)
+        setIsMotionPanelCollapsed(userPrefCollapsedRef.current)
+        setIsMobileMotionMinimized(userPrefMobileMinimizedRef.current)
+      }
     }
 
     // [SYNC FIX] Inform Redux that we are starting to edit this specific step
@@ -4853,8 +5085,8 @@ function EditorPage() {
     const capture = motionCaptureRef.current
     const hasLiveChanges = capture?.trackedLayers
       ? Array.from(capture.trackedLayers.values()).some(
-          l => l.didMove || l.didScale || l.didRotate || l.didFade || l.didBlur || l.didCrop
-        )
+        l => l.didMove || l.didScale || l.didRotate || l.didFade || l.didBlur || l.didCrop
+      )
       : false
     const originalStep = savedStepTimingsRef.current?.find(s => s.id === stepId)
     const currentStep = currentSceneMotionFlow?.steps?.find(s => s.id === stepId)
@@ -5108,13 +5340,11 @@ function EditorPage() {
           </div>
         )}
 
-        {/* [ONBOARDING] During autoplay and tutorial steps, hide top toolbar */}
         {/* Top Toolbar */}
         <div
           ref={topToolbarRef}
           className="absolute top-0 left-0 right-0 z-50"
           style={{
-            display: (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) ? 'none' : undefined,
             transform: (isMotionCaptureActive || previewMode) ? 'translateY(-100%)' : 'translateY(0)',
             transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
             pointerEvents: previewMode ? 'none' : undefined,
@@ -5132,6 +5362,7 @@ function EditorPage() {
             onRequestGifOptions={() => setGifExportModalOpen(true)}
             hideExport={tutorialActive && tutorialStep === 7}
             onCanvasSizeChange={handleCanvasSizeChange}
+            onCopyAndResize={handleCopyAndResize}
             onToggleSidebar={() => handleSidebarItemClick('Elements')}
             onUndo={() => {
               if (isMotionCaptureActive) captureUndoSyncRef.current = true
@@ -5148,11 +5379,10 @@ function EditorPage() {
           />
         </div>
 
-        {/* [ONBOARDING] Hide left sidebar during tutorial to focus attention */}
+        {/* Left Sidebar */}
         <div
           className="hidden lg:block absolute left-0 z-50"
           style={{
-            display: (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) ? 'none' : undefined,
             top: `${topToolbarHeight}px`,
             height: `calc(100vh - ${topToolbarHeight}px)`,
             transform: (isMotionCaptureActive || previewMode) ? 'translateX(-100%)' : 'translateX(0)',
@@ -5207,8 +5437,24 @@ function EditorPage() {
                 {activeSidebarItem === 'Uploads' && (
                   <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                 )}
-                {activeSidebarItem === 'Media' && (
+                {activeSidebarItem === 'Bg wall' && (
                   <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                )}
+                {activeSidebarItem === 'Audio' && (
+                  <AudioPanel
+                    onClose={handleClosePanel}
+                    onAddAudioTrack={(track) => {
+                      const hasAssetId = !!(track._id || track.id)
+                      dispatch(addAudioTrack({
+                        assetId: hasAssetId ? (track._id || track.id) : null,
+                        assetUrl: track.url || track.src,
+                        name: track.name || 'Audio',
+                        duration: track.durationSeconds || track.metadata?.duration || 0,
+                        waveform: track.metadata?.waveform || [],
+                        _localAssetId: hasAssetId ? (track._id || track.id) : undefined,
+                      }))
+                    }}
+                  />
                 )}
                 {activeSidebarItem === 'Transitions' && (
                   <TransitionsPanel
@@ -5375,9 +5621,9 @@ function EditorPage() {
                   ref={mobileSheetRef}
                   className={`lg:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-2xl border-t mobile-sheet-in ${isLight ? 'border-black/5' : 'border-white/10'}`}
                   style={{
-                    height: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '50vh' : '42vh',
-                    minHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '320px' : '280px',
-                    maxHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Media') ? '52vh' : '45vh',
+                    height: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Bg wall' || activeSidebarItem === 'Audio') ? '50vh' : '42vh',
+                    minHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Bg wall' || activeSidebarItem === 'Audio') ? '320px' : '280px',
+                    maxHeight: (activeSidebarItem === 'Uploads' || activeSidebarItem === 'Bg wall' || activeSidebarItem === 'Audio') ? '52vh' : '45vh',
                     backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
                     paddingBottom: 'env(safe-area-inset-bottom, 0px)',
                   }}
@@ -5428,8 +5674,24 @@ function EditorPage() {
                     {activeSidebarItem === 'Uploads' && (
                       <UploadsPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
                     )}
-                    {activeSidebarItem === 'Media' && (
+                    {activeSidebarItem === 'Bg wall' && (
                       <ImagesPanel onClose={handleClosePanel} aspectRatio={aspectRatio} />
+                    )}
+                    {activeSidebarItem === 'Audio' && (
+                      <AudioPanel
+                        onClose={handleClosePanel}
+                        onAddAudioTrack={(track) => {
+                          const hasAssetId = !!(track._id || track.id)
+                          dispatch(addAudioTrack({
+                            assetId: hasAssetId ? (track._id || track.id) : null,
+                            assetUrl: track.url || track.src,
+                            name: track.name || 'Audio',
+                            duration: track.durationSeconds || track.metadata?.duration || 0,
+                            waveform: track.metadata?.waveform || [],
+                            _localAssetId: hasAssetId ? (track._id || track.id) : undefined,
+                          }))
+                        }}
+                      />
                     )}
                     {activeSidebarItem === 'Transitions' && (
                       <TransitionsPanel
@@ -5586,28 +5848,28 @@ function EditorPage() {
                 data-tutorial="mobile-motion-bar-container"
                 style={{ paddingTop: isMotionCaptureActive ? 0 : topToolbarHeight }}
               >
-              <MobileMotionBar
-                motionFlow={currentSceneMotionFlow?.steps || []}
-                isMotionCaptureActive={isMotionCaptureActive}
-                editingStepId={editingStepId}
-                editingMomentLabel={editingMomentLabel}
-                editingStepActionCount={editingStepActionCount}
-                isDoneEnabled={isDoneEnabled}
-                onAddMoment={handleStartMotionCapture}
-                onEditMoment={handleEditStep}
-                onDeleteStep={(stepId) => {
-                  if (currentSceneId && stepId) {
-                    dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
-                  }
-                }}
-                onApplyMotion={handleApplyMotion}
-                onCancelMotion={handleCancelMotion}
-                onUndo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(undo()) }}
-                onRedo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(redo()) }}
-                sceneLayers={sceneLayersForMotion}
-                activeStepId={playheadStepId}
-                onSelectStepEnd={handleSelectStepEnd}
-              />
+                <MobileMotionBar
+                  motionFlow={currentSceneMotionFlow?.steps || []}
+                  isMotionCaptureActive={isMotionCaptureActive}
+                  editingStepId={editingStepId}
+                  editingMomentLabel={editingMomentLabel}
+                  editingStepActionCount={editingStepActionCount}
+                  isDoneEnabled={isDoneEnabled}
+                  onAddMoment={handleStartMotionCapture}
+                  onEditMoment={handleEditStep}
+                  onDeleteStep={(stepId) => {
+                    if (currentSceneId && stepId) {
+                      dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
+                    }
+                  }}
+                  onApplyMotion={handleApplyMotion}
+                  onCancelMotion={handleCancelMotion}
+                  onUndo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(undo()) }}
+                  onRedo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(redo()) }}
+                  sceneLayers={sceneLayersForMotion}
+                  activeStepId={playheadStepId}
+                  onSelectStepEnd={handleSelectStepEnd}
+                />
               </div>
             )}
 
@@ -5762,14 +6024,14 @@ function EditorPage() {
               />
             </div>
 
-            {/* Canvas - Takes all available space. [ONBOARDING] Fill full screen when bottom section hidden */}
+            {/* Canvas - Takes all available space */}
             <div
               ref={canvasContainerRef}
               data-tutorial="canvas-area"
               className="absolute flex-1 overflow-hidden select-none"
               style={{
                 top: 0,
-                bottom: (previewMode || (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3)))) ? 0 : (initialBottomHeight || 0),
+                bottom: previewMode ? 0 : (initialBottomHeight || 0),
                 left: 0,
                 right: 0,
                 backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
@@ -5875,7 +6137,7 @@ function EditorPage() {
                   height: '8px',
                   border: '1px solid rgba(255, 255, 255, 0.15)',
                   display: 'none',
-                  pointerEvents: 'none',
+                  pointerEvents: 'none'
                 }}
               >
                 <div
@@ -5888,14 +6150,15 @@ function EditorPage() {
                   }}
                 />
               </div>
+
+
             </div>
 
             {/* Removed floating mobile menu button */}
           </div>
 
-          {/* [ONBOARDING] Hide playback controls during tutorial */}
           {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-          {!isMotionCaptureActive && !previewMode && !((!isAuthenticated) && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3))) && (
+          {!isMotionCaptureActive && !previewMode && !isAutoPlaying && (
             <div
               className={`absolute right-0 pointer-events-auto flex items-center justify-center ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
               style={{
@@ -5951,7 +6214,7 @@ function EditorPage() {
             className={`absolute bottom-0 right-0 z-45 flex flex-col pointer-events-auto ${!isResizingBottom ? 'transition-all duration-300' : ''}`}
             style={{
               zIndex: 45,
-              display: (previewMode || (!isAuthenticated && (isAutoPlaying || (tutorialActive && tutorialStep >= 1 && tutorialStep <= 3)))) ? 'none' : undefined,
+              display: previewMode ? 'none' : undefined,
               left: (typeof window !== 'undefined' && window.innerWidth < 1024) ? '0px' : currentSidebarWidth,
               backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
               backdropFilter: 'blur(20px)',
@@ -5977,8 +6240,8 @@ function EditorPage() {
                 top: '-1px',
                 background: (isResizingBottom || isHoveringHandle)
                   ? (theme === 'light'
-                      ? 'linear-gradient(to right, rgba(0, 0, 0, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(0, 0, 0, 0.08) 100%)'
-                      : 'linear-gradient(to right, rgba(255, 255, 255, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(255, 255, 255, 0.08) 100%)')
+                    ? 'linear-gradient(to right, rgba(0, 0, 0, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(0, 0, 0, 0.08) 100%)'
+                    : 'linear-gradient(to right, rgba(255, 255, 255, 0.08) 0%, #7050c0 15%, #7050c0 85%, rgba(255, 255, 255, 0.08) 100%)')
                   : (theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'),
                 pointerEvents: 'none'
               }}
@@ -6236,37 +6499,36 @@ function EditorPage() {
           </div>
 
           {/* Motion Panel - Right side overlay (always visible on desktop, togglable on mobile) */}
-          {/* [ONBOARDING] During tutorial motion capture the panel stays hidden; normal authenticated mode always shows it */}
-          {!previewMode && !(tutorialActive && isMotionCaptureActive) && (
-          <MotionPanel
-            isOpen={isMotionPanelOpen}
-            onClose={() => setIsMotionPanelOpen(false)}
-            isCollapsed={isMotionPanelCollapsed}
-            onToggleCollapsed={() => setIsMotionPanelCollapsed(prev => !prev)}
-            topToolbarHeight={topToolbarHeight}
-            bottomSectionHeight={bottomSectionHeight}
-            motionControls={motionControls}
-            onStepEdit={handleEditStep}
-            onDeleteStep={(stepId) => {
-              if (currentSceneId && stepId) {
-                dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
-              }
-            }}
-            onApplyMotion={handleApplyMotion}
-            onCancelMotion={handleCancelMotion}
-            onStartMotionCapture={handleStartMotionCapture}
-            onAddAnimation={handleAddAnimation}
-            onCustomActionValueChange={handleMotionPanelValueChange}
-            onDeleteCaptureAction={handleDeleteCaptureAction}
-            sceneLayers={sceneLayersForMotion}
-            selectedLayerIds={selectedLayerIds}
-            isMotionCaptureActive={isMotionCaptureActive}
-            editingStepId={editingStepId}
-            editingStepActionCount={editingStepActionCount}
-            activeStepId={playheadStepId}
-            onSelectStepEnd={handleSelectStepEnd}
-            onMobileMinimizedChange={setIsMobileMotionMinimized}
-          />
+          {!previewMode && (
+            <MotionPanel
+              isOpen={isMotionPanelOpen}
+              onClose={() => setIsMotionPanelOpen(false)}
+              isCollapsed={isMotionPanelCollapsed}
+              onToggleCollapsed={() => setIsMotionPanelCollapsed(prev => !prev)}
+              topToolbarHeight={topToolbarHeight}
+              bottomSectionHeight={bottomSectionHeight}
+              motionControls={motionControls}
+              onStepEdit={handleEditStep}
+              onDeleteStep={(stepId) => {
+                if (currentSceneId && stepId) {
+                  dispatch(deleteSceneMotionStep({ sceneId: currentSceneId, stepId }))
+                }
+              }}
+              onApplyMotion={handleApplyMotion}
+              onCancelMotion={handleCancelMotion}
+              onStartMotionCapture={handleStartMotionCapture}
+              onAddAnimation={handleAddAnimation}
+              onCustomActionValueChange={handleMotionPanelValueChange}
+              onDeleteCaptureAction={handleDeleteCaptureAction}
+              sceneLayers={sceneLayersForMotion}
+              selectedLayerIds={selectedLayerIds}
+              isMotionCaptureActive={isMotionCaptureActive}
+              editingStepId={editingStepId}
+              editingStepActionCount={editingStepActionCount}
+              activeStepId={playheadStepId}
+              onSelectStepEnd={handleSelectStepEnd}
+              onMobileMinimizedChange={setIsMobileMotionMinimized}
+            />
           )}
 
           {/* Preview Mode — minimal floating play/pause + scrub bar over the canvas */}
@@ -6321,11 +6583,7 @@ function EditorPage() {
             </div>
           </div>
         </Modal>
-        <TutorialOverlay
-          isPlaying={isPlaying}
-          manualTargetRect={manualTutorialRect}
-          onNext={() => dispatch(nextStep())}
-        />
+
         <TutorialExportModal
           isOpen={tutorialActive && tutorialStep === 7}
           onClose={() => dispatch(endTutorial())}
@@ -6343,9 +6601,59 @@ function EditorPage() {
             handleExport(res);
           }}
         />
-        {isInteractionLocked && (
-          <div className="fixed inset-0 z-[999999]" style={{ cursor: 'default' }} />
+
+        {/* Global Workspace relative hint modals overlay (z-index 99999) */}
+        {(showExampleIntro || (tutorialActive && tutorialStep === 2)) && (
+          <div
+            className="absolute pointer-events-none"
+            style={{
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: previewMode ? 0 : (initialBottomHeight || 0),
+              zIndex: 99999
+            }}
+          >
+            {showExampleIntro && (
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-0 flex items-end justify-center lg:items-end lg:justify-end p-6 lg:pointer-events-none">
+                  {/* Main Card Container — Workspace relative */}
+                  <div className="w-[300px] sm:w-[320px] pointer-events-auto bg-[#01B2FD] border border-white/20 rounded-2xl overflow-hidden transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-5
+                    absolute bottom-6 right-6 lg:bottom-6 lg:right-6 max-lg:left-1/2 max-lg:top-1/2 max-lg:-translate-x-1/2 max-lg:-translate-y-1/2 max-lg:bottom-auto max-lg:right-auto p-4 flex flex-col gap-3.5 shadow-xl">
+
+                    {/* Video preview framed inside card, object-cover to remove borders */}
+                    <div className="relative w-full overflow-hidden bg-black flex items-center justify-center border border-white/10 aspect-[16/10]">
+                      <video className="w-full h-full object-cover" src="/videos/Untitled Project_2160p (3).mp4" autoPlay muted loop />
+                    </div>
+
+                    {/* Content Text: Clean visual hierarchy with white text */}
+                    <div className="flex flex-col gap-1 text-left">
+                      <span className="text-[11px] font-bold text-white/70 uppercase tracking-wider">
+                        Replace assets
+                      </span>
+                      <h4 className="text-[13px] font-semibold text-white leading-normal">
+                        Drag your own images here to replace the sample assets.
+                      </h4>
+                    </div>
+
+                    {/* Got It Button (Flat) */}
+                    <button
+                      onClick={handleCompleteExampleIntro}
+                      className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-white/95 text-[#01B2FD] text-xs font-bold transition-colors duration-200"
+                    >
+                      Got It
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <TutorialOverlay
+              isPlaying={isPlaying}
+              onNext={() => dispatch(nextStep())}
+            />
+          </div>
         )}
+
 
         {/* Toast notification for save/undo feedback - Purple design with timer bar */}
         {toast && createPortal(

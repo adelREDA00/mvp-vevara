@@ -313,6 +313,8 @@ function MotionPanel({
   const currentSceneId = useSelector(selectCurrentSceneId)
   const layers = useSelector(selectLayers)
   const tutorialState = useSelector(selectTutorialState)
+  const isTutorialStep1 = tutorialState?.active && tutorialState?.step === 1;
+  const isTutorialStep4 = tutorialState?.active && tutorialState?.step === 4;
 
   const motionFlowData = useSelector((state) =>
     currentSceneId ? selectSceneMotionFlow(state, currentSceneId) : DEFAULT_MOTION_FLOW
@@ -516,7 +518,7 @@ function MotionPanel({
   const cancelAndRestoreActivePreview = useCallback((pixiObj) => {
     if (!pixiObj || pixiObj.destroyed) return
     if (pixiObj._previewTimeline) {
-      try { pixiObj._previewTimeline.kill() } catch {}
+      try { pixiObj._previewTimeline.kill() } catch { }
       pixiObj._previewTimeline = null
     }
     if (pixiObj._isPlayingPresetPreview) {
@@ -720,9 +722,9 @@ function MotionPanel({
     }
     previewingObjectRef.current = pixiObject
 
-    if (pixiObject._previewTimeline) { 
-      try { pixiObject._previewTimeline.kill() } catch {}
-      pixiObject._previewTimeline = null 
+    if (pixiObject._previewTimeline) {
+      try { pixiObject._previewTimeline.kill() } catch { }
+      pixiObject._previewTimeline = null
     }
     const previewEngine = getGlobalMotionEngine()
     gsap.killTweensOf(previewEngine.masterTimeline, { time: true })
@@ -802,11 +804,11 @@ function MotionPanel({
       if (pixiObject.destroyed) return
       pixiObject._isPlayingPresetPreview = false
       pixiObject._previewTimeline = null
-      
+
       if (previewingObjectRef.current === pixiObject) {
         previewingObjectRef.current = null
       }
-      
+
       pixiObject.x = snap.x; pixiObject.y = snap.y; pixiObject.alpha = snap.alpha; pixiObject.rotation = snap.rotation
       if (pixiObject.scale) pixiObject.scale.set(snap.scaleX, snap.scaleY)
       if (pixiObject.revealProgress !== undefined && snap.revealProgress !== undefined) {
@@ -876,15 +878,15 @@ function MotionPanel({
         const eng = getGlobalMotionEngine()
         gsap.killTweensOf(eng.masterTimeline, { time: true })
         eng.masterTimeline.pause()
-        
+
         // If a preview is already active, we MUST reuse the existing original preview snap to prevent locking mid-animation values
         const hasSnap = !!pixiObj._originalPreviewSnap
         const snap = pixiObj._originalPreviewSnap
-        
+
         const currentX = hasSnap ? snap.x : pixiObj.x
         const currentY = hasSnap ? snap.y : pixiObj.y
-        const currentAlpha = hasSnap 
-          ? snap.alpha 
+        const currentAlpha = hasSnap
+          ? snap.alpha
           : (pixiObj._tiltHidden && typeof pixiObj._intendedAlpha === 'number'
             ? pixiObj._intendedAlpha
             : (Math.abs(pixiObj.alpha - 0.000001) < 1e-7 ? 1.0 : pixiObj.alpha))
@@ -1067,46 +1069,32 @@ function MotionPanel({
   // NORMAL MODE — VIEW-ONLY MOMENT CARDS
   // ============================================================================
   const renderNormalMode = () => {
-    // [ONBOARDING] During Step 1, dim all moment cards with a semi-transparent overlay.
-    // Only the Add Moment button at the bottom remains fully interactive.
-    const isTutorialStep1 = tutorialState?.active && tutorialState?.step === 1;
-
     return (
       <div className="flex-1 overflow-y-auto p-3 space-y-2 relative" style={{ scrollBehavior: 'smooth' }}>
-        {/* [ONBOARDING] Dimmed overlay over all cards except the Add Moment button */}
-        {isTutorialStep1 && (
-          <div
-            className="absolute inset-0 z-10 pointer-events-auto"
-            style={{
-              background: 'rgba(0,0,0,0.35)',
-              // Expose only the Add Moment button area via clip-path.
-              // The pointer-events:auto overlay blocks clicks on everything except the cutout.
-            }}
-          />
-        )}
-        
+
         {/* Design Base State Card */}
         <div
           onClick={(e) => {
             e.stopPropagation();
             onSelectStepEnd?.('base');
           }}
-          className={`overflow-hidden border rounded-xl transition-all duration-150 cursor-pointer ${
-            activeStepId === 'base'
-              ? isLight
-                ? 'border-[#b89eff] bg-white shadow-sm'
-                : 'border-[#5a4b81] bg-white/[0.05] shadow-sm'
-              : isLight
-                ? 'border-transparent bg-white'
-                : 'border-transparent bg-[#090a0d]'
-          }`}
+          className={`overflow-hidden border-2 rounded-xl transition-all duration-150 cursor-pointer ${activeStepId === 'base'
+            ? isLight
+              ? 'border-transparent bg-[#b0b5be] shadow-sm'
+              : 'border-transparent bg-[#3a3b48] shadow-sm'
+            : isLight
+              ? 'border-transparent bg-[#eaecef] hover:bg-[#b0b5be]'
+              : 'border-transparent bg-[#1c1d26] hover:bg-[#3a3b48]'
+            }`}
         >
-          <div className={`w-full flex items-center gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
+          <div className={`w-full flex items-center justify-between gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
             <div className="min-w-0 flex-1 text-left">
-              <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>
+              <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-[#111827]' : 'text-[#F2F2F2]'
+                }`}>
                 Design
               </h4>
-              <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+              <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-[#27303A]' : 'text-[#AEB5C0]'
+                }`}>
                 Starting point
               </p>
             </div>
@@ -1124,7 +1112,6 @@ function MotionPanel({
             <div key={step.id} ref={el => { if (el) cardRefs.current[step.id] = el }}
               style={{
                 pointerEvents: isTutorialStep1 ? 'none' : 'auto',
-                opacity: isTutorialStep1 ? 0.5 : 1,
               }}
               onClick={(e) => {
                 const isActionButton = e.target.closest('button');
@@ -1132,13 +1119,13 @@ function MotionPanel({
 
                 onSelectStepEnd?.(step.id);
               }}
-              className={`overflow-hidden border rounded-xl transition-all duration-150 cursor-pointer ${isPlayheadActive
+              className={`group overflow-hidden border-2 rounded-xl transition-all duration-150 cursor-pointer ${isPlayheadActive
                 ? isLight
-                  ? 'border-[#b89eff] bg-white shadow-sm'
-                  : 'border-[#5a4b81] bg-white/[0.05] shadow-sm'
+                  ? 'border-transparent bg-[#cab3f8] shadow-sm'
+                  : 'border-transparent bg-[#4c3b70] shadow-sm'
                 : isLight
-                  ? 'border-transparent bg-white'
-                  : 'border-transparent bg-[#090a0d]'
+                  ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8]'
+                  : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847]'
                 }`}>
               {/* Delete confirmation — consistent min-height, no layout shift */}
               {isConfirmingDelete ? (
@@ -1164,8 +1151,14 @@ function MotionPanel({
                     className="flex items-center gap-3 min-w-0 flex-1 text-left"
                   >
                     <div className="min-w-0 flex-1">
-                      <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-slate-800' : 'text-zinc-100'}`}>Moment {stepIndex + 1}</h4>
-                      <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+                      <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isPlayheadActive
+                        ? isLight ? 'text-[#2d1b4e]' : 'text-purple-100'
+                        : isLight ? 'text-slate-800 group-hover:text-[#2d1b4e]' : 'text-zinc-400 group-hover:text-purple-100'
+                        }`}>Moment {stepIndex + 1}</h4>
+                      <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isPlayheadActive
+                        ? isLight ? 'text-[#3b1e70]/80' : 'text-purple-300'
+                        : isLight ? 'text-slate-500 group-hover:text-[#3b1e70]/80' : 'text-zinc-500 group-hover:text-purple-300'
+                        }`}>
                         {layerCount > 0 ? `${layerCount} animated element${layerCount !== 1 ? 's' : ''}` : 'No effects'}
                       </p>
                     </div>
@@ -1175,7 +1168,9 @@ function MotionPanel({
                     <button
                       onClick={(e) => { e.stopPropagation(); onStepEdit?.(step.id) }}
                       title="Edit moment"
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isLight ? 'text-slate-400 hover:text-[#7c4af0] hover:bg-slate-100' : 'text-zinc-500 hover:text-[#8e7ebd] hover:bg-white/10'
+                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
+                        ? isLight ? 'text-[#3b1e70]/85 hover:text-[#2d1b4e] hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-white hover:bg-white/10'
+                        : isLight ? 'text-slate-400 hover:text-[#7c4af0] group-hover:text-[#3b1e70]/85 hover:bg-[#cab3f8]/10' : 'text-zinc-500 hover:text-[#8e7ebd] group-hover:text-purple-200/80 hover:bg-white/10'
                         }`}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -1183,7 +1178,9 @@ function MotionPanel({
                     <button
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteStepId(step.id) }}
                       title="Delete moment"
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isLight ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' : 'text-zinc-500 hover:text-red-400 hover:bg-red-500/10'
+                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
+                        ? isLight ? 'text-[#3b1e70]/85 hover:text-red-600 hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-red-400 hover:bg-white/10'
+                        : isLight ? 'text-slate-400 hover:text-red-500 group-hover:text-[#3b1e70]/85 hover:bg-red-50' : 'text-zinc-500 hover:text-red-400 group-hover:text-purple-200/80 hover:bg-red-500/10'
                         }`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1201,8 +1198,12 @@ function MotionPanel({
                         }
                       }}
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isExpanded
-                        ? (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
-                        : (isLight ? 'text-slate-400 hover:bg-slate-100' : 'text-zinc-500 hover:bg-white/10')
+                        ? isPlayheadActive
+                          ? isLight ? 'text-[#2d1b4e] bg-[#cab3f8]/30' : 'text-purple-200 bg-white/10'
+                          : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
+                        : isPlayheadActive
+                          ? isLight ? 'text-[#3b1e70]/85 hover:bg-[#cab3f8]/30' : 'text-purple-200/85 hover:bg-white/10'
+                          : (isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80')
                         }`}
                     >
                       <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180' : 'rotate-0'}`} />
@@ -1259,8 +1260,9 @@ function MotionPanel({
             [ONBOARDING] Elevated z-index so it stays above the dimmed overlay during Step 1. */}
         <div
           data-tutorial="add-moment-button"
-          className={`relative z-20 border-2 border-solid rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'} ${isLight ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50' : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45'
-            }`}
+          style={{ minHeight: 52 }}
+          className={`relative z-20 border-2 border-solid rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'} ${isLight ? 'border-[#7c4af0]/20 hover:border-[#7c4af0]/50' : 'border-[#7c4af0]/15 hover:border-[#7c4af0]/45'
+            } ${isTutorialStep1 || isTutorialStep4 ? 'animate-onboarding-pulse border-[#7c4af0] bg-[#7c4af0]/5 dark:bg-[#7c4af0]/10' : ''}`}
           onClick={() => onStartMotionCapture?.()}
         >
           <Plus className="h-3.5 w-3.5 text-[#7c4af0] shrink-0" />
@@ -1669,7 +1671,7 @@ function MotionPanel({
       if (actionType === 'colorChange') {
         const current = v.color ?? inherited.color ?? getLayerColorHex()
         const safeCurrent = /^#[0-9a-fA-F]{6}$/.test(String(current)) ? current : '#ffffff'
-        
+
         if (isMobile) {
           return wrap(
             <div className="flex flex-col gap-2.5">
@@ -1678,7 +1680,7 @@ function MotionPanel({
                 <AdvancedColorPickerModal
                   initialColor={safeCurrent}
                   onColorSelect={(color) => commit({ color })}
-                  onClose={() => {}}
+                  onClose={() => { }}
                   isInline={true}
                   hideHeader={true}
                 />
@@ -1935,7 +1937,7 @@ function MotionPanel({
           </div>
           <button
             onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
-            className={`w-full font-bold flex items-center justify-center gap-2 border-2 border-dashed border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
+            className={`w-full font-bold flex items-center justify-center gap-2 border-2  border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
               }`}
             style={{
               backgroundColor: 'rgb(228, 217, 249)',
@@ -2036,15 +2038,14 @@ function MotionPanel({
               <button
                 onClick={() => onSelectStepEnd?.('base')}
                 title="Design / Starting Point"
-                className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${
-                  activeStepId === 'base'
-                    ? isLight
-                      ? 'border-[#b89eff] text-[#7c4af0] bg-[#b89eff]/10'
-                      : 'border-[#5a4b81] text-[#c084fc] bg-[#5a4b81]/10'
-                    : isLight
-                      ? 'border-slate-200 text-slate-500 hover:border-[#b89eff]/50 hover:text-[#7c4af0]'
-                      : 'border-white/10 text-zinc-500 hover:border-[#5a4b81]/50 hover:text-[#c084fc]'
-                }`}
+                className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${activeStepId === 'base'
+                  ? isLight
+                    ? 'border-transparent bg-slate-200 text-slate-900 shadow-sm'
+                    : 'border-transparent bg-[#1c1d26] text-zinc-200 shadow-sm'
+                  : isLight
+                    ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8] hover:text-purple-900'
+                    : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
+                  }`}
               >
                 D
               </button>
@@ -2053,13 +2054,13 @@ function MotionPanel({
                   key={step.id}
                   onClick={() => onSelectStepEnd?.(step.id)}
                   title={`Select Moment ${idx + 1}`}
-                  className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold transition-colors shrink-0 ${activeStepId === step.id
+                  className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${activeStepId === step.id
                     ? isLight
-                      ? 'border-[#b89eff] text-[#b89eff] bg-[#b89eff]/10'
-                      : 'border-[#5a4b81] text-[#5a4b81] bg-[#5a4b81]/10'
+                      ? 'border-transparent bg-[#cab3f8] text-purple-900 shadow-sm'
+                      : 'border-transparent bg-[#4c3b70] text-purple-200 shadow-sm'
                     : isLight
-                      ? 'border-slate-200 text-slate-500 hover:border-[#b89eff]/50 hover:text-[#b89eff]'
-                      : 'border-white/10 text-zinc-500 hover:border-[#5a4b81]/50 hover:text-[#5a4b81]'
+                      ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8] hover:text-purple-900'
+                      : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
                     }`}
                 >
                   M{idx + 1}
@@ -2070,10 +2071,10 @@ function MotionPanel({
                 data-tutorial="add-moment-button"
                 onClick={() => onStartMotionCapture?.()}
                 title="Add Moment"
-                className={`w-9 h-9 rounded-lg border-2 border-solid flex items-center justify-center transition-colors shrink-0 ${isLight
-                  ? 'border-[#7c4af0]/20 text-[#7c4af0]/60 hover:border-[#7c4af0]/50 hover:text-[#7c4af0]'
-                  : 'border-[#7c4af0]/15 text-[#7c4af0]/50 hover:border-[#7c4af0]/45 hover:text-[#c084fc]'
-                  }`}
+                className={`w-9 h-9 rounded-lg border-2 border-solid flex items-center justify-center transition-all shrink-0 ${isLight
+                  ? 'border-[#7c4af0]/30 text-[#7c4af0] hover:border-[#7c4af0] hover:bg-[#7c4af0]/5'
+                  : 'border-[#7050c0]/35 text-[#8e7ebd] hover:border-[#7050c0] hover:bg-[#7050c0]/5'
+                  } ${isTutorialStep1 || isTutorialStep4 ? 'animate-onboarding-pulse border-[#7c4af0] bg-[#7c4af0]/5 dark:bg-[#7c4af0]/10' : ''}`}
               >
                 <Plus className="h-4 w-4" />
               </button>

@@ -1219,8 +1219,11 @@ export async function createVideoLayer(config) {
     const currentSrc = videoElement.src || ''
     if (videoUrl && !currentSrc.includes(videoUrl)) {
       videoElement.pause()
-      // [CORS FIX] Always re-enforce crossOrigin BEFORE setting src on reuse
-      videoElement.crossOrigin = 'anonymous'
+      if (videoUrl && videoUrl.startsWith('blob:')) {
+        videoElement.removeAttribute('crossorigin')
+      } else {
+        videoElement.crossOrigin = 'anonymous'
+      }
       videoElement.src = videoUrl
       videoElement.load()
     } else {
@@ -1233,7 +1236,11 @@ export async function createVideoLayer(config) {
     if (!videoElement) {
       // PERFORMANCE: Use a native element to ensure progressive loading and streaming.
       videoElement = document.createElement('video')
-      videoElement.crossOrigin = 'anonymous'
+      if (videoUrl && videoUrl.startsWith('blob:')) {
+        videoElement.removeAttribute('crossorigin')
+      } else {
+        videoElement.crossOrigin = 'anonymous'
+      }
       videoElement.src = videoUrl
       videoElement.muted = data.muted !== false
       videoElement.loop = false
@@ -1322,7 +1329,7 @@ export async function createVideoLayer(config) {
         muted: data.muted !== false,
         loop: false,
         playsinline: true,
-        crossOrigin: 'anonymous'
+        crossOrigin: (videoUrl && videoUrl.startsWith('blob:')) ? '' : 'anonymous'
       }
     })
     texture._nativeVideo = videoElement
@@ -1337,7 +1344,7 @@ export async function createVideoLayer(config) {
             muted: data.muted !== false,
             loop: false,
             playsinline: true,
-            crossOrigin: 'anonymous',
+            crossOrigin: (videoUrl && videoUrl.startsWith('blob:')) ? '' : 'anonymous',
           }
         }
       })
@@ -1370,8 +1377,8 @@ export async function createVideoLayer(config) {
   container.addChild(sprite)
 
   // CROP SYSTEM: Store intrinsic media dimensions
-  const texWidth = videoElement?.videoWidth || texture.width || data.width || 300
-  const texHeight = videoElement?.videoHeight || texture.height || data.height || 200
+  const texWidth = videoElement?.videoWidth || (texture.width > 16 ? texture.width : 0) || data.width || config.mediaWidth || 300
+  const texHeight = videoElement?.videoHeight || (texture.height > 16 ? texture.height : 0) || data.height || config.mediaHeight || 200
 
   const finalWidth = width || texWidth
   const finalHeight = height || (width ? ((texHeight || 200) / (texWidth || 300)) * width : texHeight)

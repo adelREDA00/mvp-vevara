@@ -71,6 +71,9 @@ const initialState = {
     // Map of layerId -> initial transform captured at edit start
     initialTransforms: {},
   },
+  // Tracks which scenes have already displayed their empty state
+  // { [sceneId]: true } — once consumed, empty state never reappears
+  consumedEmptyStates: {},
   status: 'idle',
   error: null,
   isSaving: false,
@@ -233,6 +236,9 @@ const projectSlice = createSlice({
   reducers: {
     // [FIX] Reset project state to initial values for clean editor re-entry
     resetProject: () => initialState,
+    resetDirty: (state) => {
+      state.isDirty = false;
+    },
     // Asset loading management
     setLoadingMode: (state, action) => {
       state.loadingMode = action.payload // 'global' or 'local'
@@ -249,7 +255,36 @@ const projectSlice = createSlice({
       delete state.preparingLayers[action.payload]
     },
     setAspectRatio: (state, action) => {
-      state.aspectRatio = action.payload
+      const newAspectRatio = action.payload
+      state.aspectRatio = newAspectRatio
+
+      let width = 1920
+      let height = 1080
+      if (newAspectRatio === '9:16') {
+        width = 1080
+        height = 1920
+      } else if (newAspectRatio === '1:1') {
+        width = 1080
+        height = 1080
+      }
+
+      state.scenes = state.scenes.map(scene => ({
+        ...scene,
+        width,
+        height
+      }))
+
+      Object.keys(state.layers).forEach(layerId => {
+        const layer = state.layers[layerId]
+        if (layer && layer.type === 'background') {
+          state.layers[layerId] = {
+            ...layer,
+            width,
+            height
+          }
+        }
+      })
+
       state.isDirty = true
       state.version++
     },
@@ -877,6 +912,18 @@ const projectSlice = createSlice({
       }
     },
 
+    /**
+     * Mark a scene's empty state as consumed.
+     * Once consumed, the empty state canvas will never appear for this scene again,
+     * even if all layers are later deleted.
+     */
+    consumeEmptyState: (state, action) => {
+      const sceneId = action.payload
+      if (sceneId) {
+        state.consumedEmptyStates[sceneId] = true
+      }
+    },
+
     // =========================================================================
     // Scene Motion Flow actions - Core motion system (scene-based)
     // =========================================================================
@@ -1290,6 +1337,7 @@ const projectSlice = createSlice({
     // Initialize project (load from saved data)
     initializeProject: (state, action) => {
       const project = action.payload
+      state.projectId = project._id || project.projectId || null
       state.scenes = project.scenes || []
       state.layers = project.layers || {}
       state.sceneMotionFlows = project.sceneMotionFlows || {}
@@ -1299,6 +1347,7 @@ const projectSlice = createSlice({
       state.audioTracks = (project.audioTracks || [])
         .filter(t => !t.isUploading || t.assetUrl)
         .map(t => t.isUploading ? { ...t, isUploading: false } : t)
+      state.consumedEmptyStates = project.consumedEmptyStates || {}
       state.status = 'succeeded'
       state.isDirty = false
       state.version = 0
@@ -1839,7 +1888,7 @@ const projectSlice = createSlice({
     // Attach an image/video asset to a frame layer (cover-fit crop)
     // For card frames, `side` param ('front'|'back') determines which side receives the asset
     attachAssetToFrame: (state, action) => {
-      const { layerId, assetUrl, assetWidth, assetHeight, side, assetIsVideo, muted, duration, sourceStartTime, sourceEndTime, thumbnail } = action.payload
+      const { layerId, assetUrl, assetWidth, assetHeight, side, assetIsVideo, muted, duration, sourceStartTime, sourceEndTime, thumbnail, _localAssetId } = action.payload
       const layer = state.layers[layerId]
       if (!layer || layer.type !== 'frame') return
 
@@ -1858,6 +1907,7 @@ const projectSlice = createSlice({
           backAssetWidth: assetWidth,
           backAssetHeight: assetHeight,
           backThumbnail: thumbnail || null,
+          backLocalAssetId: _localAssetId || null,
           // [VIDEO-IN-FRAME FIX] Preserve back-side video metadata
           ...(assetIsVideo ? {
             backAssetIsVideo: true,
@@ -1902,6 +1952,7 @@ const projectSlice = createSlice({
         assetWidth,
         assetHeight,
         thumbnail: thumbnail || null,
+        _localAssetId: _localAssetId || null,
         originalPlaceholderWidth: layer.mediaWidth || layer.width,
         originalPlaceholderHeight: layer.mediaHeight || layer.height,
         // [VIDEO-IN-FRAME FIX] Preserve video metadata so splitScene, mute/unmute,
@@ -2286,6 +2337,7 @@ const projectSlice = createSlice({
 
 export const {
   resetProject,
+  resetDirty,
   setProjectName,
   addScene,
   updateScene,
@@ -2338,6 +2390,7 @@ export const {
   detachAssetFromFrame,
   flipCardFrame,
   toggleFrameLock,
+  consumeEmptyState,
   setTimelineDragging,
   setCanvasInteracting,
   // Audio track actions (project-level)
@@ -2383,6 +2436,37 @@ export const selectSelectedLayer = createSelector(
   [selectSelectedLayerId, selectLayers],
   (selectedLayerId, layers) => selectedLayerId ? layers[selectedLayerId] : null
 )
+
+// =========================================================================
+// Empty state selectors
+// =========================================================================
+
+/**
+ * Returns true if the empty state has already been consumed for a given scene.
+ */
+export const selectIsEmptyStateConsumed = (state, sceneId) => {
+  const scene = state.project.scenes.find(s => s.id === sceneId)
+  if (!scene) return false
+  const hasContent = scene.layers.some(layerId => {
+    const layer = state.project.layers[layerId]
+    return layer && layer.type !== 'background'
+  })
+  if (!hasContent) return false
+  return !!state.project.consumedEmptyStates[sceneId]
+}
+
+/**
+ * Returns true if the scene has any non-background content layers.
+ * Used to determine whether the empty state canvas should be shown.
+ */
+export const selectSceneHasContentLayers = (state, sceneId) => {
+  const scene = state.project.scenes.find(s => s.id === sceneId)
+  if (!scene) return false
+  return scene.layers.some(layerId => {
+    const layer = state.project.layers[layerId]
+    return layer && layer.type !== 'background'
+  })
+}
 
 // =========================================================================
 // Scene Motion Flow selectors

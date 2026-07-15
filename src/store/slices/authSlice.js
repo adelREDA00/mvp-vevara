@@ -72,11 +72,58 @@ export const updateUserTheme = createAsyncThunk(
     }
 )
 
+export const completeOnboarding = createAsyncThunk(
+    'auth/completeOnboarding',
+    async (_, { rejectWithValue }) => {
+        try {
+            const data = await api.put('/auth/onboarding', { hasCompletedOnboarding: true })
+            const userString = localStorage.getItem('vevara_user')
+            if (userString) {
+                const user = JSON.parse(userString)
+                user.hasCompletedOnboarding = true
+                localStorage.setItem('vevara_user', JSON.stringify(user))
+            }
+            return data.user
+        } catch (error) {
+            return rejectWithValue(error.message)
+        }
+    }
+)
+
+export const completeExampleIntro = createAsyncThunk(
+    'auth/completeExampleIntro',
+    async (_, { rejectWithValue }) => {
+        try {
+            const data = await api.put('/auth/example-intro', { hasSeenExampleProjectIntro: true })
+            const userString = localStorage.getItem('vevara_user')
+            if (userString) {
+                const user = JSON.parse(userString)
+                user.hasSeenExampleProjectIntro = true
+                localStorage.setItem('vevara_user', JSON.stringify(user))
+            }
+            return data.user
+        } catch (error) {
+            return rejectWithValue(error.message)
+        }
+    }
+)
+
 const initialState = {
     user: JSON.parse(localStorage.getItem('vevara_user') || 'null'),
     isAuthenticated: !!localStorage.getItem('vevara_user'),
     status: 'idle',
     error: null,
+    migration: {
+        isActive: false,
+        progress: 0,
+        total: 0,
+        errors: [],
+        completed: false,
+        failed: false,
+        currentItem: null,
+        hasProjects: false,
+        hasAssets: false,
+    },
 }
 
 const authSlice = createSlice({
@@ -91,7 +138,46 @@ const authSlice = createSlice({
                 state.user.theme = action.payload
                 localStorage.setItem('vevara_user', JSON.stringify(state.user))
             }
-        }
+        },
+        startMigration: (state, action) => {
+            state.migration.isActive = true
+            state.migration.progress = 0
+            state.migration.total = action.payload?.total || 0
+            state.migration.errors = []
+            state.migration.completed = false
+            state.migration.failed = false
+            state.migration.currentItem = action.payload?.currentItem || null
+            state.migration.hasProjects = action.payload?.hasProjects ?? true
+            state.migration.hasAssets = action.payload?.hasAssets ?? false
+        },
+        updateMigrationProgress: (state, action) => {
+            state.migration.progress = action.payload.progress ?? state.migration.progress
+            state.migration.currentItem = action.payload.currentItem ?? state.migration.currentItem
+        },
+        migrationComplete: (state, action) => {
+            state.migration.isActive = false
+            state.migration.completed = true
+            state.migration.progress = action.payload?.progress ?? state.migration.total
+            state.migration.errors = action.payload?.errors || []
+        },
+        migrationFailed: (state, action) => {
+            state.migration.isActive = false
+            state.migration.failed = true
+            state.migration.errors = action.payload?.errors || []
+        },
+        resetMigration: (state) => {
+            state.migration = {
+                isActive: false,
+                progress: 0,
+                total: 0,
+                errors: [],
+                completed: false,
+                failed: false,
+                currentItem: null,
+                hasProjects: false,
+                hasAssets: false,
+            }
+        },
     },
     extraReducers: (builder) => {
         builder
@@ -125,6 +211,7 @@ const authSlice = createSlice({
                 state.user = null
                 state.isAuthenticated = false
                 state.status = 'idle'
+                state.migration = initialState.migration
             })
             .addCase(checkAuth.pending, (state) => {
                 state.status = 'loading'
@@ -145,8 +232,18 @@ const authSlice = createSlice({
                     state.user.theme = action.payload.theme
                 }
             })
+            .addCase(completeOnboarding.fulfilled, (state, action) => {
+                if (state.user) {
+                    state.user.hasCompletedOnboarding = action.payload.hasCompletedOnboarding
+                }
+            })
+            .addCase(completeExampleIntro.fulfilled, (state, action) => {
+                if (state.user) {
+                    state.user.hasSeenExampleProjectIntro = action.payload.hasSeenExampleProjectIntro
+                }
+            })
     },
 })
 
-export const { clearError, setLocalTheme } = authSlice.actions
+export const { clearError, setLocalTheme, startMigration, updateMigrationProgress, migrationComplete, migrationFailed, resetMigration } = authSlice.actions
 export default authSlice.reducer

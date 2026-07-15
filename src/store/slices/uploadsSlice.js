@@ -21,7 +21,7 @@ export const fetchUploads = createAsyncThunk(
  * Helper: extract dimensions from a video file before uploading.
  * Returns { width, height, duration } or fallback zeros.
  */
-function getVideoDimensions(file) {
+export function getVideoDimensions(file) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
     const video = document.createElement('video')
@@ -90,7 +90,7 @@ function getVideoDimensions(file) {
  * Helper to extract dimensions and a highly compressed base64 thumbnail from an image file before uploading.
  * Keeps thumbnails extremely small (max 200px, 0.6 quality) to optimize payload size.
  */
-function getImageThumbnail(file) {
+export function getImageThumbnail(file) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
     const img = new window.Image()
@@ -139,7 +139,7 @@ function getImageThumbnail(file) {
  * Uses the Web Audio API (no external library).
  * Returns { duration, waveform: Float32Array→Array of 100 amplitude samples }
  */
-function getAudioMetadata(file) {
+export function getAudioMetadata(file) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file)
     const cleanup = () => URL.revokeObjectURL(url)

@@ -60,7 +60,11 @@ async function createExportVideoElement(videoUrl, exportCtx = { active: true }) 
     video.playsInline = true;
     video.preload = 'auto'; // Re-enable auto preload with Media Fragments to buffer target segments in-memory for instant 20ms seeks!
     video.autoplay = false;
-    video.crossOrigin = 'anonymous';
+    if (videoUrl && videoUrl.startsWith('blob:')) {
+        video.removeAttribute('crossorigin');
+    } else {
+        video.crossOrigin = 'anonymous';
+    }
 
     await new Promise((resolve, reject) => {
         if (video.readyState >= 3 && video.videoWidth > 0) {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { createPortal } from 'react-dom'
-import { X } from 'lucide-react'
+import { X, Pipette } from 'lucide-react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 
 // Helper functions for color conversion
@@ -140,6 +140,7 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
   const isInitialMount = useRef(true)
   const previousHexRef = useRef(initialColor)
   const onColorSelectRef = useRef(onColorSelect)
+  const colorInputRef = useRef(null)
 
   // Keep onColorSelect ref updated
   useEffect(() => {
@@ -248,6 +249,22 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
 
     if (/^#[0-9A-Fa-f]{0,6}$/i.test(displayVal)) {
       setHex(displayVal)
+    }
+  }
+
+  const handleEyeDropperClick = async () => {
+    if (typeof window !== 'undefined' && 'EyeDropper' in window) {
+      try {
+        const eyeDropper = new window.EyeDropper()
+        const result = await eyeDropper.open()
+        if (result && result.sRGBHex) {
+          handleHexChange(result.sRGBHex)
+        }
+      } catch (err) {
+        console.warn('Eyedropper failed or cancelled', err)
+      }
+    } else {
+      colorInputRef.current?.click()
     }
   }
 
@@ -458,6 +475,28 @@ function AdvancedColorPickerModal({ initialColor, onColorSelect, onClose, anchor
                   placeholder="#000000"
                 />
               </div>
+
+              {/* Eyedropper Button */}
+              <button
+                type="button"
+                onClick={handleEyeDropperClick}
+                className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+                  isLight 
+                    ? 'text-slate-500 hover:text-slate-950 hover:bg-slate-200' 
+                    : 'text-white/50 hover:text-white hover:bg-white/10'
+                }`}
+                title="Pick color"
+              >
+                <Pipette className="w-4 h-4" />
+              </button>
+
+              <input
+                ref={colorInputRef}
+                type="color"
+                value={hex && hex.startsWith('#') && hex.length === 7 ? hex : '#000000'}
+                onChange={(e) => handleHexChange(e.target.value)}
+                style={{ display: 'none' }}
+              />
 
 
             </div>

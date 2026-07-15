@@ -340,7 +340,7 @@ function ElementsPanel({ onClose, aspectRatio }) {
 
   return (
     <div
-      className="flex flex-col h-full relative transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300 pt-0 lg:pt-12"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
         backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
@@ -349,20 +349,14 @@ function ElementsPanel({ onClose, aspectRatio }) {
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-      {/* Header */}
-      <div className={`hidden lg:block px-6 pt-6 pb-4 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Graphics</h2>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
-            >
-              <X className="h-5 w-5" strokeWidth={2} />
-            </button>
-          )}
-        </div>
-      </div>
+      {onClose && (
+        <button
+          onClick={onClose}
+          className={`absolute top-3 right-3 z-50 transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'} hidden lg:block`}
+        >
+          <X className="h-5 w-5" strokeWidth={2} />
+        </button>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">

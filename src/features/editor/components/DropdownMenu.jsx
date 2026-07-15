@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
-function DropdownMenu({ trigger, children, className = "" }) {
+function DropdownMenu({ trigger, children, className = "", style = {} }) {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef(null)
   const triggerRef = useRef(null)
@@ -70,6 +70,7 @@ function DropdownMenu({ trigger, children, className = "" }) {
             borderColor: 'var(--dropdown-border)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
+            ...style
           }}
         >
           {typeof children === 'function'

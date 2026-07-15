@@ -144,7 +144,7 @@ function TextPanel({ onClose, aspectRatio }) {
 
   return (
     <div
-      className="flex flex-col h-full relative transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300 pt-0 lg:pt-12"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
         backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
@@ -153,35 +153,14 @@ function TextPanel({ onClose, aspectRatio }) {
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-
-      <div className={`hidden lg:block px-6 pt-6 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Text</h2>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
-            >
-              <X className="h-5 w-5" strokeWidth={2} />
-            </button>
-          )}
-        </div>
-        {/* 
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-500" strokeWidth={2} />
-          <input
-            type="text"
-            placeholder="Search text styles..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full pl-10 pr-4 py-2.5 border rounded-[12px] text-[14px] focus:outline-none focus:ring-1 transition-all ${
-                isLight 
-                    ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-500 focus:border-purple-500 focus:ring-purple-500/20' 
-                    : 'bg-white/5 border-white/10 text-white placeholder-zinc-600 focus:border-white/20 focus:ring-white/20'
-            }`}
-          />
-        </div> */}
-      </div>
+      {onClose && (
+        <button
+          onClick={onClose}
+          className={`absolute top-3 right-3 z-50 transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'} hidden lg:block`}
+        >
+          <X className="h-5 w-5" strokeWidth={2} />
+        </button>
+      )}
 
       <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
         <div className="space-y-4">

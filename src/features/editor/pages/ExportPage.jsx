@@ -138,26 +138,129 @@ export default function ExportPage() {
           }
         }
 
+        const rehydrateProjectSnapshot = async (snapshot) => {
+          if (!snapshot) return null
+          const rehydratedLayers = { ...snapshot.layers }
+          const { getAssetUrl } = await import('../../../services/localAssetService')
+
+          // Parallel rehydration for extremely fast UX
+          await Promise.all(
+            Object.entries(rehydratedLayers).map(async ([layerId, layer]) => {
+              const assetId = layer?.data?._localAssetId
+              const backAssetId = layer?.data?.backLocalAssetId
+              if (layer.type === 'image' || layer.type === 'video') {
+                if (assetId) {
+                  try {
+                    const blobUrl = await getAssetUrl(assetId)
+                    if (blobUrl) {
+                      rehydratedLayers[layerId] = {
+                        ...layer,
+                        data: {
+                          ...layer.data,
+                          url: blobUrl,
+                          src: blobUrl,
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    console.warn('[ExportPage] Failed to rehydrate layer asset:', assetId, err)
+                  }
+                }
+              } else if (layer.type === 'frame') {
+                try {
+                  let updatedData = { ...layer.data }
+                  let needsUpdate = false
+                  if (assetId) {
+                    const blobUrl = await getAssetUrl(assetId)
+                    if (blobUrl) {
+                      updatedData.assetUrl = blobUrl
+                      needsUpdate = true
+                    }
+                  }
+                  if (backAssetId) {
+                    const blobUrl = await getAssetUrl(backAssetId)
+                    if (blobUrl) {
+                      updatedData.backAssetUrl = blobUrl
+                      needsUpdate = true
+                    }
+                  }
+                  if (needsUpdate) {
+                    rehydratedLayers[layerId] = {
+                      ...layer,
+                      data: updatedData
+                    }
+                  }
+                } catch (err) {
+                  console.warn('[ExportPage] Failed to rehydrate frame layer assets:', layerId, err)
+                }
+              }
+            })
+          )
+
+          const rehydratedAudioTracks = Array.isArray(snapshot.audioTracks)
+            ? await Promise.all(
+                snapshot.audioTracks.map(async (track) => {
+                  const localId = track._localAssetId || track.assetId
+                  if (!localId) return track
+                  try {
+                    const blobUrl = await getAssetUrl(localId)
+                    if (blobUrl) {
+                      return { ...track, assetUrl: blobUrl }
+                    }
+                  } catch (err) {
+                    console.warn('[ExportPage] Failed to rehydrate audio asset:', localId, err)
+                  }
+                  return track
+                })
+              )
+            : []
+
+          return {
+            ...snapshot,
+            layers: rehydratedLayers,
+            audioTracks: rehydratedAudioTracks,
+          }
+        }
+
         if (projectSnapshot) {
-          setProjectData(projectSnapshot)
+          const rehydrated = await rehydrateProjectSnapshot(projectSnapshot)
+          setProjectData(rehydrated)
           setLoading(false)
           return
         }
 
-        // 2. Fallback to Database API (only if authenticated & projectId exists)
+        // 2. Fallback to Database API / Guest local database
         if (projectId) {
-          const project = await api.get(`/projects/${projectId}`)
-          if (project && project.data) {
-            setProjectData({
-              projectName: project.name || 'Untitled Project',
-              scenes: project.data.scenes || [],
-              layers: project.data.layers || {},
-              sceneMotionFlows: project.data.sceneMotionFlows || {},
-              audioTracks: project.data.audioTracks || [],
-              aspectRatio: project.data.aspectRatio || '16:9',
-            })
-            setLoading(false)
-            return
+          if (projectId.startsWith('local_')) {
+            const { getProject } = await import('../../../services/localProjectService')
+            const localProject = getProject(projectId)
+            if (localProject) {
+              const rehydrated = await rehydrateProjectSnapshot(localProject)
+              setProjectData({
+                projectName: rehydrated.name || 'Untitled Project',
+                scenes: rehydrated.scenes || [],
+                layers: rehydrated.layers || {},
+                sceneMotionFlows: rehydrated.sceneMotionFlows || {},
+                audioTracks: rehydrated.audioTracks || [],
+                aspectRatio: rehydrated.aspectRatio || '16:9',
+              })
+              setLoading(false)
+              return
+            }
+          } else {
+            const project = await api.get(`/projects/${projectId}`)
+            if (project && project.data) {
+              setProjectData({
+                projectName: project.name || 'Untitled Project',
+                scenes: project.data.scenes || [],
+                layers: project.data.layers || {},
+                sceneMotionFlows: project.data.sceneMotionFlows || {},
+                audioTracks: project.data.audioTracks || [],
+                aspectRatio: project.data.aspectRatio || '16:9',
+              })
+              setLoading(false)
+              return
+            }
           }
         }
 

@@ -16,7 +16,7 @@ import { BLUR_MAX, computeBlurPhysicalStrength } from '../../engine/motion/blurC
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
 import { useSelector, useDispatch } from 'react-redux'
-import { selectTutorialState, endTutorial, setAutoPlayState } from '../../../store/slices/tutorialSlice'
+import { selectTutorialState } from '../../../store/slices/tutorialSlice'
 import { selectCanUndo, selectCanRedo } from '../../../store/slices/historySlice'
 import {
   duplicateLayer,
@@ -118,6 +118,7 @@ function CanvasControls({
 
   const canUndo = useSelector(selectCanUndo)
   const canRedo = useSelector(selectCanRedo)
+  const isTutorialStep3 = tutorialActive && tutorialStep === 3;
 
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
   const [showBlurSlider, setShowBlurSlider] = useState(false)
@@ -342,8 +343,8 @@ function CanvasControls({
     if (animateButtonRef.current && containerRef.current) {
       const btnRect = animateButtonRef.current.getBoundingClientRect()
       const containerRect = containerRef.current.getBoundingClientRect()
-      const center = btnRect.left - containerRect.left + (btnRect.width / 2)
-      setTooltipLeft(center)
+      const center = Math.round(btnRect.left - containerRect.left + (btnRect.width / 2))
+      setTooltipLeft(prev => (prev === center ? prev : center))
     }
   }, [])
 
@@ -599,7 +600,7 @@ function CanvasControls({
     return (
       <>
         {/* Left: Undo/Redo + optional label — grows to fill available space */}
-        <div className="flex items-center gap-1 px-2 flex-1">
+        <div className="flex items-center gap-1 px-2 flex-1 rounded-l-[11px]">
           <div className={`flex items-center gap-0.5 pr-2 mr-1 border-r border-black/10 dark:border-white/10`}>
             <button
               onClick={onUndo}
@@ -654,9 +655,11 @@ function CanvasControls({
           <button
             data-tutorial="add-step-button"
             onClick={() => { if (isDoneEnabled) { onApplyMotion?.(); setShowAddStepHint(false) } }}
-            className={`flex items-center justify-center px-6 border-l transition-all duration-300 touch-manipulation whitespace-nowrap font-semibold text-xs ${
+            className={`flex items-center justify-center px-6 border-l transition-all duration-300 touch-manipulation whitespace-nowrap font-semibold text-xs rounded-r-[11px] ${
               isDoneEnabled
-                ? 'bg-[#7c4af0] text-white border-[#7c4af0] shadow-[0_0_20px_rgba(124,74,240,0.6)] animate-pulse-glow hover:bg-[#8b5cf6]'
+                ? (isTutorialStep3
+                  ? 'bg-[#7c4af0] text-white border-[#7c4af0] animate-onboarding-pulse hover:bg-[#8b5cf6]'
+                  : 'bg-[#7c4af0] text-white border-[#7c4af0] shadow-[0_0_20px_rgba(124,74,240,0.6)] animate-pulse-glow hover:bg-[#8b5cf6]')
                 : (theme === 'light'
                   ? 'text-gray-400 border-black/10 cursor-default'
                   : 'text-zinc-500 border-white/10 cursor-default')
@@ -696,7 +699,7 @@ function CanvasControls({
             style={{ left: '50%', transform: 'translateX(-50%)' }}
           >
             <div
-              className="h-10 flex items-stretch overflow-hidden backdrop-blur-md flex-shrink-0"
+              className="h-10 flex items-stretch backdrop-blur-md flex-shrink-0"
               style={{
                 backgroundColor: 'var(--editor-panel-bg)',
                 backdropFilter: 'blur(24px)',

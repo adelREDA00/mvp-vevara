@@ -26,11 +26,15 @@ import {
   selectUploadProgress,
   selectUploadQueueArray,
   cancelUpload,
+  getVideoDimensions,
+  getImageThumbnail,
+  getAudioMetadata,
 } from '../../../store/slices/uploadsSlice'
 
 import { addLayerAndSelect, addAudioTrack, selectCurrentSceneId, selectIsAssetPreparing } from '../../../store/slices/projectSlice'
 import Modal from './Modal'
 import { assetCacheWarmer } from '../../engine/pixi/textureUtils'
+import { storeAsset, getAssetMetadata, getAssetUrl, deleteAsset } from '../../../services/localAssetService'
 
 // Utility functions
 const formatFileSize = (bytes) => {
@@ -82,6 +86,119 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const [isPublic, setIsPublic] = useState(true)
   const [assetType, setAssetType] = useState('image')
   const fileInputRef = useRef(null)
+  // Safe limit: 200MB total (IndexedDB works up to ~500MB on most browsers; be conservative)
+  const GUEST_STORAGE_LIMIT = 200 * 1024 * 1024
+  const GUEST_SINGLE_FILE_LIMIT = 100 * 1024 * 1024 // 100MB per file
+  // Local guest asset metadata (stored in localStorage as JSON)
+  const LOCAL_ASSETS_KEY = 'vevara_local_uploaded_assets'
+  const getLocalAssets = () => {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_ASSETS_KEY) || '[]')
+    } catch { return [] }
+  }
+  const saveLocalAssets = (assets) => {
+    try { localStorage.setItem(LOCAL_ASSETS_KEY, JSON.stringify(assets)) } catch {}
+  }
+  const [localAssets, setLocalAssets] = useState(getLocalAssets)
+  // Track guest uploads in a local state array for display
+  const [guestUploads, setGuestUploads] = useState([])
+  const guestUploadsRef = useRef([])
+  const guestHydratedRef = useRef(false)
+  const GUEST_ASSETS_KEY = 'vevara_guest_assets'
+
+  /**
+   * Save asset metadata to localStorage (small JSON, no binary data).
+   * Binary blobs live in IndexedDB via storeAsset().
+   */
+  const saveGuestAssets = () => {
+    try {
+      // Only persist metadata — the binary data is in IndexedDB
+      const meta = guestUploadsRef.current.map(a => ({
+        _id: a._id || a.id,
+        id: a._id || a.id,
+        name: a.name,
+        type: a.type || a.assetType,
+        assetType: a.assetType || a.type,
+        metadata: {
+          mimeType: a.metadata?.mimeType || a.metadata?.type || a.type,
+          type: a.metadata?.type || a.metadata?.mimeType || a.type,
+          width: a.metadata?.width || 0,
+          height: a.metadata?.height || 0,
+          duration: a.metadata?.duration || 0,
+          size: a.metadata?.size || 0,
+          thumbnail: a.metadata?.thumbnail || null,
+        },
+        uploadedAt: a.uploadedAt || a.createdAt || Date.now(),
+        createdAt: a.createdAt || a.uploadedAt || Date.now(),
+      }))
+      localStorage.setItem(GUEST_ASSETS_KEY, JSON.stringify(meta))
+    } catch { /* quota exceeded — not critical, assets still in IDB */ }
+  }
+
+  /**
+   * On mount: read asset metadata from localStorage, then re-create blob URLs
+   * from IndexedDB so the guest asset library survives page refreshes.
+   */
+  const loadGuestAssets = useCallback(async () => {
+    if (guestHydratedRef.current) return
+    guestHydratedRef.current = true
+    try {
+      const stored = JSON.parse(localStorage.getItem(GUEST_ASSETS_KEY) || '[]')
+      if (stored.length === 0) return
+
+      // Rehydrate each asset by recreating its blob URL from IndexedDB
+      const hydrated = []
+      for (const meta of stored) {
+        try {
+          const blobUrl = await getAssetUrl(meta.id)
+          if (blobUrl) {
+            hydrated.push({
+              ...meta,
+              url: blobUrl,
+            })
+          }
+        } catch (err) {
+          // If the IDB entry is missing, skip this asset — don't block the rest
+          console.warn('[GuestAssets] Failed to rehydrate asset:', meta.id, err)
+        }
+      }
+      guestUploadsRef.current = hydrated
+      setGuestUploads(hydrated)
+    } catch (err) {
+      console.error('[GuestAssets] Failed to load assets:', err)
+    }
+  }, [])
+  // Load stored guest assets on mount
+  useEffect(() => { loadGuestAssets() }, [loadGuestAssets])
+
+  // Listen for guest-asset-added events from EmptyState/Stage
+  useEffect(() => {
+    const handleGuestAssetAdded = () => {
+      guestHydratedRef.current = false
+      loadGuestAssets()
+    }
+    window.addEventListener('vevara:guest-asset-added', handleGuestAssetAdded)
+    return () => window.removeEventListener('vevara:guest-asset-added', handleGuestAssetAdded)
+  }, [loadGuestAssets])
+
+  const addGuestAsset = (asset) => {
+    guestUploadsRef.current = [asset, ...guestUploadsRef.current]
+    saveGuestAssets()
+    setGuestUploads(guestUploadsRef.current)
+  }
+
+  const removeGuestAsset = async (id) => {
+    guestUploadsRef.current = guestUploadsRef.current.filter(a => a.id !== id)
+    saveGuestAssets()
+    setGuestUploads(guestUploadsRef.current)
+    // Also clean up from IndexedDB
+    try { await deleteAsset(id) } catch {}
+  }
+
+  // Track total storage used by guest assets (approximate, from metadata)
+  const guestStorageUsed = useMemo(() =>
+    guestUploads.reduce((sum, a) => sum + (a.metadata?.size || 0), 0),
+  [guestUploads])
 
   // Infinite Scroll State
   const [visibleCount, setVisibleCount] = useState(16)
@@ -158,6 +275,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const uploadProgress = useSelector(selectUploadProgress)
   const uploadQueue = useSelector(selectUploadQueueArray)
   const currentSceneId = useSelector(selectCurrentSceneId)
+  const { isAuthenticated } = useSelector((state) => state.auth)
   const { theme, user } = useContext(ThemeContext)
   // Get user from state if not in context
   const authUser = useSelector((state) => state.auth.user)
@@ -185,8 +303,11 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const { worldWidth, worldHeight } = getWorldDimensions()
 
   useEffect(() => {
-    dispatch(fetchUploads())
-  }, [dispatch])
+    // Only fetch uploads from server if authenticated
+    if (isAuthenticated) {
+      dispatch(fetchUploads())
+    }
+  }, [dispatch, isAuthenticated])
 
   // Warm PIXI assets cache in the background for uploaded assets
   useEffect(() => {
@@ -195,9 +316,18 @@ function UploadsPanel({ onClose, aspectRatio }) {
     }
   }, [uploadedImages])
 
+  // Use guest assets when unauthenticated, server assets when authenticated
+  const displayAssets = isAuthenticated ? uploadedImages : guestUploads
+  
+  // For authenticated users we compute counts from server data; for guests we compute from local
+  const localImageCount = guestUploads.filter(a => (a.metadata?.type || '').startsWith('image/') || a.assetType === 'image').length
+  const localVideoCount = guestUploads.filter(a => (a.metadata?.type || '').startsWith('video/') || a.assetType === 'video').length
+  const localAudioCount = guestUploads.filter(a => (a.metadata?.type || '').startsWith('audio/') || a.assetType === 'audio').length
+
   const filteredImages = useMemo(() => {
-    if (!uploadedImages.length) return []
-    return uploadedImages.filter(image => {
+    const assets = isAuthenticated ? uploadedImages : guestUploads
+    if (!assets.length) return []
+    return assets.filter(image => {
       const isAudio = image.metadata?.type?.startsWith('audio/') || image.assetType === 'audio'
       const isVideo = image.metadata?.type?.startsWith('video/')
       const isIcon = image.assetType === 'icon'
@@ -210,9 +340,11 @@ function UploadsPanel({ onClose, aspectRatio }) {
         (activeTab === 'Videos' && isVideo)
       return matchesTab
     })
-  }, [uploadedImages, activeTab])
+    }, [isAuthenticated, uploadedImages, guestUploads, activeTab])
 
   const displayItems = useMemo(() => {
+    // For guest users, skip the upload queue (that's Redux/API based)
+    if (!isAuthenticated) return filteredImages
     // Filter queue items based on tab
     const filteredQueue = uploadQueue.filter(item => {
       const matchesTab = activeTab === 'All' ||
@@ -223,7 +355,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
       return matchesTab
     })
     return [...filteredQueue, ...filteredImages]
-  }, [uploadQueue, filteredImages, activeTab])
+  }, [isAuthenticated, uploadQueue, filteredImages, activeTab])
 
   const visibleItems = useMemo(() => {
     return displayItems.slice(0, visibleCount)
@@ -253,10 +385,106 @@ function UploadsPanel({ onClose, aspectRatio }) {
     }
   }, [sentinelRef.current, displayItems.length])
 
-  const handleFileSelect = useCallback((files) => {
+  const handleFileSelect = useCallback(async (files) => {
     if (!files || files.length === 0) return
+
+    // Read auth status directly from store to avoid closure issues
+    const currentAuth = store.getState().auth
+    if (!currentAuth.isAuthenticated) {
+      const fileArray = Array.from(files)
+
+      // Pre-check: warn about large files before attempting to store them
+      let totalNewBytes = 0
+      for (const file of fileArray) {
+        totalNewBytes += file.size
+      }
+      const afterStorage = guestStorageUsed + totalNewBytes
+      if (afterStorage > GUEST_STORAGE_LIMIT) {
+        setConfirmModal({
+          isOpen: true,
+          title: 'Storage Limit',
+          message: `This file is too large to store locally. Create an account to upload larger assets.\n\nCurrent: ${formatFileSize(guestStorageUsed)}\nAdding: ${formatFileSize(totalNewBytes)}\nLimit: ${formatFileSize(GUEST_STORAGE_LIMIT)}`,
+          onConfirm: () => {
+            setConfirmModal(prev => ({ ...prev, isOpen: false }))
+            window.location.href = '/login'
+          },
+          onCancel: () => {
+            setConfirmModal(prev => ({ ...prev, isOpen: false }))
+          },
+          confirmLabel: 'Create Account',
+          cancelLabel: 'Cancel',
+        })
+        return
+      }
+
+      for (const file of fileArray) {
+        if (file.size > GUEST_SINGLE_FILE_LIMIT) {
+          setConfirmModal({
+            isOpen: true,
+            title: 'File Too Large',
+            message: `"${file.name}" (${formatFileSize(file.size)}) exceeds the ${formatFileSize(GUEST_SINGLE_FILE_LIMIT)} per-file limit for local storage.\n\nCreate an account to upload larger files.`,
+            onConfirm: () => {
+              setConfirmModal(prev => ({ ...prev, isOpen: false }))
+              window.location.href = '/login'
+            },
+            onCancel: () => {
+              setConfirmModal(prev => ({ ...prev, isOpen: false }))
+            },
+            confirmLabel: 'Create Account',
+            cancelLabel: 'Skip',
+          })
+          continue
+        }
+        try {
+          const stored = await storeAsset(file)
+          const blobUrl = URL.createObjectURL(file)
+          // Get dimensions for images/video
+          let dimensions = { width: 0, height: 0, duration: 0, thumbnail: null, waveform: [] }
+          if (file.type.startsWith('image/')) {
+            dimensions = await getImageThumbnail(file)
+          } else if (file.type.startsWith('video/')) {
+            dimensions = await getVideoDimensions(file)
+          } else if (file.type.startsWith('audio/')) {
+            const audioMeta = await getAudioMetadata(file)
+            dimensions = { width: 0, height: 0, duration: audioMeta.duration, waveform: audioMeta.waveform || [], thumbnail: null }
+          }
+
+          // Create a virtual "uploaded" asset entry matching the API response shape
+          const mimeType = file.type
+          const assetType_ = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'image'
+          const assetEntry = {
+            _id: stored.id,
+            id: stored.id,
+            name: file.name,
+            url: blobUrl,
+            type: assetType_,
+            assetType: assetType_,
+            isPublic: true,
+            metadata: {
+              mimeType,
+              type: mimeType,
+              width: dimensions.width || 0,
+              height: dimensions.height || 0,
+              duration: dimensions.duration || 0,
+              size: file.size,
+              thumbnail: dimensions.thumbnail || null,
+              waveform: dimensions.waveform || [],
+            },
+            uploadedAt: Date.now(),
+            createdAt: Date.now(),
+          }
+          addGuestAsset(assetEntry)
+          // Guest uploads should NOT auto-insert into canvas.
+          // Assets go to the Uploads panel only, matching authenticated behavior.
+        } catch (err) {
+          console.error('[GuestUpload] Failed to store asset:', err)
+        }
+      }
+      return
+    }
+
     dispatch(startBatchUpload({ files, isPublic, assetType }))
-  }, [dispatch, isPublic, assetType])
+  }, [dispatch, isPublic, assetType, currentSceneId, worldWidth, worldHeight, store, addGuestAsset, guestStorageUsed, GUEST_STORAGE_LIMIT, GUEST_SINGLE_FILE_LIMIT])
 
   const handleFileInputChange = useCallback((e) => {
     handleFileSelect(e.target.files)
@@ -279,6 +507,29 @@ function UploadsPanel({ onClose, aspectRatio }) {
 
   const handleDeleteImage = useCallback((imageId, e) => {
     e.stopPropagation()
+    // Guest: delete from local storage
+    if (!isAuthenticated) {
+      setConfirmModal({
+        isOpen: true,
+        title: 'Delete Asset',
+        message: 'Are you sure you want to delete this asset?',
+        onConfirm: async () => {
+          setDeletingId(imageId)
+          try {
+            await removeGuestAsset(imageId)
+          } catch (err) {
+            console.error('[GuestDelete] Failed to delete asset:', err)
+          } finally {
+            setDeletingId(null)
+            setSelectedIds(prev => prev.filter(id => id !== imageId))
+            setConfirmModal(prev => ({ ...prev, isOpen: false }))
+          }
+        },
+        onCancel: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+      })
+      return
+    }
+    // Auth: delete from server
     const image = uploadedImages.find(img => img.id === imageId)
     if (!image) return
 
@@ -301,7 +552,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
         })
       }
     })
-  }, [dispatch, uploadedImages, isAssetInUse])
+  }, [dispatch, uploadedImages, isAssetInUse, isAuthenticated, removeGuestAsset])
 
   const handleToggleSelect = useCallback((id) => {
     setSelectedIds(prev =>
@@ -312,6 +563,27 @@ function UploadsPanel({ onClose, aspectRatio }) {
   const handleBulkDelete = useCallback(async () => {
     if (selectedIds.length === 0) return
 
+    // Guest: bulk delete from local storage
+    if (!isAuthenticated) {
+      setConfirmModal({
+        isOpen: true,
+        title: `Delete ${selectedIds.length} Asset${selectedIds.length > 1 ? 's' : ''}`,
+        message: `Are you sure you want to delete ${selectedIds.length} selected assets?`,
+        onConfirm: async () => {
+          try {
+            await Promise.all(selectedIds.map(id => removeGuestAsset(id)))
+            setSelectedIds([])
+            setConfirmModal(prev => ({ ...prev, isOpen: false }))
+          } catch (err) {
+            console.error('Guest bulk delete failed:', err)
+          }
+        },
+        onCancel: () => setConfirmModal(prev => ({ ...prev, isOpen: false })),
+      })
+      return
+    }
+
+    // Auth: bulk delete from server
     const inUseAssets = selectedIds.filter(id => {
       const asset = uploadedImages.find(img => img.id === id)
       return asset && isAssetInUse(asset.url)
@@ -336,21 +608,24 @@ function UploadsPanel({ onClose, aspectRatio }) {
         }
       }
     })
-  }, [dispatch, selectedIds, uploadedImages, isAssetInUse])
+  }, [dispatch, selectedIds, uploadedImages, isAssetInUse, isAuthenticated, removeGuestAsset])
 
   const handleClearError = () => dispatch(clearUploadError())
   const handleRetryFetch = () => { dispatch(clearFetchError()); dispatch(fetchUploads()) }
 
   const handleAddImageLayer = useCallback((image) => {
     // Audio assets: dispatch addAudioTrack instead of adding a canvas layer
-    const isAudio = image.metadata?.type?.startsWith('audio/') || image.assetType === 'audio'
+    const isAudio = (image.metadata?.type || image.metadata?.mimeType || '').startsWith('audio/') || image.type === 'audio' || image.assetType === 'audio'
     if (isAudio) {
+      const hasAssetId = !!(image._id || image.id)
       dispatch(addAudioTrack({
-        assetId: image.id,
+        assetId: hasAssetId ? (image._id || image.id) : null,
         assetUrl: image.url,
         name: image.name || 'Audio',
         duration: image.metadata?.duration || 0,
         waveform: image.metadata?.waveform || [],
+        // Store the local asset ID so tracks can be rehydrated on project reload
+        _localAssetId: hasAssetId ? (image._id || image.id) : undefined,
       }))
       return
     }
@@ -368,7 +643,10 @@ function UploadsPanel({ onClose, aspectRatio }) {
       finalHeight *= scale
     }
 
-    const isVideo = image.metadata?.type?.startsWith('video/')
+    const isVideo = (image.metadata?.type || image.metadata?.mimeType || '').startsWith('video/') || image.type === 'video' || image.assetType === 'video'
+
+    // In guest mode, store the IndexedDB assetId so it can be rehydrated on project reopen
+    const hasAssetId = !!(image._id || image.id)
 
     dispatch(addLayerAndSelect({
       sceneId: currentSceneId,
@@ -387,6 +665,8 @@ function UploadsPanel({ onClose, aspectRatio }) {
         src: image.url,
         thumbnail: image.metadata?.thumbnail || image.thumbnail || null,
         ...(image.metadata || {}),
+        // Store the local asset ID so the layer can be rehydrated on project reload
+        ...(hasAssetId && !image.url?.startsWith('/') ? { _localAssetId: image._id || image.id } : {}),
         // For videos, include duration for proper scene timing
         ...(isVideo && image.metadata?.duration ? { duration: image.metadata.duration } : {}),
       }
@@ -394,11 +674,10 @@ function UploadsPanel({ onClose, aspectRatio }) {
   }, [dispatch, currentSceneId, worldWidth, worldHeight])
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024
-  const { isAuthenticated } = useSelector((state) => state.auth)
 
   return (
     <div
-      className="flex flex-col h-full relative transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300 pt-0 lg:pt-12"
       style={{
         width: isMobile ? '100%' : '320px',
         backgroundColor: isMobile ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
@@ -407,23 +686,18 @@ function UploadsPanel({ onClose, aspectRatio }) {
         borderRight: isMobile ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
+      {onClose && (
+        <button 
+            onClick={onClose} 
+            className={`absolute top-3 right-3 z-50 transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'} hidden lg:block`}
+        >
+          <X className="h-5 w-5" strokeWidth={2} />
+        </button>
+      )}
 
-      <div className={`px-6 lg:pt-6 pt-0 pb-5 border-b ${isLight ? 'border-black/5' : 'border-white/5'}`}>
-        <div className="hidden lg:flex items-center justify-between mb-4">
-          <h2 className={`text-[20px] font-semibold tracking-tight ${isLight ? 'text-gray-900' : 'text-white'}`}>Uploads</h2>
-          {onClose && (
-            <button 
-                onClick={onClose} 
-                className={`transition-all duration-300 p-2 rounded-[10px] ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
-            >
-              <X className="h-5 w-5" strokeWidth={2} />
-            </button>
-          )}
-        </div>
-
-        {isAuthenticated ? (
-          <div className="flex flex-col gap-2.5">
-            {isDesigner && (
+      <div className="px-6 pt-0 pb-5">
+        <div className="flex flex-col gap-2.5">
+            {isAuthenticated && isDesigner && (
               <div className={`p-3 rounded-[16px] border mb-1 flex flex-col gap-3 ${isLight ? 'bg-white border-black/5' : 'bg-white/5 border-white/5'}`}>
                 <div className="flex items-center justify-between">
                   <span className={`text-[12px] font-semibold ${isLight ? 'text-gray-500' : 'text-zinc-500'}`}>Visibility</span>
@@ -491,27 +765,9 @@ function UploadsPanel({ onClose, aspectRatio }) {
                 </button>
             )}
             <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*" onChange={handleFileInputChange} className="hidden" />
-          </div>
-        ) : (
-          <div className={`py-8 px-5 text-center rounded-[20px] border mb-2 shadow-small ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-white/5 border-white/5'}`}>
-            <div className="w-14 h-14 bg-[#7c4af0]/10 rounded-full flex items-center justify-center mx-auto mb-5">
-              <UploadIcon className="h-7 w-7 text-[#7c4af0]" strokeWidth={2} />
-            </div>
-            <h3 className={`text-[16px] font-semibold mb-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>Want to upload?</h3>
-            <p className={`text-[13px] mb-5 leading-relaxed ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
-              Create an account to upload your own assets and use premium templates.
-            </p>
-            <button
-              onClick={() => window.location.href = '/login'}
-              className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-[12px] text-[14px] font-semibold transition-all shadow-medium active:scale-[0.98]"
-            >
-              Sign up for free
-            </button>
-          </div>
-        )}
+        </div>
       </div>
 
-      {isAuthenticated && (
         <>
           {/* Upload Error */}
           {uploadError && (
@@ -550,7 +806,16 @@ function UploadsPanel({ onClose, aspectRatio }) {
                 onClick={() => setActiveTab(tab)}
                 className={`px-4 py-4 text-[13px] font-semibold tracking-wide relative transition-colors ${activeTab === tab ? 'text-[#7c4af0]' : (isLight ? 'text-gray-500 hover:text-gray-900' : 'text-zinc-500 hover:text-white')}`}
               >
-                {tab} <span className="opacity-40 ml-1">{tab === 'All' ? totalCount : tab === 'Images' ? imageCount : tab === 'Icons' ? iconCount : tab === 'Audio' ? audioCount : videoCount}</span>
+                {tab} <span className="opacity-40 ml-1">{tab === 'All' 
+                ? (isAuthenticated ? totalCount : guestUploads.length) 
+                : tab === 'Images' 
+                  ? (isAuthenticated ? imageCount : localImageCount) 
+                  : tab === 'Icons' 
+                    ? iconCount 
+                    : tab === 'Audio' 
+                      ? (isAuthenticated ? audioCount : localAudioCount) 
+                      : (isAuthenticated ? videoCount : localVideoCount)
+              }</span>
                 {activeTab === tab && (
                   <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-[#7c4af0] rounded-t-full" />
                 )}
@@ -597,10 +862,10 @@ function UploadsPanel({ onClose, aspectRatio }) {
               </div>
             )}
 
-            {/* Loading skeleton */}
-            {isFetching && !uploadedImages.length ? (
+            {/* Loading skeleton - only for authenticated fetch */}
+            {isFetching && !uploadedImages.length && isAuthenticated ? (
               <SkeletonGrid isLight={isLight} />
-            ) : filteredImages.length === 0 ? (
+            ) : filteredImages.length === 0 && visibleItems.length === 0 ? (
               <div className="h-64 flex flex-col items-center justify-center text-center">
                 <div className={`p-4 rounded-full mb-4 ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
                   <UploadIcon className={`h-8 w-8 ${isLight ? 'text-slate-300' : 'text-zinc-600'}`} />
@@ -624,6 +889,7 @@ function UploadsPanel({ onClose, aspectRatio }) {
                       onAdd={handleAddImageLayer}
                       isPlaying={playingTrackId === image.id}
                       onPlayPause={handlePlayPause}
+                      isSelectionMode={selectedIds.length > 0}
                     />
                   ))}
                 </div>
@@ -636,36 +902,45 @@ function UploadsPanel({ onClose, aspectRatio }) {
             )}
           </div>
         </>
-      )}
 
       {/* Confirmation Modal */}
       <Modal
         isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onClose={() => {
+          if (confirmModal.onCancel) confirmModal.onCancel()
+          else setConfirmModal(prev => ({ ...prev, isOpen: false }))
+        }}
         title={confirmModal.title}
         maxWidth="max-w-xs"
       >
         <div className="flex flex-col items-center text-center">
-          <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
-            <Trash2 className="h-6 w-6 text-red-500" />
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${confirmModal.confirmLabel === 'Create Account' ? 'bg-purple-500/10' : 'bg-red-500/10'}`}>
+            {confirmModal.confirmLabel === 'Create Account' ? (
+              <UploadIcon className="h-6 w-6 text-purple-500" />
+            ) : (
+              <Trash2 className="h-6 w-6 text-red-500" />
+            )}
           </div>
-          <p className={`text-[13px] leading-relaxed mb-6 px-2 ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
+          <p className={`text-[13px] leading-relaxed mb-6 px-2 whitespace-pre-line ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
             {confirmModal.message}
           </p>
           <div className="flex flex-col w-full gap-2">
             <button
               onClick={confirmModal.onConfirm}
-              className="w-full py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-[14px] font-semibold transition-all shadow-lg active:scale-[0.98]"
+              className={`w-full py-2.5 rounded-xl text-[14px] font-semibold transition-all shadow-lg active:scale-[0.98] ${confirmModal.confirmLabel === 'Create Account' ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}
             >
-              Delete
+              {confirmModal.confirmLabel || 'Delete'}
             </button>
             <button
-              onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+              onClick={() => {
+                if (confirmModal.onCancel) confirmModal.onCancel()
+                else setConfirmModal(prev => ({ ...prev, isOpen: false }))
+              }}
               className={`w-full py-2.5 rounded-xl text-[14px] font-medium transition-all active:scale-[0.98] ${
                 isLight ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'bg-white/5 text-white/60 hover:text-white'
               }`}
             >
-              Cancel
+              {confirmModal.cancelLabel || 'Cancel'}
             </button>
           </div>
         </div>

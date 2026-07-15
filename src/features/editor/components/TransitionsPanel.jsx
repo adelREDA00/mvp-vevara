@@ -238,7 +238,7 @@ function TransitionsPanel({ onClose, activeTransitionSceneId, motionControls }) 
 
   return (
     <div
-      className="flex flex-col h-full relative transition-all duration-300"
+      className="flex flex-col h-full relative transition-all duration-300 pt-0 lg:pt-12"
       style={{
         width: typeof window !== 'undefined' && window.innerWidth < 1024 ? '100%' : '320px',
         backgroundColor: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'transparent' : (isLight ? '#f3f4f7' : '#090a0d'),
@@ -247,24 +247,15 @@ function TransitionsPanel({ onClose, activeTransitionSceneId, motionControls }) 
         borderRight: typeof window !== 'undefined' && window.innerWidth < 1024 ? 'none' : `1px solid ${isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.05)'}`,
       }}
     >
-
-      {/* Header - Hidden on Mobile to match other panels */}
-      <div className={`hidden lg:block px-4 pt-4 pb-3.5 border-b ${isLight ? 'border-black/5' : 'border-zinc-800/50'}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className={`text-base font-bold tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>Transitions</h2>
-          </div>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={`transition-all duration-200 p-1.5 rounded-lg active:scale-95 ${isLight ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-900' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
-              aria-label="Close transitions panel"
-            >
-              <X className="h-4 w-4" strokeWidth={2.5} />
-            </button>
-          )}
-        </div>
-      </div>
+      {onClose && (
+        <button
+          onClick={onClose}
+          className={`absolute top-3 right-3 z-50 transition-all duration-200 p-1.5 rounded-lg active:scale-95 ${isLight ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-900' : 'text-white/60 hover:text-white hover:bg-white/10'} hidden lg:block`}
+          aria-label="Close transitions panel"
+        >
+          <X className="h-4 w-4" strokeWidth={2.5} />
+        </button>
+      )}
 
       {/* Options Grid & Nested Settings */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6 select-none">

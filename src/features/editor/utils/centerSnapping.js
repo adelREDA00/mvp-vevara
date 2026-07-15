@@ -536,6 +536,7 @@ export function applySafeZoneSnapping({
   scaleY = 1,
   bounds = null // Optional: pre-calculated world bounds {left, right, top, bottom}
 }) {
+
   const safeZone = calculateSafeZone(canvasWidth, canvasHeight, margin)
 
   // Start with original positions

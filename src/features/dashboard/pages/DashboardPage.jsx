@@ -15,10 +15,14 @@ import { uid } from '../../../utils/ids'
 import ProjectStarterModal from '../components/ProjectStarterModal'
 import CreateFromScratchModal from '../components/CreateFromScratchModal'
 import ProjectConfigModal from '../components/ProjectConfigModal'
-import DashboardSidebar from '../components/DashboardSidebar'
+import ExamplePreviewModal from '../components/ExamplePreviewModal'
 import DashboardHero from '../components/DashboardHero'
 import TemplateThumbnail from '../components/TemplateThumbnail'
 import { ThemeContext } from '../../../app/context/ThemeContext'
+import * as localProjectService from '../../../services/localProjectService'
+import { getLocalTemplates, createFromLocalTemplate } from '../../../services/localProjectService'
+import { TEMPLATE_PROJECTS } from '../../../config/templates'
+import { cleanupLocalExports, cleanupOrphanedAssets } from '../../../services/localAssetService'
 
 const TUTORIAL_VIDEO_URL = "/first.mp4"
 
@@ -71,7 +75,7 @@ const CategoryCircle = ({ label, active, onClick, isStuck }) => {
 const DashboardPage = () => {
     const dispatch = useDispatch()
     const navigate = useNavigate()
-    const { user, isAuthenticated, status } = useSelector((state) => state.auth)
+    const { user, isAuthenticated, status, migration } = useSelector((state) => state.auth)
     const { theme, setTheme, isLight } = useContext(ThemeContext)
 
     const [projects, setProjects] = useState([])
@@ -86,6 +90,8 @@ const DashboardPage = () => {
     const [isProjectStarterModalOpen, setIsProjectStarterModalOpen] = useState(false)
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [isFilterStuck, setIsFilterStuck] = useState(false)
+    const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
+    const [selectedTemplateForPreview, setSelectedTemplateForPreview] = useState(null)
     const scrollContainerRef = useRef(null)
     const filterRef = useRef(null)
     const filterSentinelRef = useRef(null)
@@ -131,6 +137,12 @@ const DashboardPage = () => {
         }
     }, [])
 
+    // Clean up local storage and IndexedDB space on mount
+    useEffect(() => {
+        cleanupLocalExports()
+        cleanupOrphanedAssets()
+    }, [])
+
     // Category scroll indicators
     const checkScroll = () => {
         const el = categoriesScrollRef.current
@@ -161,21 +173,15 @@ const DashboardPage = () => {
         }
     }, [window.location.hash])
 
-    useEffect(() => {
-        if (status !== 'loading' && status !== 'idle' && !isAuthenticated) {
-            navigate('/login')
-            return
-        }
+    const [refetchTrigger, setRefetchTrigger] = useState(0)
 
+    useEffect(() => {
         const fetchProjects = async () => {
             try {
-                setLoading(true)
-                const [data, templateData] = await Promise.all([
-                    api.get('/projects'),
-                    api.get('/projects/template')
-                ])
+                if (projects.length === 0) setLoading(true)
+                const data = await api.get('/projects')
                 setProjects(data)
-                setTemplateProjects(templateData)
+                setTemplateProjects(TEMPLATE_PROJECTS)
             } catch (error) {
                 console.error('Failed to fetch projects:', error)
             } finally {
@@ -185,15 +191,44 @@ const DashboardPage = () => {
 
         if (isAuthenticated) {
             fetchProjects()
+        } else {
+            // Guest: load local projects
+            loadLocalProjects()
         }
-    }, [isAuthenticated, status, navigate])
+    }, [isAuthenticated, status, refetchTrigger])
+
+    // Re-fetch projects from API when migration completes successfully
+    useEffect(() => {
+        if (migration.completed && isAuthenticated && !migration.failed) {
+            const timer = setTimeout(() => setRefetchTrigger(n => n + 1), 500)
+            return () => clearTimeout(timer)
+        }
+    }, [migration.completed, isAuthenticated])
+
+    // Load projects from local storage for guest users
+    const loadLocalProjects = () => {
+        try {
+            setLoading(true)
+            const localProjects = JSON.parse(localStorage.getItem('vevara_local_projects') || '[]')
+            setProjects(localProjects.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)))
+            setTemplateProjects(TEMPLATE_PROJECTS)
+        } catch (e) {
+            console.error('Failed to load local projects:', e)
+            setProjects([])
+        } finally {
+            setTimeout(() => setLoading(false), 200)
+        }
+    }
 
     const handleLogout = async () => {
         await dispatch(logoutUser())
-        navigate('/login')
     }
 
     const handleCreateProject = async () => {
+        if (!isAuthenticated) {
+            handleCreateBlankProjectLocal()
+            return
+        }
         try {
             setIsDuplicating(true)
             const sceneId = uid()
@@ -244,6 +279,58 @@ const DashboardPage = () => {
         }
     }
 
+    // Create a blank project locally for guest users
+    const handleCreateBlankProjectLocal = () => {
+        const project = localProjectService.createBlankProject()
+        // Store the project ID in the URL for the editor to pick up
+        window.location.href = `/project/${project._id}`
+    }
+
+    const scrollToTemplates = () => {
+        const element = document.getElementById('templates')
+        if (element && scrollContainerRef.current) {
+            element.scrollIntoView({ behavior: 'smooth' })
+        }
+    }
+
+    // Handle template click for guests
+    const handleLocalTemplateClick = async (template) => {
+        setIsDuplicating(true);
+        try {
+            // Fetch the template project's full details from backend (guest-accessible endpoint)
+            const templateData = await api.get(`/projects/template/${template._id}`);
+
+            // Generate local ID and attributes
+            const newId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+            // Unwrap MongoDB project 'data' sub-object fields to the root of local storage project object
+            const duplicated = {
+                _id: newId,
+                name: `${templateData.name || 'Untitled'} (Copy)`,
+                aspectRatio: templateData.data?.aspectRatio || '16:9',
+                scenes: templateData.data?.scenes || [],
+                layers: templateData.data?.layers || {},
+                sceneMotionFlows: templateData.data?.sceneMotionFlows || {},
+                audioTracks: templateData.data?.audioTracks || [],
+                thumbnail: templateData.thumbnail || null,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+
+            // Save using existing guest architecture
+            localProjectService.saveProject(duplicated);
+
+            // Redirect to editor
+            window.location.href = `/project/${duplicated._id}?fromTemplate=true`;
+        } catch (error) {
+            console.error('Failed to duplicate local template:', error);
+            setIsDuplicating(false);
+        }
+    }
+
+    // Get templates for display (auth vs guest)
+    const displayTemplates = isAuthenticated ? templateProjects : getLocalTemplates()
+
     const HERO_TEMPLATE_MAPPINGS = {
         app: {
             "App Walkthrough": {
@@ -288,8 +375,13 @@ const DashboardPage = () => {
     const handleDuplicateTemplate = async (templateId) => {
         try {
             setIsDuplicating(true)
-            const newProject = await api.post(`/projects/${templateId}/duplicate`)
-            window.location.href = `/project/${newProject._id}`
+            if (isAuthenticated) {
+                const newProject = await api.post(`/projects/${templateId}/duplicate`)
+                window.location.href = `/project/${newProject._id}?fromTemplate=true`
+            } else {
+                const template = TEMPLATE_PROJECTS.find(t => t._id === templateId) || { _id: templateId };
+                await handleLocalTemplateClick(template);
+            }
         } catch (error) {
             console.error('Failed to duplicate template:', error)
             setIsDuplicating(false)
@@ -297,14 +389,39 @@ const DashboardPage = () => {
     }
 
     const handleCopyProject = async (project) => {
+        // Guest: duplicate locally by loading the FULL project data first
+        if (!isAuthenticated) {
+            try {
+                // Load the full project (with scenes, layers, etc.) not just metadata
+                const fullProject = localProjectService.getProject(project._id)
+                if (!fullProject) {
+                    setToast({ message: 'Could not find project data to duplicate.', type: 'error' })
+                    setTimeout(() => setToast(null), 3000)
+                    return
+                }
+                const duplicated = localProjectService.duplicateProject(fullProject)
+                if (duplicated) {
+                    setProjects(prev => [duplicated, ...prev])
+                    setToast({ message: `Successfully copied "${project.name}"`, type: 'success' })
+                    setTimeout(() => setToast(null), 3000)
+                }
+            } catch (error) {
+                console.error('Failed to copy local project:', error)
+                setToast({ message: 'Failed to copy project. Please try again.', type: 'error' })
+                setTimeout(() => setToast(null), 3000)
+            }
+            return
+        }
+        // Authenticated: duplicate via API
         try {
             const newProject = await api.post(`/projects/${project._id}/duplicate`)
             setProjects(prev => [newProject, ...prev])
-            setToast({ message: `successfly copied "${project.name}"` })
+            setToast({ message: `Successfully copied "${project.name}"`, type: 'success' })
             setTimeout(() => setToast(null), 3000)
         } catch (error) {
             console.error('Failed to copy project:', error)
-            alert('Failed to copy project. Please try again.')
+            setToast({ message: 'Failed to copy project. Please try again.', type: 'error' })
+            setTimeout(() => setToast(null), 3000)
         }
     }
 
@@ -319,7 +436,7 @@ const DashboardPage = () => {
         if (e && e.stopPropagation) {
             e.stopPropagation()
         }
-        setSelectedProjectIds(prev => 
+        setSelectedProjectIds(prev =>
             prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]
         )
     }
@@ -327,15 +444,25 @@ const DashboardPage = () => {
     const handleBulkDelete = async () => {
         try {
             setIsBulkDeleting(true)
-            await Promise.all(selectedProjectIds.map(id => api.delete(`/projects/${id}`)))
-            setProjects(prev => prev.filter(p => !selectedProjectIds.includes(p._id)))
-            setToast({ message: `successfly deleted ${selectedProjectIds.length} projects` })
+            if (!isAuthenticated) {
+                // Guest: delete from local storage only
+                for (const id of selectedProjectIds) {
+                    localProjectService.deleteProject(id)
+                }
+                cleanupOrphanedAssets()
+                setProjects(prev => prev.filter(p => !selectedProjectIds.includes(p._id)))
+            } else {
+                await Promise.all(selectedProjectIds.map(id => api.delete(`/projects/${id}`)))
+                setProjects(prev => prev.filter(p => !selectedProjectIds.includes(p._id)))
+            }
+            setToast({ message: `Successfully deleted ${selectedProjectIds.length} projects`, type: 'success' })
             setSelectedProjectIds([])
             setIsBulkDeleteConfirmOpen(false)
             setTimeout(() => setToast(null), 3000)
         } catch (error) {
             console.error('Failed to bulk delete projects:', error)
-            alert('Failed to delete projects. Please try again.')
+            setToast({ message: 'Failed to delete projects. Please try again.', type: 'error' })
+            setTimeout(() => setToast(null), 3000)
         } finally {
             setIsBulkDeleting(false)
         }
@@ -347,12 +474,21 @@ const DashboardPage = () => {
         if (!projectToDelete || isDeleting) return
         try {
             setIsDeleting(true)
-            await api.delete(`/projects/${projectToDelete}`)
+            if (!isAuthenticated) {
+                // Guest: delete from local storage only
+                localProjectService.deleteProject(projectToDelete)
+                cleanupOrphanedAssets()
+            } else {
+                await api.delete(`/projects/${projectToDelete}`)
+            }
             setProjects(prev => prev.filter(p => p._id !== projectToDelete))
             setProjectToDelete(null)
+            setToast({ message: 'Successfully deleted project', type: 'success' })
+            setTimeout(() => setToast(null), 3000)
         } catch (error) {
             console.error('Failed to delete project:', error)
-            alert('Failed to delete project. Please try again.')
+            setToast({ message: 'Failed to delete project. Please try again.', type: 'error' })
+            setTimeout(() => setToast(null), 3000)
         } finally {
             setIsDeleting(false)
         }
@@ -401,63 +537,66 @@ const DashboardPage = () => {
 
     const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
+    const isGuestEmpty = !isAuthenticated && projects.length === 0;
+    const heroTitle = isGuestEmpty ? "Create beautiful motion videos" : "Create your next motion video";
+    const heroSubtitle = isGuestEmpty ? "Turn your screenshots and ideas into animated videos." : "";
+    const heroCtaText = isGuestEmpty ? "Start Creating" : "New Project";
+
+    const handleTemplateCardClick = (template) => {
+        setSelectedTemplateForPreview(template);
+        setIsPreviewModalOpen(true);
+    };
+
+    const handleCopyAndCustomizeTemplate = async (template) => {
+        setIsPreviewModalOpen(false);
+        if (isAuthenticated) {
+            await handleDuplicateTemplate(template._id);
+        } else {
+            handleLocalTemplateClick(template);
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-[var(--dashboard-sidebar-bg)] text-[var(--dashboard-text)] font-medium selection:bg-slate-500/10 flex overflow-x-hidden">
+        <div className="min-h-screen bg-[var(--dashboard-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[var(--dashboard-accent)]/10 flex overflow-x-hidden">
             {toast && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className={`${isLight ? 'bg-white text-slate-800 border-slate-200 shadow-lg' : 'bg-slate-900 text-white border-slate-850 shadow-2xl'} border rounded-full px-6 py-2.5 flex items-center gap-2 text-[12px] font-semibold tracking-wide`}>
-                        <Sparkles size={14} className="text-emerald-500 animate-pulse" />
-                        <span>{toast.message}</span>
+                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] animate-in fade-in slide-in-from-top-4 duration-300 select-none">
+                    <div className={`text-white px-4 py-2 rounded-[8px] flex items-center justify-center gap-2 text-[13px] font-semibold tracking-wide shadow-lg border border-white/10 ${toast.type === 'error' ? 'bg-rose-550 dark:bg-rose-500' : 'bg-emerald-550 dark:bg-emerald-500'}`}>
+                        {toast.type === 'error' ? (
+                            <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        ) : (
+                            <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                        )}
+                        <span className="leading-none">{toast.message}</span>
                     </div>
                 </div>
             )}
-            {/* Sidebar */}
-            <DashboardSidebar
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-                onCreateProject={() => setIsCreateScratchModalOpen(true)}
-            />
 
-            {/* Content Wrapper (Scrollable) */}
+            {/* Content Wrapper (Scrollable) - 0px radius */}
             <div
                 ref={scrollContainerRef}
-                className="flex-1 lg:ml-[var(--sidebar-width)] h-screen overflow-y-auto transition-all custom-scrollbar pb-2 md:pb-3 pr-2 md:pr-3 pt-1 md:pt-2"
+                className="flex-1 h-screen overflow-y-auto transition-all custom-scrollbar pb-2 md:pb-3 px-4 md:px-8 pt-1 md:pt-2"
             >
-                <div className="min-h-full bg-[var(--dashboard-bg)] rounded-[16px] md:rounded-[24px] border border-[var(--dashboard-border)] shadow-md dashboard-page-container flex flex-col relative">
+                <div className="min-h-full bg-[var(--dashboard-bg)] rounded-none border-none shadow-none flex flex-col relative">
                     {/* Updates Banner */}
-                    <div className="w-full bg-pink-600 py-2.5 px-4 md:px-10 border-b border-pink-750 flex items-center justify-center z-20 rounded-t-[15px] md:rounded-t-[23px] text-white">
+                    <div className="w-full bg-pink-600 py-2.5 px-4 md:px-10 border-b border-pink-750 flex items-center justify-center z-20 rounded-t-none text-white">
                         <div className="text-[11px] font-extrabold text-center tracking-wider uppercase flex items-center gap-2 justify-center">
-                            <span className="bg-white text-pink-600 text-[9px] font-black px-1.5 py-0.5 rounded tracking-wide">Update</span>
+                            <span className="bg-white text-pink-600 text-[9px] font-black px-1.5 py-0.5 rounded-[4px] tracking-wide">Update</span>
                             <span className="opacity-95 flex items-center gap-1.5">
                                 <Music size={11} strokeWidth={2.5} />
-                                <span>audio support is now live (you can add multiple audio tracks to your project)</span>
+                                <span>audio support is now live </span>
                             </span>
                         </div>
                     </div>
 
-                    {/* Brand Gradient Background - Softer Start */}
-                    <div className="absolute inset-x-0 top-0 h-[500px] bg-gradient-to-b from-[var(--dashboard-accent)]/20 via-[var(--dashboard-accent)]/5 to-transparent pointer-events-none z-0 rounded-t-[16px] md:rounded-t-[24px]" />
-
                     <div className="px-4 md:px-10 pb-4 md:pb-10 max-w-[1600px] mx-auto w-full flex-1 relative z-10">
                         {/* Header */}
-                        {/* Header - Non-sticky */}
-                        <header className="flex items-center justify-between mb-8 md:mb-6 pt-4 md:pt-10">
-                            <div className="flex items-center gap-4">
-                                {/* Mobile Menu Button - Top Left Initial Position */}
-                                <button
-                                    onClick={() => setIsSidebarOpen(true)}
-                                    className="lg:hidden w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:bg-[var(--dashboard-card-hover)] rounded-full transition-all"
-                                >
-                                    <Menu size={20} />
-                                </button>
-
-                                {/* <div className="hidden lg:flex flex-col">
-                                    <h2 className="text-[13px] font-bold text-[var(--dashboard-text-muted)] uppercase tracking-widest opacity-40">Vevara Motion</h2>
-                                    <p className="text-[16px] font-bold text-[var(--dashboard-text)]">Dashboard</p>
-                                </div> */}
-                            </div>
-
-                            <div className="flex items-center gap-4">
+                        <header className="flex items-center justify-between mb-8 md:mb-6 pt-4 md:pt-10 select-none">
+                            {/* Left Side: Theme Toggle (Branding removed) */}
+                            <div className="flex items-center gap-3">
                                 <button
                                     onClick={() => {
                                         const newTheme = theme === 'light' ? 'dark' : 'light'
@@ -467,243 +606,292 @@ const DashboardPage = () => {
                                             dispatch(updateUserTheme(newTheme))
                                         }
                                     }}
-                                    className="w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] transition-all"
+                                    className="w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] transition-all rounded-[8px]"
                                 >
                                     {isLight ? <Moon size={18} /> : <Sun size={18} />}
                                 </button>
+                            </div>
 
-                                {isAuthenticated && (
+                            {/* Right Side: Auth controls */}
+                            <div className="flex items-center gap-4">
+                                {isAuthenticated ? (
                                     <DropdownMenu
                                         trigger={
-                                            <button className="flex items-center gap-2 outline-none group">
-                                                <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-white font-bold text-[11px] shadow-md group-hover:scale-105 transition-transform">
+                                            <button className="flex items-center gap-2 outline-none group rounded-[8px]">
+                                                <div className="w-8 h-8 rounded-[8px] bg-slate-600 flex items-center justify-center text-white font-bold text-[11px] shadow-sm group-hover:scale-105 transition-transform">
                                                     {user?.email?.substring(0, 2).toUpperCase()}
                                                 </div>
                                                 <ChevronDown size={12} className="text-[var(--dashboard-text-muted)] mt-0.5" />
                                             </button>
                                         }
-                                        className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] shadow-xl"
+                                        className="bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] shadow-none rounded-[12px]"
                                     >
-                                        <div className="px-4 py-3 border-b border-[var(--dashboard-border)] mb-1">
+                                        <div className="px-4 py-3 border-b border-[var(--dropdown-border)] mb-1">
                                             <p className="text-[12px] font-medium text-[var(--dashboard-text-muted)] truncate">{user?.email}</p>
                                         </div>
-                                        <DropdownMenuItem onClick={handleLogout} className="hover:bg-[var(--dashboard-card-hover)]">
+                                        <DropdownMenuItem onClick={handleLogout} className="hover:bg-rose-500/10 rounded-[8px]">
                                             <div className="flex items-center gap-3 text-rose-500">
                                                 <LogOut size={16} strokeWidth={2} />
                                                 <span className="text-[14px] font-semibold">Logout</span>
                                             </div>
                                         </DropdownMenuItem>
                                     </DropdownMenu>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <Link
+                                            to="/login"
+                                            className="h-9 px-4 text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-accent)] text-[12px] font-bold rounded-[8px] border border-[var(--dashboard-border)] flex items-center transition-all bg-transparent hover:bg-[var(--dashboard-card-hover)]"
+                                        >
+                                            Log in
+                                        </Link>
+                                        <Link
+                                            to="/register"
+                                            className={`h-9 px-4 bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent-hover)] ${isLight ? 'text-white' : 'text-[#06121A]'} text-[12px] font-bold rounded-[8px] flex items-center gap-2 transition-all`}
+                                        >
+                                            Sign up
+                                        </Link>
+                                    </div>
                                 )}
                             </div>
                         </header>
 
-                        <DashboardHero userName={user?.firstName} />
+                        <DashboardHero title={heroTitle} subtitle={heroSubtitle} />
 
-                        {/* Create New Project Section */}
-                        <section className="mb-16 relative">
-                            <style>{`
-                                @keyframes dashMove {
-                                    to { stroke-dashoffset: -80; }
-                                }
-                                @keyframes pingDot {
-                                    0%, 100% { opacity: 1; transform: scale(1); }
-                                    50% { opacity: 0.4; transform: scale(1.6); }
-                                }
-                                .dash-anim {
-                                    stroke-dasharray: 5 5;
-                                    stroke-dashoffset: 0;
-                                    animation: dashMove 4s linear infinite;
-                                }
-                                .group:hover .dash-anim { animation-duration: 1.8s; }
-                                .dot-ping {
-                                    animation: pingDot 2s ease-in-out infinite;
-                                    transform-origin: center;
-                                }
-                            `}</style>
-
-                            <div className="flex items-center justify-between mb-6">
-                                <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Create new project</h2>
-                            </div>
-
-                            {/* Max-width wrapper so cards stay compact on wide screens */}
-                            <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Card 1: Product Launch Videos */}
-                                <div
-                                    onClick={() => {
-                                        setConfigModalMode('app')
-                                        setIsProjectConfigModalOpen(true)
-                                    }}
-                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#7c4af0] via-[#6a3fd4] to-[#5127be] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#7c4af0]/25 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
-                                >
-                                    {/* Left text label */}
-                                    <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
-                                        <h3 className="text-[17px] md:text-[22px] font-extrabold tracking-tight text-white leading-tight">
-                                            App & Software Showcase
-                                        </h3>
-                                        <p className="text-[11px] md:text-[12px] text-white/80 font-semibold mt-0.5 max-w-[85%] truncate md:max-w-none">
-                                            Walkthroughs, demos & feature reveals
-                                        </p>
-                                        <div className="py-1 px-3 bg-white text-black font-extrabold text-[10px] rounded-lg mt-2 flex items-center gap-1.5 hover:bg-white/95 transition-all w-fit shadow-md">
-                                            <span>Start creating</span>
-                                            <ArrowRight size={10} strokeWidth={2.5} />
-                                        </div>
-                                    </div>
-
-                                    {/* Layered custom mockups */}
-                                    <div className="absolute right-0 top-0 bottom-0 w-[45%] md:w-[40%] overflow-hidden pointer-events-none">
-                                        {/* Back backing card shape */}
-                                        <div className="absolute right-[10%] bottom-[-5%] w-[80%] h-[90%] bg-white/10 backdrop-blur-md rounded-xl transform rotate-[-12deg] z-0 transition-transform duration-500 group-hover:rotate-[-8deg]" />
-                                        {/* Front mockup card image */}
-                                        <div
-                                            className="absolute right-[2%] bottom-[-10%] w-[80%] h-[100%] bg-cover bg-center rounded-xl border border-white/20 shadow-2xl transform rotate-[-4deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[-2deg]"
-                                            style={{ backgroundImage: "url('/sass.png')" }}
-                                        />
-                                    </div>
+                        {/* CTA Buttons — below hero */}
+                        <section className="flex flex-col items-center justify-center mb-12 md:mb-16 gap-3">
+                            <button
+                                onClick={() => setIsCreateScratchModalOpen(true)}
+                                className={`px-8 h-12 md:h-14 md:px-10 bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent-hover)] ${isLight ? 'text-white' : 'text-[#06121A]'} text-[14px] md:text-[16px] font-bold rounded-[8px] transition-all flex items-center justify-center gap-2`}
+                            >
+                                <span>{heroCtaText}</span>
+                            </button>
+                            {!isAuthenticated && (
+                                <div className="text-[11px] md:text-[12px] text-[var(--dashboard-text-muted)] opacity-85 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 font-semibold tracking-wide select-none">
+                                    <span>No account needed</span>
+                                    <span className="opacity-40">•</span>
+                                    <span>Your projects are saved automatically in your browser</span>
+                                    <span className="opacity-40">•</span>
+                                    <span>Create an account anytime to keep your work across devices</span>
                                 </div>
-
-                                {/* Card 2: Product Promo Videos */}
-                                <div
-                                    onClick={() => {
-                                        setConfigModalMode('ads')
-                                        setIsProjectConfigModalOpen(true)
-                                    }}
-                                    className="group relative overflow-hidden h-[110px] md:h-[136px] bg-gradient-to-r from-[#00ab6b] via-[#05c46b] to-[#3bf681] rounded-[24px] border border-white/10 cursor-pointer shadow-lg hover:shadow-2xl hover:shadow-[#0bb85c]/30 hover:scale-[1.01] transition-all duration-500 ease-out flex items-center justify-between select-none"
-                                >
-                                    {/* Left text label */}
-                                    <div className="pl-8 md:pl-12 flex flex-col justify-center h-full z-10 py-2">
-                                        <h3 className="text-[17px] md:text-[22px] font-extrabold tracking-tight text-white leading-tight">
-                                            Ads & Marketing
-                                        </h3>
-                                        <p className="text-[11px] md:text-[12px] text-white/80 font-semibold mt-0.5 max-w-[85%] truncate md:max-w-none">
-                                            Promotions, ads & social content
-                                        </p>
-                                        <div className="py-1 px-3 bg-white text-black font-extrabold text-[10px] rounded-lg mt-2 flex items-center gap-1.5 hover:bg-white/95 transition-all w-fit shadow-md">
-                                            <span>Start creating</span>
-                                            <ArrowRight size={10} strokeWidth={2.5} />
-                                        </div>
-                                    </div>
-
-                                    {/* Layered custom mockups */}
-                                    <div className="absolute right-0 top-0 bottom-0 w-[45%] md:w-[40%] overflow-hidden pointer-events-none">
-                                        {/* Back backing card shape */}
-                                        <div className="absolute right-[12%] bottom-[-5%] w-[75%] h-[90%] bg-white/10 backdrop-blur-md rounded-xl transform rotate-[10deg] z-0 transition-transform duration-500 group-hover:rotate-[6deg]" />
-                                        {/* Front phone mockup card image */}
-                                        <div
-                                            className="absolute right-[2%] bottom-[-15%] w-[80%] h-[115%] bg-cover bg-center rounded-t-xl border border-white/20 shadow-2xl transform rotate-[2deg] z-10 transition-all duration-500 group-hover:scale-105 group-hover:rotate-[0deg]"
-                                            style={{ backgroundImage: "url('/ads.png')" }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </section>
 
-                        {/* Recent Projects Section */}
-                        {(loading || projects.length > 0) && (
-                            <section id="projects" className="scroll-mt-24 mb-16">
-                                <div className="flex items-center justify-between mb-8">
-                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Your projects</h2>
+                        {/* My Projects Section - 0px container */}
+                        <section id="projects" className="scroll-mt-24 mb-16 rounded-none">
+                            <div className="flex flex-col mb-8">
+                                <h2 className="text-[20px] font-bold tracking-tight text-[var(--dashboard-text)]">My Projects</h2>
+                                {/* <p className="text-[12px] text-[var(--dashboard-text-muted)] mt-1 font-medium">
+                                    {isAuthenticated
+                                        ? "Your projects are saved to your account."
+                                        : "Your projects are saved on this device."
+                                    }
+                                </p> */}
+                            </div>
+
+                            {loading ? (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {[1, 2, 3, 4, 5, 6].map(i => (
+                                        <div key={i} className="aspect-[16/10] bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                                    {/* Add New Project Card - Radius 12px */}
+                                    {(!isGuestEmpty) && (
+                                        <div
+                                            onClick={() => setIsCreateScratchModalOpen(true)}
+                                            className="aspect-[16/10] w-full border border-dashed border-[var(--dashboard-border)] rounded-[12px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-[var(--dashboard-card-hover)] transition-all group"
+                                        >
+                                            <div className="w-10 h-10 bg-[var(--dashboard-card-hover)] rounded-[8px] flex items-center justify-center text-[var(--dashboard-text-muted)] group-hover:scale-105 transition-transform">
+                                                <Plus size={20} strokeWidth={2} />
+                                            </div>
+                                            <p className="text-[var(--dashboard-text-muted)] font-semibold text-[11px] text-center px-4">Create new</p>
+                                        </div>
+                                    )}
+
+                                    {/* Migration skeleton cards */}
+                                    {migration.isActive && migration.total > 0 && Array.from({ length: migration.total }).map((_, i) => (
+                                        <div key={`migration-skeleton-${i}`} className="group cursor-pointer">
+                                            <div className="aspect-[16/10] bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden relative mb-3 transition-all duration-300">
+                                                <div
+                                                    className="absolute inset-0 bg-gradient-to-r from-transparent via-[var(--dashboard-card-hover)] to-transparent animate-[shimmer_2s_ease-in-out_infinite]"
+                                                    style={{ backgroundSize: '200% 100%', animationDelay: `${i * 150}ms` }}
+                                                />
+                                            </div>
+                                            <div className="px-0.5 space-y-1.5">
+                                                <div className="h-3 w-24 bg-[var(--dashboard-card-hover)] rounded-[8px] animate-pulse" style={{ animationDelay: `${i * 150}ms` }} />
+                                                <div className="h-2 w-16 bg-[var(--dashboard-card-hover)] rounded-[8px] animate-pulse opacity-60" style={{ animationDelay: `${i * 150}ms` }} />
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* Empty state message - 12px radius */}
+                                    {isGuestEmpty && (
+                                        <div className="col-span-full py-12 border border-dashed border-[var(--dashboard-border)] rounded-[12px] flex flex-col items-center justify-center text-center p-6 bg-[var(--dashboard-card-bg)]">
+
+                                            <Folder className="w-10 h-10 text-[var(--dashboard-text-muted)] opacity-40 mb-4" />
+
+                                            <p className="text-[15px] text-[var(--dashboard-text)] font-semibold">
+                                                Start creating without an account
+                                            </p>
+                                            {/* 
+                                            <p className="text-[13px] text-[var(--dashboard-text-muted)] mt-2 max-w-sm">
+                                                Your projects and uploaded files are saved on this device.
+                                                Create an account anytime to keep your work everywhere.
+                                            </p> */}
+
+                                        </div>
+                                    )}
+
+                                    {/* Project List - Cards: radius 12px */}
+                                    {sortedProjects.map((project) => (
+                                        <div
+                                            key={project._id}
+                                            className="group cursor-pointer"
+                                            onClick={(e) => {
+                                                if (isSelectionMode) {
+                                                    toggleSelectProject(e, project._id)
+                                                } else {
+                                                    window.location.href = `/project/${project._id}`
+                                                }
+                                            }}
+                                        >
+                                            <div className={`aspect-[16/10] bg-[var(--dashboard-card-bg)] border rounded-[12px] overflow-hidden relative mb-3 transition-all duration-300 shadow-none ${selectedProjectIds.includes(project._id)
+                                                ? 'border-[var(--dashboard-text-muted)] ring-1 ring-[var(--dashboard-text-muted)]/20'
+                                                : 'border-[var(--dashboard-border)] group-hover:border-[var(--dashboard-border-hover)]'
+                                                }`}>
+                                                {project.thumbnail ? (
+                                                    <img
+                                                        src={project.thumbnail}
+                                                        alt={`${project.name} thumbnail`}
+                                                        className="w-full h-full object-cover block"
+                                                    />
+                                                ) : (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
+                                                        <Layers size={28} strokeWidth={1.5} />
+                                                    </div>
+                                                )}
+
+                                                <button
+                                                    onClick={(e) => toggleSelectProject(e, project._id)}
+                                                    className={`absolute top-2 left-2 z-20 w-7 h-7 rounded-[8px] flex items-center justify-center border transition-all duration-200 ${selectedProjectIds.includes(project._id)
+                                                        ? 'bg-[var(--dashboard-accent)] border-[var(--dashboard-accent)] text-white'
+                                                        : `bg-black/40 backdrop-blur-md hover:bg-black/60 border-white/10 text-transparent ${isSelectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                                        }`
+                                                        }`}
+                                                >
+                                                    {selectedProjectIds.includes(project._id) && (
+                                                        <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4.5}>
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+
+                                                <div className="absolute top-2 right-2 z-10" onClick={(e) => e.stopPropagation()}>
+                                                    <DropdownMenu
+                                                        trigger={
+                                                            <button className="w-7 h-7 flex items-center justify-center bg-black/40 backdrop-blur-md hover:bg-black/60 text-white border border-white/10 rounded-[8px] transition-all duration-200 outline-none">
+                                                                <MoreHorizontal size={14} />
+                                                            </button>
+                                                        }
+                                                        className="bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] shadow-none rounded-[8px]"
+                                                    >
+                                                        <DropdownMenuItem
+                                                            onClick={() => handleCopyProject(project)}
+                                                            className="hover:bg-[var(--dropdown-hover)] cursor-pointer text-[var(--dashboard-text)] rounded-[8px]"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <Copy size={14} className="text-[var(--dashboard-text-muted)]" />
+                                                                <span className="text-[13px] font-semibold">Make a Copy</span>
+                                                            </div>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            onClick={() => setProjectToDelete(project._id)}
+                                                            className="hover:bg-rose-500/10 cursor-pointer text-rose-500 rounded-[8px]"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <Trash2 size={14} />
+                                                                <span className="text-[13px] font-semibold">Delete</span>
+                                                            </div>
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenu>
+                                                </div>
+                                            </div>
+                                            <div className="px-0.5">
+                                                <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:opacity-85 transition-opacity truncate">{project.name}</h3>
+                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>                        {/* Explore Examples Section */}
+                        {displayTemplates.length > 0 && (
+                            <section id="templates" className="scroll-mt-24 mb-16 pt-8 border-none rounded-none">
+                                <div className="flex flex-col mb-8">
+                                    <h2 className="text-[20px] font-bold tracking-tight text-[var(--dashboard-text)]">Explore Examples</h2>
                                 </div>
 
                                 {loading ? (
-                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                        {[1, 2, 3, 4, 5, 6].map(i => (
-                                            <div key={i} className="aspect-[16/10] bg-[var(--dashboard-card-bg)] rounded-[12px] animate-pulse border border-[var(--dashboard-border)]" />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                        {[1, 2, 3].map(i => (
+                                            <div key={i} className="aspect-video bg-[var(--dashboard-card-bg)] rounded-[12px] border border-[var(--dashboard-border)] animate-pulse" />
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                                        {/* Add New Project Card - Always visible */}
-                                        <div
-                                            onClick={() => setIsCreateScratchModalOpen(true)}
-                                            className="aspect-[16/10] w-full border-2 border-dashed border-[var(--dashboard-border)] rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-slate-500/30 hover:bg-slate-550/5 transition-all group"
-                                        >
-                                            <div className="w-10 h-10 bg-slate-500/10 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 group-hover:scale-110 transition-transform">
-                                                <Plus size={20} strokeWidth={2} />
-                                            </div>
-                                            <p className="text-[var(--dashboard-text-muted)] font-medium text-[11px] text-center px-4">Create new</p>
-                                        </div>
-
-                                        {/* Project List */}
-                                        {sortedProjects.map((project) => (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                        {displayTemplates.map((template) => (
+                                            /* Example Cards: Radius 12px */
                                             <div
-                                                key={project._id}
-                                                className="group cursor-pointer"
-                                                onClick={(e) => {
-                                                    if (isSelectionMode) {
-                                                        toggleSelectProject(e, project._id)
-                                                    } else {
-                                                        window.location.href = `/project/${project._id}`
-                                                    }
-                                                }}
+                                                key={template._id || template.name}
+                                                className="group/card cursor-pointer bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] overflow-hidden hover:border-[var(--dashboard-border-hover)] transition-all duration-300 relative shadow-none"
+                                                onClick={() => handleTemplateCardClick(template)}
                                             >
-                                                <div className={`aspect-[16/10] bg-[var(--dashboard-card-bg)] border rounded-[12px] overflow-hidden relative mb-3 transition-all duration-300 shadow-sm ${
-                                                    selectedProjectIds.includes(project._id)
-                                                        ? 'border-purple-400 ring-2 ring-purple-400/25'
-                                                        : 'border-[var(--dashboard-border)] group-hover:border-slate-500/40'
-                                                }`}>
-                                                    {project.thumbnail ? (
-                                                        <img
-                                                            src={project.thumbnail}
-                                                            alt={`${project.name} thumbnail`}
-                                                            className="w-full h-full object-cover"
-                                                        />
+                                                <div className="aspect-video bg-[var(--dashboard-card-bg)] flex items-center justify-center relative overflow-hidden rounded-none">
+                                                    {template.thumbnail ? (
+                                                        <img src={template.thumbnail} alt={template.name} className="w-full h-full object-cover" />
                                                     ) : (
-                                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--dashboard-text-muted)] gap-3 opacity-20">
-                                                            <Layers size={28} strokeWidth={1.5} />
+                                                        <div className="flex flex-col items-center gap-2 text-[var(--dashboard-text-muted)] opacity-50">
+                                                            <Layers size={32} strokeWidth={1.5} />
+                                                            <span className="text-[11px] font-semibold uppercase tracking-widest">{template.category || 'Template'}</span>
                                                         </div>
                                                     )}
-
-                                                    <button
-                                                        onClick={(e) => toggleSelectProject(e, project._id)}
-                                                        className={`absolute top-2 left-2 z-20 w-7 h-7 rounded-md flex items-center justify-center border transition-all duration-200 ${
-                                                            selectedProjectIds.includes(project._id)
-                                                                ? 'bg-purple-500 border-purple-500 text-white'
-                                                                : `bg-black/40 backdrop-blur-md hover:bg-black/60 border-white/10 text-transparent ${
-                                                                    isSelectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                                                                  }`
-                                                        }`}
-                                                    >
-                                                        {selectedProjectIds.includes(project._id) && (
-                                                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4.5}>
-                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                                            </svg>
-                                                        )}
-                                                    </button>
-
-                                                    <div className="absolute top-2 right-2 z-10" onClick={(e) => e.stopPropagation()}>
-                                                        <DropdownMenu
-                                                            trigger={
-                                                                <button className="w-7 h-7 flex items-center justify-center bg-black/40 backdrop-blur-md hover:bg-black/60 text-white border border-white/10 rounded-md transition-all duration-200 shadow-sm outline-none">
-                                                                    <MoreHorizontal size={14} />
-                                                                </button>
-                                                            }
-                                                            className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] shadow-xl"
-                                                        >
-                                                            <DropdownMenuItem 
-                                                                onClick={() => handleCopyProject(project)}
-                                                                className="hover:bg-[var(--dashboard-card-hover)] cursor-pointer text-[var(--dashboard-text)]"
-                                                            >
-                                                                <div className="flex items-center gap-2">
-                                                                    <Copy size={14} className="text-slate-400" />
-                                                                    <span className="text-[13px] font-semibold">Make a Copy</span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuItem 
-                                                                onClick={() => setProjectToDelete(project._id)}
-                                                                className="hover:bg-rose-500/10 cursor-pointer text-rose-500"
-                                                            >
-                                                                <div className="flex items-center gap-2">
-                                                                    <Trash2 size={14} />
-                                                                    <span className="text-[13px] font-semibold">Delete</span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenu>
-                                                    </div>
+                                                    {/* Simple hover overlay */}
+                                                    <div className="absolute inset-0 bg-black/5 opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-none" />
                                                 </div>
-                                                <div className="px-0.5">
-                                                    <h3 className="text-[13px] font-semibold text-[var(--dashboard-text)] group-hover:text-slate-700 dark:group-hover:text-slate-350 transition-colors truncate">{project.name}</h3>
-                                                    <p className="text-[10px] text-[var(--dashboard-text-muted)] mt-0.5 font-medium uppercase tracking-tight opacity-70">Edited {new Date(project.updatedAt).toLocaleDateString()}</p>
+
+                                                {/* Action Menu (Visible on Hover) */}
+                                                <div
+                                                    className="absolute top-2.5 right-2.5 z-30 opacity-0 group-hover/card:opacity-100 transition-all"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <DropdownMenu
+                                                        trigger={
+                                                            <button className="w-8 h-8 flex items-center justify-center bg-black/40 backdrop-blur-md hover:bg-black/60 text-white border border-white/10 rounded-[8px] transition-all duration-200 outline-none">
+                                                                <MoreHorizontal size={14} />
+                                                            </button>
+                                                        }
+                                                        className="bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] shadow-none rounded-[8px]"
+                                                    >
+                                                        <DropdownMenuItem
+                                                            onClick={() => handleTemplateCardClick(template)}
+                                                            className="hover:bg-[var(--dropdown-hover)] cursor-pointer text-[var(--dashboard-text)] rounded-[8px]"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <Play size={14} />
+                                                                <span className="text-[13px] font-semibold">Preview</span>
+                                                            </div>
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            onClick={() => handleCopyAndCustomizeTemplate(template)}
+                                                            className="hover:bg-[var(--dropdown-hover)] cursor-pointer text-[var(--dashboard-text)] rounded-[8px]"
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <Sparkles size={14} />
+                                                                <span className="text-[13px] font-semibold">Customize</span>
+                                                            </div>
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenu>
                                                 </div>
                                             </div>
                                         ))}
@@ -712,104 +900,11 @@ const DashboardPage = () => {
                             </section>
                         )}
 
-                        {/* Categories - Vibing Circular Filters (Sticky) - Commented out for now
-                        <div ref={filterSentinelRef} className="h-px w-full mb-2 md:mb-4" />
-                        <section
-                            className="sticky top-2 md:top-6 z-30 mb-8 md:mb-20 flex justify-center pointer-events-none"
-                        >
-                            <div
-                                className={`transition-all duration-500 ease-in-out pointer-events-auto flex items-center relative ${isFilterStuck
-                                    ? 'bg-[var(--dashboard-bg)]/90 backdrop-blur-2xl shadow-xl py-0.5 md:py-1 px-2 md:px-8 border border-[var(--dashboard-border)] rounded-full w-fit max-w-[98%] md:max-w-[95%] ring-1 ring-white/5'
-                                    : 'bg-transparent py-2 md:py-4 w-full border-none rounded-none justify-center'
-                                    }`}
-                            >
-                                <div
-                                    className={`lg:hidden shrink-0 flex items-center justify-center transition-all duration-500 overflow-hidden ${isFilterStuck ? 'w-10 opacity-100 mr-2 ml-1 grow-0' : 'w-0 opacity-0'
-                                        }`}
-                                >
-                                    <button
-                                        onClick={() => setIsSidebarOpen(true)}
-                                        className="w-8 h-8 rounded-full flex items-center justify-center bg-[var(--dashboard-accent)]/10 border border-[var(--dashboard-accent)]/20 text-[var(--dashboard-accent)] shadow-sm transform transition-transform hover:scale-105"
-                                    >
-                                        <Menu size={16} />
-                                    </button>
-                                </div>
-
-                                <div className={`relative max-w-full overflow-hidden rounded-full ${!isFilterStuck ? 'flex-1' : ''}`}>
-                                    <div className={`absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollLeft ? 'opacity-100' : 'opacity-0'}`} />
-
-                                    <div
-                                        ref={categoriesScrollRef}
-                                        onScroll={checkScroll}
-                                        className={`flex items-center justify-start md:justify-center overflow-x-auto no-scrollbar scroll-smooth transition-all duration-500 ${isFilterStuck
-                                            ? 'py-1 md:py-1.5 px-4 gap-2 md:gap-6'
-                                            : 'py-2 md:py-4 px-2 gap-4 md:gap-8'
-                                            }`}
-                                    >
-                                        {CATEGORIES.map(cat => (
-                                            <CategoryCircle
-                                                key={cat}
-                                                label={cat}
-                                                active={selectedCategory === cat}
-                                                onClick={() => {
-                                                    setSelectedCategory(cat)
-                                                    const element = document.getElementById('templates')
-                                                    if (element && scrollContainerRef.current) {
-                                                        element.scrollIntoView({ behavior: 'smooth' })
-                                                    }
-                                                }}
-                                                isStuck={isFilterStuck}
-                                            />
-                                        ))}
-                                    </div>
-
-                                    <div className={`absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l ${isFilterStuck ? 'from-[var(--dashboard-bg)]/80' : 'from-transparent'} to-transparent z-10 pointer-events-none transition-opacity duration-500 ${canScrollRight ? 'opacity-100' : 'opacity-0'}`} />
-                                </div>
-                            </div>
-                        </section>
-                        */}
-
-                        {/* Templates Section - Commented out for now
-                        {templateProjects.length > 0 && (
-                            <section id="templates" className="scroll-mt-24 mb-24">
-                                <div className="flex items-center justify-between mb-8">
-                                    <h2 className="text-[20px] font-clean tracking-tight text-[var(--dashboard-text)]">Try a Template</h2>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
-                                    {templateProjects
-                                        .filter(project => {
-                                            const projectCat = project.category || ''
-                                            return projectCat.trim() !== '' &&
-                                                projectCat.toLowerCase() !== 'none' &&
-                                                projectCat.toLowerCase() !== 'undefined'
-                                        })
-                                        .map((project) => (
-                                            <div
-                                                key={project._id}
-                                                className="group cursor-pointer"
-                                                onClick={() => handleDuplicateTemplate(project._id)}
-                                            >
-                                                <TemplateThumbnail project={project} />
-                                                <div className="px-0.5">
-                                                    <h3 className="text-[15px] font-semibold text-[var(--dashboard-text)] group-hover:text-[#7c4af0] transition-colors truncate">{project.name}</h3>
-                                                    <p className="text-[11px] text-[var(--dashboard-text-muted)] mt-1 font-medium uppercase tracking-widest opacity-60">
-                                                        {project.category && project.category !== 'none' ? project.category : 'Template'}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        ))}
-                                </div>
-                            </section>
-                        )}
-                        */}
-
-
                         {/* Editor Updates Section */}
-                        <section id="roadmap" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
+                        <section id="roadmap" className="scroll-mt-24 mb-16 pt-16 border-none">
                             <div className="w-full max-w-2xl">
                                 <h2 className="text-[18px] font-bold tracking-tight text-[var(--dashboard-text)] mb-8">Editor Updates</h2>
-                                
+
                                 <div className="relative pl-6 border-l-2 border-[var(--dashboard-border)] ml-3 space-y-6 py-2">
                                     {[
                                         { label: "Transition between pages", done: true },
@@ -823,11 +918,10 @@ const DashboardPage = () => {
                                     ].map((item, idx) => (
                                         <div key={idx} className="relative flex items-start gap-3.5">
                                             {/* Dot on line */}
-                                            <div className={`absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
-                                                item.done 
-                                                     ? 'bg-emerald-500 border-[var(--dashboard-bg)] text-white shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
-                                                     : 'bg-zinc-700 border-[var(--dashboard-bg)] text-zinc-400 dark:bg-zinc-800'
-                                            }`}>
+                                            <div className={`absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${item.done
+                                                ? 'bg-emerald-500 border-[var(--dashboard-bg)] text-white shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                                                : 'bg-zinc-700 border-[var(--dashboard-bg)] text-zinc-400 dark:bg-zinc-800'
+                                                }`}>
                                                 {item.done && (
                                                     <svg className="w-1.5 h-1.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={5}>
                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -849,26 +943,26 @@ const DashboardPage = () => {
                         </section>
 
                         {/* AI Video Idea Generation Section */}
-                        <section id="ai-idea-generator" className="scroll-mt-24 mb-16 pt-16 border-t border-[var(--dashboard-border)]">
+                        <section id="ai-idea-generator" className="scroll-mt-24 mb-16 pt-16 border-none rounded-none">
                             <div className="w-full">
-                                <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[20px] p-6 space-y-5">
+                                <div className="bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[12px] p-6 space-y-5 shadow-none">
                                     <div className="flex flex-col gap-1">
                                         <h3 className="text-[14px] font-bold text-[var(--dashboard-text)]">
                                             What would you like to see on the editor?
                                         </h3>
-                                        <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">
+                                        {/* <p className="text-[12px] text-[var(--dashboard-text-muted)] font-medium">
                                             Get custom templates for your business, just describe what you want
-                                        </p>
+                                        </p> */}
                                     </div>
 
                                     <form
                                         onSubmit={handleFeedbackSubmit}
                                         className="relative group/input space-y-4"
                                     >
-                                        <div className="flex items-center bg-[var(--dashboard-bg)] border border-[var(--dashboard-border)] rounded-xl px-4 py-3 focus-within:border-slate-500 transition-all">
+                                        <div className="flex items-center bg-[var(--dashboard-card-bg)] border border-[var(--dashboard-border)] rounded-[8px] px-4 py-3 focus-within:border-[var(--dashboard-accent)] transition-all">
                                             {feedbackStatus === 'success' ? (
-                                                <div className="flex items-center justify-center w-full py-1 text-slate-600 dark:text-slate-400 animate-in fade-in zoom-in duration-300">
-                                                    <span className="font-bold text-[13px]">Got it 🙌 This will be available in the next update</span>
+                                                <div className="flex items-center justify-center w-full py-1 text-slate-650 dark:text-slate-400 animate-in fade-in zoom-in duration-300">
+                                                    <span className="font-bold text-[13px] text-[var(--dashboard-text)]">Got it 🙌 This will be available in the next update</span>
                                                 </div>
                                             ) : (
                                                 <>
@@ -883,7 +977,7 @@ const DashboardPage = () => {
                                                     <button
                                                         type="submit"
                                                         disabled={isSubmitDisabled}
-                                                        className="bg-slate-700 dark:bg-slate-600 text-white px-5 py-2 rounded-lg font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        className={`bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent-hover)] ${isLight ? 'text-white' : 'text-[#06121A]'} px-5 py-2 rounded-[8px] font-bold text-[11px] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
                                                     >
                                                         {feedbackStatus === 'loading' ? '...' : 'Submit'}
                                                     </button>
@@ -893,7 +987,7 @@ const DashboardPage = () => {
 
                                         {feedbackStatus !== 'success' && availableExamples.length > 0 && (
                                             <div className="flex flex-col gap-2 pt-1">
-                                                <p className="text-[10px] text-[var(--dashboard-text-muted)]/50 font-bold uppercase tracking-wider">
+                                                <p className="text-[10px] text-[var(--dashboard-text-muted)] font-bold uppercase tracking-wider">
                                                     Popular ideas:
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
@@ -902,10 +996,7 @@ const DashboardPage = () => {
                                                             key={example}
                                                             type="button"
                                                             onClick={() => handleAddExample(example)}
-                                                            className={`px-3 py-1.5 text-[11px] font-semibold rounded-full border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer ${isLight
-                                                                ? 'bg-gray-100 hover:bg-gray-200/80 border-gray-200 text-gray-700 shadow-sm'
-                                                                : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300 shadow-md'
-                                                                }`}
+                                                            className={`px-3 py-1.5 text-[11px] font-semibold rounded-[8px] border transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer bg-[var(--dashboard-card-bg)] hover:bg-[var(--dashboard-card-hover)] border-[var(--dashboard-border)] text-[var(--dashboard-text-muted)]`}
                                                         >
                                                             {example}
                                                         </button>
@@ -919,7 +1010,7 @@ const DashboardPage = () => {
                         </section>
 
                         {/* High Usage System Notice - Styled to be very soft, compact, and completely neutral */}
-                        <div className="mt-8 p-3 rounded-xl border border-[var(--dashboard-border)] bg-[var(--dashboard-card-bg)]/40 flex items-center justify-center gap-2.5 text-[var(--dashboard-text-muted)] max-w-3xl mx-auto opacity-75 hover:opacity-100 transition-opacity">
+                        <div className="mt-8 p-3 rounded-[8px] border border-[var(--dashboard-border)] bg-[var(--dashboard-card-bg)] flex items-center justify-center gap-2.5 text-[var(--dashboard-text-muted)] max-w-3xl mx-auto opacity-75 hover:opacity-100 transition-opacity">
                             <svg className="w-4 h-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
@@ -930,7 +1021,7 @@ const DashboardPage = () => {
                     </div>
 
                     {/* Footer */}
-                    <footer className="mt-auto px-4 md:px-10 py-12 border-t border-[var(--dashboard-border)] flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
+                    <footer className="mt-auto px-4 md:px-10 py-12 border-none flex flex-col md:flex-row items-center justify-between text-[var(--dashboard-text-muted)] text-[11px] font-semibold gap-4">
                         <div className="flex items-center gap-6">
                             <span>© {new Date().getFullYear()} Vevara Motion</span>
                         </div>
@@ -964,14 +1055,14 @@ const DashboardPage = () => {
                         <button
                             disabled={isDeleting}
                             onClick={() => setProjectToDelete(null)}
-                            className="h-10 flex-1 bg-[var(--dashboard-card-bg)] text-[var(--dashboard-text)] rounded-lg text-[13px] font-semibold border border-[var(--dashboard-border)] disabled:opacity-50"
+                            className="h-10 flex-1 bg-[var(--dashboard-card-bg)] text-[var(--dashboard-text)] rounded-[8px] text-[13px] font-semibold border border-[var(--dashboard-border)] disabled:opacity-50"
                         >
                             Cancel
                         </button>
                         <button
                             disabled={isDeleting}
                             onClick={confirmDeleteProject}
-                            className="h-10 flex-1 bg-rose-500 text-white rounded-lg text-[13px] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-rose-600 transition-colors"
+                            className="h-10 flex-1 bg-rose-500 text-white rounded-[8px] text-[13px] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-rose-600 transition-colors"
                         >
                             {isDeleting ? (
                                 <>
@@ -1002,37 +1093,43 @@ const DashboardPage = () => {
                 onCreate={handleCreateFromConfig}
             />
 
-            <div className={`fixed left-1/2 -translate-x-1/2 z-[999] transition-all duration-500 ease-out w-max max-w-[95vw] ${
-                                                isSelectionMode 
-                                                    ? 'bottom-16 opacity-100 scale-100' 
-                                                    : 'bottom-0 opacity-0 scale-95 pointer-events-none'
-                                            }`}>
-                                                <div className={`flex items-center gap-3 md:gap-6 px-4 md:px-6 py-3 rounded-full border shadow-2xl whitespace-nowrap ${
-                                                    isLight 
-                                                        ? 'bg-white border-slate-200 text-slate-800' 
-                                                        : 'bg-slate-900 border-slate-800 text-white'
-                                                }`}>
-                                                    <button
-                                                        onClick={() => setSelectedProjectIds([])}
-                                                        className={`w-7 h-7 flex items-center justify-center rounded-full transition-all shrink-0 ${
-                                                            isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/5 text-slate-400'
-                                                        }`}
-                                                    >
-                                                        <X size={15} />
-                                                    </button>
-                                                    <span className="text-[13px] font-semibold tracking-wide shrink-0">
-                                                        {selectedProjectIds.length} selected
-                                                    </span>
-                                                    <div className={`w-px h-5 shrink-0 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
-                                                    <button
-                                                        onClick={() => setIsBulkDeleteConfirmOpen(true)}
-                                                        className="flex items-center gap-1.5 bg-rose-500 hover:bg-rose-600 text-white text-[12px] md:text-[13px] font-semibold px-4 md:px-5 py-2 rounded-full shadow-md transition-all shrink-0 animate-pulse"
-                                                    >
-                                                        <Trash2 size={13} />
-                                                        <span>Delete</span>
-                                                    </button>
-                                                </div>
-                                            </div>
+            <ExamplePreviewModal
+                isOpen={isPreviewModalOpen}
+                onClose={() => setIsPreviewModalOpen(false)}
+                selectedTemplate={selectedTemplateForPreview}
+                templates={displayTemplates}
+                onCopyAndCustomize={handleCopyAndCustomizeTemplate}
+                isLight={isLight}
+            />
+
+            <div className={`fixed left-1/2 -translate-x-1/2 z-[999] transition-all duration-500 ease-out w-max max-w-[95vw] ${isSelectionMode
+                ? 'bottom-16 opacity-100 scale-100'
+                : 'bottom-0 opacity-0 scale-95 pointer-events-none'
+                }`}>
+                <div className={`flex items-center gap-3 md:gap-6 px-4 md:px-6 py-3 rounded-full border shadow-2xl whitespace-nowrap ${isLight
+                    ? 'bg-white border-slate-200 text-slate-800'
+                    : 'bg-slate-900 border-slate-800 text-white'
+                    }`}>
+                    <button
+                        onClick={() => setSelectedProjectIds([])}
+                        className={`w-7 h-7 flex items-center justify-center rounded-full transition-all shrink-0 ${isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/5 text-slate-400'
+                            }`}
+                    >
+                        <X size={15} />
+                    </button>
+                    <span className="text-[13px] font-semibold tracking-wide shrink-0">
+                        {selectedProjectIds.length} selected
+                    </span>
+                    <div className={`w-px h-5 shrink-0 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+                    <button
+                        onClick={() => setIsBulkDeleteConfirmOpen(true)}
+                        className="flex items-center gap-1.5 bg-rose-500 hover:bg-rose-600 text-white text-[12px] md:text-[13px] font-semibold px-4 md:px-5 py-2 rounded-full shadow-md transition-all shrink-0"
+                    >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                    </button>
+                </div>
+            </div>
 
             <Modal
                 isOpen={isBulkDeleteConfirmOpen}

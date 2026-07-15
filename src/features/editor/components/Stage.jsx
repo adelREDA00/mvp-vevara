@@ -22,7 +22,7 @@ import {
   Unlock,
   ArrowLeft,
 } from 'lucide-react'
-import { useDispatch, useSelector } from 'react-redux'
+import { useDispatch, useSelector, useStore } from 'react-redux'
 import { createSelector } from '@reduxjs/toolkit'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useContainerResize } from '../hooks/useContainerResize'
@@ -36,13 +36,17 @@ import { useDragState } from '../hooks/useDragState'
 import { useDragSelectionBox } from '../hooks/useDragSelectionBox'
 import { useMultiSelectionBox } from '../hooks/useMultiSelectionBox'
 import TextEditOverlay from './TextEditOverlay'
+import EmptyStateCanvas from './EmptyStateCanvas'
+import SampleModal from './SampleModal'
 import { isLayerCompletelyOutside, getEffectiveLayerDimensions } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
 import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
-import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock, addAudioTrack } from '../../../store/slices/projectSlice'
+import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock, addAudioTrack, consumeEmptyState, selectIsEmptyStateConsumed, selectSceneHasContentLayers } from '../../../store/slices/projectSlice'
+import { startBatchUpload, fetchUploads, getVideoDimensions, getImageThumbnail, getAudioMetadata } from '../../../store/slices/uploadsSlice'
 import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget, showFramePlaceholderFallback, highlightFrameDropTarget } from '../../engine/pixi/createLayer'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
+import { storeAsset, getAssetUrl } from '../../../services/localAssetService'
 
 // =============================================================================
 // MEMOIZED SELECTORS
@@ -140,6 +144,7 @@ function Stage({
   // =============================================================================
 
   const dispatch = useDispatch()
+  const store = useStore()
 
 
   // Component state
@@ -147,7 +152,6 @@ function Stage({
   const [contextMenu, setContextMenu] = useState(null)
   const [subMenu, setSubMenu] = useState(null) // 'position' or null
   const subMenuTimerRef = useRef(null)
-
 
   // Refs
   const containerRef = useRef(null)
@@ -176,6 +180,17 @@ function Stage({
 
   // Redux state - memoized combined selectors for optimal performance
   const { selectedLayerIds, selectedCanvas, layers, currentSceneId, currentScene, sceneMotionFlows, scenes, timelineInfo } = useSelector(selectStageState)
+
+  // Empty state — defined AFTER currentSceneId to avoid "Cannot access before initialization" error
+  const [showSampleModal, setShowSampleModal] = useState(false)
+  const emptyStateFileInputRef = useRef(null)
+  const emptyStateConsumed = useSelector((state) =>
+    currentSceneId ? selectIsEmptyStateConsumed(state, currentSceneId) : false
+  )
+  const sceneHasContentLayers = useSelector((state) =>
+    currentSceneId ? selectSceneHasContentLayers(state, currentSceneId) : false
+  )
+  // showEmptyState is computed via useMemo below, after isReady is defined
 
   // =============================================================================
   // CANVAS DIMENSIONS & ASPECT RATIO
@@ -344,6 +359,12 @@ function Stage({
   // Stage.jsx passes layerObjects to useSimpleMotion
   // Motion playback hook - now uses scene-based motion flows
   const { playAll, pauseAll, stopAndSeekToSceneStart, pausePlayback, stopAll, seek, tweenTo, isPlaying, isBuffering, prepareEngine } = useSimpleMotion(layerObjects, currentSceneId, totalTime, null, motionCaptureMode, stageContainer, editingTextLayerId)
+
+  // Compute showEmptyState after isReady, error, and isPlaying are all available
+  const showEmptyState = useMemo(() =>
+    isReady && !error && !emptyStateConsumed && !sceneHasContentLayers && !isPlaying && !previewMode && !motionCaptureMode?.isActive,
+    [isReady, error, emptyStateConsumed, sceneHasContentLayers, isPlaying, previewMode, motionCaptureMode?.isActive]
+  )
 
   // Helper to get current transforms from PIXI objects (for accurate motion capture sync)
   const getLayerCurrentTransforms = useCallback(() => {
@@ -1655,7 +1676,7 @@ function Stage({
         const x = e.clientX - rect.left
         const y = e.clientY - rect.top
         const worldPos = viewport.toWorld(x, y)
-        
+
         if (worldPos) {
           const dropX = worldPos.x
           const dropY = worldPos.y
@@ -1663,33 +1684,33 @@ function Stage({
           for (const [frameId, frameLayer] of Object.entries(layers)) {
             if (frameLayer.type !== 'frame') continue
             if (frameLayer.sceneId !== currentSceneId) continue
-            
+
             const frameObj = layerObjects?.get(frameId)
             if (!frameObj || frameObj.destroyed) continue
-            
+
             const fx = frameLayer.x || 0
             const fy = frameLayer.y || 0
             const fw = frameLayer.width || 100
             const fh = frameLayer.height || 100
             const fax = frameLayer.anchorX ?? 0.5
             const fay = frameLayer.anchorY ?? 0.5
-            
+
             const left = fx - fw * fax
             const right = fx + fw * (1 - fax)
             const top = fy - fh * fay
             const bottom = fy + fh * (1 - fay)
-            
+
             if (dropX >= left && dropX <= right && dropY >= top && dropY <= bottom) {
               const isCardFrame = frameLayer.data?.isCardFrame
               const currentShowingFront = frameObj?._showingFront !== undefined
                 ? frameObj._showingFront
                 : (frameLayer.data?.showingFront !== false)
               const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
-              
+
               const isLocked = !!(isCardFrame
                 ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
                 : frameLayer.data?.isLockedDrop)
-                
+
               if (!isLocked) {
                 overlappingFrameId = frameId
                 overlappingFrameLayer = frameLayer
@@ -1793,37 +1814,37 @@ function Stage({
       // Check if dropped onto a Frame layer
       let overlappingFrameId = null
       let overlappingFrameLayer = null
-      
+
       for (const [frameId, frameLayer] of Object.entries(layers)) {
         if (frameLayer.type !== 'frame') continue
         if (frameLayer.sceneId !== currentSceneId) continue
-        
+
         const frameObj = layerObjects?.get(frameId)
         if (!frameObj || frameObj.destroyed) continue
-        
+
         const fx = frameLayer.x || 0
         const fy = frameLayer.y || 0
         const fw = frameLayer.width || 100
         const fh = frameLayer.height || 100
         const fax = frameLayer.anchorX ?? 0.5
         const fay = frameLayer.anchorY ?? 0.5
-        
+
         const left = fx - fw * fax
         const right = fx + fw * (1 - fax)
         const top = fy - fh * fay
         const bottom = fy + fh * (1 - fay)
-        
+
         if (dropX >= left && dropX <= right && dropY >= top && dropY <= bottom) {
           const isCardFrame = frameLayer.data?.isCardFrame
           const currentShowingFront = frameObj?._showingFront !== undefined
             ? frameObj._showingFront
             : (frameLayer.data?.showingFront !== false)
           const side = isCardFrame && currentShowingFront === false ? 'back' : 'front'
-          
+
           const isLocked = !!(isCardFrame
             ? (side === 'back' ? frameLayer.data?.backIsLockedDrop : frameLayer.data?.frontIsLockedDrop)
             : frameLayer.data?.isLockedDrop)
-            
+
           if (!isLocked) {
             overlappingFrameId = frameId
             overlappingFrameLayer = frameLayer
@@ -1918,8 +1939,8 @@ function Stage({
         // Check if dropped inside a sidebar or a panel container
         const elem = document.elementFromPoint(x, y)
         if (elem && (
-          elem.closest('.editor-panel-container') || 
-          elem.closest('[class*="Sidebar"]') || 
+          elem.closest('.editor-panel-container') ||
+          elem.closest('[class*="Sidebar"]') ||
           elem.closest('[class*="sidebar"]') ||
           elem.closest('[data-panel]') ||
           elem.closest('.left-sidebar')
@@ -1994,6 +2015,277 @@ function Stage({
       window.removeEventListener('asset-drag-drop', handleCustomDragDrop)
     }
   }, [handleCustomDragMove, handleCustomDragDrop])
+
+  // =============================================================================
+  // EMPTY STATE HANDLERS
+  // =============================================================================
+
+  const handleEmptyStateUpload = useCallback(() => {
+    // Create a synthetic click on a hidden file input to start the upload
+    // After file selection, we dispatch addLayerAndSelect via existing logic
+    if (emptyStateFileInputRef.current) {
+      emptyStateFileInputRef.current.click()
+    }
+  }, [])
+
+  // Get auth status for upload routing
+  const isAuthenticated = useSelector((state) => state.auth.isAuthenticated)
+
+  // Canvas rect ref for SampleModal positioning
+  const [canvasRect, setCanvasRect] = useState(null)
+
+  /**   * Helper: get image/video dimensions and metadata from a file
+   */
+  const getAssetMetadata = useCallback(async (file) => {
+    if (file.type.startsWith('image/')) {
+      return getImageThumbnail(file)
+    } else if (file.type.startsWith('video/')) {
+      return getVideoDimensions(file)
+    } else if (file.type.startsWith('audio/')) {
+      const audioMeta = await getAudioMetadata(file)
+      return { width: 0, height: 0, duration: audioMeta.duration, waveform: audioMeta.waveform || [] }
+    }
+    return { width: 0, height: 0, duration: 0 }
+  }, [])
+
+  /**
+   * Helper: insert a layer into the scene with standard sizing and correct metadata
+   */
+  const insertLayerFromAsset = useCallback((url, name, assetWidth, assetHeight, isVideo, duration = 0, metadata = {}, localAssetId = null) => {
+    const maxSize = 400
+    let finalWidth = assetWidth
+    let finalHeight = assetHeight
+    if (finalWidth > maxSize || finalHeight > maxSize) {
+      const scale = maxSize / Math.max(finalWidth, finalHeight)
+      finalWidth *= scale
+      finalHeight *= scale
+    }
+
+    dispatch(addLayerAndSelect({
+      sceneId: currentSceneId,
+      type: isVideo ? 'video' : 'image',
+      name: name || (isVideo ? 'Video' : 'Image'),
+      x: worldWidth / 2,
+      y: worldHeight / 2,
+      width: finalWidth,
+      height: finalHeight,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      mediaWidth: assetWidth,
+      mediaHeight: assetHeight,
+      data: {
+        url,
+        src: url,
+        duration,
+        ...metadata,
+        ...(localAssetId ? { _localAssetId: localAssetId } : {}),
+      },
+    }))
+  }, [dispatch, currentSceneId, worldWidth, worldHeight])
+
+  /**
+   * Helper: register a guest asset in localStorage so UploadsPanel can show it
+   */
+  const registerGuestAsset = useCallback((assetId, file, blobUrl, width = 0, height = 0, duration = 0, thumbnail = null, waveform = []) => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('vevara_guest_assets') || '[]')
+      const mimeType = file.type
+      const assetType = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'image'
+      stored.unshift({
+        _id: assetId,
+        id: assetId,
+        name: file.name,
+        url: blobUrl,
+        type: assetType,
+        assetType,
+        metadata: {
+          mimeType,
+          type: mimeType,
+          width,
+          height,
+          duration,
+          size: file.size,
+          thumbnail,
+          waveform,
+        },
+        uploadedAt: Date.now(),
+        createdAt: Date.now(),
+      })
+      localStorage.setItem('vevara_guest_assets', JSON.stringify(stored))
+      // Fire event so UploadsPanel can refresh
+      window.dispatchEvent(new CustomEvent('vevara:guest-asset-added'))
+    } catch (_) { /* non-critical */ }
+  }, [])
+
+  // Handle the upload from the empty state file input — integrates with existing upload pipeline
+  useEffect(() => {
+    const input = emptyStateFileInputRef.current
+    if (!input) return
+
+    const handleFileChange = async (e) => {
+      const files = e.target.files
+      if (!files || files.length === 0) return
+      const file = files[0]
+      const isVideo = file.type.startsWith('video/')
+
+      if (isAuthenticated) {
+        // Authenticated: upload to server via existing startBatchUpload
+        dispatch(startBatchUpload({ files }))
+          .unwrap()
+          .then(() => {
+            // After batch upload completes, fetch the updated upload list
+            return dispatch(fetchUploads()).unwrap()
+          })
+          .then((uploadedData) => {
+            // Find the newly uploaded asset in the response
+            if (Array.isArray(uploadedData) && uploadedData.length > 0) {
+              const newAsset = uploadedData.find(
+                (item) => item.name === file.name || item.originalName === file.name
+              )
+              if (newAsset && newAsset.url) {
+                const assetWidth = newAsset.metadata?.width || 300
+                const assetHeight = newAsset.metadata?.height || 200
+                const assetDuration = newAsset.metadata?.duration || 0
+                insertLayerFromAsset(newAsset.url, file.name, assetWidth, assetHeight, isVideo, assetDuration, newAsset.metadata)
+                dispatch(consumeEmptyState(currentSceneId))
+              }
+            }
+          })
+          .catch(() => {
+            // Upload failed — still add to canvas with blob URL as fallback
+            imageFallbackInsert(file, isVideo)
+          })
+      } else {
+        // Guest: store via localAssetService, same flow as UploadsPanel
+        try {
+          const stored = await storeAsset(file)
+          const blobUrl = URL.createObjectURL(file)
+
+          // Get metadata using uploads thunk helpers
+          const dimensions = await getAssetMetadata(file)
+
+          // Register in UploadsPanel via localStorage + event
+          registerGuestAsset(
+            stored.id,
+            file,
+            blobUrl,
+            dimensions.width,
+            dimensions.height,
+            dimensions.duration,
+            dimensions.thumbnail,
+            dimensions.waveform
+          )
+
+          // Then insert into scene
+          insertLayerFromAsset(
+            blobUrl,
+            file.name,
+            dimensions.width || 300,
+            dimensions.height || 200,
+            isVideo,
+            dimensions.duration,
+            dimensions,
+            stored.id
+          )
+          dispatch(consumeEmptyState(currentSceneId))
+        } catch (err) {
+          console.warn('[EmptyState] Guest asset storage failed:', err)
+          imageFallbackInsert(file, isVideo)
+        }
+      }
+
+      e.target.value = ''
+    }
+
+    const imageFallbackInsert = async (file, isVideo) => {
+      const blobUrl = URL.createObjectURL(file)
+      const dimensions = await getAssetMetadata(file)
+      insertLayerFromAsset(
+        blobUrl,
+        file.name,
+        dimensions.width || 300,
+        dimensions.height || 200,
+        isVideo,
+        dimensions.duration,
+        dimensions
+      )
+      dispatch(consumeEmptyState(currentSceneId))
+    }
+
+    input.addEventListener('change', handleFileChange)
+    return () => input.removeEventListener('change', handleFileChange)
+  }, [dispatch, currentSceneId, worldWidth, worldHeight, isAuthenticated, insertLayerFromAsset, registerGuestAsset, getAssetMetadata])
+
+  const handleSampleSelect = useCallback(async (sample) => {
+    const sampleUrl = sample.thumbnail
+    if (!sampleUrl) return
+
+    try {
+      const response = await fetch(sampleUrl)
+      const blob = await response.blob()
+      const file = new File([blob], sample.name || 'sample.png', { type: blob.type || 'image/png' })
+
+      if (isAuthenticated) {
+        // Upload to server via existing pipeline
+        dispatch(startBatchUpload({ files: [file] }))
+          .unwrap()
+          .then(() => dispatch(fetchUploads()).unwrap())
+          .then((uploadedData) => {
+            if (Array.isArray(uploadedData) && uploadedData.length > 0) {
+              const newAsset = uploadedData.find(
+                (item) => item.name === file.name || item.originalName === file.name
+              )
+              const assetUrl = newAsset?.url || sampleUrl
+              const assetWidth = newAsset?.metadata?.width || 400
+              const assetHeight = newAsset?.metadata?.height || 250
+              insertLayerFromAsset(assetUrl, sample.name || 'Sample Image', assetWidth, assetHeight, false)
+              dispatch(consumeEmptyState(currentSceneId))
+            }
+          })
+          .catch(() => {
+            // Fallback: insert directly with sample URL
+            insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
+            dispatch(consumeEmptyState(currentSceneId))
+          })
+      } else {
+        // Guest: store locally then insert
+        try {
+          const stored = await storeAsset(file)
+          const blobUrl = URL.createObjectURL(file)
+          const dimensions = await getAssetMetadata(file)
+          registerGuestAsset(
+            stored.id,
+            file,
+            blobUrl,
+            dimensions.width,
+            dimensions.height,
+            dimensions.duration,
+            dimensions.thumbnail,
+            dimensions.waveform
+          )
+          insertLayerFromAsset(
+            blobUrl,
+            sample.name || 'Sample Image',
+            dimensions.width || 400,
+            dimensions.height || 250,
+            false,
+            dimensions.duration,
+            dimensions,
+            stored.id
+          )
+        } catch (_) {
+          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
+        }
+        dispatch(consumeEmptyState(currentSceneId))
+      }
+    } catch (_) {
+      // Network fetch failed — insert directly
+      insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false)
+      dispatch(consumeEmptyState(currentSceneId))
+    }
+
+    setShowSampleModal(false)
+  }, [dispatch, currentSceneId, isAuthenticated, insertLayerFromAsset, registerGuestAsset, getAssetMetadata])
 
   // =============================================================================
   // RENDER
@@ -2116,16 +2408,37 @@ function Stage({
           /* Initializing state — only when Pixi is starting up and no error */
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 0 }}>
             <div className="flex flex-col items-center gap-2">
-              <div className={`w-5 h-5 border-[1.5px] rounded-full animate-spin ${
-                theme === 'light' ? 'border-black/10 border-t-black/40' : 'border-white/10 border-t-white/40'
-              }`} />
-              <p className={`text-[10px] font-medium tracking-wider uppercase ${
-                theme === 'light' ? 'text-black/30' : 'text-white/20'
-              }`}>Initializing</p>
+              <div className={`w-5 h-5 border-[1.5px] rounded-full animate-spin ${theme === 'light' ? 'border-black/10 border-t-black/40' : 'border-white/10 border-t-white/40'
+                }`} />
+              <p className={`text-[10px] font-medium tracking-wider uppercase ${theme === 'light' ? 'text-black/30' : 'text-white/20'
+                }`}>Initializing</p>
             </div>
           </div>
         ) : null}
 
+
+        {/* Empty State Canvas — shown when scene has no content layers */}
+        {showEmptyState && !editingTextLayerId && (
+          <EmptyStateCanvas
+            onUpload={handleEmptyStateUpload}
+            onTrySample={() => {
+              if (canvasWrapperRef.current) {
+                setCanvasRect(canvasWrapperRef.current.getBoundingClientRect())
+              }
+              setShowSampleModal(true)
+            }}
+            theme={theme}
+            zoom={effectiveZoom}
+          />
+        )}
+
+        {/* Hidden file input for empty state upload */}
+        <input
+          ref={emptyStateFileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          className="hidden"
+        />
 
         {/* Text Edit Overlay */}
         {(() => {
@@ -2146,6 +2459,18 @@ function Stage({
 
 
       {contextMenuElement}
+
+      {/* Sample Modal — portaled to document.body to render at editor level */}
+      {showSampleModal && createPortal(
+        <SampleModal
+          isOpen={showSampleModal}
+          onSelect={handleSampleSelect}
+          onClose={() => setShowSampleModal(false)}
+          theme={theme}
+          canvasRect={canvasRect}
+        />,
+        document.body
+      )}
     </div>
   )
 }

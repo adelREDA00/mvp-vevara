@@ -4500,7 +4500,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
               duration: draggedLayer.data?.duration,
               sourceStartTime: draggedLayer.data?.sourceStartTime,
               sourceEndTime: draggedLayer.data?.sourceEndTime,
-              thumbnail: draggedLayer.data?.thumbnail || null
+              thumbnail: draggedLayer.data?.thumbnail || null,
+              _localAssetId: draggedLayer.data?._localAssetId || null
             }))
             if (frameObj) {
               // [FIX] Clear the drop target flag so the sync loop is not blocked
