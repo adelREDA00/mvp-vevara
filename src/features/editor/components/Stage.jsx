@@ -2254,6 +2254,7 @@ function Stage({
       const file = new File([blob], filename, { type: blob.type || 'image/png' })
 
       const blobUrl = URL.createObjectURL(file)
+      const dimensions = await getAssetMetadata(file)
       const layerId = uid()
 
       if (isAuthenticated) {
@@ -2261,8 +2262,8 @@ function Stage({
         insertLayerFromAsset(
           blobUrl,
           sample.name || 'Sample Image',
-          400,
-          250,
+          dimensions.width || 400,
+          dimensions.height || 250,
           false,
           0,
           { thumbnail: sample.thumbnail },
@@ -2294,7 +2295,6 @@ function Stage({
         // Guest: store locally then insert
         try {
           const stored = await storeAsset(file)
-          const dimensions = await getAssetMetadata(file)
           registerGuestAsset(
             stored.id,
             file,
@@ -2317,7 +2317,7 @@ function Stage({
             layerId
           )
         } catch (_) {
-          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', 400, 250, false, 0, { thumbnail: sample.thumbnail }, null, layerId)
+          insertLayerFromAsset(sampleUrl, sample.name || 'Sample Image', dimensions.width || 400, dimensions.height || 250, false, 0, { thumbnail: sample.thumbnail }, null, layerId)
         }
         dispatch(consumeEmptyState(currentSceneId))
       }
