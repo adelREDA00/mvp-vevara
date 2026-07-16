@@ -263,7 +263,15 @@ const AudioBlock = React.memo(function AudioBlock({
     const performAudioResize = (clientX) => {
       if (!dragRef.current) return
       const deltaX = clientX - dragRef.current.startX
-      const scrollDelta = scrollContainer ? (scrollContainer.scrollLeft - startScrollLeftRef.current) : 0
+      let scrollDelta = 0
+      if (scrollContainer) {
+        const currentScrollLeft = scrollContainer.scrollLeft
+        if (dragRef.current.type === 'resize-right') {
+          scrollDelta = Math.max(0, currentScrollLeft - startScrollLeftRef.current)
+        } else {
+          scrollDelta = Math.min(0, currentScrollLeft - startScrollLeftRef.current)
+        }
+      }
       const adjustedDeltaX = deltaX + scrollDelta
       const secPerPx = 1.0 / calculateWidthFromDuration(1.0)
       const dSec = adjustedDeltaX * secPerPx
@@ -349,7 +357,7 @@ const AudioBlock = React.memo(function AudioBlock({
         const speedMultiplier = isShrinking ? 0 : 1.0
         checkAutoScroll(clientX, scrollContainer, resizeScrollTimerRef, () => {
           performAudioResize(lastClientXRef.current)
-        }, speedMultiplier)
+        }, speedMultiplier, dragRef.current.type === 'resize-left')
       }
     }
 

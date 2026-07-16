@@ -7,6 +7,20 @@ import {
   Undo2, Redo2,
 } from 'lucide-react'
 
+function getLayerTypeLabel(layer) {
+  if (!layer) return 'Element'
+  switch (layer.type) {
+    case 'image': return 'Image layer'
+    case 'video': return 'Video layer'
+    case 'shape': return 'Shape layer'
+    case 'text': return 'Text layer'
+    case 'group': return 'Group'
+    case 'background': return 'Background'
+    case 'frame': return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
+    default: return 'Element'
+  }
+}
+
 function MobileMotionBar({
   motionFlow = [],
   isMotionCaptureActive = false,
@@ -356,7 +370,7 @@ function MobileMotionBar({
                             ? isLight ? 'text-[#2d1b4e]' : 'text-purple-100'
                             : isLight ? 'text-slate-700' : 'text-zinc-300'
                             }`}>
-                            {layer?.name || 'Element'}
+                             {getLayerTypeLabel(layer)}
                           </span>
                           {actionTags.slice(0, 3).map((tag, i) => (
                             <span

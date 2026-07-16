@@ -206,7 +206,7 @@ export const AssetCard = React.memo(function AssetCard({
 
         {/* Centered play button overlay */}
         {!isDisabled && (
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute inset-0 bg-black/20 flex items-center justify-center transition-opacity">
             <button
               data-audio-preview-btn
               onClick={(e) => {

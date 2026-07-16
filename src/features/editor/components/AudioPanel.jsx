@@ -1,23 +1,23 @@
 import { useState, useEffect, useRef, useContext, useCallback } from 'react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { X, Play, Pause, Music, Loader2, AlertCircle } from 'lucide-react'
+import { X, Music, Loader2, AlertCircle, Play, Pause } from 'lucide-react'
 import api from '../../../api/client'
 
-const BATCH_SIZE = 6
+const BATCH_SIZE = 12 // List items are smaller, so we can load more per batch
 
-const GRADIENTS = [
+const gradients = [
   'from-pink-500 to-rose-500',
   'from-purple-600 to-indigo-600',
   'from-amber-400 to-orange-500',
   'from-teal-400 to-cyan-500',
-  'from-green-400 to-emerald-500',
+  'from-green-400 to-emerald-500'
 ]
 
 const formatDuration = (seconds) => {
-  if (!seconds) return '0:00'
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
+  if (!seconds) return '00:00'
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0')
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
 }
 
 function AudioPanel({ onClose, onAddAudioTrack }) {
@@ -150,16 +150,16 @@ function AudioPanel({ onClose, onAddAudioTrack }) {
         </div>
       )}
 
-      {/* Audio List Container */}
+      {/* Audio Grid Container */}
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar scrollbar-hide flex flex-col gap-3">
         {isInitialLoad && isFetching ? (
           <div className="flex flex-col gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className={`flex items-center gap-3 p-2 rounded-xl animate-pulse ${isLight ? 'bg-black/5' : 'bg-white/5'}`}>
-                <div className="w-12 h-12 rounded-full bg-slate-300/30 shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 bg-slate-300/30 rounded w-3/4" />
-                  <div className="h-2.5 bg-slate-300/30 rounded w-1/2" />
+              <div key={i} className={`flex items-center gap-3.5 p-2.5 rounded-xl border animate-pulse ${isLight ? 'bg-black/5 border-slate-100' : 'bg-white/5 border-white/5'}`}>
+                <div className="w-11 h-11 rounded-full bg-slate-300/30 shrink-0" />
+                <div className="flex-1 flex flex-col gap-2">
+                  <div className="h-3 bg-slate-300/30 rounded w-2/3" />
+                  <div className="h-2 bg-slate-300/30 rounded w-1/3" />
                 </div>
               </div>
             ))}
@@ -175,69 +175,64 @@ function AudioPanel({ onClose, onAddAudioTrack }) {
           </div>
         ) : (
           <>
-            {sharedAssets.map((track, index) => {
-              const trackId = track._id || track.id
-              const isPlaying = playingTrackId === trackId
-              const gradient = GRADIENTS[index % GRADIENTS.length]
+            <div className="flex flex-col gap-2.5">
+              {sharedAssets.map((track) => {
+                const trackId = track._id || track.id
+                const trackName = track.name || track.metadata?.name || 'Audio Track'
+                const trackDurationRaw = track.metadata?.duration || track.duration || 0
+                const durationText = formatDuration(trackDurationRaw)
+                const isPlaying = playingTrackId === trackId
 
-              return (
-                <div
-                  key={trackId}
-                  className={`flex items-center justify-between p-2 rounded-xl transition-all duration-200 group ${
-                    isLight ? 'hover:bg-black/5' : 'hover:bg-white/5'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      className="relative w-12 h-12 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center cursor-pointer shadow-sm"
-                      onClick={() => handlePlayPause(track)}
-                    >
-                      <div className={`absolute inset-0 bg-gradient-to-tr ${gradient} flex items-center justify-center`}>
-                        <Music className="h-5 w-5 text-white/70" />
+                const gradIndex = Math.abs((trackName || '').charCodeAt(0) || 0) % gradients.length
+                const gradientClass = gradients[gradIndex]
+
+                return (
+                  <div
+                    key={trackId}
+                    onClick={() => onAddAudioTrack(track)}
+                    className={`flex items-center gap-3.5 p-2.5 rounded-xl transition-all cursor-pointer ${isLight
+                      ? 'hover:bg-slate-50'
+                      : 'hover:bg-[#1b1c26]'
+                      }`}
+                  >
+                    {/* Left Side: Circular Profile with Play Button always on top */}
+                    <div className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden shadow-sm">
+                      {/* Gradient background */}
+                      <div className={`absolute inset-0 bg-gradient-to-tr ${gradientClass} flex items-center justify-center`}>
+                        <Music className="h-5 w-5 text-white/40" />
                       </div>
-
-                      <div className={`absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity duration-200 ${
-                        isPlaying ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}>
-                        {isPlaying ? (
-                          <Pause className="h-5 w-5 text-white fill-white" />
-                        ) : (
-                          <Play className="h-5 w-5 text-white fill-white ml-0.5" />
-                        )}
+                      {/* Play/Pause Button overlay - always visible, semi-transparent black background, white icon */}
+                      <div className="absolute inset-0 bg-black/35 flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation() // Prevent triggering row click insertion
+                            handlePlayPause(track)
+                          }}
+                          className="w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+                        >
+                          {isPlaying ? (
+                            <Pause className="h-3.5 w-3.5 fill-white text-white" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 fill-white text-white ml-0.5" />
+                          )}
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex flex-col min-w-0">
-                      <span
-                        className={`text-[13px] font-semibold truncate ${
-                          isLight ? 'text-gray-900' : 'text-white'
-                        }`}
-                      >
-                        {track.name}
+                    {/* Right Side: Name and Duration */}
+                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                      <span className={`text-xs font-semibold truncate ${isLight ? 'text-slate-800' : 'text-zinc-200'}`}>
+                        {trackName}
                       </span>
-                      <span
-                        className={`text-[11px] truncate mt-0.5 ${
-                          isLight ? 'text-gray-500' : 'text-white/40'
-                        }`}
-                      >
-                        Designer • {formatDuration(track.metadata?.duration)}
+                      <span className={`text-[10px] font-medium ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>
+                        {durationText}
                       </span>
                     </div>
                   </div>
-
-                  <button
-                    onClick={() => onAddAudioTrack?.(track)}
-                    className={`flex-shrink-0 ml-2 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all duration-200 ${
-                      isLight
-                        ? 'bg-purple-50 hover:bg-[#7c4af0] text-[#7c4af0] hover:text-white border border-purple-100'
-                        : 'bg-white/8 hover:bg-[#7c4af0] text-white hover:text-white border border-transparent'
-                    }`}
-                  >
-                    Add
-                  </button>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
             {hasMore && (
               <div ref={sentinelRef} className="h-14 flex items-center justify-center mt-2">
                 <Loader2 className="h-5 w-5 animate-spin text-[#7c4af0]" />

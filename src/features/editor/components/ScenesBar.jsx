@@ -28,7 +28,7 @@ function useDebounce(value, delay) {
 }
 
 // Standalone utility to auto-scroll a container based on cursor X coordinate
-export const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll, speedMultiplier = 1) => {
+export const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll, speedMultiplier = 1, allowLeftScroll = true) => {
   if (!container) {
     if (scrollTimerRef.current) {
       const timer = typeof scrollTimerRef.current === 'object' && 'timer' in scrollTimerRef.current
@@ -49,7 +49,7 @@ export const checkAutoScroll = (clientX, container, scrollTimerRef, onScroll, sp
   if (rightDist < threshold && rightDist > -100) {
     const ratio = Math.max(0, (threshold - rightDist) / threshold)
     speed = Math.round(ratio * 12) + 4 // speed range: 4px to 16px
-  } else if (leftDist < threshold && leftDist > -100) {
+  } else if (allowLeftScroll && leftDist < threshold && leftDist > -100) {
     const ratio = Math.max(0, (threshold - leftDist) / threshold)
     speed = -Math.round(ratio * 12) - 4
   }
@@ -953,7 +953,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     const borderThreshold = isTouchDevice() ? 24 : 16
-    
+
     // Check if mouse is vertically within the scene card body (not in the steps area above)
     if (y < 0 || y > height) {
       setHoveredSide(null)
@@ -990,7 +990,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', index.toString())
-      
+
       // Hide the default browser drag ghost image so only our custom portal drag preview is visible
       const img = new Image()
       img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -1140,7 +1140,15 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     })() : null
 
     // Scroll delta increases the effective drag distance
-    const scrollDelta = scrollContainer ? (scrollContainer.scrollLeft - startScrollLeftRef.current) : 0
+    let scrollDelta = 0
+    if (scrollContainer) {
+      const currentScrollLeft = scrollContainer.scrollLeft
+      if (resizeSideRef.current === 'right') {
+        scrollDelta = Math.max(0, currentScrollLeft - startScrollLeftRef.current)
+      } else {
+        scrollDelta = Math.min(0, currentScrollLeft - startScrollLeftRef.current)
+      }
+    }
     const adjustedDeltaX = deltaX + scrollDelta
 
     let leftOffset = 0
@@ -1238,7 +1246,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
       const speedMultiplier = isShrinking ? 0 : 1.0
       checkAutoScroll(clientX, scrollContainer, resizeScrollTimerRef, () => {
         performResize(lastClientXRef.current)
-      }, speedMultiplier)
+      }, speedMultiplier, resizeSideRef.current === 'left')
     }
   }
 
@@ -1413,7 +1421,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
             width: `${width}px`,
             height: `${height}px`,
             backgroundColor: 'rgba(255,255,255,0.06)',
-            borderRadius: '0px',
+            borderRadius: '6px',
             border: '1px solid rgba(255,255,255,0.15)',
             opacity: 1,
           }}
@@ -1454,6 +1462,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
                 willChange: 'transform',
                 transform: 'translateZ(0) scale(1.04)',
                 backfaceVisibility: 'hidden',
+                borderRadius: '6px',
               }}
             >
               <ScenePreview
@@ -1625,7 +1634,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
                   ? '2px solid rgba(124,74,240,0.8)'
                   : '2px solid rgba(167,139,250,0.5)'
                 : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
-            borderRadius: '0px',
+            borderRadius: '6px',
             boxShadow: isTouchGrabbed
               ? '0 0 0 2px rgba(124,74,240,0.4)'
               : isActive
@@ -2249,22 +2258,9 @@ const ScenesBar = React.memo(React.forwardRef(({
     resizingSceneIdRef.current = null
     isTimelineInteractingRef.current = false
     dispatch(setTimelineDragging(false))
-    // [PLAYHEAD PRESERVE] Pause in place on resize end — do not reset to project start.
+    // [PLAYHEAD PRESERVE] Pause in place on resize end — do not reset to project start or seek.
     if (onMotionPause) onMotionPause()
     else if (onMotionStop) onMotionStop()
-
-    if (side && index !== undefined && index !== null && onSeek) {
-      setTimeout(() => {
-        const sceneOffset = cumulativeOffsetsRef.current.scenes[index]
-        if (sceneOffset) {
-          if (side === 'left') {
-            onSeek(sceneOffset.startTime)
-          } else {
-            onSeek(sceneOffset.startTime + sceneOffset.duration)
-          }
-        }
-      }, 0)
-    }
   }, [onMotionStop, onMotionPause, dispatch, onSeek])
 
   // Calculate offsets for fast lookups
@@ -2914,15 +2910,6 @@ const ScenesBar = React.memo(React.forwardRef(({
       // Update sceneIdToWidth mapping to match new scene order
       // The widths stay with their respective scenes during reordering
       setSceneIdToWidth(prev => ({ ...prev }))
-
-      if (onSeek) {
-        setTimeout(() => {
-          const sceneOffset = cumulativeOffsetsRef.current.scenes[finalIndex]
-          if (sceneOffset) {
-            onSeek(sceneOffset.startTime)
-          }
-        }, 0)
-      }
     }
 
     setDraggedIndex(null)
@@ -3213,10 +3200,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               top: '4px',
               height: '100%',
               borderRadius: '1px',
-              boxShadow: isDraggingPlayhead
-                ? (isLight ? '0 0 6px rgba(124,74,240,0.4)' : '0 0 6px rgba(255,255,255,0.4)')
-                : (isLight ? '0 0 3px rgba(124,74,240,0.2)' : '0 0 3px rgba(255,255,255,0.2)'),
-              transition: 'width 0.1s, box-shadow 0.1s',
+              transition: 'width 0.1s',
             }}
           />
         </div>
@@ -3448,9 +3432,8 @@ const ScenesBar = React.memo(React.forwardRef(({
               top: '0',
               bottom: '8px',
               width: '2px',
-              backgroundColor: '#3b82f6',
+              backgroundColor: '#7c4af0',
               borderRadius: '1px',
-              boxShadow: '0 0 6px rgba(59, 130, 246, 0.5)',
               transform: 'translateX(-50%)', // Center the line on the gap
               transition: 'left 0.1s cubic-bezier(0.2, 0.8, 0.2, 1)',
               zIndex: 100,
@@ -3479,7 +3462,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               height: `${getDefaultCardHeight()}px`,
               backgroundColor: isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
               border: isLight ? '1px solid rgba(0,0,0,0.12)' : '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '0px',
+              borderRadius: '6px',
             }}
           >
             <Plus className={`h-4 w-4 pointer-events-none ${isLight ? 'text-black/30 group-hover:text-black/60' : 'text-white/30 hover:text-white/60'}`} strokeWidth={1.5} />
@@ -3501,13 +3484,6 @@ const ScenesBar = React.memo(React.forwardRef(({
         onDragStart={() => dispatch(setTimelineDragging(true))}
         onDragEnd={(type, blockState) => {
           dispatch(setTimelineDragging(false))
-          if (type && blockState && onSeek) {
-            if (type === 'move' || type === 'resize-left') {
-              onSeek(blockState.startOffset)
-            } else if (type === 'resize-right') {
-              onSeek(blockState.startOffset + blockState.duration)
-            }
-          }
         }}
       />
 

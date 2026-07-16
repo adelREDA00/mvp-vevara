@@ -14,7 +14,7 @@ import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setS
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
 import { exportVideo, initFFmpeg } from '../utils/videoExport'
-import { Loader2, ChevronDown, User, ZoomIn, ZoomOut } from 'lucide-react'
+import { Loader2, ChevronDown, User, ZoomIn, ZoomOut, X } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import MobileMotionBar from '../components/MobileMotionBar'
@@ -60,8 +60,23 @@ import * as PIXI from 'pixi.js'
 import { useAssetPreloader } from '../hooks/useAssetPreloader'
 import { usePerformanceOptimization } from '../hooks/usePerformanceOptimization'
 import { useAudioPlayback } from '../hooks/useAudioPlayback'
-
-
+const normalizeColorToHex = (color) => {
+  if (color === undefined || color === null) return '#ffffff'
+  if (typeof color === 'number') {
+    return '#' + color.toString(16).padStart(6, '0').toLowerCase()
+  }
+  if (typeof color === 'string') {
+    let str = color.trim().toLowerCase()
+    if (!str.startsWith('#')) {
+      str = '#' + str
+    }
+    while (str.startsWith('##')) {
+      str = str.slice(1)
+    }
+    return str
+  }
+  return '#ffffff'
+}
 
 function EditorPage() {
   const { theme, setTheme } = useContext(ThemeContext)
@@ -220,12 +235,23 @@ function EditorPage() {
   const exampleIntroVideoRef = useRef(null)
 
   useEffect(() => {
-    if (!showExampleIntro && exampleIntroVideoRef.current) {
+    if (showExampleIntro && exampleIntroVideoRef.current) {
+      const playVideo = async () => {
+        try {
+          exampleIntroVideoRef.current.muted = true;
+          exampleIntroVideoRef.current.playsInline = true;
+          await exampleIntroVideoRef.current.play();
+        } catch (err) {
+          console.warn("Autoplay failed for example intro video:", err);
+        }
+      };
+      playVideo();
+    } else if (!showExampleIntro && exampleIntroVideoRef.current) {
       try {
         exampleIntroVideoRef.current.pause()
         exampleIntroVideoRef.current.src = ""
         exampleIntroVideoRef.current.load()
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [showExampleIntro])
 
@@ -236,7 +262,7 @@ function EditorPage() {
           exampleIntroVideoRef.current.pause()
           exampleIntroVideoRef.current.src = ""
           exampleIntroVideoRef.current.load()
-        } catch (_) {}
+        } catch (_) { }
       }
     }
   }, [])
@@ -1529,7 +1555,7 @@ function EditorPage() {
     if (isAuthenticated) {
       // Authenticated User: Duplicate and then resize the copy
       const newProject = await api.post(`/projects/${projectId}/duplicate`)
-      
+
       const updatedScenes = (newProject.data.scenes || []).map(scene => ({
         ...scene,
         width: newWidth,
@@ -2017,7 +2043,7 @@ function EditorPage() {
       let currentCornerRadius = layer.data?.cornerRadius || 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
-          : layer.type === 'background' ? ('#' + (layer.data?.color ?? 0xffffff).toString(16).padStart(6, '0'))
+          : layer.type === 'background' ? normalizeColorToHex(layer.data?.color)
             : null
       // Track cumulative flip state from previous steps (Redux showingFront is the base/time-0 state)
       let currentShowingFront = layer.data?.showingFront !== false
@@ -3641,7 +3667,7 @@ function EditorPage() {
       let currentBlur = layer.blur !== undefined ? layer.blur : 0
       let currentColor = layer.type === 'shape' ? (layer.data?.fill || null)
         : layer.type === 'text' ? (layer.data?.color || null)
-          : layer.type === 'background' ? ('#' + (layer.data?.color || 0xffffff).toString(16).padStart(6, '0'))
+          : layer.type === 'background' ? normalizeColorToHex(layer.data?.color)
             : null
       // Track cumulative flip state from previous steps
       let currentShowingFront = layer.data?.showingFront !== false
@@ -5540,10 +5566,47 @@ function EditorPage() {
 
                         if (captureLayerId) {
                           const capture = motionCaptureRef.current
-                          if (capture && capture.trackedLayers.has(captureLayerId)) {
-                            const colorValue = color === 'transparent' ? null : color
-                            effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                          if (capture) {
+                            const normalizedVal = color === 'transparent' ? null : normalizeColorToHex(color)
+
+                            // Dynamically track background layer if it's not already tracked
+                            if (!capture.trackedLayers.has(captureLayerId)) {
+                              const bgLayer = layers[captureLayerId]
+                              const bgInitColor = bgLayer ? normalizeColorToHex(bgLayer.data?.color) : '#ffffff'
+                              capture.trackedLayers.set(captureLayerId, {
+                                initialTransform: { color: bgInitColor },
+                                currentPosition: { x: 0, y: 0 },
+                                deltaX: 0,
+                                deltaY: 0,
+                                width: bgLayer?.width || 1920,
+                                height: bgLayer?.height || 1080,
+                                scaleX: 1,
+                                scaleY: 1,
+                                rotation: 0,
+                                opacity: 1,
+                                blur: 0,
+                                cornerRadius: 0,
+                                color: bgInitColor,
+                                showingFront: true,
+                                tiltX: 0,
+                                tiltY: 0,
+                                interactionType: null,
+                                didMove: false,
+                                didBlur: false,
+                                didCornerRadius: false,
+                                didScale: false,
+                                didRotate: false,
+                                didFade: false,
+                                didCrop: false,
+                                didColor: false,
+                                didFlip: false,
+                                didTilt: false,
+                              })
+                            }
+
+                            effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: normalizedVal })
                             effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                            setCaptureVersion(v => v + 1)
                             return
                           }
                         }
@@ -5774,10 +5837,47 @@ function EditorPage() {
                               }
                               if (captureLayerId) {
                                 const capture = motionCaptureRef.current
-                                if (capture && capture.trackedLayers.has(captureLayerId)) {
-                                  const colorValue = color === 'transparent' ? null : color
-                                  effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: colorValue })
+                                if (capture) {
+                                  const normalizedVal = color === 'transparent' ? null : normalizeColorToHex(color)
+
+                                  // Dynamically track background layer if it's not already tracked
+                                  if (!capture.trackedLayers.has(captureLayerId)) {
+                                    const bgLayer = layers[captureLayerId]
+                                    const bgInitColor = bgLayer ? normalizeColorToHex(bgLayer.data?.color) : '#ffffff'
+                                    capture.trackedLayers.set(captureLayerId, {
+                                      initialTransform: { color: bgInitColor },
+                                      currentPosition: { x: 0, y: 0 },
+                                      deltaX: 0,
+                                      deltaY: 0,
+                                      width: bgLayer?.width || 1920,
+                                      height: bgLayer?.height || 1080,
+                                      scaleX: 1,
+                                      scaleY: 1,
+                                      rotation: 0,
+                                      opacity: 1,
+                                      blur: 0,
+                                      cornerRadius: 0,
+                                      color: bgInitColor,
+                                      showingFront: true,
+                                      tiltX: 0,
+                                      tiltY: 0,
+                                      interactionType: null,
+                                      didMove: false,
+                                      didBlur: false,
+                                      didCornerRadius: false,
+                                      didScale: false,
+                                      didRotate: false,
+                                      didFade: false,
+                                      didCrop: false,
+                                      didColor: false,
+                                      didFlip: false,
+                                      didTilt: false,
+                                    })
+                                  }
+
+                                  effectiveMotionCaptureMode.onPositionUpdate({ layerId: captureLayerId, color: normalizedVal })
                                   effectiveMotionCaptureMode.onInteractionEnd(captureLayerId)
+                                  setCaptureVersion(v => v + 1)
                                   return
                                 }
                               }
@@ -6334,57 +6434,95 @@ function EditorPage() {
                 </div>
               </div>
 
-              {/* Zoom controls - fixed at bottom, outside scroll; minimal height */}
-              <div className="pointer-events-auto flex-shrink-0 hidden lg:grid grid-cols-3 items-center px-4 py-1" style={{ paddingBottom: 'max(4px, env(safe-area-inset-bottom, 0px))' }}>
-                {/* Left side empty placeholder */}
-                <div></div>
-
-                {/* Center - Canvas Zoom Slider */}
-                <div className="flex justify-center items-center gap-2.5">
+              {/* Floating Zoom Controls Badge */}
+              <div
+                className={`absolute bottom-4 right-4 z-[200] pointer-events-auto hidden lg:flex items-center gap-4 px-3 py-1.5 rounded-[6px] backdrop-blur-md shadow-lg border
+    ${isLight
+                    ? "bg-white/80 border-black/5 text-gray-900"
+                    : "bg-black/55 border-white/10 text-white"
+                  }`}
+              >
+                {/* Canvas Zoom Slider */}
+                <div className="flex items-center gap-2">
                   <input
                     type="range"
                     min={0}
                     max={100}
                     step={0.1}
                     value={(() => {
-                      // Convert zoom (10-200) to slider position (0-100) using log scale
                       const z = zoom === -1 ? 100 : Math.min(200, Math.max(10, zoom))
-                      return ((Math.log(z) - Math.log(10)) / (Math.log(200) - Math.log(10))) * 100
+                      return (
+                        ((Math.log(z) - Math.log(10)) /
+                          (Math.log(200) - Math.log(10))) *
+                        100
+                      )
                     })()}
                     onChange={(e) => {
-                      // Convert slider position (0-100) to zoom (10-200) using exp scale
                       const t = Number(e.target.value) / 100
                       const newZoom = 10 * Math.pow(200 / 10, t)
                       setZoom(Math.max(10, Math.min(200, newZoom)))
                     }}
-                    className={`w-32 sm:w-36 lg:w-44 h-1 rounded-full appearance-none ${theme === 'light' ? 'bg-gray-300 [&::-webkit-slider-thumb]:bg-gray-600 [&::-moz-range-thumb]:bg-gray-600' : 'bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white'} [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 lg:[&::-webkit-slider-thumb]:w-[15px] lg:[&::-webkit-slider-thumb]:h-[15px] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5 lg:[&::-moz-range-thumb]:w-[15px] lg:[&::-moz-range-thumb]:h-[15px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-110`}
+                    className={`w-28 h-1 rounded-full appearance-none
+        ${isLight
+                        ? "bg-black/10 [&::-webkit-slider-thumb]:bg-[#6b7280] [&::-moz-range-thumb]:bg-[#6b7280]"
+                        : "bg-white/20 [&::-webkit-slider-thumb]:bg-white [&::-moz-range-thumb]:bg-white"
+                      }
+        [&::-webkit-slider-thumb]:appearance-none
+        [&::-webkit-slider-thumb]:w-3
+        [&::-webkit-slider-thumb]:h-3
+        [&::-webkit-slider-thumb]:rounded-full
+        [&::-webkit-slider-thumb]:cursor-pointer
+        hover:[&::-webkit-slider-thumb]:scale-110
+        [&::-moz-range-thumb]:w-3
+        [&::-moz-range-thumb]:h-3
+        [&::-moz-range-thumb]:rounded-full
+        [&::-moz-range-thumb]:border-0
+        [&::-moz-range-thumb]:cursor-pointer
+        hover:[&::-moz-range-thumb]:scale-110`}
                   />
-                  <span className={`text-xs lg:text-sm font-mono tabular-nums w-10 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>
-                    {zoom === -1 ? 'Fit' : `${Math.round(zoom)}%`}
+                  <span
+                    className={`text-xs font-mono tabular-nums w-8 text-right ${isLight ? "text-gray-500" : "text-white/70"
+                      }`}
+                  >
+                    {zoom === -1 ? "Fit" : `${Math.round(zoom)}%`}
                   </span>
                 </div>
 
-                {/* Right side - Timeline Zoom Buttons */}
-                <div className="flex justify-end items-center gap-2">
-                  <span className={`text-xs lg:text-sm font-medium tracking-wide mr-1 ${theme === 'light' ? 'text-gray-500' : 'text-white/60'}`}>Timeline:</span>
+                {/* Vertical Divider */}
+                <div
+                  className={`w-[1px] h-3.5 ${isLight ? "bg-black/10" : "bg-white/10"
+                    }`}
+                />
+
+                {/* Timeline Zoom Buttons */}
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => timelineControlRef.current?.zoomOut()}
-                    className={`p-1.5 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    className={`p-1 rounded-lg transition-all ${isLight
+                      ? "text-gray-500 hover:text-gray-900 hover:bg-black/5"
+                      : "text-white/70 hover:text-white hover:bg-white/10"
+                      }`}
                     title="Zoom out timeline"
                     type="button"
                   >
-                    <ZoomOut className="h-[16px] w-[16px] lg:h-[17px] lg:w-[17px]" />
+                    <ZoomOut className="h-4 w-4" />
                   </button>
+
                   <button
                     onClick={() => timelineControlRef.current?.zoomIn()}
-                    className={`p-1.5 rounded-lg transition-all ${theme === 'light' ? 'bg-gray-200 text-gray-950 hover:bg-gray-300' : 'bg-white/8 text-white hover:bg-white/12'}`}
+                    className={`p-1 rounded-lg transition-all ${isLight
+                      ? "text-gray-500 hover:text-gray-900 hover:bg-black/5"
+                      : "text-white/70 hover:text-white hover:bg-white/10"
+                      }`}
                     title="Zoom in timeline"
                     type="button"
                   >
-                    <ZoomIn className="h-[16px] w-[16px] lg:h-[17px] lg:w-[17px]" />
+                    <ZoomIn className="h-4 w-4" />
                   </button>
                 </div>
               </div>
+
+
 
               {/* Mobile Canvas Controls - Fixed at the very bottom on mobile screens.
                   [UPDATE #2] During Motion Capture the controls move to the top of the
@@ -6641,33 +6779,32 @@ function EditorPage() {
           >
             {showExampleIntro && (
               <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-0 flex items-end justify-center lg:items-end lg:justify-end p-6 lg:pointer-events-none">
+                <div className="absolute inset-0 flex items-end justify-center lg:items-start lg:justify-start p-6 lg:pointer-events-none">
                   {/* Main Card Container — Workspace relative */}
-                  <div className="w-[300px] sm:w-[320px] pointer-events-auto bg-[#01B2FD] border border-white/20 rounded-2xl overflow-hidden transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-5
-                    absolute bottom-6 right-6 lg:bottom-6 lg:right-6 max-lg:left-1/2 max-lg:top-1/2 max-lg:-translate-x-1/2 max-lg:-translate-y-1/2 max-lg:bottom-auto max-lg:right-auto p-4 flex flex-col gap-3.5 shadow-xl">
+                  <div className="w-[300px] sm:w-[320px] pointer-events-auto bg-[#01B2FD] border border-white/20 rounded-none overflow-hidden transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-5
+                    absolute bottom-6 right-6 lg:top-6 lg:left-6 lg:bottom-auto lg:right-auto max-lg:left-1/2 max-lg:top-1/2 max-lg:-translate-x-1/2 max-lg:-translate-y-1/2 max-lg:bottom-auto max-lg:right-auto flex flex-col shadow-xl">
 
-                    {/* Video preview framed inside card, object-cover to remove borders */}
-                    <div className="relative w-full overflow-hidden bg-black flex items-center justify-center border border-white/10 aspect-[16/10]">
-                      <video ref={exampleIntroVideoRef} className="w-full h-full object-cover" src="/videos/Untitled Project_2160p (3).mp4" autoPlay muted loop playsInline webkit-playsinline="true" />
-                    </div>
-
-                    {/* Content Text: Clean visual hierarchy with white text */}
-                    <div className="flex flex-col gap-1 text-left">
-                      <span className="text-[11px] font-bold text-white/70 uppercase tracking-wider">
+                    {/* Header / Text area */}
+                    <div className="p-4 pr-10 flex flex-col gap-1 text-left relative">
+                      {/* Close Button X (Top-Right) */}
+                      <button
+                        onClick={handleCompleteExampleIntro}
+                        className="absolute top-3 right-3 text-white/70 hover:text-white transition-colors"
+                      >
+                        <X className="h-4 w-4" strokeWidth={2.5} />
+                      </button>
+                      {/* <span className="text-[11px] font-bold text-white/70 uppercase tracking-wider">
                         Replace assets
-                      </span>
+                      </span> */}
                       <h4 className="text-[13px] font-semibold text-white leading-normal">
                         Drag your own images here to replace the sample assets.
                       </h4>
                     </div>
 
-                    {/* Got It Button (Flat) */}
-                    <button
-                      onClick={handleCompleteExampleIntro}
-                      className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-white/95 text-[#01B2FD] text-xs font-bold transition-colors duration-200"
-                    >
-                      Got It
-                    </button>
+                    {/* Video at bottom: full-width, no padding, no border-radius */}
+                    <div className="relative w-full overflow-hidden bg-black flex items-center justify-center border-t border-white/10 aspect-[16/10]">
+                      <video ref={exampleIntroVideoRef} className="w-full h-full object-cover" src="/videos/Untitled Project_2160p (3).mp4" autoPlay muted loop playsInline webkit-playsinline="true" />
+                    </div>
                   </div>
                 </div>
               </div>

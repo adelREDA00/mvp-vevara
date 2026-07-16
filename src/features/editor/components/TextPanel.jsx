@@ -169,12 +169,12 @@ function TextPanel({ onClose, aspectRatio }) {
               key={element.id}
               onClick={element.onClick}
               className={`w-full text-left px-5 py-6 rounded-[16px] transition-all duration-300 border group shadow-sm active:scale-[0.98] ${isLight
-                  ? 'bg-gray-50/50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
-                  : 'hover:bg-white/5 border-white/5 hover:border-white/10'
+                ? 'bg-gray-50/50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
+                : 'hover:bg-white/5 border-white/5 hover:border-white/10'
                 }`}
             >
               <div className="flex flex-col gap-2">
-                <span className={`text-[10px] uppercase font-bold tracking-widest transition-colors ${isLight ? 'text-gray-500 group-hover:text-gray-700' : 'text-white/40 group-hover:text-white/60'}`}>{element.name}</span>
+                {/* <span className={`text-[10px] uppercase font-bold tracking-widest transition-colors ${isLight ? 'text-gray-500 group-hover:text-gray-700' : 'text-white/40 group-hover:text-white/60'}`}>{element.name}</span> */}
                 <span
                   className={isLight ? 'text-gray-900' : 'text-white'}
                   style={{

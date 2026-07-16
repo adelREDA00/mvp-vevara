@@ -200,14 +200,14 @@ const ACTION_AVAILABILITY = {
 function getLayerDisplayName(layer) {
   if (!layer) return 'Unknown'
   switch (layer.type) {
-    case LAYER_TYPES.IMAGE: return 'Image'
-    case LAYER_TYPES.VIDEO: return 'Video'
-    case LAYER_TYPES.SHAPE: return 'Shape'
-    case LAYER_TYPES.TEXT: return 'Text'
+    case LAYER_TYPES.IMAGE: return 'Image layer'
+    case LAYER_TYPES.VIDEO: return 'Video layer'
+    case LAYER_TYPES.SHAPE: return 'Shape layer'
+    case LAYER_TYPES.TEXT: return 'Text layer'
     case LAYER_TYPES.GROUP: return 'Group'
     case LAYER_TYPES.BACKGROUND: return 'Background'
     case LAYER_TYPES.FRAME: return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
-    default: return layer.name || 'Element'
+    default: return 'Element'
   }
 }
 
@@ -1086,7 +1086,7 @@ function MotionPanel({
             e.stopPropagation();
             onSelectStepEnd?.('base');
           }}
-          className={`overflow-hidden border-2 rounded-xl transition-all duration-150 cursor-pointer ${activeStepId === 'base'
+          className={`overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${activeStepId === 'base'
             ? isLight
               ? 'border-transparent bg-[#b0b5be] shadow-sm'
               : 'border-transparent bg-[#3a3b48] shadow-sm'
@@ -1127,7 +1127,7 @@ function MotionPanel({
 
                 onSelectStepEnd?.(step.id);
               }}
-              className={`group overflow-hidden border-2 rounded-xl transition-all duration-150 cursor-pointer ${isPlayheadActive
+              className={`group overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${isPlayheadActive
                 ? isLight
                   ? 'border-transparent bg-[#cab3f8] shadow-sm'
                   : 'border-transparent bg-[#4c3b70] shadow-sm'
@@ -1299,7 +1299,7 @@ function MotionPanel({
 
         return (
           <button key={layerId} onClick={open}
-            className={`group w-full flex items-center gap-3 border rounded-lg cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
+            className={`group w-full flex items-center gap-3 border rounded-[6px] cursor-pointer transition-all duration-150 text-left ${isMobile ? 'px-3 py-2' : 'px-3.5 py-2.5'} ${isSelected ? (isLight ? 'border-purple-200 bg-purple-50/40' : 'border-purple-500/25 bg-[#7c4af0]/[0.07]') : (isLight ? 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.1] hover:bg-white/[0.04]')
               }`}>
             <div
               style={contrastBg ? { backgroundColor: contrastBg } : undefined}
