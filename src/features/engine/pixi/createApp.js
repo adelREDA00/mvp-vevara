@@ -322,25 +322,12 @@ export async function createApp(config = {}) {
   }
 }
 
-/**
- * Draws/Redraws the artboard surface and its shadow.
- */
 export function drawArtboardBackground(surface, shadow, width, height) {
   if (!surface || !shadow) return
 
-  // 1. Draw Shadow
-  // We use a simple blurred rect behind the artboard.
+  // Clear shadow container (we render outline on overlay instead)
   shadow.clear()
-  // Subtle offset to the bottom-right for a natural look
-  shadow.rect(2, 2, width, height)
-  shadow.fill({ color: 0x000000, alpha: 0.12 })
-
-  if (!shadow.filters || shadow.filters.length === 0) {
-    const blur = new PIXI.BlurFilter()
-    blur.strength = 8
-    blur.quality = 3
-    shadow.filters = [blur]
-  }
+  shadow.filters = null
 
   // 2. Draw Artboard Surface (The "Paper")
   surface.clear()

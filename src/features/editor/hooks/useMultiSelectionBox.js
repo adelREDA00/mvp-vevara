@@ -15,7 +15,7 @@ import { updateLayer } from '../../../store/slices/projectSlice'
 import { calculateCombinedBounds, getInitialLayerState } from '../utils/layerUtils'
 import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/viewportUtils'
 import { createDimensionsBadge, updateDimensionsBadge, removeDimensionsBadge, createRotationBadge, updateRotationBadge, removeRotationBadge } from '../utils/badgeUtils'
-import { createResizeHandle, createRotateHandle, calculateAdaptedScale } from '../utils/handleUtils'
+import { createResizeHandle, createRotateHandle, calculateAdaptedScale, calculateAdaptedOutlineScale } from '../utils/handleUtils'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 
@@ -208,7 +208,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
     const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
     const zoomScale = 1 / (viewport?.scale?.x || 1)
     const baseScale = calculateAdaptedScale(zoomScale) * (isTouch ? 1.4 : 1)
-    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 1.2 * baseScale, 10, 5)
+    drawDashedRect(graphics, 0, 0, width, height, 0, 0x8B5CF6, 2.2 * calculateAdaptedOutlineScale(zoomScale), 10, 5)
 
     graphics.alpha = isLocked ? 0.4 : 1.0
 
@@ -543,7 +543,7 @@ export function useMultiSelectionBox(stageContainer, layersContainer, selectedLa
           outline.clear()
           const zoomScale = 1 / (latestViewportRef.current?.scale?.x || 1)
           const baseScale = calculateAdaptedScale(zoomScale)
-          drawDashedRect(outline, 0, 0, freshBoxWidth, freshBoxHeight, 0, 0x8B5CF6, 1.5 * baseScale, 10, 5)
+          drawDashedRect(outline, 0, 0, freshBoxWidth, freshBoxHeight, 0, 0x8B5CF6, 2.2 * calculateAdaptedOutlineScale(zoomScale), 10, 5)
         }
 
         // Update handle positions

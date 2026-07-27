@@ -586,12 +586,13 @@ const DashboardPage = () => {
             >
                 <div className="min-h-full bg-[var(--dashboard-bg)] rounded-none border-none shadow-none flex flex-col relative">
                     {/* Updates Banner */}
-                    <div className="w-full bg-pink-600 py-2.5 px-4 md:px-10 border-b border-pink-750 flex items-center justify-center z-20 rounded-t-none text-white">
+                    <div className="w-full bg-yellow-300 py-2.5 px-4 md:px-10 border-b border-yellow-400 flex items-center justify-center z-20 rounded-t-none text-yellow-950">
                         <div className="text-[11px] font-extrabold text-center tracking-wider uppercase flex items-center gap-2 justify-center">
-                            <span className="bg-white text-pink-600 text-[9px] font-black px-1.5 py-0.5 rounded-[4px] tracking-wide">Update</span>
+                            <span className="bg-yellow-950 text-yellow-300 text-[9px] font-black px-1.5 py-0.5 rounded-[4px] tracking-wide">
+                                Beta Access
+                            </span>
                             <span className="opacity-95 flex items-center gap-1.5">
-                                <Music size={11} strokeWidth={2.5} />
-                                <span>audio support is now live </span>
+                                <span>Try Vevara and share your feedback </span>
                             </span>
                         </div>
                     </div>

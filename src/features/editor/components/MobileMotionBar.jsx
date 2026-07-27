@@ -184,11 +184,11 @@ function MobileMotionBar({
               onClick={() => onSelectStepEnd?.('base')}
               className={`shrink-0 transition-all duration-150 flex flex-col justify-center rounded-lg border-2 cursor-pointer ${activeStepId === 'base'
                 ? isLight
-                  ? 'border-transparent bg-[#b0b5be] shadow-sm'
+                  ? 'border-transparent bg-[#d7d7db] shadow-sm'
                   : 'border-transparent bg-[#3a3b48] shadow-sm'
                 : isLight
-                  ? 'border-transparent bg-[#eaecef] hover:bg-[#b0b5be]'
-                  : 'border-transparent bg-[#1c1d26] hover:bg-[#3a3b48]'
+                  ? 'border-transparent bg-[#ffffff] hover:bg-[#d7d7db]'
+                  : 'border-transparent bg-[#121319] hover:bg-[#3a3b48]'
                 }`}
             >
               <div className="flex items-center gap-1.5 px-2.5 py-1">
@@ -270,8 +270,8 @@ function MobileMotionBar({
                           <button
                             onClick={(e) => { e.stopPropagation(); onEditMoment?.(step.id) }}
                             className={`h-6 w-6 flex items-center justify-center rounded-lg transition-colors ${isActive
-                              ? isLight ? 'text-[#3b1e70]/85 hover:text-[#2d1b4e] hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-white hover:bg-white/10'
-                              : isLight ? 'text-slate-400 hover:text-[#7c4af0] group-hover:text-[#3b1e70]/85 hover:bg-[#cab3f8]/10' : 'text-zinc-500 hover:text-[#c084fc] group-hover:text-purple-200/80 hover:bg-white/10'
+                              ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
+                              : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
                               }`}
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -279,8 +279,8 @@ function MobileMotionBar({
                           <button
                             onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(step.id) }}
                             className={`h-6 w-6 flex items-center justify-center rounded-lg transition-colors ${isActive
-                              ? isLight ? 'text-[#3b1e70]/85 hover:text-red-600 hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-red-400 hover:bg-white/10'
-                              : isLight ? 'text-slate-400 hover:text-red-500 group-hover:text-[#3b1e70]/85 hover:bg-red-50' : 'text-zinc-500 hover:text-red-400 group-hover:text-purple-200/80 hover:bg-[#cab3f8]/10'
+                              ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
+                              : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
                               }`}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -302,10 +302,10 @@ function MobileMotionBar({
                           }}
                           className={`h-6 w-6 flex items-center justify-center rounded-lg transition-colors shrink-0 ${isExpanded
                             ? isActive
-                              ? isLight ? 'text-[#2d1b4e] bg-[#cab3f8]/30' : 'text-purple-200 bg-white/10'
-                              : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#c084fc] bg-white/10')
+                              ? isLight ? 'text-[#2d1b4e] hover:bg-black/5' : 'text-purple-200 bg-white/10'
+                              : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
                             : isActive
-                              ? isLight ? 'text-[#3b1e70]/85 hover:bg-[#cab3f8]/30' : 'text-purple-200/60 hover:bg-white/10'
+                              ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
                               : (isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80')
                             }`}
                         >
@@ -338,12 +338,12 @@ function MobileMotionBar({
             const isExpandedCardActive = activeStepId === expandedCardId;
             return (
               <div className={`border-t px-3 py-2.5 transition-all duration-150 ${isExpandedCardActive
-                ? isLight ? 'border-purple-900/10 bg-[#cab3f8] text-[#2d1b4e]' : 'border-purple-200/10 bg-[#4c3b70] text-purple-100'
+                ? isLight ? 'border-slate-150 bg-slate-50/70 text-slate-800' : 'border-white/[0.05] bg-black/25 text-purple-100'
                 : isLight ? 'border-slate-200 bg-white text-slate-800' : 'border-white/[0.06] bg-[#121319] text-zinc-400'
                 }`}>
                 {expandedAllLayerIds.size === 0 ? (
                   <p className={`text-[10px] italic text-center py-1 ${isExpandedCardActive
-                    ? isLight ? 'text-[#3b1e70]/80' : 'text-purple-300'
+                    ? isLight ? 'text-slate-400' : 'text-zinc-650'
                     : isLight ? 'text-slate-400' : 'text-zinc-650'
                     }`}>
                     No effects in this moment
@@ -362,21 +362,21 @@ function MobileMotionBar({
                         <div
                           key={layerId}
                           className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${isExpandedCardActive
-                            ? isLight ? 'bg-[#2d1b4e]/10 border border-[#2d1b4e]/10' : 'bg-white/10 border border-white/5'
+                            ? isLight ? 'bg-[#7c4af0]/10 border border-[#7c4af0]/15' : 'bg-[#7c4af0]/15 border border-white/5'
                             : isLight ? 'bg-slate-100 border border-slate-200' : 'bg-white/[0.04] border border-white/[0.06]'
                             }`}
                         >
                           <span className={`text-[10px] font-semibold ${isExpandedCardActive
-                            ? isLight ? 'text-[#2d1b4e]' : 'text-purple-100'
+                            ? isLight ? 'text-[#7c4af0]' : 'text-purple-100'
                             : isLight ? 'text-slate-700' : 'text-zinc-300'
                             }`}>
-                             {getLayerTypeLabel(layer)}
+                            {getLayerTypeLabel(layer)}
                           </span>
                           {actionTags.slice(0, 3).map((tag, i) => (
                             <span
                               key={i}
                               className={`text-[8px] font-bold px-1 py-px rounded ${isExpandedCardActive
-                                ? isLight ? 'bg-[#2d1b4e]/15 text-[#2d1b4e]/90' : 'bg-zinc-800 text-zinc-350'
+                                ? isLight ? 'bg-white/80 text-[#7c4af0]' : 'bg-zinc-800 text-zinc-350'
                                 : isLight ? 'bg-slate-100 text-slate-500' : 'bg-zinc-800 text-zinc-400'
                                 }`}
                             >

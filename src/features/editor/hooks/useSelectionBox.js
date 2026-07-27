@@ -26,7 +26,7 @@ import * as PIXI from 'pixi.js'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { drawDashedRect } from '../../engine/pixi/dashUtils'
 import { drawShapePath, redrawFramePlaceholder } from '../../engine/pixi/createLayer'
-import { getRotatedCursor, calculateAdaptedScale } from '../utils/handleUtils'
+import { getRotatedCursor, calculateAdaptedScale, calculateAdaptedOutlineScale } from '../utils/handleUtils'
 import { syncTiltMesh, markTiltTextureDirty, computePerspectiveCorners, stampTiltCaptureDims } from '../../engine/pixi/perspectiveTilt'
 import { setCanvasInteracting } from '../../../store/slices/projectSlice'
 import {
@@ -835,8 +835,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     }
 
     // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
-    const baseScale = calculateAdaptedScale(zoomScale)
-    outline.stroke({ color: 0x8B5CF6, width: 1.2 * baseScale })
+    outline.stroke({ color: 0x8B5CF6, width: 2.2 * calculateAdaptedOutlineScale(zoomScale) })
     hoverBox.visible = true
   }, [layersContainer, isPlaying, latestLayerRef, getCurrentLayerTilt])
 
@@ -902,7 +901,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
       const cornerRadius = 8 * scaledBase
       handle.circle(0, 0, cornerRadius)
       handle.fill({ color: 0xffffff })
-      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
+      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 2.0 * scaledBase) })
     } else if (isSide) {
       // Side handles: badge/pill shape (rounded rectangle)
       const sideWidth = 20 * scaledBase
@@ -918,7 +917,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         handle.roundRect(-sideWidthVertical / 2, -sideHeightVertical / 2, sideWidthVertical, sideHeightVertical, 3 * scaledBase)
       }
       handle.fill({ color: 0xffffff })
-      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
+      handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 2.0 * scaledBase) })
     }
 
     // No need to scale the handle itself since we calculated the size already
@@ -959,7 +958,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         const hoverCornerRadius = 12 * scaledBase
         handle.circle(0, 0, hoverCornerRadius)
         handle.fill({ color: 0x8B5CF6 })
-        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.2 * scaledBase) })
+        handle.stroke({ color: 0xffffff, width: Math.max(1, 2.0 * scaledBase) })
       } else if (isSide) {
         const hoverExtra = 3 * scaledBase
         const hoverSideWidth = 20 * scaledBase
@@ -973,7 +972,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           handle.roundRect(-(hoverSideWidthVertical + hoverExtra) / 2, -(hoverSideHeightVertical + hoverExtra) / 2, hoverSideWidthVertical + hoverExtra, hoverSideHeightVertical + hoverExtra, 3 * scaledBase)
         }
         handle.fill({ color: 0x8B5CF6 })
-        handle.stroke({ color: 0xffffff, width: Math.max(1, 1.2 * scaledBase) })
+        handle.stroke({ color: 0xffffff, width: Math.max(1, 2.0 * scaledBase) })
       }
 
       const canvasEl = canvasRef.current
@@ -989,7 +988,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         const normalCornerRadius = 8 * scaledBase
         handle.circle(0, 0, normalCornerRadius)
         handle.fill({ color: 0xffffff })
-        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
+        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 2.0 * scaledBase) })
       } else if (isSide) {
         const normalSideWidth = 20 * scaledBase
         const normalSideHeight = 7 * scaledBase
@@ -1002,7 +1001,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           handle.roundRect(-normalSideWidthVertical / 2, -normalSideHeightVertical / 2, normalSideWidthVertical, normalSideHeightVertical, 3 * scaledBase)
         }
         handle.fill({ color: 0xffffff })
-        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 1.2 * scaledBase) })
+        handle.stroke({ color: 0x8B5CF6, width: Math.max(1, 2.0 * scaledBase) })
       }
 
       const canvasEl = canvasRef.current
@@ -1655,8 +1654,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
         }
 
         // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
-        const baseScale = calculateAdaptedScale(zoomScale)
-        outline.stroke({ color: 0x8B5CF6, width: 1.2 * baseScale })
+        outline.stroke({ color: 0x8B5CF6, width: 2.2 * calculateAdaptedOutlineScale(zoomScale) })
       }
 
       // Update handle positions and rotation handle
@@ -3835,6 +3833,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     // Get viewport zoom to keep handles at consistent screen size
     const viewportScale = viewport?.scale?.x || 1
     const zoomScale = 1 / viewportScale
+    const baseScale = calculateAdaptedScale(zoomScale)
 
     // Clear and redraw
     selectionBox.removeChildren()
@@ -3858,7 +3857,7 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
     const outline = new PIXI.Graphics()
     outline.label = 'selection-outline'
     outline.rect(localBoundsX, localBoundsY, scaledWidth, scaledHeight)
-    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale }) // Purple color
+    outline.stroke({ color: 0x8B5CF6, width: 2.2 * calculateAdaptedOutlineScale(zoomScale) }) // Purple color
     outline.eventMode = 'none'
     selectionBox.addChild(outline)
 
@@ -3947,7 +3946,6 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
 
     // Position handles
     const centerX = localBoundsX + scaledWidth / 2
-    const baseScale = calculateAdaptedScale(zoomScale)
     const layerSizeRef = Math.min(scaledWidth, scaledHeight)
     const smallLayerScale = layerSizeRef < 60 ? Math.max(0.6, layerSizeRef / 60) : 1
     const radius = Math.max(14, 22 * baseScale * smallLayerScale)

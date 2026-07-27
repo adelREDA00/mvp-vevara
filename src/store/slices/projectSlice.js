@@ -2,6 +2,7 @@ import { createSlice, createSelector, createAsyncThunk } from '@reduxjs/toolkit'
 import { uid } from '../../utils/ids'
 import { setSelectedLayer, selectSelectedLayerId } from './selectionSlice'
 import api from '../../api/client'
+import { PRESET_REGISTRY } from '../../features/engine/motion/presets.js'
 
 const generateId = uid
 
@@ -93,7 +94,7 @@ const initialState = {
 // Resolve step layout: auto and manual steps behave like fixed duration objects.
 // Under shrink, we apply a non-linear intelligent packing system that protects block durations
 // and uses push/collision cascades to maintain ordering.
-const resolveStepLayout = (steps, sceneDurationMs, resizeSide = 'right') => {
+export const resolveStepLayout = (steps, sceneDurationMs, resizeSide = 'right') => {
   if (steps.length === 0) return
   const MIN_DURATION = 200 // ms — minimum to prevent micro-durations
   const MIN_SPACING = 0   // ms — minimum spacing between steps to maintain visual gaps
@@ -186,22 +187,68 @@ const syncSceneMotionDuration = (state, sceneId, resizeSide = 'right') => {
   const steps = motionFlow.steps || []
   if (steps.length === 0) return
 
+  // Capture step durations before resolveStepLayout to compute parent resize scale ratio
+  const oldStepDurations = new Map(steps.map(s => [s.id, s.duration || 1000]))
+
   // Resolve layout: auto steps reflow, manual steps preserved
   resolveStepLayout(steps, sceneDurationMs, resizeSide)
 
-  // Sync action durations to each step's effective duration
+  // Sync action durations to each step's effective duration by proportionally rescaling child actions
   steps.forEach(step => {
     if (!step.layerActions) step.layerActions = {}
-    const effectiveDuration = step.duration
+    const effectiveDuration = step.duration || 1000
+    const oldStepDuration = oldStepDurations.get(step.id) || effectiveDuration
+    const scaleRatio = (oldStepDuration > 0 && oldStepDuration !== effectiveDuration) ? effectiveDuration / oldStepDuration : 1
+    const MIN_ACTION_DURATION = 50
+
     Object.keys(step.layerActions).forEach(layerId => {
       const actions = step.layerActions[layerId]
       if (!Array.isArray(actions)) return
       actions.forEach(action => {
+        const oldOffset = action.actionStartOffset !== undefined ? action.actionStartOffset : 0
+        const oldDur = action.actionDuration !== undefined ? action.actionDuration : oldStepDuration
+
+        let newOffset = oldOffset
+        let newDur = oldDur
+
+        if (scaleRatio !== 1) {
+          newOffset = Math.round(oldOffset * scaleRatio)
+          newDur = Math.max(MIN_ACTION_DURATION, Math.round(oldDur * scaleRatio))
+        } else {
+          newOffset = Math.min(oldOffset, Math.max(0, effectiveDuration - MIN_ACTION_DURATION))
+          newDur = Math.min(oldDur, Math.max(MIN_ACTION_DURATION, effectiveDuration - newOffset))
+        }
+
+        action.actionStartOffset = Math.min(newOffset, effectiveDuration - MIN_ACTION_DURATION)
+        action.actionDuration = Math.min(newDur, effectiveDuration - action.actionStartOffset)
         if (!action.values) action.values = {}
-        action.values.duration = effectiveDuration
-        action.duration = effectiveDuration
+        action.values.duration = action.actionDuration
+        action.duration = action.actionDuration
       })
     })
+
+    if (step.layerPresets) {
+      Object.keys(step.layerPresets).forEach(layerId => {
+        const preset = step.layerPresets[layerId]
+        if (!preset) return
+        const oldOffset = preset.actionStartOffset !== undefined ? preset.actionStartOffset : 0
+        const oldDur = preset.actionDuration !== undefined ? preset.actionDuration : oldStepDuration
+
+        let newOffset = oldOffset
+        let newDur = oldDur
+
+        if (scaleRatio !== 1) {
+          newOffset = Math.round(oldOffset * scaleRatio)
+          newDur = Math.max(MIN_ACTION_DURATION, Math.round(oldDur * scaleRatio))
+        } else {
+          newOffset = Math.min(oldOffset, Math.max(0, effectiveDuration - MIN_ACTION_DURATION))
+          newDur = Math.min(oldDur, Math.max(MIN_ACTION_DURATION, effectiveDuration - newOffset))
+        }
+
+        preset.actionStartOffset = Math.min(newOffset, effectiveDuration - MIN_ACTION_DURATION)
+        preset.actionDuration = Math.min(newDur, effectiveDuration - preset.actionStartOffset)
+      })
+    }
   })
 }
 
@@ -229,6 +276,68 @@ const syncSceneVideoDuration = (state, sceneId) => {
     }
   }
 }
+
+// Helper to check overlap between two audio blocks
+const audioOverlaps = (a, b) => {
+  const startA = a.startOffset;
+  const endA = a.startOffset + a.duration;
+  const startB = b.startOffset;
+  const endB = b.startOffset + b.duration;
+  return !(endA <= startB || endB <= startA);
+};
+
+// Compacts audio tracks layout and resolves conflicts
+const compactAudioTracks = (tracks, movedTrackId = null) => {
+  let list = tracks.map(t => ({ ...t }));
+  if (list.length === 0) return [];
+
+  const hasOverlapInRow = (track, rowIndex, placed) => {
+    return placed.some(other => other.rowIndex === rowIndex && audioOverlaps(track, other));
+  };
+
+  let placed = [];
+
+  // If there's a moved/active track, we handle it first
+  if (movedTrackId) {
+    const movedIndex = list.findIndex(t => t.id === movedTrackId);
+    if (movedIndex !== -1) {
+      const movedTrack = list[movedIndex];
+      list.splice(movedIndex, 1); // remove from list
+
+      // Move the block upward as much as possible to the highest row (closest to 0) where it has absolutely no overlap with any other track
+      let bestRow = movedTrack.rowIndex ?? 0;
+      for (let r = 0; r < (movedTrack.rowIndex ?? 0); r++) {
+        const hasOverlap = list.some(other => other.rowIndex === r && audioOverlaps(movedTrack, other));
+        if (!hasOverlap) {
+          bestRow = r;
+          break;
+        }
+      }
+      movedTrack.rowIndex = bestRow;
+
+      // Place the moved track first
+      placed.push(movedTrack);
+    }
+  }
+
+  // Sort remaining tracks by startOffset to process them chronologically
+  list.sort((a, b) => a.startOffset - b.startOffset || (a.rowIndex ?? 0) - (b.rowIndex ?? 0) || a.id.localeCompare(b.id));
+
+  // Place each remaining track in the highest available row
+  for (const track of list) {
+    let row = 0;
+    while (true) {
+      if (!hasOverlapInRow(track, row, placed)) {
+        track.rowIndex = row;
+        placed.push(track);
+        break;
+      }
+      row++;
+    }
+  }
+
+  return placed;
+};
 
 const projectSlice = createSlice({
   name: 'project',
@@ -1083,27 +1192,344 @@ const projectSlice = createSlice({
       let newStartTime = startTime !== undefined ? startTime : step.startTime
       let newDuration = duration !== undefined ? duration : step.duration
 
-      // Clamp startTime: cannot go before prevEnd, cannot push past nextStart
-      newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
-
-      // Clamp duration: minimum 50ms, cannot exceed space to nextStart
-      newDuration = Math.max(MIN_DURATION, Math.min(newDuration, nextStart - newStartTime))
+      if (duration === undefined) {
+        // Moving: preserve duration, clamp startTime to fit between neighbors
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - newDuration))
+      } else {
+        // Resizing: clamp startTime and duration normally
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+        newDuration = Math.max(MIN_DURATION, Math.min(newDuration, nextStart - newStartTime))
+      }
 
       step.startTime = Math.round(newStartTime)
       step.duration = Math.round(newDuration)
 
-      // Sync action durations
+      // Sync action durations (only for actions that don't have independent timing)
       if (step.layerActions) {
         Object.keys(step.layerActions).forEach(layerId => {
           const actions = step.layerActions[layerId]
           if (!Array.isArray(actions)) return
           actions.forEach(a => {
             if (!a.values) a.values = {}
-            a.values.duration = step.duration
-            a.duration = step.duration
+            // Only sync if the action does NOT have independent sub-step timing
+            if (a.actionStartOffset === undefined && a.actionDuration === undefined) {
+              a.values.duration = step.duration
+              a.duration = step.duration
+            }
           })
         })
       }
+
+      if (step.layerPresets) {
+        Object.keys(step.layerPresets).forEach(layerId => {
+          const preset = step.layerPresets[layerId]
+          if (!preset) return
+          if (preset.actionStartOffset === undefined && preset.actionDuration === undefined) {
+            preset.duration = step.duration
+          }
+        })
+      }
+      state.isDirty = true
+      state.version++
+    },
+
+    // [TIMELINE DETAILS] Update individual action timing within a step.
+    // Each action can have an independent start offset and duration within the parent step.
+    // actionStartOffset: ms from step.startTime (0 = starts with parent)
+    // actionDuration: ms duration of this action (defaults to step.duration if absent)
+    // This enables the Timeline Details View sub-step editing.
+    //
+    // [BOUNDARY EXPANSION] When a child is dragged beyond the parent's bounds:
+    // - Rightward: parent duration expands to contain the child.
+    // - Leftward: parent startTime shifts earlier, all children's offsets adjust to
+    //   maintain their absolute positions (only the parent boundary changes).
+    // Expansion is clamped by: scene start, previous moment end, next moment start.
+    updateSceneMotionActionTiming: (state, action) => {
+      const { sceneId, stepId, layerId, actionId, actionStartOffset, actionDuration } = action.payload
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (!motionFlow) return
+
+      const steps = motionFlow.steps
+      const stepIndex = steps.findIndex(s => s.id === stepId)
+      if (stepIndex === -1) return
+
+      const step = steps[stepIndex]
+      const stepDuration = step.duration || 1000
+      const MIN_DURATION = 50 // ms minimum for a single action
+
+      if (!step.layerActions) step.layerActions = {}
+      if (!step.layerActions[layerId]) step.layerActions[layerId] = []
+
+      let motionAction = step.layerActions[layerId]?.find(a => a.id === actionId)
+      let presetAction = null
+
+      if (!motionAction && step.layerPresets?.[layerId]) {
+        const preset = step.layerPresets[layerId]
+        if (preset && (actionId.startsWith('preset_') || actionId === `preset_${preset.id}_${step.id}`)) {
+          presetAction = preset
+        }
+      }
+
+      if (!motionAction && !presetAction) return
+
+      const targetObject = motionAction || presetAction
+
+      // Compute blocking boundaries for parent expansion
+      const sceneDuration = motionFlow.pageDuration || 5000
+      const prevEnd = stepIndex > 0
+        ? (steps[stepIndex - 1].startTime || 0) + (steps[stepIndex - 1].duration || 0)
+        : 0
+      const nextStart = stepIndex < steps.length - 1
+        ? (steps[stepIndex + 1].startTime || sceneDuration)
+        : sceneDuration
+
+      const currentStepStart = step.startTime || 0
+      
+      // Compute the requested absolute times for the target action
+      let targetAbsStart;
+      let targetAbsDuration;
+
+      if (action.payload.absoluteStartTime !== undefined) {
+        targetAbsStart = action.payload.absoluteStartTime;
+        targetAbsDuration = action.payload.absoluteDuration !== undefined ? action.payload.absoluteDuration : (targetObject.actionDuration || stepDuration);
+      } else {
+        // Fallback for relative dispatch
+        const newOffset = actionStartOffset !== undefined ? actionStartOffset : (targetObject.actionStartOffset || 0);
+        targetAbsStart = currentStepStart + newOffset;
+        targetAbsDuration = actionDuration !== undefined ? actionDuration : (targetObject.actionDuration || stepDuration);
+      }
+
+      targetAbsDuration = Math.max(MIN_DURATION, targetAbsDuration);
+
+      if (action.payload.isMove) {
+        targetAbsStart = Math.max(prevEnd, Math.min(targetAbsStart, nextStart - targetAbsDuration));
+      }
+
+      const targetAbsEnd = targetAbsStart + targetAbsDuration;
+
+      // Calculate new parent bounds by finding the absolute min start and max end of ALL children
+      let minAbsStart = Infinity
+      let maxAbsEnd = -Infinity
+
+      Object.values(step.layerActions).forEach(actions => {
+        if (!Array.isArray(actions)) return
+        actions.forEach(a => {
+          let absStart, absEnd;
+
+          if (a.id === actionId) {
+            // Use the newly requested absolute bounds for the target action
+            absStart = targetAbsStart;
+            absEnd = targetAbsEnd;
+          } else {
+            const offset = a.actionStartOffset !== undefined ? a.actionStartOffset : 0
+            const duration = a.actionDuration !== undefined ? a.actionDuration : (step.duration || 1000)
+            absStart = currentStepStart + offset
+            absEnd = absStart + duration
+          }
+
+          if (absStart < minAbsStart) minAbsStart = absStart
+          if (absEnd > maxAbsEnd) maxAbsEnd = absEnd
+        })
+      })
+
+      if (step.layerPresets) {
+        Object.entries(step.layerPresets).forEach(([lId, preset]) => {
+          let absStart, absEnd;
+          const isTarget = presetAction === preset || actionId.startsWith(`preset_${preset.id}_`) || actionId === `preset_${preset.id}_${step.id}`
+          if (isTarget) {
+            absStart = targetAbsStart
+            absEnd = targetAbsEnd
+          } else {
+            const offset = preset.actionStartOffset !== undefined ? preset.actionStartOffset : 0
+            const duration = preset.actionDuration !== undefined ? preset.actionDuration : (step.duration || 1000)
+            absStart = currentStepStart + offset
+            absEnd = absStart + duration
+          }
+
+          if (absStart < minAbsStart) minAbsStart = absStart
+          if (absEnd > maxAbsEnd) maxAbsEnd = absEnd
+        })
+      }
+
+      if (minAbsStart === Infinity) {
+        minAbsStart = currentStepStart
+        maxAbsEnd = currentStepStart + (step.duration || 1000)
+      }
+
+      // Clamp new parent bounds against neighbors and scene limits
+      let targetStart = minAbsStart
+      let targetEnd = maxAbsEnd
+
+      if (targetStart < prevEnd) targetStart = prevEnd
+      if (targetEnd > nextStart) targetEnd = nextStart
+
+      if (targetEnd - targetStart < MIN_DURATION) {
+        targetEnd = targetStart + MIN_DURATION
+      }
+
+      // Set new parent bounds
+      step.startTime = Math.round(targetStart)
+      step.duration = Math.round(targetEnd - targetStart)
+
+      // Re-normalize all children's offsets relative to the new parent bounds
+      // Strictly clamping them to ensure they cannot escape the parent boundary
+      Object.values(step.layerActions).forEach(actions => {
+        if (!Array.isArray(actions)) return
+        actions.forEach(a => {
+          let absStart, absEnd;
+
+          if (a.id === actionId) {
+            absStart = targetAbsStart;
+            absEnd = targetAbsEnd;
+          } else {
+            const offset = a.actionStartOffset !== undefined ? a.actionStartOffset : 0
+            const duration = a.actionDuration !== undefined ? a.actionDuration : (step.duration || 1000)
+            absStart = currentStepStart + offset
+            absEnd = absStart + duration
+          }
+
+          // Clamp child absolute times strictly within new parent bounds
+          const clampedAbsStart = Math.max(targetStart, Math.min(absStart, targetEnd - MIN_DURATION))
+          const clampedAbsEnd = Math.max(clampedAbsStart + MIN_DURATION, Math.min(absEnd, targetEnd))
+
+          a.actionStartOffset = Math.round(clampedAbsStart - targetStart)
+          a.actionDuration = Math.round(clampedAbsEnd - clampedAbsStart)
+          
+          if (!a.values) a.values = {}
+          a.values.duration = a.actionDuration
+          a.duration = a.actionDuration
+        })
+      })
+
+      if (step.layerPresets) {
+        Object.entries(step.layerPresets).forEach(([lId, preset]) => {
+          let absStart, absEnd;
+          const isTarget = presetAction === preset || actionId.startsWith(`preset_${preset.id}_`) || actionId === `preset_${preset.id}_${step.id}`
+          if (isTarget) {
+            absStart = targetAbsStart
+            absEnd = targetAbsEnd
+          } else {
+            const offset = preset.actionStartOffset !== undefined ? preset.actionStartOffset : 0
+            const duration = preset.actionDuration !== undefined ? preset.actionDuration : (step.duration || 1000)
+            absStart = currentStepStart + offset
+            absEnd = absStart + duration
+          }
+
+          const clampedAbsStart = Math.max(targetStart, Math.min(absStart, targetEnd - MIN_DURATION))
+          const clampedAbsEnd = Math.max(clampedAbsStart + MIN_DURATION, Math.min(absEnd, targetEnd))
+
+          preset.actionStartOffset = Math.round(clampedAbsStart - targetStart)
+          preset.actionDuration = Math.round(clampedAbsEnd - clampedAbsStart)
+        })
+      }
+
+      // Mark step as manually positioned
+      step.manual = true
+
+      state.isDirty = true
+      state.version++
+    },
+
+    // [TIMELINE DETAILS] Resize a parent moment step while scaling all child action timings proportionally.
+    // Child actions preserve their relative position (start %, end %) within the parent.
+    // This is used when the user drags the parent step block in the main timeline row.
+    updateSceneMotionStepWithChildScaling: (state, action) => {
+      const { sceneId, stepId, startTime, duration } = action.payload
+      const motionFlow = state.sceneMotionFlows[sceneId]
+      if (!motionFlow) return
+
+      const steps = motionFlow.steps
+      const stepIndex = steps.findIndex(s => s.id === stepId)
+      if (stepIndex === -1) return
+
+      const step = steps[stepIndex]
+      const sceneDuration = motionFlow.pageDuration || 5000
+      const MIN_DURATION = 200
+      const MIN_ACTION_DURATION = 50
+
+      // Mark step as manually positioned
+      step.manual = true
+
+      // Neighbor boundaries
+      const prevEnd = stepIndex > 0
+        ? (steps[stepIndex - 1].startTime || 0) + (steps[stepIndex - 1].duration || 0)
+        : 0
+      const nextStart = stepIndex < steps.length - 1
+        ? (steps[stepIndex + 1].startTime || sceneDuration)
+        : sceneDuration
+
+      const oldStartTime = step.startTime || 0
+      const oldDuration = step.duration || 1000
+
+      let newStartTime = startTime !== undefined ? startTime : oldStartTime
+      let newDuration = duration !== undefined ? duration : oldDuration
+
+      // Clamp
+      if (startTime !== undefined) {
+        // Left-resize: preserve the right boundary (oldStartTime + oldDuration)
+        const targetRight = oldStartTime + oldDuration
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+        newDuration = Math.max(MIN_DURATION, targetRight - newStartTime)
+        newStartTime = targetRight - newDuration
+      } else {
+        // Right-resize
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+        newDuration = Math.max(MIN_DURATION, Math.min(newDuration, nextStart - newStartTime))
+      }
+
+      // Calculate scale ratio for proportional child rescaling
+      const scaleRatio = oldDuration > 0 ? newDuration / oldDuration : 1
+
+      step.startTime = Math.round(newStartTime)
+      step.duration = Math.round(newDuration)
+
+      // Proportionally rescale all child actions
+      if (step.layerActions) {
+        Object.keys(step.layerActions).forEach(layerId => {
+          const actions = step.layerActions[layerId]
+          if (!Array.isArray(actions)) return
+          actions.forEach(a => {
+            if (a.actionStartOffset !== undefined || a.actionDuration !== undefined) {
+              // Action has independent timing — scale it proportionally
+              const oldOffset = a.actionStartOffset !== undefined ? a.actionStartOffset : 0
+              const oldActDuration = a.actionDuration !== undefined ? a.actionDuration : oldDuration
+
+              const newOffset = Math.round(oldOffset * scaleRatio)
+              const newActDuration = Math.max(MIN_ACTION_DURATION, Math.round(oldActDuration * scaleRatio))
+
+              a.actionStartOffset = Math.min(newOffset, step.duration - MIN_ACTION_DURATION)
+              a.actionDuration = Math.min(newActDuration, step.duration - a.actionStartOffset)
+
+              if (!a.values) a.values = {}
+              a.values.duration = a.actionDuration
+              a.duration = a.actionDuration
+            } else {
+              // No independent timing — sync to full step duration
+              if (!a.values) a.values = {}
+              a.values.duration = step.duration
+              a.duration = step.duration
+            }
+          })
+        })
+      }
+
+      if (step.layerPresets) {
+        Object.keys(step.layerPresets).forEach(layerId => {
+          const preset = step.layerPresets[layerId]
+          if (!preset) return
+          if (preset.actionStartOffset !== undefined || preset.actionDuration !== undefined) {
+            const oldOffset = preset.actionStartOffset !== undefined ? preset.actionStartOffset : 0
+            const oldActDuration = preset.actionDuration !== undefined ? preset.actionDuration : oldDuration
+
+            const newOffset = Math.round(oldOffset * scaleRatio)
+            const newActDuration = Math.max(MIN_ACTION_DURATION, Math.round(oldActDuration * scaleRatio))
+
+            preset.actionStartOffset = Math.min(newOffset, step.duration - MIN_ACTION_DURATION)
+            preset.actionDuration = Math.min(newActDuration, step.duration - preset.actionStartOffset)
+          }
+        })
+      }
+
       state.isDirty = true
       state.version++
     },
@@ -1177,17 +1603,32 @@ const projectSlice = createSlice({
       const motionFlow = state.sceneMotionFlows[sceneId]
       if (motionFlow) {
         const step = motionFlow.steps.find(s => s.id === stepId)
-        if (step && step.layerActions[layerId]) {
-          const actionToDelete = step.layerActions[layerId].find(a => a.id === actionId)
-          step.layerActions[layerId] = step.layerActions[layerId].filter(a => a.id !== actionId)
+        if (step) {
+          let deletedAny = false
+          if (step.layerActions?.[layerId]) {
+            const actionToDelete = step.layerActions[layerId].find(a => a.id === actionId)
+            if (actionToDelete) {
+              step.layerActions[layerId] = step.layerActions[layerId].filter(a => a.id !== actionId)
+              if (step.layerActions[layerId].length === 0) {
+                delete step.layerActions[layerId]
+              }
+              deletedAny = true
+            }
+          }
 
-          // Clean up if no actions left for this layer
-          if (step.layerActions[layerId].length === 0) {
-            delete step.layerActions[layerId]
+          if (!deletedAny && step.layerPresets?.[layerId]) {
+            const preset = step.layerPresets[layerId]
+            if (preset && (actionId.startsWith(`preset_${preset.id}_`) || actionId === `preset_${preset.id}_${step.id}`)) {
+              delete step.layerPresets[layerId]
+              if (Object.keys(step.layerPresets).length === 0) {
+                delete step.layerPresets
+              }
+              deletedAny = true
+            }
           }
 
           // Clean up step if no layers have actions or presets left
-          const hasActionsLeft = Object.keys(step.layerActions).length > 0
+          const hasActionsLeft = Object.keys(step.layerActions || {}).length > 0
           const hasPresetsLeft = step.layerPresets && Object.keys(step.layerPresets).length > 0
           if (!hasActionsLeft && !hasPresetsLeft) {
             // [FIX] DO NOT delete the step if it's currently being captured/edited!
@@ -2168,31 +2609,42 @@ const projectSlice = createSlice({
 
     /** Add a new audio track from an uploaded asset */
     addAudioTrack: (state, action) => {
-      const { assetId, assetUrl, name, duration, waveform, id, rowIndex: customRowIndex, ...rest } = action.payload
+      const { assetId, assetUrl, name, duration, waveform, id, rowIndex: customRowIndex, startOffset, ...rest } = action.payload
       
-      let rowIndex = customRowIndex
-      if (rowIndex === undefined || rowIndex === null) {
-        // Find the lowest rowIndex not currently occupied at startOffset 0
-        const usedRows = new Set(state.audioTracks.map(t => t.rowIndex))
-        rowIndex = 0
-        while (usedRows.has(rowIndex)) rowIndex++
-      }
-
-      state.audioTracks.push({
+      const newTrack = {
         id: id || uid(),
         assetId: assetId || null,
         assetUrl,
         name: name || 'Audio',
-        startOffset: 0,
+        startOffset: startOffset !== undefined ? startOffset : 0,
         duration: duration || 0,
         totalDuration: duration || 0,
         trimStart: 0,
-        rowIndex,
+        rowIndex: 0,
         volume: 1,
         muted: false,
         waveform: waveform || [],
         ...rest
-      })
+      }
+
+      // Check overlap helper inside the reducer block
+      const audioOverlapsLocal = (a, b) => {
+        const startA = a.startOffset;
+        const endA = a.startOffset + a.duration;
+        const startB = b.startOffset;
+        const endB = b.startOffset + b.duration;
+        return !(endA <= startB || endB <= startA);
+      };
+
+      // Determine the highest row where the block fits without overlapping another audio block
+      let rowIndex = 0
+      while (state.audioTracks.some(t => t.rowIndex === rowIndex && audioOverlapsLocal(newTrack, t))) {
+        rowIndex++
+      }
+      newTrack.rowIndex = rowIndex
+
+      state.audioTracks.push(newTrack)
+      state.audioTracks = compactAudioTracks(state.audioTracks, newTrack.id)
       state.isDirty = true
       state.version++
     },
@@ -2203,6 +2655,13 @@ const projectSlice = createSlice({
       const track = state.audioTracks.find(t => t.id === id)
       if (!track) return
       Object.assign(track, updates)
+
+      // Only run compaction if updates contain fields that affect layout
+      const affectsLayout = 'startOffset' in updates || 'duration' in updates || 'rowIndex' in updates;
+      if (affectsLayout) {
+        state.audioTracks = compactAudioTracks(state.audioTracks, id)
+      }
+
       state.isDirty = true
       state.version++
     },
@@ -2211,17 +2670,7 @@ const projectSlice = createSlice({
     deleteAudioTrack: (state, action) => {
       const id = action.payload
       state.audioTracks = state.audioTracks.filter(t => t.id !== id)
-
-      // Compact rowIndices so no empty rows exist between active rows
-      const activeRows = Array.from(new Set(state.audioTracks.map(t => t.rowIndex ?? 0))).sort((a, b) => a - b)
-      const rowMap = {}
-      activeRows.forEach((oldRowIndex, newRowIndex) => {
-        rowMap[oldRowIndex] = newRowIndex
-      })
-      state.audioTracks.forEach(t => {
-        t.rowIndex = rowMap[t.rowIndex ?? 0] ?? 0
-      })
-
+      state.audioTracks = compactAudioTracks(state.audioTracks)
       state.isDirty = true
       state.version++
     },
@@ -2231,25 +2680,20 @@ const projectSlice = createSlice({
       const copiedTrack = action.payload
       if (!copiedTrack) return
 
-      const targetRow = (copiedTrack.rowIndex ?? 0) + 1
-      state.audioTracks.forEach(t => {
-        if ((t.rowIndex ?? 0) >= targetRow) {
-          t.rowIndex = (t.rowIndex ?? 0) + 1
-        }
-      })
-
-      state.audioTracks.push({
+      const newTrack = {
         ...copiedTrack,
-        rowIndex: targetRow,
-      })
+        id: uid(),
+      }
+
+      state.audioTracks.push(newTrack)
+      state.audioTracks = compactAudioTracks(state.audioTracks, newTrack.id)
       state.isDirty = true
       state.version++
     },
 
     /**
      * Cut an audio track at a given point (in project seconds).
-     * Splits one track into two: left half keeps original ID, right half gets a new ID
-     * and is placed on the next available row.
+     * Splits one track into two: left half keeps original ID, right half gets a new ID.
      */
     cutAudioTrack: (state, action) => {
       const { id, cutAtSeconds } = action.payload
@@ -2260,13 +2704,7 @@ const projectSlice = createSlice({
       const relCut = cutAtSeconds - track.startOffset // seconds into the TRIMMED block
       if (relCut <= 0 || relCut >= track.duration) return // cut is outside the block
 
-      // Right segment is placed in a new row below the cut track
-      const targetRow = (track.rowIndex ?? 0) + 1
-      state.audioTracks.forEach(t => {
-        if ((t.rowIndex ?? 0) >= targetRow) {
-          t.rowIndex = (t.rowIndex ?? 0) + 1
-        }
-      })
+      const leftDuration = relCut
 
       const rightHalf = {
         id: uid(),
@@ -2277,16 +2715,16 @@ const projectSlice = createSlice({
         duration: track.duration - relCut,
         totalDuration: track.totalDuration || track.duration,
         trimStart: (track.trimStart || 0) + relCut,
-        rowIndex: targetRow,
+        rowIndex: track.rowIndex,
         volume: track.volume,
         muted: track.muted,
         waveform: track.waveform || [],
       }
 
-      // Shorten the original track to the left half
-      track.duration = relCut
+      track.duration = leftDuration
 
       state.audioTracks.push(rightHalf)
+      state.audioTracks = compactAudioTracks(state.audioTracks, rightHalf.id)
       state.isDirty = true
       state.version++
     },
@@ -2369,6 +2807,8 @@ export const {
   clearPresetFromStep,
   clearSceneMotionFlow,
   updateStepTiming,
+  updateSceneMotionActionTiming,
+  updateSceneMotionStepWithChildScaling,
   startMotionEditing,
   stopMotionEditing,
   initializeProject,

@@ -888,7 +888,9 @@ export class MotionEngine {
         let resolvedActions = []
         const preset = stepLayerPresets[layerId]
         if (preset && PRESET_REGISTRY[preset.id]) {
-          const presetActions = PRESET_REGISTRY[preset.id].getActions(startState, stepDurationMsValue)
+          const presetStartOffset = preset.actionStartOffset !== undefined ? preset.actionStartOffset : 0
+          const presetDuration = preset.actionDuration !== undefined ? preset.actionDuration : stepDurationMsValue
+          const presetActions = PRESET_REGISTRY[preset.id].getActions(startState, presetDuration)
           const customByType = new Map()
           actions.forEach(a => { if (a) customByType.set(a.type, a) })
 
@@ -899,14 +901,17 @@ export class MotionEngine {
               return {
                 id: `preset_${preset.id}_${pAction.type}_${step.id}`,
                 _isPresetAction: true,
-                ...pAction
+                actionStartOffset: presetStartOffset,
+                actionDuration: presetDuration,
+                ...pAction,
+                values: { ...(pAction.values || {}), duration: presetDuration }
               }
             }
 
             // Compose: keep preset's startOffset, merge values per-type
             const pValues = pAction.values || {}
             const cValues = custom.values || {}
-            const mergedValues = { ...pValues, ...cValues }
+            const mergedValues = { ...pValues, ...cValues, duration: presetDuration }
 
             // Per-type delta composition — the preset's delta and the custom
             // delta should ADD (move/rotate) or MULTIPLY (scale) so the
@@ -921,10 +926,6 @@ export class MotionEngine {
             } else if (pAction.type === 'rotate') {
               mergedValues.dangle = (pValues.dangle || 0) + (cValues.dangle || 0)
             }
-            // fade / blur / colorChange / cornerRadius / tilt: custom values
-            // already override via { ...pValues, ...cValues } — preset's
-            // startOffset still gates the pre-step visual state, custom's
-            // final target wins for the post-step state.
 
             // Custom action's duration overrides if explicitly provided
             if (cValues.duration !== undefined) mergedValues.duration = cValues.duration
@@ -934,6 +935,8 @@ export class MotionEngine {
               _isPresetAction: true, // keep startOffset state-tracking skip
               _isComposedAction: true,
               type: pAction.type,
+              actionStartOffset: custom.actionStartOffset !== undefined ? custom.actionStartOffset : presetStartOffset,
+              actionDuration: custom.actionDuration !== undefined ? custom.actionDuration : presetDuration,
               startOffset: pAction.startOffset,
               values: mergedValues
             }
@@ -960,12 +963,23 @@ export class MotionEngine {
           const handler = getActionHandler(action.type)
           if (!handler) return
 
-          let actionDuration = action.values?.duration
-            ? action.values.duration / 1000
-            : stepDuration
+          // [CHILD TIMING FIX] Read per-action custom timing from Redux.
+          // actionStartOffset (ms): offset from parent step start. 0 = starts with parent.
+          // actionDuration (ms): independent duration. Falls back to step duration.
+          // These are set by the Timeline Details View (updateSceneMotionActionTiming).
+          const actionOffsetMs = action.actionStartOffset || 0
+          const actionOffsetSec = actionOffsetMs / 1000
+          const tweenStartTime = stepStartTime + actionOffsetSec
+
+          // Use actionDuration (set by details panel) > values.duration > stepDuration
+          let actionDuration = action.actionDuration
+            ? action.actionDuration / 1000
+            : (action.values?.duration
+              ? action.values.duration / 1000
+              : stepDuration)
 
           // Clamp: never let a tween extend past the scene boundary
-          const maxDuration = sceneEndTime - stepStartTime
+          const maxDuration = sceneEndTime - tweenStartTime
           if (maxDuration > 0) {
             actionDuration = Math.min(actionDuration, maxDuration)
           } else {
@@ -988,7 +1002,7 @@ export class MotionEngine {
           const actionOptions = {
             ...options,
             duration: actionDuration,
-            startTime: stepStartTime,
+            startTime: tweenStartTime,
             sceneStartOffset: startTimeOffset,
             startState: adjustedStartState
           }
@@ -1002,7 +1016,7 @@ export class MotionEngine {
           builder.timeline.add((gsapTimeline) => {
             const tween = handler.execute(pixiObject, action, actionOptions)
             if (tween) {
-              gsapTimeline.add(tween, stepStartTime)
+              gsapTimeline.add(tween, tweenStartTime)
             }
           })
 

@@ -26,11 +26,13 @@ import {
   updateAudioTrack,
   deleteAudioTrack,
   cutAudioTrack,
+  selectIsTimelineDragging,
 } from '../../../store/slices/projectSlice'
 import { pause, seekBySeconds } from '../../../store/slices/playbackSlice'
 import { uploadFile, enqueueUpload, cancelUpload } from '../../../store/slices/uploadsSlice'
 import { checkAutoScroll, stopAutoScroll } from './ScenesBar'
 import { storeAsset } from '../../../services/localAssetService'
+import { snapAudioBlock } from '../utils/timelineSnapping'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -64,10 +66,15 @@ const AudioBlock = React.memo(function AudioBlock({
   onDragStart,
   onDragEnd,
   onMotionPause,
+  onDragRowChange,
+  sceneBoundaries = [],
+  audioTracks = [],
+  playheadTime = 0,
 }) {
   const [localStartOffset, setLocalStartOffset] = useState(block.startOffset)
   const [localDuration, setLocalDuration] = useState(block.duration)
   const [localTrimStart, setLocalTrimStart] = useState(block.trimStart || 0)
+  const [localYOffset, setLocalYOffset] = useState(0)
 
   const [isInteracting, setIsInteracting] = useState(false)
 
@@ -83,6 +90,7 @@ const AudioBlock = React.memo(function AudioBlock({
       setLocalStartOffset(block.startOffset)
       setLocalDuration(block.duration)
       setLocalTrimStart(block.trimStart || 0)
+      setLocalYOffset(0)
       localStateRef.current = {
         startOffset: block.startOffset,
         duration: block.duration,
@@ -104,6 +112,7 @@ const AudioBlock = React.memo(function AudioBlock({
   const resizeScrollTimerRef = useRef(null)
   const startScrollLeftRef = useRef(0)
   const lastClientXRef = useRef(0)
+  const lastClientYRef = useRef(0)
 
   // Refs to avoid stale closures in event listeners
   const blockRef = useRef(block)
@@ -111,6 +120,7 @@ const AudioBlock = React.memo(function AudioBlock({
   const onSelectRef = useRef(onSelect)
   const onResizeRef = useRef(onResize)
   const onMotionPauseRef = useRef(onMotionPause)
+  const onDragRowChangeRef = useRef(onDragRowChange)
 
   useEffect(() => {
     blockRef.current = block
@@ -118,7 +128,8 @@ const AudioBlock = React.memo(function AudioBlock({
     onSelectRef.current = onSelect
     onResizeRef.current = onResize
     onMotionPauseRef.current = onMotionPause
-  }, [block, onDragEnd, onSelect, onResize, onMotionPause])
+    onDragRowChangeRef.current = onDragRowChange
+  }, [block, onDragEnd, onSelect, onResize, onMotionPause, onDragRowChange])
 
   // ── Decode waveform if missing ─────────────────────────────────────────────
   const waveformLength = block.waveform?.length || 0
@@ -229,7 +240,11 @@ const AudioBlock = React.memo(function AudioBlock({
 
     let hasMoved = false
     let dragActive = false
-    
+    setLocalYOffset(0)
+    if (type === 'move') {
+      onDragRowChangeRef.current?.(blockRef.current.rowIndex ?? 0)
+    }
+
     // Find nearest overflow-x scroll container
     const scrollContainer = blockOuterRef.current ? (() => {
       let el = blockOuterRef.current.parentElement
@@ -251,6 +266,7 @@ const AudioBlock = React.memo(function AudioBlock({
 
     startScrollLeftRef.current = scrollContainer ? scrollContainer.scrollLeft : 0
     lastClientXRef.current = e.clientX
+    lastClientYRef.current = e.clientY
 
     dragRef.current = {
       type,
@@ -276,12 +292,24 @@ const AudioBlock = React.memo(function AudioBlock({
       const secPerPx = 1.0 / calculateWidthFromDuration(1.0)
       const dSec = adjustedDeltaX * secPerPx
 
+      const pixelsPerSecond = calculateWidthFromDuration(1.0)
       let newStart = dragRef.current.origStart
       let newDuration = dragRef.current.origDuration
       let newTrimStart = dragRef.current.origTrimStart
 
       if (dragRef.current.type === 'move') {
-        newStart = Math.max(0, dragRef.current.origStart + dSec)
+        const proposedStart = dragRef.current.origStart + dSec
+        const snapped = snapAudioBlock({
+          type: 'move',
+          proposedStart,
+          proposedDuration: dragRef.current.origDuration,
+          audioTracks,
+          currentTrackId: blockRef.current.id,
+          sceneBoundaries,
+          pixelsPerSecond,
+          playheadTime,
+        })
+        newStart = Math.max(0, snapped.start)
       } else if (dragRef.current.type === 'resize-left') {
         const origStart = dragRef.current.origStart
         const origDuration = dragRef.current.origDuration
@@ -290,7 +318,19 @@ const AudioBlock = React.memo(function AudioBlock({
         const minStart = Math.max(0, origStart - origTrimStart)
         const maxStart = origStart + origDuration - 0.3
 
-        newStart = origStart + dSec
+        const proposedStart = origStart + dSec
+        const snapped = snapAudioBlock({
+          type: 'resize-left',
+          proposedStart,
+          proposedDuration: origDuration,
+          audioTracks,
+          currentTrackId: blockRef.current.id,
+          sceneBoundaries,
+          pixelsPerSecond,
+          playheadTime,
+        })
+
+        newStart = snapped.start
         newStart = Math.max(minStart, Math.min(newStart, maxStart))
 
         newDuration = origDuration - (newStart - origStart)
@@ -303,10 +343,23 @@ const AudioBlock = React.memo(function AudioBlock({
 
         const maxDuration = Math.max(0.3, totalAssetDur - origTrimStart)
 
+        const proposedDuration = origDuration + dSec
+        const snapped = snapAudioBlock({
+          type: 'resize-right',
+          proposedStart: origStart,
+          proposedDuration,
+          audioTracks,
+          currentTrackId: blockRef.current.id,
+          sceneBoundaries,
+          pixelsPerSecond,
+          playheadTime,
+        })
+
+        newDuration = snapped.duration
         newDuration = Math.max(
           0.3,
           Math.min(
-            origDuration + dSec,
+            newDuration,
             maxDuration
           )
         )
@@ -349,7 +402,16 @@ const AudioBlock = React.memo(function AudioBlock({
 
       if (!dragActive || !dragRef.current) return
       lastClientXRef.current = clientX
+      lastClientYRef.current = clientY
       performAudioResize(clientX)
+
+      if (dragRef.current.type === 'move') {
+        const deltaY = clientY - startY
+        setLocalYOffset(deltaY)
+        const rowDelta = Math.round(deltaY / ROW_HEIGHT)
+        const finalRowIndex = Math.max(0, (blockRef.current.rowIndex ?? 0) + rowDelta)
+        onDragRowChangeRef.current?.(finalRowIndex)
+      }
 
       if (scrollContainer) {
         const deltaX = clientX - dragRef.current.startX
@@ -368,19 +430,23 @@ const AudioBlock = React.memo(function AudioBlock({
       const durationMs = Date.now() - startTimeMs
 
       if (!dragActive && !hasMoved && durationMs < 300) {
-        // Quick tap / click -> Select audio block AND snap playhead to clicked position
-        const rect = blockOuterRef.current.parentElement.getBoundingClientRect()
-        const clickX = startX - rect.left
-        const secPerPx = 1.0 / calculateWidthFromDuration(1.0)
-        const seekTime = clickX * secPerPx
-        onSelectRef.current(blockRef.current.id, seekTime)
+        // Quick tap / click -> Select audio block only
+        onSelectRef.current(blockRef.current.id)
       } else if (dragActive) {
         // Drag/trim finished -> Snap playhead to start or end depending on operation
         const currentType = dragRef.current?.type
+        let finalRowIndex = blockRef.current.rowIndex ?? 0
+        if (currentType === 'move') {
+          const deltaY = lastClientYRef.current - startY
+          const rowDelta = Math.round(deltaY / ROW_HEIGHT)
+          finalRowIndex = Math.max(0, (blockRef.current.rowIndex ?? 0) + rowDelta)
+        }
+
         const finalBlockState = {
           startOffset: localStateRef.current.startOffset,
           duration: localStateRef.current.duration,
           trimStart: localStateRef.current.trimStart,
+          rowIndex: finalRowIndex,
         }
 
         // Commit final state to Redux synchronously so that the store updates before we trigger callbacks or history log
@@ -391,6 +457,7 @@ const AudioBlock = React.memo(function AudioBlock({
         }
       }
 
+      onDragRowChangeRef.current?.(null)
       dragRef.current = null
       setIsInteracting(false)
       document.removeEventListener('pointermove', onMove)
@@ -427,7 +494,8 @@ const AudioBlock = React.memo(function AudioBlock({
         left: `${leftPx}px`,
         width: `${blockPx}px`,
         height: `${BLOCK_HEIGHT}px`,
-        zIndex: isSelected ? 20 : 10,
+        zIndex: isInteracting ? 100 : (isSelected ? 20 : 10),
+        transform: `translate3d(0, calc(-50% + ${isInteracting ? localYOffset : 0}px), 0)`,
         touchAction: 'none',
         userSelect: 'none',
       }}
@@ -471,6 +539,8 @@ const AudioBlock = React.memo(function AudioBlock({
           background: blockBackground,
           border: blockBorder,
           boxShadow: 'none',
+          outline: isSelected ? '2px solid #7c4af0' : 'none',
+          outlineOffset: '2px',
         }}
         onPointerDown={(e) => {
           if (!block.isUploading) startDrag(e, 'move')
@@ -703,7 +773,7 @@ const EmptyAudioPlaceholder = React.memo(function EmptyAudioPlaceholder({
         border: isLight
           ? '1.5px solid rgba(0,0,0,0.12)'
           : '1.5px solid rgba(255,255,255,0.12)',
-        backgroundColor: isLight ? 'rgba(0,0,0,0.025)' : 'rgba(255,255,255,0.025)',
+        backgroundColor: 'transparent',
       }}
       onClick={onClick}
       title="Click to upload audio"
@@ -742,6 +812,9 @@ const AudioBar = React.forwardRef(function AudioBar(
     onMotionPause,
     onDragStart,
     onDragEnd,
+    leftOffset = 16,
+    sceneBoundaries = [],
+    playheadTime = 0,
   },
   ref
 ) {
@@ -751,11 +824,13 @@ const AudioBar = React.forwardRef(function AudioBar(
   const dispatch = useDispatch()
   const audioTracks = useSelector(selectAudioTracks)
   const uploadQueue = useSelector(state => state.uploads?.uploadQueue || {})
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
   const { isAuthenticated } = useSelector((state) => state.auth)
   const fileInputRef = useRef(null)
 
   const tracksContainerRef = useRef(null)
   const [draggedOverRow, setDraggedOverRow] = useState(null)
+  const [activeDraggingRow, setActiveDraggingRow] = useState(null)
   const lastHoveredRowRef = useRef(null)
 
   useEffect(() => {
@@ -981,17 +1056,22 @@ const AudioBar = React.forwardRef(function AudioBar(
 
   // ── Click outside context menu to close ──────────────────────────────────
   useEffect(() => {
+    const closeHandler = () => {
+      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
+    }
     const handler = (e) => {
       if (e.target.closest('[data-audio-context-menu]')) return
-      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
+      closeHandler()
     }
     document.addEventListener('mousedown', handler, { capture: true })
     document.addEventListener('click', handler, { capture: true })
     document.addEventListener('contextmenu', handler, { capture: true })
+    window.addEventListener('close-context-menus', closeHandler)
     return () => {
       document.removeEventListener('mousedown', handler, { capture: true })
       document.removeEventListener('click', handler, { capture: true })
       document.removeEventListener('contextmenu', handler, { capture: true })
+      window.removeEventListener('close-context-menus', closeHandler)
     }
   }, [])
 
@@ -1074,19 +1154,23 @@ const AudioBar = React.forwardRef(function AudioBar(
   return (
     <div
       className="flex flex-col flex-shrink-0 relative"
-      style={{ width: '100%', marginTop: '2px' }}
+      style={{ width: '100%', marginTop: '12px' }}
       onClick={handleContainerClick}
     >
       <div
         ref={tracksContainerRef}
         style={{
-          marginLeft: '16px',
+          marginLeft: `${leftOffset}px`,
           width: `${totalProjectWidth}px`,
           position: 'relative',
         }}
       >
         {rows.map((rowTracks, rowIdx) => {
           const isEmptyRow = rowTracks.length === 0
+          const isRowHovered = (draggedOverRow === rowIdx) || (activeDraggingRow === rowIdx)
+          const rowBg = isRowHovered
+            ? (isLight ? '#e0f2fe' : 'rgba(14, 165, 233, 0.12)')
+            : (isLight ? 'rgba(0,0,0,0.025)' : 'rgba(255,255,255,0.025)')
 
           return (
             <div
@@ -1095,13 +1179,17 @@ const AudioBar = React.forwardRef(function AudioBar(
               style={{
                 height: `${ROW_HEIGHT}px`,
                 width: '100%',
+                zIndex: isTimelineDragging && rowTracks.some(t => t.id === selectedAudioBlockId) ? 50 : 1
               }}
             >
-              {draggedOverRow === rowIdx && (
-                <div 
-                  className="absolute inset-0 bg-sky-400/20 border border-sky-400/35 rounded-lg pointer-events-none z-[5]"
-                />
-              )}
+              {/* Row background lane */}
+              <div
+                className="absolute inset-x-0 top-0.5 bottom-0.5 rounded-[4px] transition-colors duration-150 pointer-events-none"
+                style={{
+                  backgroundColor: rowBg,
+                }}
+              />
+
               {isEmptyRow ? (
                 <EmptyAudioPlaceholder
                   totalProjectWidth={totalProjectWidth}
@@ -1120,6 +1208,7 @@ const AudioBar = React.forwardRef(function AudioBar(
                     onResize={handleResize}
                     onDelete={handleDelete}
                     onContextMenu={(e, blk) => {
+                      window.dispatchEvent(new CustomEvent('close-context-menus'))
                       setContextMenu({
                         visible: true,
                         x: e.clientX,
@@ -1137,6 +1226,10 @@ const AudioBar = React.forwardRef(function AudioBar(
                     }}
                     onDragEnd={onDragEnd}
                     onMotionPause={onMotionPause}
+                    onDragRowChange={setActiveDraggingRow}
+                    sceneBoundaries={sceneBoundaries}
+                    audioTracks={audioTracks}
+                    playheadTime={playheadTime}
                   />
                 ))
               )}
@@ -1154,11 +1247,10 @@ const AudioBar = React.forwardRef(function AudioBar(
         style={{ display: 'none' }}
       />
 
-      {/* Context Menu for Audio Blocks */}
       {contextMenu.visible && contextMenu.block && createPortal(
         <div
           data-audio-context-menu
-          className="fixed rounded-lg shadow-2xl py-1 z-[10005] min-w-[150px] overflow-hidden"
+          className="fixed rounded-lg shadow-2xl py-1 z-[10005] min-w-[170px] overflow-hidden"
           style={{
             top: `${contextMenu.y}px`,
             left: `${contextMenu.x}px`,
@@ -1179,12 +1271,12 @@ const AudioBar = React.forwardRef(function AudioBar(
           >
             {contextMenu.block.muted ? (
               <>
-                <Volume2 className="h-3.5 w-3.5 text-purple-400" />
+                <Volume2 className="h-3.5 w-3.5 opacity-60" />
                 <span>Unmute</span>
               </>
             ) : (
               <>
-                <VolumeX className="h-3.5 w-3.5 text-purple-400" />
+                <VolumeX className="h-3.5 w-3.5 opacity-60" />
                 <span>Mute</span>
               </>
             )}
@@ -1193,14 +1285,14 @@ const AudioBar = React.forwardRef(function AudioBar(
           <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
 
           <button
-            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400/90 hover:bg-red-500/15 hover:text-red-300'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
+            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
             style={{ width: 'calc(100% - 4px)' }}
             onClick={() => {
               handleDelete(contextMenu.block.id)
               setContextMenu(prev => ({ ...prev, visible: false }))
             }}
           >
-            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+            <Trash2 className="h-3.5 w-3.5 opacity-60" />
             <span>Delete Audio</span>
           </button>
         </div>,
@@ -1278,7 +1370,7 @@ export function AudioControlsContent({
               title={isMuted ? 'Unmute' : 'Mute'}
             >
               {isMuted ? (
-                <VolumeX className="h-4 w-4 text-amber-500" strokeWidth={2} />
+                <VolumeX className="h-4 w-4" strokeWidth={2} />
               ) : (
                 <Volume2 className="h-4 w-4" strokeWidth={2} />
               )}
@@ -1325,8 +1417,8 @@ export function AudioControlsContent({
         onClick={onDelete}
         className={`h-8 px-2 rounded-[8px] transition-all flex items-center justify-center touch-manipulation border ${
           isLight
-            ? 'text-red-500 hover:bg-red-50 border-transparent hover:border-red-200'
-            : 'text-red-400 hover:bg-red-500/15 border-transparent hover:border-red-500/25'
+            ? 'text-gray-700 hover:bg-gray-100 border-transparent hover:border-gray-200'
+            : 'text-white hover:bg-white/10 border-transparent hover:border-white/10'
         }`}
         title="Delete audio block"
       >

@@ -216,6 +216,7 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
       // Update viewport screen dimensions (visible viewport size)
       viewport.screenWidth = width
       viewport.screenHeight = height
+      viewport.emit('resized')
 
       // World dimensions stay fixed - don't update them on resize
       // This ensures the world coordinate system remains constant
@@ -224,6 +225,9 @@ export function usePixiCanvas(containerRef, { width, height, worldWidth, worldHe
         viewport.worldWidth = worldWidth
         viewport.worldHeight = worldHeight
       }
+
+      // Force immediate render to prevent flickering/black frames
+      app.render()
     } catch (error) {
       console.error('Error resizing viewport:', error)
       setError(error)

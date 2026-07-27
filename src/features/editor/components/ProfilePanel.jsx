@@ -76,26 +76,19 @@ function ProfilePanel({ onClose, onNavigate }) {
             
             {/* User Info - Flat & Borderless */}
             <div className="flex items-center gap-3.5 pb-6 border-b border-black/5 dark:border-white/5">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-[#7c4af0] to-[#a88beb] flex items-center justify-center text-white font-semibold text-[15px] shadow-sm flex-shrink-0">
-                {getUserInitials()}
-              </div>
               <div className="flex-1 min-w-0">
-                <h3 className={`text-[14px] font-semibold truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                  {user?.username || 'Authenticated User'}
-                </h3>
-                <p className={`text-[12px] truncate ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
+                <p className={`text-[12px] truncate font-semibold text-center ${isLight ? 'text-slate-800' : 'text-zinc-300'}`}>
                   {user?.email}
                 </p>
               </div>
             </div>
 
-            {/* Custom Theme Switcher Row - Clean & Minimalist */}
-            <div className="flex items-center justify-between pb-6 border-b border-black/5 dark:border-white/5">
-              <span className={`text-[13px] font-medium ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>Theme</span>
+            {/* Custom Theme Switcher Row - Toggle icons only, no text labels */}
+            <div className="flex items-center justify-center pb-6 border-b border-black/5 dark:border-white/5">
               <div className={`flex rounded-lg p-0.5 ${isLight ? 'bg-gray-200/60' : 'bg-white/[0.06]'}`}>
                 <button
                   onClick={() => handleThemeChange('light')}
-                  className={`flex items-center justify-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                  className={`flex items-center justify-center p-2 rounded-md transition-all ${
                     theme === 'light'
                       ? isLight
                         ? 'bg-white text-slate-900 shadow-sm'
@@ -104,13 +97,13 @@ function ProfilePanel({ onClose, onNavigate }) {
                         ? 'text-slate-500 hover:text-slate-900'
                         : 'text-white/40 hover:text-white/80'
                   }`}
+                  title="Light Theme"
                 >
-                  <Sun className={`h-3.5 w-3.5 transition-colors ${theme === 'light' ? 'text-amber-500' : ''}`} />
-                  <span>Light</span>
+                  <Sun className={`h-4 w-4 transition-colors ${theme === 'light' ? 'text-amber-500' : ''}`} />
                 </button>
                 <button
                   onClick={() => handleThemeChange('dark')}
-                  className={`flex items-center justify-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                  className={`flex items-center justify-center p-2 rounded-md transition-all ${
                     theme === 'dark'
                       ? isLight
                         ? 'bg-white text-slate-900 shadow-sm'
@@ -119,90 +112,57 @@ function ProfilePanel({ onClose, onNavigate }) {
                         ? 'text-slate-500 hover:text-slate-900'
                         : 'text-white/40 hover:text-white/80'
                   }`}
+                  title="Dark Theme"
                 >
-                  <Moon className={`h-3.5 w-3.5 transition-colors ${theme === 'dark' ? 'text-indigo-400' : ''}`} />
-                  <span>Dark</span>
+                  <Moon className={`h-4 w-4 transition-colors ${theme === 'dark' ? 'text-indigo-400' : ''}`} />
                 </button>
               </div>
-            </div>
-
-            {/* Account Actions */}
-            <div className="flex flex-col gap-2.5">
-              <button
-                onClick={handleDashboard}
-                className="w-full h-10 px-4 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-[12px] text-[13px] font-semibold flex items-center justify-center gap-2 transition-all shadow-medium active:scale-[0.98]"
-              >
-                Go to Dashboard
-              </button>
-
-              <button
-                onClick={handleLogout}
-                className={`w-full h-9 px-4 rounded-[12px] text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.95] ${
-                  isLight
-                    ? 'bg-red-50 hover:bg-red-100/60 text-red-600 border border-red-200/50'
-                    : 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20'
-                }`}
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Log Out
-              </button>
             </div>
 
           </div>
         ) : (
           /* Guest Info - Elegant Minimalist Centered Layout */
-          <div className="py-6 px-1 text-center flex flex-col items-center">
-            <div className="w-12 h-12 bg-[#7c4af0]/10 rounded-full flex items-center justify-center mb-5">
-              <Smile className="h-6 w-6 text-[#7c4af0]" strokeWidth={1.5} />
-            </div>
-            <h3 className={`text-[16px] font-semibold mb-1.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>Guest Account</h3>
-            <p className={`text-[12.5px] mb-6 leading-relaxed max-w-[220px] mx-auto ${isLight ? 'text-slate-500' : 'text-white/40'}`}>
-              Login to sync your projects and access professional features.
-            </p>
+          <div className="py-6 px-1 text-center flex flex-col items-center gap-5">
+            <button
+              onClick={handleDashboard}
+              className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-[12px] text-[13px] font-semibold transition-all shadow-medium active:scale-[0.98]"
+            >
+              Log in
+            </button>
             
-            <div className="w-full flex flex-col gap-5">
-              <button
-                onClick={handleDashboard}
-                className="w-full py-2.5 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-[12px] text-[13px] font-semibold transition-all shadow-medium active:scale-[0.98]"
-              >
-                Log in
-              </button>
-              
-              {/* Clean flat Theme switcher */}
-              <div className="flex items-center justify-between pt-5 border-t border-black/5 dark:border-white/5 w-full">
-                <span className={`text-[13px] font-medium ${isLight ? 'text-slate-600' : 'text-zinc-400'}`}>Theme</span>
-                <div className={`flex rounded-lg p-0.5 ${isLight ? 'bg-gray-200/60' : 'bg-white/[0.06]'}`}>
-                  <button
-                    onClick={() => handleThemeChange('light')}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                      theme === 'light'
-                        ? isLight
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'bg-white/10 text-white shadow-sm'
-                        : isLight
-                          ? 'text-slate-500 hover:text-slate-900'
-                          : 'text-white/40 hover:text-white/80'
-                    }`}
-                  >
-                    <Sun className={`h-3 w-3 transition-colors ${theme === 'light' ? 'text-amber-500' : ''}`} />
-                    <span>Light</span>
-                  </button>
-                  <button
-                    onClick={() => handleThemeChange('dark')}
-                    className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                      theme === 'dark'
-                        ? isLight
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'bg-white/10 text-white shadow-sm'
-                        : isLight
-                          ? 'text-slate-500 hover:text-slate-900'
-                          : 'text-white/40 hover:text-white/80'
-                    }`}
-                  >
-                    <Moon className={`h-3 w-3 transition-colors ${theme === 'dark' ? 'text-indigo-400' : ''}`} />
-                    <span>Dark</span>
-                  </button>
-                </div>
+            {/* Clean flat Theme switcher - Toggle icons only, no text labels */}
+            <div className="w-full flex items-center justify-center pt-5 border-t border-black/5 dark:border-white/5">
+              <div className={`flex rounded-lg p-0.5 ${isLight ? 'bg-gray-200/60' : 'bg-white/[0.06]'}`}>
+                <button
+                  onClick={() => handleThemeChange('light')}
+                  className={`flex items-center justify-center p-2 rounded-md transition-all ${
+                    theme === 'light'
+                      ? isLight
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'bg-white/10 text-white shadow-sm'
+                      : isLight
+                        ? 'text-slate-500 hover:text-slate-900'
+                        : 'text-white/40 hover:text-white/80'
+                  }`}
+                  title="Light Theme"
+                >
+                  <Sun className={`h-4 w-4 transition-colors ${theme === 'light' ? 'text-amber-500' : ''}`} />
+                </button>
+                <button
+                  onClick={() => handleThemeChange('dark')}
+                  className={`flex items-center justify-center p-2 rounded-md transition-all ${
+                    theme === 'dark'
+                      ? isLight
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'bg-white/10 text-white shadow-sm'
+                      : isLight
+                        ? 'text-slate-500 hover:text-slate-900'
+                        : 'text-white/40 hover:text-white/80'
+                  }`}
+                  title="Dark Theme"
+                >
+                  <Moon className={`h-4 w-4 transition-colors ${theme === 'dark' ? 'text-indigo-400' : ''}`} />
+                </button>
               </div>
             </div>
           </div>

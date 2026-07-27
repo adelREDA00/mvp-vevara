@@ -47,6 +47,7 @@ import { getCatmullRomPath, getSegmentMidpoint, getDistance } from '../utils/cur
 import { filterBackgroundLayers as filterBgLayers, findLayerIdFromObject } from '../utils/layerUtils'
 import { pauseViewportDragPlugin, resumeViewportDragPlugin } from '../utils/viewportUtils'
 import { getScaledBadgeDimensions } from '../utils/badgeUtils'
+import { calculateAdaptedOutlineScale } from '../utils/handleUtils'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { getLayerFirstActionTime } from '../utils/animationUtils'
 import { highlightFrameDropTarget, unhighlightFrameDropTarget, attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi } from '../../engine/pixi/createLayer'
@@ -92,7 +93,7 @@ const cancelIdleCallback = (typeof window !== 'undefined' && window.cancelIdleCa
  * @param {number} [zoom=100] - Current zoom level (percentage, e.g., 100 = 100%)
  */
 export function useCanvasInteractions(stageContainer, layersContainer, layerObjectsMap, interactionParams, viewport, dragStateAPI, onStartTextEditing, motionCaptureMode = null, pausePlayback = null, isPlaying = false, multiSelectionAPI = null, layerObjectsVersion = 0) {
-  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0, prepareEngine } = interactionParams
+  const { layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom: zoom = 100, sceneMotionFlows, currentSceneId, sceneStartOffset = 0, prepareEngine, onSelectAudioBlock } = interactionParams
   const dispatch = useDispatch()
 
   // =============================================================================
@@ -1003,7 +1004,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // [FIX] ZOOM ADAPTIVE: Keep outline visually consistent regardless of zoom
     const viewportScale = viewport.scale?.x || 1
     const zoomScale = 1 / viewportScale
-    outlineGraphics.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
+    outlineGraphics.stroke({ color: 0x8B5CF6, width: 2.2 * calculateAdaptedOutlineScale(zoomScale) })
 
     hoverBox.visible = true
   }, [layersContainer, motionCaptureMode, isPlaying])
@@ -1060,7 +1061,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
 
     // [FIX] ZOOM ADAPTIVE: Use the provided zoomScale for consistency with selection box
-    outline.stroke({ color: 0x8B5CF6, width: 1.5 * zoomScale })
+    outline.stroke({ color: 0x8B5CF6, width: 2.2 * calculateAdaptedOutlineScale(zoomScale) })
     dragHoverBox.visible = true
   }, [layersContainer])
 
@@ -1151,8 +1152,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (!start || !end) return
 
       const color = 0x8B5CF6
-      const strokeWidth = 4
-      const startRadius = 6
+      const strokeWidth = 6
+      const startRadius = 8
 
       // ---- Start Point Marker ----
       arrow.circle(start.x, start.y, startRadius)
@@ -3008,6 +3009,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       if (!target || target === stageContainer || target === viewport || target === viewport.plugins.get('clamp')) {
         // Clicked on empty canvas - select the canvas
         dispatch(setSelectedCanvas(true))
+        onSelectAudioBlock?.(null)
         return
       }
 

@@ -1063,12 +1063,17 @@ function MotionPanel({
         ) : (
           <button
             onClick={handleCollapseWithAnimation}
-            className={`transition-all duration-300 p-2 rounded-[10px] shrink-0 ${isLight ? 'text-gray-400 hover:text-gray-900 hover:bg-gray-100' : 'text-white/40 hover:text-white hover:bg-white/10'}`}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0 mt-3 mb-1 ${isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200' : 'text-zinc-400 hover:text-white hover:bg-white/10'
+              }`}
             aria-label="Collapse"
           >
             <ChevronRight className="h-5 w-5 text-zinc-500 dark:text-zinc-400" strokeWidth={2} />
           </button>
         )}
+
+
+
+
       </div>
     )
   }
@@ -1088,11 +1093,11 @@ function MotionPanel({
           }}
           className={`overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${activeStepId === 'base'
             ? isLight
-              ? 'border-transparent bg-[#b0b5be] shadow-sm'
+              ? 'border-transparent bg-[#d7d7db] shadow-sm'
               : 'border-transparent bg-[#3a3b48] shadow-sm'
             : isLight
-              ? 'border-transparent bg-[#eaecef] hover:bg-[#b0b5be]'
-              : 'border-transparent bg-[#1c1d26] hover:bg-[#3a3b48]'
+              ? 'border-transparent bg-[#ffffff] hover:bg-[#d7d7db]'
+              : 'border-transparent bg-[#121319] hover:bg-[#3a3b48]'
             }`}
         >
           <div className={`w-full flex items-center justify-between gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
@@ -1160,8 +1165,8 @@ function MotionPanel({
                   >
                     <div className="min-w-0 flex-1">
                       <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isPlayheadActive
-                        ? isLight ? 'text-[#2d1b4e]' : 'text-purple-100'
-                        : isLight ? 'text-slate-800 group-hover:text-[#2d1b4e]' : 'text-zinc-400 group-hover:text-purple-100'
+                        ? isLight ? 'text-[#1E293B]' : 'text-purple-100'
+                        : isLight ? 'text-slate-800 group-hover:text-[#1E293B]' : 'text-zinc-400 group-hover:text-purple-100'
                         }`}>Moment {stepIndex + 1}</h4>
                       <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isPlayheadActive
                         ? isLight ? 'text-[#3b1e70]/80' : 'text-purple-300'
@@ -1177,8 +1182,8 @@ function MotionPanel({
                       onClick={(e) => { e.stopPropagation(); onStepEdit?.(step.id) }}
                       title="Edit moment"
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
-                        ? isLight ? 'text-[#3b1e70]/85 hover:text-[#2d1b4e] hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-white hover:bg-white/10'
-                        : isLight ? 'text-slate-400 hover:text-[#7c4af0] group-hover:text-[#3b1e70]/85 hover:bg-[#cab3f8]/10' : 'text-zinc-500 hover:text-[#8e7ebd] group-hover:text-purple-200/80 hover:bg-white/10'
+                        ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
+                        : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
                         }`}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -1187,8 +1192,8 @@ function MotionPanel({
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteStepId(step.id) }}
                       title="Delete moment"
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
-                        ? isLight ? 'text-[#3b1e70]/85 hover:text-red-600 hover:bg-[#cab3f8]/30' : 'text-purple-200/80 hover:text-red-400 hover:bg-white/10'
-                        : isLight ? 'text-slate-400 hover:text-red-500 group-hover:text-[#3b1e70]/85 hover:bg-red-50' : 'text-zinc-500 hover:text-red-400 group-hover:text-purple-200/80 hover:bg-red-500/10'
+                        ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
+                        : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
                         }`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1207,10 +1212,10 @@ function MotionPanel({
                       }}
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isExpanded
                         ? isPlayheadActive
-                          ? isLight ? 'text-[#2d1b4e] bg-[#cab3f8]/30' : 'text-purple-200 bg-white/10'
+                          ? isLight ? 'text-[#2d1b4e] hover:bg-black/5' : 'text-purple-200 bg-white/10'
                           : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
                         : isPlayheadActive
-                          ? isLight ? 'text-[#3b1e70]/85 hover:bg-[#cab3f8]/30' : 'text-purple-200/85 hover:bg-white/10'
+                          ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
                           : (isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80')
                         }`}
                     >
@@ -1922,7 +1927,7 @@ function MotionPanel({
             {isMobile ? (
               <ChevronDown className="h-5 w-5 text-zinc-500 dark:text-zinc-400" strokeWidth={2.5} />
             ) : (
-              <ChevronRight className="h-5 w-5 text-zinc-500 dark:text-zinc-400" strokeWidth={2} />
+              <ChevronRight className="h-5 w-5 text-zinc-500 dark:text-zinc-400 " strokeWidth={2} />
             )}
           </button>
         </div>
@@ -1973,9 +1978,8 @@ function MotionPanel({
           width: '48px',
           top: `${collapsedTop}px`,
           height: `calc(100vh - ${collapsedTop}px - ${bottomSectionHeight || 0}px)`,
-          zIndex: 50,
+          zIndex: 35,
           backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
-          borderLeft: `1px solid ${isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.05)'}`,
         }}
       >
         {/* Expand toggle */}
@@ -2048,10 +2052,10 @@ function MotionPanel({
                 title="Design / Starting Point"
                 className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${activeStepId === 'base'
                   ? isLight
-                    ? 'border-transparent bg-slate-200 text-slate-900 shadow-sm'
-                    : 'border-transparent bg-[#1c1d26] text-zinc-200 shadow-sm'
+                    ? 'border-transparent bg-[#d7d7db] text-slate-900 shadow-sm'
+                    : 'border-transparent bg-[#3a3b48] text-zinc-200 shadow-sm'
                   : isLight
-                    ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8] hover:text-purple-900'
+                    ? 'border-transparent bg-white text-slate-800 hover:bg-[#d7d7db] hover:text-purple-900'
                     : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
                   }`}
               >

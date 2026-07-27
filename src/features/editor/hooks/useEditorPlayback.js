@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
-import { selectProjectTimelineInfo, setCurrentScene, selectCurrentSceneId, selectTotalProjectDuration } from '../../../store/slices/projectSlice'
+import { selectProjectTimelineInfo, setCurrentScene, selectCurrentSceneId, selectTotalProjectDuration, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
 
 export function useEditorPlayback(scenes) {
   const dispatch = useDispatch()
@@ -20,6 +20,7 @@ export function useEditorPlayback(scenes) {
   const [segments, setSegments] = useState([])
 
   const totalTime = useSelector(selectTotalProjectDuration)
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
 
   const formatTime = useCallback((seconds) => {
     const mins = Math.floor(seconds / 60)
@@ -97,6 +98,7 @@ export function useEditorPlayback(scenes) {
   // This works both during playback (auto-follow) and during manual seeking (auto-select)
   useEffect(() => {
     if (!timelineInfo || timelineInfo.length === 0) return
+    if (isTimelineDragging) return
 
     // Find which scene should be active at the current playhead time
     // using a small epsilon to handle floating point precision at exact boundaries
@@ -128,7 +130,7 @@ export function useEditorPlayback(scenes) {
         dispatch(setCurrentScene(null))
       }
     }
-  }, [playheadTime, timelineInfo, currentSceneId, dispatch])
+  }, [playheadTime, timelineInfo, currentSceneId, dispatch, isTimelineDragging])
 
   // Monitor engine's playing state
   useEffect(() => {

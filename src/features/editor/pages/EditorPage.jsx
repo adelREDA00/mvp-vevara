@@ -6,15 +6,15 @@ import { Link, useParams, useLocation } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import api from '../../../api/client'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack, addAudioTrack } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack, addAudioTrack, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { store } from '../../../store'
 import { gsap } from 'gsap'
-import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer } from '../../../store/slices/selectionSlice'
+import { selectSelectedLayerIds, selectSelectedCanvas, clearLayerSelection, setSelectedLayer, selectSelectedActionStepId, setSelectedAction } from '../../../store/slices/selectionSlice'
 import { undo, redo } from '../../../store/slices/historySlice'
 import { saveAs } from 'file-saver'
 import { exportVideo, initFFmpeg } from '../utils/videoExport'
-import { Loader2, ChevronDown, User, ZoomIn, ZoomOut, X } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronUp, User, ZoomIn, ZoomOut, X, Play, Pause, Scissors } from 'lucide-react'
 import MotionInspector from '../components/MotionInspector'
 import MotionPanel from '../components/MotionPanel'
 import MobileMotionBar from '../components/MobileMotionBar'
@@ -182,6 +182,98 @@ function EditorPage() {
   const [colorPickerType, setColorPickerType] = useState('fill') // 'fill' or 'text' or 'stroke'
   const [sidebarWidth, setSidebarWidth] = useState('80px')
   const currentSidebarWidth = typeof window !== 'undefined' && window.innerWidth < 1024 ? '0px' : sidebarWidth
+  const isMobileSize = typeof window !== 'undefined' && window.innerWidth < 1024
+  const timelineLeftOffset = isMobileSize ? 16 : 220
+
+  // [TIMELINE DETAILS] Lifted details expand state
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false)
+  const toggleDetails = useCallback(() => {
+    setIsDetailsExpanded(prev => !prev)
+  }, [])
+
+  const ACTION_LABELS = {
+    move: 'Move',
+    fade: 'Fade',
+    scale: 'Scale',
+    rotate: 'Rotate',
+    blur: 'Blur',
+    cornerRadius: 'Radius',
+    color: 'Color',
+    crop: 'Crop',
+    tilt: 'Tilt',
+    typewriter: 'Reveal',
+    flip: 'Flip',
+  }
+  const getActionLabel = useCallback((type) => ACTION_LABELS[type] || type, [])
+
+  // Calculate detailed rows count and height
+  const orderedLayerIds = useMemo(() => {
+    if (!currentSceneData || !layers) return []
+    return (currentSceneData.layers || [])
+      .filter(lid => {
+        const layer = layers[lid]
+        return layer && layer.type !== 'background'
+      })
+      .reverse()
+  }, [currentSceneData, layers])
+
+  const detailRows = useMemo(() => {
+    if (!currentSceneData || !layers || !currentSceneMotionFlow) return []
+    const steps = currentSceneMotionFlow.steps || []
+    const rowMap = new Map()
+    steps.forEach(step => {
+      const layerActions = step.layerActions || {}
+      const layerPresets = step.layerPresets || {}
+      Object.entries(layerActions).forEach(([layerId, actions]) => {
+        if (!Array.isArray(actions)) return
+        actions.forEach(action => {
+          const key = `${layerId}::${action.type}`
+          if (!rowMap.has(key)) {
+            const layer = layers[layerId]
+            const isBg = layer?.type === 'background'
+            const idx = orderedLayerIds.indexOf(layerId)
+            const layerOrder = isBg ? 9999 : (idx !== -1 ? idx : 999)
+            rowMap.set(key, {
+              layerId,
+              layerName: layer?.name || 'Layer',
+              actionType: action.type,
+              layerOrder,
+            })
+          }
+        })
+      })
+      Object.entries(layerPresets).forEach(([layerId, preset]) => {
+        if (!preset || !PRESET_REGISTRY[preset.id]) return
+        const presetDef = PRESET_REGISTRY[preset.id]
+        const key = `${layerId}::preset`
+        if (!rowMap.has(key)) {
+          const layer = layers[layerId]
+          const isBg = layer?.type === 'background'
+          const idx = orderedLayerIds.indexOf(layerId)
+          const layerOrder = isBg ? 9999 : (idx !== -1 ? idx : 999)
+          rowMap.set(key, {
+            layerId,
+            layerName: layer?.name || 'Layer',
+            actionType: presetDef.name || preset.id,
+            isPreset: true,
+            layerOrder,
+          })
+        }
+      })
+    })
+
+    return Array.from(rowMap.values())
+      .sort((a, b) => {
+        const orderDiff = a.layerOrder - b.layerOrder
+        if (orderDiff !== 0) return orderDiff
+        return a.actionType.localeCompare(b.actionType)
+      })
+  }, [currentSceneData, layers, currentSceneMotionFlow, orderedLayerIds])
+
+  const detailsPanelHeight = useMemo(() => {
+    if (!isDetailsExpanded || detailRows.length === 0) return 0
+    return detailRows.length * 31 + 8
+  }, [isDetailsExpanded, detailRows])
   // Default pasteboard (workspace) visibility should be ON for everyone.
   // Guests should see the same outside-of-canvas workspace as auth users.
   const [showPasteboard, setShowPasteboard] = useState(true)
@@ -192,6 +284,7 @@ function EditorPage() {
   // preset to a different preset (same count, different identity) is detected as a change.
   const [captureBaselinePresetSignature, setCaptureBaselinePresetSignature] = useState('')
   const [motionControls, setMotionControls] = useState(null)
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
   // captureVersion bumps on every onPositionUpdate, so this re-evaluates on each interaction
   const hasLiveCanvasChanges = motionCaptureMode?.trackedLayers
     ? Array.from(motionCaptureMode.trackedLayers.values()).some(
@@ -616,7 +709,6 @@ function EditorPage() {
     const l = data.left !== undefined ? data.left : 0
     const t = data.top !== undefined ? data.top : 0
 
-
     if (sw <= 0 || sh <= 0) return
 
     // Hide scrollbars on mobile devices
@@ -639,11 +731,17 @@ function EditorPage() {
     if (vTrackRef.current) vTrackRef.current.style.display = showBoth ? 'block' : 'none'
     if (hTrackRef.current) hTrackRef.current.style.display = showBoth ? 'block' : 'none'
 
+    const padding = Math.max(ww, wh) * 0.5
+
     if (showBoth && vThumbRef.current) {
       const vTrackH = sh - 23 // top 8 + bottom 15
-      const thumbH = Math.max(40, Math.min(vTrackH, (sh / totalWorldHeight) * vTrackH))
-      const maxT = wh - sh / scale
-      const ratio = maxT <= 1 ? 0 : Math.max(0, Math.min(1, t / maxT))
+      const totalRangeY = wh + 2 * padding
+      const screenWorldH = sh / scale
+      const thumbH = Math.max(40, Math.min(vTrackH, (screenWorldH / totalRangeY) * vTrackH))
+      
+      const minT = -padding
+      const maxT = wh + padding - screenWorldH
+      const ratio = (maxT - minT) <= 1 ? 0 : Math.max(0, Math.min(1, (t - minT) / (maxT - minT)))
 
       const pos = ratio * (vTrackH - thumbH)
       vThumbRef.current.style.height = `${thumbH}px`
@@ -652,9 +750,13 @@ function EditorPage() {
 
     if (showBoth && hThumbRef.current) {
       const hTrackW = sw - 23 // left 8 + right 15
-      const thumbW = Math.max(40, Math.min(hTrackW, (sw / totalWorldWidth) * hTrackW))
-      const maxL = ww - sw / scale
-      const ratio = maxL <= 1 ? 0 : Math.max(0, Math.min(1, l / maxL))
+      const totalRangeX = ww + 2 * padding
+      const screenWorldW = sw / scale
+      const thumbW = Math.max(40, Math.min(hTrackW, (screenWorldW / totalRangeX) * hTrackW))
+
+      const minL = -padding
+      const maxL = ww + padding - screenWorldW
+      const ratio = (maxL - minL) <= 1 ? 0 : Math.max(0, Math.min(1, (l - minL) / (maxL - minL)))
 
       const pos = ratio * (hTrackW - thumbW)
       hThumbRef.current.style.width = `${thumbW}px`
@@ -686,17 +788,20 @@ function EditorPage() {
       lastMousePos.current = { x: e.clientX, y: e.clientY }
 
       const { scale, screenWidth, screenHeight, worldWidth, worldHeight } = viewportData
-      const totalWorldWidth = worldWidth * scale
-      const totalWorldHeight = worldHeight * scale
+      const padding = Math.max(worldWidth, worldHeight) * 0.5
 
       if (scrollbarDragType.current === 'vertical') {
         const vTrackHeight = screenHeight - 23
-        const thumbHeight = Math.max(40, Math.min(vTrackHeight, (screenHeight / totalWorldHeight) * vTrackHeight))
+        const totalRangeY = worldHeight + 2 * padding
+        const screenWorldH = screenHeight / scale
+        const thumbHeight = Math.max(40, Math.min(vTrackHeight, (screenWorldH / totalRangeY) * vTrackHeight))
         const scrollableTrack = vTrackHeight - thumbHeight
 
         if (scrollableTrack <= 0) return
 
-        const scrollableWorldRange = worldHeight - screenHeight / scale
+        const minT = -padding
+        const maxT = worldHeight + padding - screenWorldH
+        const scrollableWorldRange = maxT - minT
         const panAmount = (deltaY / scrollableTrack) * scrollableWorldRange
 
         const currentCenter = stageRef.current.getViewportData()
@@ -706,12 +811,16 @@ function EditorPage() {
         }
       } else {
         const hTrackWidth = screenWidth - 23
-        const thumbWidth = Math.max(40, Math.min(hTrackWidth, (screenWidth / totalWorldWidth) * hTrackWidth))
+        const totalRangeX = worldWidth + 2 * padding
+        const screenWorldW = screenWidth / scale
+        const thumbWidth = Math.max(40, Math.min(hTrackWidth, (screenWorldW / totalRangeX) * hTrackWidth))
         const scrollableTrack = hTrackWidth - thumbWidth
 
         if (scrollableTrack <= 0) return
 
-        const scrollableWorldRange = worldWidth - screenWidth / scale
+        const minL = -padding
+        const maxL = worldWidth + padding - screenWorldW
+        const scrollableWorldRange = maxL - minL
         const panAmount = (deltaX / scrollableTrack) * scrollableWorldRange
 
         const currentCenter = stageRef.current.getViewportData()
@@ -1644,6 +1753,22 @@ function EditorPage() {
   // -------------------------------------------------------------------
   // State for tracking the current editing step (created via CanvasControls)
   const [editingStepId, setEditingStepId] = useState(null)
+  const [mobileMotionBarHeight, setMobileMotionBarHeight] = useState(0)
+  const mobileMotionBarContainerRef = useRef(null)
+
+  useEffect(() => {
+    if (!mobileMotionBarContainerRef.current) {
+      setMobileMotionBarHeight(0)
+      return
+    }
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setMobileMotionBarHeight(entry.target.clientHeight)
+      }
+    })
+    observer.observe(mobileMotionBarContainerRef.current)
+    return () => observer.disconnect()
+  }, [isMotionCaptureActive, previewMode])
   // True only when editing an EXISTING moment (not when creating a brand-new one)
   const [isEditingExistingStep, setIsEditingExistingStep] = useState(false)
 
@@ -1680,6 +1805,15 @@ function EditorPage() {
       for (const actA of listA) {
         const actB = listB.find(b => b.type === actA.type)
         if (!actB) return false
+
+        // Check action start offset & duration
+        const offsetA = actA.actionStartOffset !== undefined ? actA.actionStartOffset : 0
+        const offsetB = actB.actionStartOffset !== undefined ? actB.actionStartOffset : 0
+        if (Math.abs(offsetA - offsetB) > 1) return false
+
+        const durA = actA.actionDuration !== undefined ? actA.actionDuration : (stepA.duration || 1000)
+        const durB = actB.actionDuration !== undefined ? actB.actionDuration : (stepB.duration || 1000)
+        if (Math.abs(durA - durB) > 1) return false
 
         const valA = actA.values || {}
         const valB = actB.values || {}
@@ -1723,6 +1857,26 @@ function EditorPage() {
   const captureUndoSyncRef = useRef(false) // Signals that trackedLayers needs syncing from Redux after undo/redo
   const captureActionIdsRef = useRef(new Map()) // Tracks dispatched action IDs during capture: "layerId:type" -> actionId
   const [captureVersion, setCaptureVersion] = useState(0) // Internal state to force re-renders on Ref updates
+
+  const leftReservedAreaRef = useRef(null)
+
+  useEffect(() => {
+    const element = leftReservedAreaRef.current
+    if (!element) return
+
+    const handleWheel = (e) => {
+      if (scenesBarRef.current) {
+        e.preventDefault()
+        scenesBarRef.current.scrollTop += e.deltaY
+        scenesBarRef.current.scrollLeft += e.deltaX
+      }
+    }
+
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      element.removeEventListener('wheel', handleWheel)
+    }
+  }, [])
 
   const isStepUnchanged = useMemo(() => {
     if (!isEditingExistingStep || !editingStepId) return false
@@ -1799,12 +1953,16 @@ function EditorPage() {
     if (!currentSceneId) return null
     if (!currentSceneTimelineInfo) return null
 
+    if (isTimelineDragging && editingStepId) {
+      return editingStepId
+    }
+
     const timeInSceneMs = (playheadTime - currentSceneTimelineInfo.startTime) * 1000
     if (timeInSceneMs < -2.1) return null
 
     const steps = currentSceneMotionFlow?.steps || []
     if (steps.length === 0) return 'base'
-    if (timeInSceneMs <= 2.1) return 'base'
+    if (timeInSceneMs <= 0) return 'base'
 
     // Sort steps by startTime to ensure correct ordering
     const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
@@ -1858,7 +2016,17 @@ function EditorPage() {
     }
 
     return null
-  }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime, editingStepId])
+  }, [currentSceneId, currentSceneMotionFlow, currentSceneTimelineInfo, playheadTime, editingStepId, isTimelineDragging])
+
+  const selectedActionStepId = useSelector(selectSelectedActionStepId)
+  const lastActiveStepIdRef = useRef(null)
+  if (!isTimelineDragging) {
+    lastActiveStepIdRef.current = playheadStepId
+  }
+  if (selectedActionStepId) {
+    lastActiveStepIdRef.current = selectedActionStepId
+  }
+  const activeStepIdToUse = isTimelineDragging ? (selectedActionStepId || lastActiveStepIdRef.current || 'base') : playheadStepId
 
   // Virtual layer for UI controls during motion capture
   // This combines the base Redux layer with live capture transforms to prevent slider snapping
@@ -3486,6 +3654,7 @@ function EditorPage() {
 
     // Set the visual selection
     setEditingStepId(stepId)
+    dispatch(setSelectedAction({ layerId: null, actionType: null, stepId }))
 
     // Seek to the step's timeline position
     if (stepId === 'base') {
@@ -3506,10 +3675,10 @@ function EditorPage() {
     const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
     const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
     const stepDurMs = step.duration != null ? step.duration : stepDuration
-    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs) / 1000
+    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs - 5) / 1000
 
     seek(stepEndTimeSeconds)
-  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow])
+  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow, dispatch])
 
   /**
    * Select a step (highlight + seek to END of moment) WITHOUT entering capture mode.
@@ -3530,6 +3699,7 @@ function EditorPage() {
 
     // Set the visual selection
     setEditingStepId(stepId)
+    dispatch(setSelectedAction({ layerId: null, actionType: null, stepId }))
 
     if (stepId === 'base') {
       seek(startTimeOffset)
@@ -3548,13 +3718,13 @@ function EditorPage() {
     const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
     const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
     const stepDurMs = step.duration != null ? step.duration : stepDuration
-    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs) / 1000
+    const stepEndTimeSeconds = startTimeOffset + (stepStartMs + stepDurMs - 5) / 1000
 
     const epsilon = 0.002
     if (Math.abs(playheadTimeRef.current - stepEndTimeSeconds) > epsilon) {
       seek(stepEndTimeSeconds)
     }
-  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow, playheadTimeRef])
+  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow, playheadTimeRef, dispatch])
 
   /**
    * Edit an existing motion step (Centralized logic for both Panel and Timeline)
@@ -5141,6 +5311,7 @@ function EditorPage() {
     const originalStep = savedStepTimingsRef.current?.find(s => s.id === stepId)
     const currentStep = currentSceneMotionFlow?.steps?.find(s => s.id === stepId)
     const isStepUnchanged = isEditingExistingStep && areStepsIdentical(originalStep, currentStep)
+    const hasActionChanges = editingStepActionCount !== captureBaselineActionCount
     const hasChanges = isStepUnchanged ? false : (hasLiveChanges || hasActionChanges || hasPresetChanges)
 
     if (hasChanges) {
@@ -5434,7 +5605,7 @@ function EditorPage() {
           className="hidden lg:block absolute left-0 z-50"
           style={{
             top: `${topToolbarHeight}px`,
-            height: `calc(100vh - ${topToolbarHeight}px)`,
+            height: `calc(100vh - ${topToolbarHeight}px - ${bottomSectionHeight || 140}px)`,
             transform: (isMotionCaptureActive || previewMode) ? 'translateX(-100%)' : 'translateX(0)',
             transition: isResizingBottom
               ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
@@ -5968,6 +6139,7 @@ function EditorPage() {
                 In capture mode the toolbar hides (translateY -100%) so no offset needed. */}
             {!previewMode && (
               <div
+                ref={mobileMotionBarContainerRef}
                 className="lg:hidden"
                 data-tutorial="mobile-motion-bar-container"
                 style={{ paddingTop: isMotionCaptureActive ? 0 : topToolbarHeight }}
@@ -5991,7 +6163,7 @@ function EditorPage() {
                   onUndo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(undo()) }}
                   onRedo={() => { if (isMotionCaptureActive) captureUndoSyncRef.current = true; dispatch(redo()) }}
                   sceneLayers={sceneLayersForMotion}
-                  activeStepId={playheadStepId}
+                  activeStepId={activeStepIdToUse}
                   onSelectStepEnd={handleSelectStepEnd}
                 />
               </div>
@@ -6145,6 +6317,7 @@ function EditorPage() {
                 requestOpenControl={requestOpenControl}
                 stepsCount={currentSceneMotionFlow?.steps?.length || 0}
                 editingMomentLabel={editingMomentLabel}
+                onCutScene={handleSplitScene}
               />
             </div>
 
@@ -6154,8 +6327,10 @@ function EditorPage() {
               data-tutorial="canvas-area"
               className="absolute flex-1 overflow-hidden select-none"
               style={{
-                top: 0,
-                bottom: previewMode ? 0 : (initialBottomHeight || 0),
+                top: isMobileSize
+                  ? mobileMotionBarHeight
+                  : ((isMotionCaptureActive || previewMode) ? 0 : (topToolbarHeight || 56)),
+                bottom: previewMode ? 0 : (bottomSectionHeight || 218),
                 left: 0,
                 right: 0,
                 backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
@@ -6164,6 +6339,7 @@ function EditorPage() {
                 // select, drag, zoom/pan). The floating play/exit controls are
                 // fixed-position siblings, so they remain interactive.
                 pointerEvents: previewMode ? 'none' : undefined,
+                transition: 'top 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
               }}
             >
               {/* Canvas skeleton — same readiness gate as the global FullScreenLoading,
@@ -6207,9 +6383,9 @@ function EditorPage() {
                 onTextChange={handleTextChange}
                 onFinishEditing={handleFinishEditing}
                 onStartTextEditing={startTextEditing}
-                totalTime={totalTime}
                 showPasteboard={showPasteboard}
                 previewMode={previewMode}
+                onSelectAudioBlock={setSelectedAudioBlockId}
               />
 
               {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
@@ -6225,55 +6401,69 @@ function EditorPage() {
 
 
 
-              {/* Vertical Scrollbar Container */}
-              <div
-                ref={vTrackRef}
-                className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
-                style={{
-                  top: 8,
-                  bottom: `calc(${Math.max(0, (bottomSectionHeight || 0) - (initialBottomHeight || 0))}px + ${isMotionCaptureActive ? 15 : 55}px)`,
-                  right: '6px',
-                  width: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  display: 'none',
-                  pointerEvents: 'none'
-                }}
-              >
-                <div
-                  ref={vThumbRef}
-                  className="w-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
-                  style={{ pointerEvents: 'auto', left: 0 }}
-                  onMouseDown={(e) => {
-                    handleScrollbarMouseDown(e, 'vertical')
-                    document.body.style.userSelect = 'none'
-                  }}
-                />
-              </div>
+              {/* Scrollbar positioning variables */}
+              {(() => {
+                const rightScrollbarOffset = (typeof window !== 'undefined' && window.innerWidth >= 1024)
+                  ? (isMotionPanelOpen
+                    ? (isMotionPanelCollapsed ? '54px' : '306px')
+                    : '6px')
+                  : '6px';
+                const leftScrollbarOffset = (typeof window !== 'undefined' && window.innerWidth >= 1024) ? 128 : 8;
 
-              {/* Horizontal Scrollbar Container */}
-              <div
-                ref={hTrackRef}
-                className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
-                style={{
-                  left: 8,
-                  right: 15,
-                  bottom: `calc(${Math.max(0, (bottomSectionHeight || 0) - (initialBottomHeight || 0))}px + ${isMotionCaptureActive ? 10 : 50}px)`,
-                  height: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  display: 'none',
-                  pointerEvents: 'none'
-                }}
-              >
-                <div
-                  ref={hThumbRef}
-                  className="h-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
-                  style={{ pointerEvents: 'auto', top: 0 }}
-                  onMouseDown={(e) => {
-                    handleScrollbarMouseDown(e, 'horizontal')
-                    document.body.style.userSelect = 'none'
-                  }}
-                />
-              </div>
+                return (
+                  <>
+                    {/* Vertical Scrollbar Container */}
+                    <div
+                      ref={vTrackRef}
+                      className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
+                      style={{
+                        top: 8,
+                        bottom: '24px',
+                        right: rightScrollbarOffset,
+                        width: '6px',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        display: 'none',
+                        pointerEvents: 'none'
+                      }}
+                    >
+                      <div
+                        ref={vThumbRef}
+                        className="w-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                        style={{ pointerEvents: 'auto', left: 0 }}
+                        onMouseDown={(e) => {
+                          handleScrollbarMouseDown(e, 'vertical')
+                          document.body.style.userSelect = 'none'
+                        }}
+                      />
+                    </div>
+
+                    {/* Horizontal Scrollbar Container */}
+                    <div
+                      ref={hTrackRef}
+                      className="absolute z-40 bg-black/60 backdrop-blur-md rounded-full"
+                      style={{
+                        left: leftScrollbarOffset,
+                        right: `calc(${rightScrollbarOffset} + 9px)`,
+                        bottom: '6px',
+                        height: '6px',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        display: 'none',
+                        pointerEvents: 'none'
+                      }}
+                    >
+                      <div
+                        ref={hThumbRef}
+                        className="h-full bg-white/90 hover:bg-white active:bg-white transition-colors cursor-pointer rounded-full absolute shadow-sm"
+                        style={{ pointerEvents: 'auto', top: 0 }}
+                        onMouseDown={(e) => {
+                          handleScrollbarMouseDown(e, 'horizontal')
+                          document.body.style.userSelect = 'none'
+                        }}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
 
 
             </div>
@@ -6281,55 +6471,7 @@ function EditorPage() {
             {/* Removed floating mobile menu button */}
           </div>
 
-          {/* Unified Playback Controls - Full-width bar sitting exactly above the bottom section */}
-          {!isMotionCaptureActive && !previewMode && !isAutoPlaying && (
-            <div
-              className={`absolute right-0 pointer-events-auto flex items-center justify-center ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`}
-              style={{
-                zIndex: 30,
-                left: currentSidebarWidth,
-                bottom: `${bottomSectionHeight || 140}px`,
-                height: '40px',
-                backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
-                borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div className="w-full px-4">
-                <PlaybackControls
-                  isPlaying={isPlaying}
-                  isBuffering={motionControls?.isBuffering || false}
-                  currentTime={playheadTime}
-                  totalTime={totalTime}
-                  shiftLeft={currentSidebarWidth !== '0px'}
-                  onPlayPause={() => {
-                    if (motionControls) {
-                      if (isPlaying) {
-                        motionControls.pauseAll()
-                        setIsPlaying(false)
-                      } else {
-                        motionControls.playAll()
-                        setIsPlaying(true)
-                      }
-                    }
-                  }}
-                  onSplit={handleSplitScene}
-                  playheadStepId={playheadStepId}
-                  onUpdateStep={handleEditStep}
-                  onDeleteStep={(stepId) => {
-                    if (currentSceneId && stepId) {
-                      dispatch(deleteSceneMotionStep({
-                        sceneId: currentSceneId,
-                        stepId: stepId
-                      }))
-                    }
-                  }}
-                  isMotionCaptureActive={isMotionCaptureActive}
-                  onZoomIn={() => timelineControlRef.current?.zoomIn()}
-                  onZoomOut={() => timelineControlRef.current?.zoomOut()}
-                />
-              </div>
-            </div>
-          )}
+
 
           {/* [ONBOARDING] Hide bottom section during tutorial to focus attention on canvas + moments panel */}
           {/* Bottom Sections - Overlay at bottom with glass effect */}
@@ -6339,7 +6481,7 @@ function EditorPage() {
             style={{
               zIndex: 45,
               display: previewMode ? 'none' : undefined,
-              left: (typeof window !== 'undefined' && window.innerWidth < 1024) ? '0px' : currentSidebarWidth,
+              left: '0px',
               backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
@@ -6352,35 +6494,179 @@ function EditorPage() {
           >
             {/* Top border line & Resize Handle */}
             <div
-              className="absolute top-0 left-0 right-0 h-[6px] -mt-[3px] cursor-ns-resize z-50 pointer-events-auto"
+              className="absolute top-0 left-0 right-0 h-[18px] -mt-[9px] cursor-ns-resize z-50 pointer-events-auto"
               onMouseDown={handleBottomResizeMouseDown}
               onTouchStart={handleBottomResizeMouseDown}
               onMouseEnter={() => setIsHoveringHandle(true)}
               onMouseLeave={() => setIsHoveringHandle(false)}
             />
             <div
-              className="absolute top-0 left-0 right-0 h-[1px] transition-all duration-150"
+              className="absolute top-0 left-0 right-0 transition-all duration-150"
               style={{
-                top: '-1px',
+                top: (isResizingBottom || isHoveringHandle) ? '-1.5px' : '-1px',
+                height: (isResizingBottom || isHoveringHandle) ? '3px' : '1.5px',
                 background: (isResizingBottom || isHoveringHandle)
                   ? (theme === 'light'
-                    ? 'linear-gradient(to right, rgba(0, 0, 0, 0.08) 0%, #7c4af0 15%, #7c4af0 85%, rgba(0, 0, 0, 0.08) 100%)'
-                    : 'linear-gradient(to right, rgba(255, 255, 255, 0.08) 0%, #7050c0 15%, #7050c0 85%, rgba(255, 255, 255, 0.08) 100%)')
-                  : (theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'),
+                    ? 'linear-gradient(to right, rgba(0, 0, 0, 0) 0%, #7c4af0 15%, #7c4af0 85%, rgba(0, 0, 0, 0) 100%)'
+                    : 'linear-gradient(to right, rgba(255, 255, 255, 0) 0%, #7050c0 15%, #7050c0 85%, rgba(255, 255, 255, 0) 100%)')
+                  : (theme === 'light'
+                    ? 'linear-gradient(to right, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.08) 15%, rgba(0, 0, 0, 0.08) 85%, rgba(0, 0, 0, 0) 100%)'
+                    : 'linear-gradient(to right, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.08) 15%, rgba(255, 255, 255, 0.08) 85%, rgba(255, 255, 255, 0) 100%)'),
                 pointerEvents: 'none'
               }}
             />
 
             {/* Content Container - Scrollable if content overflows */}
-            <div className="flex flex-col flex-1" style={{
+            <div className="flex flex-col lg:flex-row flex-1" style={{
               minHeight: 0, // Allow flex item to shrink
               position: 'relative',
               paddingBottom: '0px' // Remove padding to make scenes bar touch bottom
             }}>
+              {/* Left Reserved Area - play/cut controls + future detail space */}
+              {!(typeof window !== 'undefined' && window.innerWidth < 1024) && (
+                <div
+                  ref={leftReservedAreaRef}
+                  className="flex flex-col select-none pointer-events-none"
+                  style={{
+                    width: `${timelineLeftOffset}px`,
+                    top: 0,
+                    bottom: 12,
+                    position: 'absolute',
+                    left: 0,
+                  }}
+                >
+                  {/* Left Top Controls Area */}
+                  <div
+                    className="flex items-center justify-center border-r pointer-events-auto"
+                    style={{
+                      height: '40px', // matches timeline ruler height
+                      borderBottom: theme === 'light' ? '1px solid rgba(0, 0, 0, 0.05)' : '1px solid rgba(255, 255, 255, 0.05)',
+                      borderTop: 'none',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      zIndex: 110,
+                      backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                      borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+                    }}
+                  >
+                    {/* Play button centered inside the left section */}
+                    <div
+                      className="flex items-center justify-center h-full w-full"
+                    >
+                      {/* Play/Pause Button */}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          if (motionControls) {
+                            if (isPlaying) {
+                              motionControls.pauseAll()
+                              setIsPlaying(false)
+                            } else {
+                              motionControls.playAll()
+                              setIsPlaying(true)
+                            }
+                          }
+                        }}
+                        className={`w-8 h-8 flex items-center justify-center rounded-md transition-all flex-shrink-0 active:scale-95 ${theme === 'light'
+                          ? 'hover:bg-black/5 text-gray-500 hover:text-gray-900'
+                          : 'hover:bg-white/8 text-white/40 hover:text-white/80'
+                          }`}
+                        title={isPlaying ? 'Pause' : 'Play'}
+                        type="button"
+                      >
+                        {isPlaying ? (
+                          <Pause className="h-4 w-4" fill="currentColor" />
+                        ) : (
+                          <Play className="h-4 w-4 ml-0.5" fill="currentColor" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Left Lower Background Area */}
+                  <div
+                    className="border-r"
+                    style={{
+                      position: 'absolute',
+                      top: '40px',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      zIndex: 100,
+                      backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                      borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                </div>
+              )}
+
               {/* Scrollable Content Area - only playback + scenes; zoom is fixed below */}
               <div className={`flex-col overflow-x-hidden flex-1 scrollbar-hide overflow-y-hidden ${activeBottomMenu ? 'hidden lg:flex' : 'flex'}`} style={{
                 minHeight: 0
               }}>
+
+                {/* Mobile Playback Toolbar */}
+                {isMobileSize && (
+                  <div className="flex items-center justify-between px-4 h-9 lg:hidden" style={{
+                    borderColor: theme === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)',
+                    backgroundColor: theme === 'light' ? '#f3f4f7' : '#090a0d',
+                  }}>
+                    {/* Left: Details Toggle */}
+                    <button
+                      onClick={toggleDetails}
+                      className={`p-1.5 rounded-md transition-all ${isDetailsExpanded
+                        ? (theme === 'light' ? 'bg-[#7c4af0]/10 text-[#7c4af0]' : 'bg-[#7c4af0]/20 text-[#a78bfa]')
+                        : (theme === 'light' ? 'text-gray-500 hover:bg-black/5' : 'text-white/40 hover:bg-white/8')
+                        }`}
+                      title="Toggle Details"
+                    >
+                      {isDetailsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+
+                    {/* Center: Play/Pause */}
+                    <button
+                      onClick={() => {
+                        if (motionControls) {
+                          if (isPlaying) {
+                            motionControls.pauseAll()
+                            setIsPlaying(false)
+                          } else {
+                            motionControls.playAll()
+                            setIsPlaying(true)
+                          }
+                        }
+                      }}
+                      className={`w-7 h-7 flex items-center justify-center rounded-full transition-all ${theme === 'light' ? 'bg-white text-gray-800 shadow-sm border border-gray-200' : 'bg-zinc-800 text-white border border-white/10'
+                        }`}
+                    >
+                      {isPlaying ? <Pause className="h-3 w-3" fill="currentColor" /> : <Play className="h-3 w-3 ml-0.5" fill="currentColor" />}
+                    </button>
+
+                    {/* Right: Zoom Controls */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => timelineControlRef.current?.zoomIn()}
+                        className={`p-1.5 rounded-md transition-all ${theme === 'light' ? 'text-gray-500 hover:bg-black/5' : 'text-white/40 hover:bg-white/8'
+                          }`}
+                        title="Zoom In"
+                      >
+                        <ZoomIn className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => timelineControlRef.current?.zoomOut()}
+                        className={`p-1.5 rounded-md transition-all ${theme === 'light' ? 'text-gray-500 hover:bg-black/5' : 'text-white/40 hover:bg-white/8'
+                          }`}
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Scenes Bar - Timeline Tracks Section - Horizontally scrollable */}
                 <div
@@ -6395,7 +6681,7 @@ function EditorPage() {
                     WebkitOverflowScrolling: 'touch',
                     paddingBottom: '12px',
                     paddingTop: '0px',
-                    paddingLeft: '20px',
+                    paddingLeft: '0px',
                     paddingRight: '20px',
                     touchAction: 'auto',
                   }}
@@ -6406,7 +6692,7 @@ function EditorPage() {
                     totalTime={totalTime}
                     worldWidth={worldWidth}
                     worldHeight={worldHeight}
-                    currentTimeStepId={playheadStepId}
+                    currentTimeStepId={activeStepIdToUse}
                     isMotionCaptureActive={isMotionCaptureActive}
                     editingStepId={editingStepId}
                     onStepClick={handleSelectStep}
@@ -6418,18 +6704,33 @@ function EditorPage() {
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
                     onPlayheadInteractionDuringCapture={handlePlayheadInteractionDuringCapture}
                     selectedAudioBlockId={selectedAudioBlockId}
-                    onSelectAudioBlock={(id, seekTime) => {
+                    onSelectAudioBlock={(id) => {
                       setSelectedAudioBlockId(id)
                       if (id) {
                         if (document.activeElement && document.activeElement.tagName !== 'BODY') {
                           document.activeElement.blur()
                         }
                         dispatch(clearLayerSelection())
-                        if (seekTime !== undefined) {
-                          seek(seekTime)
+                      }
+                    }}
+                    leftOffset={timelineLeftOffset}
+                    isPlaying={isPlaying}
+                    isBuffering={motionControls?.isBuffering || false}
+                    onPlayPause={() => {
+                      if (motionControls) {
+                        if (isPlaying) {
+                          motionControls.pauseAll()
+                          setIsPlaying(false)
+                        } else {
+                          motionControls.playAll()
+                          setIsPlaying(true)
                         }
                       }
                     }}
+                    onSplit={handleSplitScene}
+                    isDetailsExpanded={isDetailsExpanded}
+                    toggleDetails={toggleDetails}
+                    detailsPanelHeight={detailsPanelHeight}
                   />
                 </div>
               </div>
@@ -6537,6 +6838,7 @@ function EditorPage() {
                   currentScene={currentSceneData}
                   editingStepActionCount={editingStepActionCount}
                   isDoneEnabled={isDoneEnabled}
+                  onCutScene={handleSplitScene}
                   selectedAudioBlock={selectedAudioBlock}
                   onAudioBlockUpdate={({ id, ...updates }) => timelineControlRef.current?.updateBlock?.(id, updates)}
                   onAudioBlockDelete={(id) => {
@@ -6838,7 +7140,7 @@ function EditorPage() {
               }
             `}</style>
             <div
-              className="relative overflow-hidden rounded-xl shadow-2xl border border-purple-400/30 backdrop-blur-xl"
+              className="relative overflow-hidden border-2 rounded-[6px] shadow-2xl border border-purple-400/30 backdrop-blur-xl"
               style={{
                 backgroundColor: '#7c3aed',
                 minWidth: '260px',

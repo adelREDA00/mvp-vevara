@@ -1,13 +1,14 @@
-import { Plus, Zap, ChevronDown, Pencil, Scissors, Trash2 } from 'lucide-react'
+import { Plus, Zap, ChevronDown, ChevronUp, Pencil, Scissors, Trash2, Play, Pause, Loader2 } from 'lucide-react'
 import { uid } from '../../../utils/ids'
 import { useDispatch, useSelector } from 'react-redux'
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback, useContext, useImperativeHandle } from 'react'
 import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
-import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming, setTimelineDragging, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
-import { clearLayerSelection } from '../../../store/slices/selectionSlice'
+import { addScene, setCurrentScene, selectScenes, selectCurrentSceneId, reorderScene, updateScene, splitScene, deleteScene, selectProjectTimelineInfo, selectSceneMotionFlows, deleteSceneMotionStep, updateStepTiming, updateSceneMotionStepWithChildScaling, setTimelineDragging, selectIsTimelineDragging, selectLayers, selectCurrentScene, resolveStepLayout } from '../../../store/slices/projectSlice'
+import { clearLayerSelection, setSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import AudioBar from './AudioBar'
+import MotionDetailsPanel from './MotionDetailsPanel'
 
 
 // Custom hook for debouncing values
@@ -419,9 +420,10 @@ const ScenePreview = React.memo(({ layers, cardWidth, cardHeight, backgroundColo
 // Detect touch device for adaptive interaction sizing
 const isTouchDevice = () => typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
 
-const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, onPlayheadInteractionDuringCapture, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false }) => {
+const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = null, onStepClick, onStepContextMenu, cardWidth, pageDuration = 5000, isMotionCaptureActive, onPlayheadInteractionDuringCapture, sceneId, onMotionPause, currentTime = 0, isCurrentScene = false, detailsPanelHeight = 0, cardHeight = 48, onSeek, sceneStartTime = 0, onSeekInstant }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
+  const isTimelineDragging = useSelector(selectIsTimelineDragging)
   // Compute active step from playhead position (synchronous, no re-render lag)
   // Uses the "preceding step region" rule: gaps after a step belong to that step.
   // ONLY for the current scene — non-current scenes should never auto-highlight
@@ -430,8 +432,9 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     // For non-current scenes, never auto-compute — only use activeStepId
     // which is null (since activeStepId={isActive ? activeStepId : null} only
     // passes a value to the current scene).
-    if (!isCurrentScene || !steps.length || pageDuration <= 0) return activeStepId
+    if (!isCurrentScene || !steps.length || pageDuration <= 0 || isTimelineDragging) return activeStepId
     const timeInMs = currentTime * 1000
+    if (timeInMs <= 0) return null // Exact scene start belongs to Design/Base state
     const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
 
     // 1. Check if playhead is exactly within any step's range
@@ -484,6 +487,14 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
   const didDragRef = useRef(false)
   const [isDragging, setIsDragging] = useState(false)
 
+  // Derive live steps during scene card trimming for 60fps visual stability
+  const effectiveSteps = useMemo(() => {
+    if (!steps || steps.length === 0) return []
+    const clonedSteps = JSON.parse(JSON.stringify(steps))
+    resolveStepLayout(clonedSteps, pageDuration)
+    return clonedSteps
+  }, [steps, pageDuration])
+
   const pxToMs = cardWidth > 0 ? pageDuration / cardWidth : 0
 
   const getClientX = useCallback((e) => {
@@ -492,10 +503,58 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     return e.clientX
   }, [])
 
+  const getClampedStepTiming = useCallback((stepId, targetStartTime, targetDuration) => {
+    const stepsList = steps || []
+    const stepIndex = stepsList.findIndex(s => s.id === stepId)
+    if (stepIndex === -1) return { startTime: 0, duration: 0 }
+    const step = stepsList[stepIndex]
+    const sceneDuration = pageDuration
+    const MIN_DURATION = 200
+
+    const prevEnd = stepIndex > 0
+      ? (stepsList[stepIndex - 1].startTime || 0) + (stepsList[stepIndex - 1].duration || 0)
+      : 0
+    const nextStart = stepIndex < stepsList.length - 1
+      ? (stepsList[stepIndex + 1].startTime || sceneDuration)
+      : sceneDuration
+
+    const oldStartTime = step.startTime || 0
+    const oldDuration = step.duration || 1000
+
+    let newStartTime = targetStartTime !== undefined ? targetStartTime : oldStartTime
+    let newDuration = targetDuration !== undefined ? targetDuration : oldDuration
+
+    if (targetDuration === undefined) {
+      // Moving
+      newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - newDuration))
+    } else {
+      // Resizing
+      if (targetStartTime !== undefined) {
+        // Left-resize: preserve the right boundary
+        const targetRight = oldStartTime + oldDuration
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+        newDuration = Math.max(MIN_DURATION, targetRight - newStartTime)
+        newStartTime = targetRight - newDuration
+      } else {
+        // Right-resize
+        newStartTime = Math.max(prevEnd, Math.min(newStartTime, nextStart - MIN_DURATION))
+        newDuration = Math.max(MIN_DURATION, Math.min(newDuration, nextStart - newStartTime))
+      }
+    }
+
+    return {
+      startTime: Math.round(newStartTime),
+      duration: Math.round(newDuration)
+    }
+  }, [steps, pageDuration])
+
   const handleStepPointerDown = useCallback((e, step, type) => {
     if (e.pointerType === 'touch') return
     e.stopPropagation()
     e.preventDefault()
+
+    // IMMEDIATELY update active moment selection state
+    onStepClick?.(step.id)
 
     // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
     if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
@@ -522,20 +581,72 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       origDuration: step.duration || (pageDuration / (steps.length || 1)),
     }
 
+    // rAF-throttled seek for canvas sync during operation (Option A)
+    const seekRafRef = { current: null }
+
+    // Determine initial playhead time and snap immediately (Rule 2 & 3)
+    let finalSeekTime = currentTime
+    if (type === 'resize-left') {
+      finalSeekTime = sceneStartTime + ((step.startTime || 0) + 5) / 1000
+    } else if (type === 'resize-right') {
+      finalSeekTime = sceneStartTime + (((step.startTime || 0) + (step.duration || 1000)) - 5) / 1000
+    } else {
+      finalSeekTime = sceneStartTime + (((step.startTime || 0) + (step.duration || 1000)) - 5) / 1000
+    }
+
+    if (onSeekInstant) {
+      onSeekInstant(finalSeekTime)
+    }
+    if (onSeek) {
+      onSeek(finalSeekTime)
+    }
+
     const handlePointerMove = (moveE) => {
       if (!dragRef.current) return
       const dx = getClientX(moveE) - dragRef.current.startX
       if (Math.abs(dx) > 2) didDragRef.current = true
       const msDelta = dx * pxToMs
 
+      const clamped = getClampedStepTiming(
+        dragRef.current.stepId,
+        dragRef.current.type === 'resize-right' ? undefined : Math.round(dragRef.current.origStartTime + msDelta),
+        dragRef.current.type === 'move' ? undefined : (dragRef.current.type === 'resize-right' ? Math.round(dragRef.current.origDuration + msDelta) : Math.round(dragRef.current.origDuration - msDelta))
+      )
+
+      // Calculate new time and drive playhead (Rule 2 & 3)
+      if (dragRef.current.type === 'resize-left') {
+        finalSeekTime = sceneStartTime + (clamped.startTime + 5) / 1000
+      } else if (dragRef.current.type === 'resize-right') {
+        finalSeekTime = sceneStartTime + (clamped.startTime + clamped.duration - 5) / 1000
+      } else {
+        finalSeekTime = sceneStartTime + (clamped.startTime + clamped.duration - 5) / 1000
+      }
+
+      // [CANVAS SYNC FIX] Always update playhead DOM element instantly AND
+      // throttle the engine seek (onSeek) via requestAnimationFrame so the
+      // canvas layer positions / motion states stay in sync during operations.
+      if (onSeekInstant) {
+        onSeekInstant(finalSeekTime)
+      }
+      if (onSeek) {
+        if (seekRafRef.current === null) {
+          seekRafRef.current = requestAnimationFrame(() => {
+            seekRafRef.current = null
+            onSeek(finalSeekTime)
+          })
+        }
+      }
+
       if (dragRef.current.type === 'resize-right') {
-        dispatch(updateStepTiming({
+        // [CHILD SCALING FIX] Use proportional child scaling for resize operations
+        dispatch(updateSceneMotionStepWithChildScaling({
           sceneId,
           stepId: dragRef.current.stepId,
           duration: Math.round(dragRef.current.origDuration + msDelta),
         }))
       } else if (dragRef.current.type === 'resize-left') {
-        dispatch(updateStepTiming({
+        // [CHILD SCALING FIX] Use proportional child scaling for resize operations
+        dispatch(updateSceneMotionStepWithChildScaling({
           sceneId,
           stepId: dragRef.current.stepId,
           startTime: Math.round(dragRef.current.origStartTime + msDelta),
@@ -556,14 +667,22 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       document.removeEventListener('pointermove', handlePointerMove)
       document.removeEventListener('pointerup', handlePointerUp)
       dispatch(setTimelineDragging(false))
+
+      // Commit final playhead position logically (Rule 2 & 3)
+      if (onSeek) {
+        onSeek(finalSeekTime)
+      }
     }
 
     document.addEventListener('pointermove', handlePointerMove)
     document.addEventListener('pointerup', handlePointerUp)
-  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, getClientX, onMotionPause, isMotionCaptureActive, onPlayheadInteractionDuringCapture])
+  }, [pxToMs, pageDuration, steps, sceneId, dispatch, getClientX, onMotionPause, isMotionCaptureActive, onPlayheadInteractionDuringCapture, onSeek, onSeekInstant, sceneStartTime, getClampedStepTiming, currentTime, onStepClick])
 
   const handleStepTouchStart = useCallback((e, step, type) => {
     e.stopPropagation()
+
+    // IMMEDIATELY update active moment selection state
+    onStepClick?.(step.id)
 
     // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
     if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
@@ -574,6 +693,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     const startX = touch.clientX
     const startY = touch.clientY
     let hasMoved = false
+    // rAF-throttled seek for canvas sync during operation (Option A)
+    const seekRafRef = { current: null }
 
     let contextTimer = null
     if (type === 'move') {
@@ -582,6 +703,24 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
           onStepContextMenu?.({ preventDefault: () => { }, stopPropagation: () => { }, clientX: touch.clientX, clientY: touch.clientY }, step.id)
         }
       }, 600)
+    }
+
+    // Immediately snap playhead to handle / selection end (Rule 2 & 3)
+    let finalSeekTime = currentTime
+    if (type === 'resize-left') {
+      finalSeekTime = sceneStartTime + ((step.startTime || 0) + 5) / 1000
+    } else if (type === 'resize-right') {
+      finalSeekTime = sceneStartTime + (((step.startTime || 0) + (step.duration || 1000)) - 5) / 1000
+    } else {
+      // Move: snap to end
+      finalSeekTime = sceneStartTime + (((step.startTime || 0) + (step.duration || 1000)) - 5) / 1000
+    }
+
+    if (onSeekInstant) {
+      onSeekInstant(finalSeekTime)
+    }
+    if (onSeek) {
+      onSeek(finalSeekTime)
     }
 
     const onTouchMove = (moveE) => {
@@ -619,14 +758,47 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
         const dx = touchX - dragRef.current.startX
         const msDelta = dx * pxToMs
 
+        const clamped = getClampedStepTiming(
+          dragRef.current.stepId,
+          dragRef.current.type === 'resize-right' ? undefined : Math.round(dragRef.current.origStartTime + msDelta),
+          dragRef.current.type === 'move' ? undefined : (dragRef.current.type === 'resize-right' ? Math.round(dragRef.current.origDuration + msDelta) : Math.round(dragRef.current.origDuration - msDelta))
+        )
+
+        // Calculate seek position and drive playhead (Rule 2 & 3)
+        if (dragRef.current.type === 'resize-left') {
+          finalSeekTime = sceneStartTime + (clamped.startTime + 5) / 1000
+        } else if (dragRef.current.type === 'resize-right') {
+          finalSeekTime = sceneStartTime + (clamped.startTime + clamped.duration - 5) / 1000
+        } else {
+          // Move: follow the end
+          finalSeekTime = sceneStartTime + (clamped.startTime + clamped.duration - 5) / 1000
+        }
+
+        // [CANVAS SYNC FIX] Always update playhead DOM element instantly AND
+        // throttle the engine seek (onSeek) via requestAnimationFrame so the
+        // canvas layer positions / motion states stay in sync during operations.
+        if (onSeekInstant) {
+          onSeekInstant(finalSeekTime)
+        }
+        if (onSeek) {
+          if (seekRafRef.current === null) {
+            seekRafRef.current = requestAnimationFrame(() => {
+              seekRafRef.current = null
+              onSeek(finalSeekTime)
+            })
+          }
+        }
+
         if (dragRef.current.type === 'resize-right') {
-          dispatch(updateStepTiming({
+          // [CHILD SCALING FIX] Use proportional child scaling for resize operations
+          dispatch(updateSceneMotionStepWithChildScaling({
             sceneId,
             stepId: dragRef.current.stepId,
             duration: Math.round(dragRef.current.origDuration + msDelta),
           }))
         } else if (dragRef.current.type === 'resize-left') {
-          dispatch(updateStepTiming({
+          // [CHILD SCALING FIX] Use proportional child scaling for resize operations
+          dispatch(updateSceneMotionStepWithChildScaling({
             sceneId,
             stepId: dragRef.current.stepId,
             startTime: Math.round(dragRef.current.origStartTime + msDelta),
@@ -649,6 +821,10 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
         setIsDragging(false)
         dispatch(setTimelineDragging(false))
       }
+      // Commit final playhead position logically (Rule 2 & 3)
+      if (onSeek) {
+        onSeek(finalSeekTime)
+      }
       cleanup()
     }
 
@@ -661,7 +837,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     document.addEventListener('touchend', onTouchEnd, { once: true })
     document.addEventListener('touchcancel', onTouchEnd, { once: true })
-  }, [pxToMs, pageDuration, steps.length, sceneId, dispatch, onMotionPause, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture])
+  }, [pxToMs, pageDuration, steps, sceneId, dispatch, onMotionPause, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture, onSeek, sceneStartTime, getClampedStepTiming, onStepClick])
 
   return (
     <div
@@ -671,7 +847,7 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       data-tutorial="steps-area"
       className="absolute left-0 right-0 z-[120]"
       style={{
-        top: '-40px',
+        top: `-${34 + 14 + (detailsPanelHeight || 0)}px`,
         height: '34px',
         pointerEvents: 'auto',
       }}
@@ -719,18 +895,20 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
       {/* ── Step Fills ── */}
       <div className="absolute inset-0 overflow-visible pointer-events-none">
         {(() => {
-          const sortedSteps = [...steps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+          const sortedSteps = [...effectiveSteps].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
           return sortedSteps.map((step, idx) => {
             const isEditing = isMotionCaptureActive && editingStepId === step.id
             const isPlayheadInside = displayStepId === step.id
             const isStepSelected = isEditing
 
-            const stepStart = step.startTime || 0
+            const prevStep = idx > 0 ? sortedSteps[idx - 1] : null
             const nextStep = sortedSteps[idx + 1]
-            const nextStart = nextStep ? (nextStep.startTime || 0) : pageDuration
-            const fillDuration = Math.max(0, nextStart - stepStart)
 
-            const fillLeftPct = (stepStart / pageDuration) * 100
+            const startBoundary = prevStep ? ((prevStep.startTime || 0) + (prevStep.duration || 1000)) : 0
+            const endBoundary = nextStep ? (nextStep.startTime || 0) : pageDuration
+            const fillDuration = Math.max(0, endBoundary - startBoundary)
+
+            const fillLeftPct = (startBoundary / pageDuration) * 100
             const fillWidthPct = (fillDuration / pageDuration) * 100
 
             return (
@@ -755,14 +933,14 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
         })()}
       </div>
 
-      {/* ── Step Blocks ── */}
+      {/* ── Step Blocks / moments blocks── */}
       <div className="absolute inset-0 overflow-visible">
-        {steps.map((step, i) => {
+        {effectiveSteps.map((step, i) => {
           const isActive = displayStepId === step.id
           const isEditing = isMotionCaptureActive && editingStepId === step.id
           const isPlayheadInside = isActive
           const stepStart = step.startTime || 0
-          const stepDur = step.duration || (pageDuration / (steps.length || 1))
+          const stepDur = step.duration || (pageDuration / (effectiveSteps.length || 1))
           const leftPct = Math.min((stepStart / pageDuration) * 100, 100)
           const rawWidthPct = (stepDur / pageDuration) * 100
           const widthPct = Math.min(rawWidthPct, 100 - leftPct)
@@ -829,8 +1007,8 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
                       : isPlayheadInside
                         ? isLight ? 'bg-[#cab3f8] text-purple-950' : 'bg-[#4c3b70] text-purple-200'
                         : isLight
-                          ? 'bg-[#d7d7db] text-slate-800 hover:bg-[#cab3f8] hover:text-purple-950'
-                          : 'bg-[#25232d] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
+                          ? 'bg-[#d7d7db] text-slate-800'
+                          : 'bg-[#25232d] text-zinc-400'
                     }
                   `
                 })()}
@@ -877,10 +1055,11 @@ const MotionStepsBar = React.memo(({ steps = [], activeStepId, editingStepId = n
 
 
 
-const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, editingStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture, currentTime = 0 }) => {
+const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu, layers, index, isDragging, dragOverIndex, draggedIndex, insertionIndex, onDragStart, onDragOver, onDragEnd, onDrop, cardWidth, onCardWidthChange, onResizeStart, onResizeEnd, previousCardWidths, minCardWidth, absoluteCurrentTime = 0, calculateDurationFromWidth, calculateWidthFromDuration, formatDuration, onMotionStop, onMotionPause, hasMotionSteps = false, motionStepCount = 0, motionFlow = null, activeStepId = null, editingStepId = null, onStepClick, onStepContextMenu, isMotionCaptureActive, onPlayheadInteractionDuringCapture, currentTime = 0, detailsPanelHeight = 0, onSeek, sceneStartTime = 0, cardsContainerRef, onSeekInstant, isTimelineDragging = false }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
   const scenes = useSelector(selectScenes)
+  const latestResizeSeekTimeRef = useRef(0)
   // Get responsive card dimensions
   const getCardDimensions = () => {
     if (typeof window === 'undefined') return { width: 120, height: 60 }
@@ -986,6 +1165,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     index < insertionIndex && index > draggedIndex
 
   const handleDragStart = (e) => {
+    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     // Set drag data first - this is required for drag to work
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move'
@@ -1059,7 +1243,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
       document.removeEventListener('pointermove', dragMoveWrapper, { capture: true })
       document.removeEventListener('touchmove', dragMoveWrapper, { capture: true })
     }
-  }, [draggedIndex, index, dragMoveWrapper])
+  }, [draggedIndex, index, dragMoveWrapper, onSeek, sceneStartTime, currentCardWidth, cardsContainerRef, calculateDurationFromWidth, calculateWidthFromDuration])
 
   const handleDragOver = (e) => {
     e.preventDefault()
@@ -1112,6 +1296,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
   const resizeScrollTimerRef = useRef(null)
   const startScrollLeftRef = useRef(0)
   const lastClientXRef = useRef(0)
+  const resizeSeekRafRef = useRef(null) // rAF throttle for onSeek during resize
 
   // Declare high-performance resize function that accounts for scroll distance
   const performResize = useCallback((clientX) => {
@@ -1176,7 +1361,25 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     // (the "playhead jumps to project start on resize" bug). onMotionPause only pauses.
     if (onMotionPause) onMotionPause()
     else if (onMotionStop) onMotionStop()
-    const newDuration = calculateDurationFromWidth(newWidth)
+    let newDuration = calculateDurationFromWidth(newWidth)
+
+    // Snap to playhead during right trim (only right side)
+    if (resizeSideRef.current === 'right' && typeof absoluteCurrentTime === 'number') {
+      const pixelsPerSecond = calculateWidthFromDuration ? calculateWidthFromDuration(1.0) : 100
+      const thresholdSeconds = 5 / pixelsPerSecond // 5px threshold
+      const diffSeconds = Math.abs((sceneStartTime + newDuration) - absoluteCurrentTime)
+      if (diffSeconds <= thresholdSeconds) {
+        newDuration = Math.max(0.1, absoluteCurrentTime - sceneStartTime)
+        if (calculateWidthFromDuration) {
+          newWidth = calculateWidthFromDuration(newDuration)
+        }
+      }
+    }
+
+    const targetSeekTime = resizeSideRef.current === 'left'
+      ? sceneStartTime
+      : sceneStartTime + Math.max(0, newDuration - 0.05)
+    latestResizeSeekTimeRef.current = targetSeekTime
 
     // Batch UI updates
     let nextTooltipPos = resizeState.tooltipPosition
@@ -1252,6 +1455,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
 
   const handleResizeMouseUp = () => {
     stopAutoScroll(resizeScrollTimerRef)
+    // Cancel any pending rAF seek from performResize
+    if (resizeSeekRafRef.current !== null) {
+      cancelAnimationFrame(resizeSeekRafRef.current)
+      resizeSeekRafRef.current = null
+    }
     const wasLeftResize = resizeSideRef.current === 'left'
     const currentGapSize = resizeState.gapSize
     const currentWidth = currentCardWidth
@@ -1313,6 +1521,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
     e.stopPropagation()
     e.preventDefault()
 
+    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     const startX = e.clientX || (e.touches && e.touches[0].clientX)
     const startWidth = currentCardWidth
 
@@ -1360,6 +1573,9 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
       tooltipPosition: initialTooltipPos
     })
 
+    const initialSeekTime = side === 'left' ? sceneStartTime : sceneStartTime + initialDuration
+    latestResizeSeekTimeRef.current = initialSeekTime
+
     document.addEventListener('mousemove', resizeMouseMoveWrapper, { passive: false })
     document.addEventListener('mouseup', resizeMouseUpWrapper, { passive: false })
     document.addEventListener('touchmove', resizeMouseMoveWrapper, { passive: false })
@@ -1405,7 +1621,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         width: `${actualWidth}px`,
         minWidth: `${minWidthFallback}px`,
         overflow: 'visible',
-        transition: resizeState.isResizing ? 'none' : 'width 0.1s ease-out, transform 0.2s ease-out',
+        transition: (resizeState.isResizing || isTimelineDragging) ? 'none' : 'width 0.1s ease-out, transform 0.2s ease-out',
         marginRight: '4px',
         transform: resizeState.leftOffset !== 0 ? `translateX(${resizeState.leftOffset}px)` : 'none',
         boxSizing: 'border-box',
@@ -1482,7 +1698,7 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
         className="relative group flex-shrink-0"
         style={{
           opacity: isDraggedItem ? 0 : 1,
-          transition: isDraggedItem ? 'none' : 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: (isDraggedItem || isTimelineDragging) ? 'none' : 'opacity 0.15s ease-out, transform 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
           transform: shouldMoveLeft ? 'translateX(-8px)' : shouldMoveRight ? 'translateX(8px)' : 'translateX(0)',
           overflow: 'visible',
           pointerEvents: 'auto',
@@ -1624,26 +1840,19 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           style={{
             width: '100%',
             height: `${height}px`,
+            margin: '0px',
             pointerEvents: 'auto',
-            overflow: resizeState.isResizing ? 'visible' : 'hidden',
+            overflow: 'hidden',
             cursor: isDraggingRef.current ? 'grabbing' : 'grab',
             border: isTouchGrabbed
               ? '2px solid #7c4af0'
-              : isActive
-                ? isLight
-                  ? '2px solid rgba(124,74,240,0.8)'
-                  : '2px solid rgba(167,139,250,0.5)'
-                : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
+              : (isLight ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.08)'),
             borderRadius: '6px',
-            boxShadow: isTouchGrabbed
-              ? '0 0 0 2px rgba(124,74,240,0.4)'
-              : isActive
-                ? isLight
-                  ? '0 0 0 1px rgba(124,74,240,0.2)'
-                  : '0 0 0 1px rgba(167,139,250,0.15)'
-                : 'none',
+            boxShadow: 'none',
+            outline: isActive ? '2px solid #7c4af0' : 'none',
+            outlineOffset: '2px',
             transform: isTouchGrabbed ? 'scale(1.05)' : 'none',
-            transition: resizeState.isResizing ? 'none' : 'border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            transition: (resizeState.isResizing || isTimelineDragging) ? 'none' : 'border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
           <ScenePreview
@@ -1738,6 +1947,11 @@ const SceneCard = React.memo(({ scene, isActive = false, onClick, onContextMenu,
           onMotionPause={onMotionPause}
           currentTime={currentTime}
           isCurrentScene={isActive}
+          detailsPanelHeight={detailsPanelHeight}
+          cardHeight={height}
+          onSeek={onSeek}
+          sceneStartTime={sceneStartTime}
+          onSeekInstant={onSeekInstant}
         />
         {/* Left Visual Resize Grab Area */}
         {/* Left Visual Resize Grab Area */}
@@ -1937,9 +2151,19 @@ const ScenesBar = React.memo(React.forwardRef(({
   onPlayheadInteractionDuringCapture, // Callback when playhead is interacted with during motion capture mode
   selectedAudioBlockId = null,
   onSelectAudioBlock = null,
+  leftOffset = 16,
+  isPlaying = false,
+  isBuffering = false,
+  onPlayPause,
+  onSplit,
+  isDetailsExpanded = false,
+  toggleDetails,
+  detailsPanelHeight = 0,
 }, ref) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
+  const isMobile = leftOffset < 100 || (typeof window !== 'undefined' && window.innerWidth < 1024)
+  const activeLeftOffset = isMobile ? leftOffset : leftOffset + 16
   const dispatch = useDispatch()
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null })
   const [stepContextMenu, setStepContextMenu] = useState({ visible: false, x: 0, y: 0, sceneId: null, stepId: null })
@@ -1949,6 +2173,8 @@ const ScenesBar = React.memo(React.forwardRef(({
   const allLayers = useSelector(state => state.project.layers)
   const sceneMotionFlows = useSelector(selectSceneMotionFlows)
   const isTimelineDragging = useSelector(selectIsTimelineDragging)
+  const allLayersRaw = useSelector(selectLayers)
+  const currentScene = useSelector(selectCurrentScene)
 
   // [PERFORMANCE] Debounce layers update to prevent live re-renders of all scene cards
   // during active transforms on the canvas. Previews will catch up after 500ms of inactivity.
@@ -2069,6 +2295,7 @@ const ScenesBar = React.memo(React.forwardRef(({
     e.stopPropagation()
     // [MOTION CAPTURE] Suppress scene-card delete/update menus while capturing a moment.
     if (isMotionCaptureActive) return
+    window.dispatchEvent(new CustomEvent('close-context-menus'))
     // Explicitly close the other menu type to ensure exclusivity
     setStepContextMenu(prev => ({ ...prev, visible: false }))
 
@@ -2086,6 +2313,7 @@ const ScenesBar = React.memo(React.forwardRef(({
     e.stopPropagation()
     // [MOTION CAPTURE] Suppress motion-step delete/update menus while capturing a moment.
     if (isMotionCaptureActive) return
+    window.dispatchEvent(new CustomEvent('close-context-menus'))
     // Explicitly close the other menu type to ensure exclusivity
     setContextMenu(prev => ({ ...prev, visible: false }))
 
@@ -2135,14 +2363,21 @@ const ScenesBar = React.memo(React.forwardRef(({
   }, [contextMenu, currentTime, timelineInfo, dispatch, onPause, onSeek])
 
   useEffect(() => {
+    const closeHandler = () => {
+      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
+      setStepContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev)
+    }
     const handleClick = () => {
-      setContextMenu(prev => ({ ...prev, visible: false }))
-      setStepContextMenu(prev => ({ ...prev, visible: false }))
+      closeHandler()
     }
     if (contextMenu.visible || stepContextMenu.visible) {
       window.addEventListener('click', handleClick)
     }
-    return () => window.removeEventListener('click', handleClick)
+    window.addEventListener('close-context-menus', closeHandler)
+    return () => {
+      window.removeEventListener('click', handleClick)
+      window.removeEventListener('close-context-menus', closeHandler)
+    }
   }, [contextMenu.visible, stepContextMenu.visible])
 
   // Update scene ID to width mapping when scenes change
@@ -2323,6 +2558,15 @@ const ScenesBar = React.memo(React.forwardRef(({
     return targetScene.startWidth + (targetScene.width * progressInScene)
   }
 
+  const updatePlayheadDOMInstant = useCallback((time) => {
+    const pos = calculatePlayheadPosition(time)
+    const maxPx = calculatePlayheadPosition(totalTime)
+    const clampedPos = Math.min(pos, maxPx)
+    if (playheadElementRef.current) {
+      playheadElementRef.current.style.left = `${activeLeftOffset + clampedPos}px`
+    }
+  }, [cumulativeOffsets, activeLeftOffset, totalTime])
+
   const playheadPositionPx = useMemo(() => {
     return calculatePlayheadPosition(currentTime)
   }, [currentTime, cumulativeOffsets])
@@ -2433,14 +2677,27 @@ const ScenesBar = React.memo(React.forwardRef(({
   useEffect(() => {
     if (isDraggingPlayhead && playheadElementRef.current) {
       // During drag, update position directly for instant feedback
-      const newLeft = `${16 + playheadPosition}px`
+      const newLeft = `${activeLeftOffset + playheadPosition}px`
       playheadElementRef.current.style.left = newLeft
     }
-  }, [playheadPosition, isDraggingPlayhead])
+  }, [playheadPosition, isDraggingPlayhead, activeLeftOffset])
 
 
   const handleTimelineClick = (e) => {
     if (!cardsContainerRef.current || !onSeek || isDraggingPlayhead || isTimelineInteractingRef.current) return
+
+    // Check if click was inside the sticky left reserved section
+    if (e.currentTarget?.parentElement) {
+      const viewportRect = e.currentTarget.parentElement.getBoundingClientRect()
+      const viewportX = e.clientX - viewportRect.left
+      if (viewportX < activeLeftOffset) {
+        if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+          onPlayheadInteractionDuringCapture()
+        }
+        onSeek(0)
+        return
+      }
+    }
 
     // [PLAYHEAD INTERACTION DURING CAPTURE] If capture mode is active, exit it first
     if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
@@ -2492,6 +2749,46 @@ const ScenesBar = React.memo(React.forwardRef(({
       if (isTimelineDragging) dispatch(setTimelineDragging(false))
     }
 
+    // Check if mouse is inside the timeline ruler bounds (strictly ruler only)
+    if (timelineRef.current) {
+      const rulerRect = timelineRef.current.getBoundingClientRect()
+      if (e.clientY < rulerRect.top || e.clientY > rulerRect.bottom) {
+        if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
+        if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
+        return
+      }
+    }
+
+    // Check if mouse is inside the sticky left reserved section
+    if (e.currentTarget?.parentElement) {
+      const viewportRect = e.currentTarget.parentElement.getBoundingClientRect()
+      const viewportX = e.clientX - viewportRect.left
+      if (viewportX < activeLeftOffset) {
+        if (isDraggingPlayhead || isTimelineDragging || draggedIndex !== null || resizingSceneIdRef.current !== null || !cardsContainerRef.current || !ghostPlayheadRef.current) {
+          if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
+          if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
+          return
+        }
+
+        if (ghostPlayheadRef.current.style.display !== 'block') {
+          ghostPlayheadRef.current.style.display = 'block'
+        }
+        if (ghostTooltipRef.current && ghostTooltipRef.current.style.display !== 'block') {
+          ghostTooltipRef.current.style.display = 'block'
+        }
+
+        ghostPlayheadRef.current.style.left = `${activeLeftOffset}px`
+
+        if (ghostTooltipRef.current && ghostTooltipTextRef.current && timelineRef.current) {
+          const timelineRect = timelineRef.current.getBoundingClientRect()
+          ghostTooltipRef.current.style.left = `${timelineRect.left + activeLeftOffset}px`
+          ghostTooltipRef.current.style.top = `${timelineRect.top - 16 - 28}px`
+          ghostTooltipTextRef.current.textContent = formatTime(0)
+        }
+        return
+      }
+    }
+
     if (isDraggingPlayhead || isTimelineDragging || draggedIndex !== null || resizingSceneIdRef.current !== null || !cardsContainerRef.current || !ghostPlayheadRef.current) {
       if (ghostPlayheadRef.current) ghostPlayheadRef.current.style.display = 'none'
       if (ghostTooltipRef.current) ghostTooltipRef.current.style.display = 'none'
@@ -2511,7 +2808,7 @@ const ScenesBar = React.memo(React.forwardRef(({
     const clampedX = Math.max(0, Math.min(mouseX, totalTimelineWidth))
 
     // Position ghost playhead
-    ghostPlayheadRef.current.style.left = `${16 + clampedX}px`
+    ghostPlayheadRef.current.style.left = `${activeLeftOffset + clampedX}px`
 
     // Compute ghost time
     const { scenes: sceneOffsets, totalTime: tTime } = cumulativeOffsets
@@ -2537,7 +2834,7 @@ const ScenesBar = React.memo(React.forwardRef(({
     // Position ghost tooltip
     if (ghostTooltipRef.current && ghostTooltipTextRef.current && timelineRef.current) {
       const timelineRect = timelineRef.current.getBoundingClientRect()
-      ghostTooltipRef.current.style.left = `${timelineRect.left + 16 + clampedX}px`
+      ghostTooltipRef.current.style.left = `${timelineRect.left + activeLeftOffset + clampedX}px`
       ghostTooltipRef.current.style.top = `${timelineRect.top - 16 - 28}px`
       ghostTooltipTextRef.current.textContent = formatTime(seekTime)
     }
@@ -2602,7 +2899,7 @@ const ScenesBar = React.memo(React.forwardRef(({
 
       // Update playhead position directly for instant visual feedback (no throttle needed)
       if (playheadElementRef.current) {
-        playheadElementRef.current.style.left = `${16 + clampedX}px`
+        playheadElementRef.current.style.left = `${activeLeftOffset + clampedX}px`
       }
 
       // Update tooltip
@@ -2611,7 +2908,7 @@ const ScenesBar = React.memo(React.forwardRef(({
         const timelineRect = timelineRef.current.getBoundingClientRect()
         setPlayheadTooltipPosition({
           top: timelineRect.top - 16 - 28,
-          left: timelineRect.left + 16 + clampedX,
+          left: timelineRect.left + activeLeftOffset + clampedX,
         })
       }
 
@@ -2715,12 +3012,18 @@ const ScenesBar = React.memo(React.forwardRef(({
   }
 
   const handleSwitchScene = (sceneId) => {
+    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
+    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
+      onPlayheadInteractionDuringCapture()
+    }
+
     // Stop playback if switching scenes manually
     if (onMotionStop) onMotionStop()
     onSelectAudioBlock?.(null)
 
     // Clear layer selection when switching scenes to prevent selection box flash
     dispatch(clearLayerSelection())
+    dispatch(setSelectedCanvas(true))
     dispatch(setCurrentScene(sceneId))
 
     // Automatically seek the playhead to the global start time of the selected scene
@@ -2910,6 +3213,20 @@ const ScenesBar = React.memo(React.forwardRef(({
       // Update sceneIdToWidth mapping to match new scene order
       // The widths stay with their respective scenes during reordering
       setSceneIdToWidth(prev => ({ ...prev }))
+
+      // Move playhead to start of dropped scene (Rule 3 drop rule)
+      let newSceneStartTime = 0
+      for (let i = 0; i < finalIndex; i++) {
+        let actualSourceIndex = i
+        if (fromIndex <= i) {
+          actualSourceIndex = i + 1
+        }
+        const width = cardWidths[actualSourceIndex] || getDefaultCardWidth()
+        newSceneStartTime += calculateDurationFromWidth(width)
+      }
+      if (onSeek) {
+        onSeek(newSceneStartTime)
+      }
     }
 
     setDraggedIndex(null)
@@ -3039,28 +3356,24 @@ const ScenesBar = React.memo(React.forwardRef(({
     }
   }, [timelineZoom])
 
+
+
   return (
     <div
-      className="relative block px-1.5 sm:px-2 md:px-2.5 pb-2 flex-shrink-0"
-      onMouseMove={handleSeekMouseMove}
-      onMouseEnter={handleSeekMouseEnter}
-      onMouseLeave={handleSeekMouseLeave}
+      className="relative block pb-2 flex-shrink-0"
       onClick={(e) => {
-        // Prevent click seeking only if we clicked on buttons, inputs, or resize handles, or audio blocks
+        // Clear audio selection when clicking lower workspace background, but do NOT trigger click-seeking
         if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
-        onSelectAudioBlock?.(null) // Clear audio selection when clicking timeline background
-        handleTimelineClick(e)
+        onSelectAudioBlock?.(null)
       }}
       onTouchStart={(e) => {
         if (isTimelineInteractingRef.current) return
         if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
         onSelectAudioBlock?.(null)
-        const touch = e.touches[0]
-        handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
       }}
       style={{
         minWidth: '100%',
-        width: `${Math.max(calculatePlayheadPosition(totalTime) + 32, 100)}px`,
+        width: `${Math.max(calculatePlayheadPosition(totalTime) + activeLeftOffset + 16, 100)}px`,
         backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
         paddingTop: '0px',
         touchAction: 'pan-x',
@@ -3070,38 +3383,83 @@ const ScenesBar = React.memo(React.forwardRef(({
 
       {/* Timeline Ruler */}
       <div
-        className="z-40"
+        className="cursor-pointer select-none"
         ref={timelineRef}
+        onMouseMove={handleSeekMouseMove}
+        onMouseEnter={handleSeekMouseEnter}
+        onMouseLeave={handleSeekMouseLeave}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+          handleTimelineClick(e)
+        }}
+        onTouchStart={(e) => {
+          e.stopPropagation()
+          if (isTimelineInteractingRef.current) return
+          if (e.target.closest('[data-audio-block]') || e.target.closest('button') || e.target.closest('[data-resize-handle]') || e.target.closest('input') || e.target.closest('.cursor-ew-resize') || e.target.closest('.resize-handle')) return
+          const touch = e.touches[0]
+          handleTimelineClick({ clientX: touch.clientX, preventDefault: () => { }, stopPropagation: () => { } })
+        }}
         style={{
           position: 'sticky',
           top: 0,
-          height: '24px',
-          pointerEvents: 'none',
-          width: `${calculatePlayheadPosition(totalTime) + 32}px`,
+          height: '40px',
+          pointerEvents: 'auto',
+          width: `${calculatePlayheadPosition(totalTime) + activeLeftOffset + 16}px`,
           minWidth: '100%',
           backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+          borderBottom: isLight ? '1px solid rgba(0, 0, 0, 0.06)' : '1px solid rgba(255, 255, 255, 0.06)',
+          borderTop: 'none',
+          zIndex: 95,
         }}
       >
+        {/* Sticky Left Play Area (Desktop) */}
+        {!isMobile && (
+          <div
+            className="absolute top-0 bottom-0 flex items-center justify-center pointer-events-auto"
+            style={{
+              position: 'sticky',
+              left: 0,
+              width: `${leftOffset}px`,
+              height: '100%',
+              backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+              zIndex: 110,
+              borderRight: isLight ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                if (onPlayPause) onPlayPause()
+              }}
+              className={`p-1 flex items-center justify-center rounded-md transition-all ${isLight ? 'hover:bg-black/5 text-black/80' : 'hover:bg-white/5 text-white/90'
+                }`}
+              title={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? (
+                <Pause className="w-4 h-4 fill-current" />
+              ) : (
+                <Play className="w-4 h-4 fill-current ml-0.5" />
+              )}
+            </button>
+          </div>
+        )}
+
         {majorMarkers.map((marker) => (
           <div
             key={`major-${marker.time}`}
-            className="absolute top-1 flex flex-row items-center gap-1.5"
+            className="absolute top-[10px] flex flex-row items-center justify-center pointer-events-none"
             style={{
-              left: `${16 + marker.position}px`,
+              left: `${activeLeftOffset + marker.position}px`,
               transform: 'translateX(-50%)',
-              height: '14px',
+              height: '16px',
             }}
           >
-            <div style={{
-              width: '1.5px',
-              height: '8px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)',
-            }} />
             <div
               className="whitespace-nowrap font-bold"
               style={{
-                color: isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)',
-                fontSize: '10px',
+                color: isLight ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.65)',
+                fontSize: '11px',
                 fontFamily: 'Inter, system-ui, sans-serif',
                 letterSpacing: '0.04em',
                 lineHeight: '1',
@@ -3115,14 +3473,14 @@ const ScenesBar = React.memo(React.forwardRef(({
         {minorMarkers.map((marker) => (
           <div
             key={`minor-${marker.time}`}
-            className="absolute"
+            className="absolute pointer-events-none"
             style={{
-              left: `${16 + marker.position}px`,
+              left: `${activeLeftOffset + marker.position}px`,
               transform: 'translateX(-50%)',
-              top: '5px',
+              top: '16px',
               width: '1px',
-              height: '4px',
-              backgroundColor: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)'
+              height: '8px',
+              backgroundColor: isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)'
             }}
           />
         ))}
@@ -3133,18 +3491,19 @@ const ScenesBar = React.memo(React.forwardRef(({
           className="absolute"
           style={{
             top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '4px',
-            left: `${16 + playheadPosition}px`,
+            left: `${activeLeftOffset + playheadPosition}px`,
             transform: 'translateX(-50%)',
             cursor: isDraggingPlayhead ? 'grabbing' : 'grab',
-            zIndex: 100,
-            width: '16px',
-            height: `${bottomSectionHeight || 200}px`,
+            zIndex: 40,
+            width: '28px',
+            height: '40px',
             userSelect: 'none',
             touchAction: 'none',
             pointerEvents: 'auto',
             willChange: 'transform, left',
           }}
           onMouseDown={(e) => {
+            e.stopPropagation()
             handlePlayheadMouseDown(e)
 
             setPlayheadTooltipTime(currentTime)
@@ -3152,7 +3511,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               const timelineRect = timelineRef.current.getBoundingClientRect()
               setPlayheadTooltipPosition({
                 top: timelineRect.top - 16 - 28,
-                left: timelineRect.left + 16 + playheadPosition,
+                left: e.clientX,
               })
             }
           }}
@@ -3163,8 +3522,9 @@ const ScenesBar = React.memo(React.forwardRef(({
             setIsHoveringPlayhead(false)
           }}
           onTouchStart={(e) => {
-            handlePlayheadMouseDown(e)
+            e.stopPropagation()
             const touch = e.touches[0]
+            handlePlayheadMouseDown(e)
             setPlayheadTooltipTime(currentTime)
             if (timelineRef.current) {
               const timelineRect = timelineRef.current.getBoundingClientRect()
@@ -3183,26 +3543,28 @@ const ScenesBar = React.memo(React.forwardRef(({
               top: 0,
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 101,
+
             }}
           >
             <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
-              <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#7c4af0' : '#ffffff'} />
+              <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#000000' : '#ffffff'} />
             </svg>
           </div>
 
-          {/* Playhead line */}
+          {/* Playhead line extending through the full bottom timeline height */}
           <div
             className="absolute left-1/2 transform -translate-x-1/2 pointer-events-none"
             style={{
-              backgroundColor: isLight ? '#7c4af0' : '#ffffff',
+              backgroundColor: isLight ? '#000000' : '#ffffff',
               width: isDraggingPlayhead ? '3px' : '2.5px',
               top: '4px',
-              height: '100%',
+              height: `${bottomSectionHeight || 300}px`,
               borderRadius: '1px',
               transition: 'width 0.1s',
+
             }}
           />
+
         </div>
 
         {/* Ghost Playhead */}
@@ -3212,21 +3574,37 @@ const ScenesBar = React.memo(React.forwardRef(({
             className="absolute pointer-events-none"
             style={{
               top: typeof window !== 'undefined' && window.innerWidth < 1024 ? '2px' : '4px',
-              left: '16px',
+              left: `${activeLeftOffset}px`,
               transform: 'translateX(-50%)',
-              zIndex: 95,
+              zIndex: 40,
               width: '16px',
-              height: `${bottomSectionHeight || 200}px`,
+              height: `${bottomSectionHeight || 300}px`,
               display: 'none',
               willChange: 'left',
             }}
           >
+            {/* Ghost Playhead marker */}
+            <div
+              className="pointer-events-none"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+              }}
+            >
+              <svg width="12" height="10" viewBox="0 0 10 8" fill="none">
+                <path d="M5 8L0.5 0H9.5L5 8Z" fill={isLight ? '#000000' : '#ffffff'} opacity={0.4} />
+              </svg>
+            </div>
+
             {/* Ghost Playhead line */}
             <div
-              className="absolute left-1/2 transform -translate-x-1/2 pointer-events-none"
+              className="absolute left-1/2 transform -translate-x-1/2"
               style={{
-                borderLeft: `1.5px solid ${isLight ? 'rgba(124, 74, 240, 0.4)' : 'rgba(255, 255, 255, 0.4)'}`,
-                width: '0px',
+                backgroundColor: isLight ? '#000000' : '#ffffff',
+                opacity: 0.3,
+                width: '1.5px',
                 top: '4px',
                 height: '100%',
               }}
@@ -3244,8 +3622,8 @@ const ScenesBar = React.memo(React.forwardRef(({
         }}
         style={{
           gap: 0,
-          marginLeft: '16px',
-          marginTop: '48px',
+          marginLeft: `${activeLeftOffset}px`,
+          marginTop: `${8 + getDefaultCardHeight() + (detailsPanelHeight || 0)}px`,
           paddingBottom: '0px',
           minWidth: 'max-content',
           width: 'max-content',
@@ -3304,9 +3682,6 @@ const ScenesBar = React.memo(React.forwardRef(({
                       color: scene.transition && scene.transition !== 'None'
                         ? '#ffffff'
                         : (isLight ? '#64748b' : '#a1a1aa'),
-                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.12)',
-                      backdropFilter: 'blur(8px)',
-                      WebkitBackdropFilter: 'blur(8px)',
                       zIndex: 100,
                     }}
                     title={scene.transition && scene.transition !== 'None'
@@ -3326,6 +3701,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   index={index}
                   scene={scene}
                   isActive={isCurrentScene}
+                  isTimelineDragging={isTimelineDragging}
                   onClick={() => handleSwitchScene(scene.id)}
                   layers={getSceneLayers(scene.id)}
                   isDragging={draggedIndex === index}
@@ -3341,7 +3717,12 @@ const ScenesBar = React.memo(React.forwardRef(({
                   onResizeStart={() => handleResizeStart(index)}
                   onResizeEnd={handleResizeEnd}
                   previousCardWidths={cardWidths}
+                  onSeek={onSeek}
+                  sceneStartTime={cumulativeOffsets.scenes[index]?.startTime || 0}
+                  cardsContainerRef={cardsContainerRef}
+                  onSeekInstant={updatePlayheadDOMInstant}
                   minCardWidth={getMinCardWidth()}
+                  absoluteCurrentTime={currentTime}
                   calculateDurationFromWidth={calculateDurationFromWidth}
                   calculateWidthFromDuration={calculateWidthFromDuration}
                   formatDuration={formatDuration}
@@ -3353,6 +3734,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
                   activeStepId={isCurrentScene ? currentTimeStepId : null}
                   editingStepId={isCurrentScene ? editingStepId : null}
+                  detailsPanelHeight={detailsPanelHeight}
                   onStepClick={(stepId) => {
                     if (!isCurrentScene) {
                       // [ISSUE 2 FIX] Compute step position BEFORE switching scene.
@@ -3471,20 +3853,136 @@ const ScenesBar = React.memo(React.forwardRef(({
         </div>
       </div>
 
+
+
+      {/* Desktop sticky details toggle container */}
+      {!isMobile && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            top: '48px',
+            left: 0,
+            width: '100%',
+            height: '34px',
+            display: 'flex',
+            zIndex: 100,
+          }}
+        >
+          <div
+            className="pointer-events-auto flex items-center justify-center px-2"
+            style={{
+              position: 'sticky',
+              left: 0,
+              width: `${leftOffset}px`,
+              height: '100%',
+              backgroundColor: isLight ? '#f3f4f7' : '#090a0d',
+              borderRight: isLight ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+          >
+            <button
+              onClick={toggleDetails}
+              className={`w-full py-1 px-1.5 flex items-center justify-between rounded-md transition-all ${isLight ? 'hover:bg-black/5' : 'hover:bg-white/5'
+                }`}
+            >
+              <span
+                style={{
+                  fontSize: '13px',
+                  color: isDetailsExpanded
+                    ? (isLight ? '#7c4af0' : '#a78bfa')
+                    : (isLight ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.75)'),
+                  fontFamily: 'Inter, system-ui, sans-serif',
+                  letterSpacing: '0.04em',
+                  fontWeight: '700',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Details
+              </span>
+              {isDetailsExpanded ? (
+                <ChevronUp
+                  className="h-5 w-5"
+                  style={{
+                    color: isLight ? '#7c4af0' : '#a78bfa',
+                  }}
+                />
+              ) : (
+                <ChevronDown
+                  className="h-5 w-5"
+                  style={{
+                    color: isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)',
+                  }}
+                />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Timeline Details Panel (expanded action rows) absolutely positioned inside the gap ── */}
+      {isDetailsExpanded && (
+        <div
+          className="absolute pointer-events-auto"
+          style={{
+            top: `${40 + getDefaultCardHeight()}px`,
+            left: 0,
+            right: 0,
+            height: `${detailsPanelHeight}px`,
+            overflow: 'visible',
+          }}
+        >
+          <MotionDetailsPanel
+            currentScene={currentScene}
+            sceneMotionFlows={sceneMotionFlows}
+            layers={allLayersRaw}
+            cardWidths={cardWidths}
+            sceneIndex={scenes.findIndex(s => s.id === currentSceneId)}
+            leftOffset={activeLeftOffset}
+            labelWidth={leftOffset}
+            onMotionPause={onMotionPause}
+            activeStepId={currentTimeStepId}
+            editingStepId={editingStepId}
+            totalProjectWidth={calculatePlayheadPosition(totalTime) + activeLeftOffset + 16}
+            onSeek={onSeek}
+            sceneStartTime={(() => { const idx = scenes.findIndex(s => s.id === currentSceneId); return idx !== -1 ? (cumulativeOffsets.scenes[idx]?.startTime || 0) : 0 })()}
+            sceneLeftOffset={(() => { const idx = scenes.findIndex(s => s.id === currentSceneId); return idx !== -1 ? (cumulativeOffsets.scenes[idx]?.startWidth || 0) : 0 })()}
+            isMotionCaptureActive={isMotionCaptureActive}
+            onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
+            onSeekInstant={updatePlayheadDOMInstant}
+            calculateDurationFromWidth={calculateDurationFromWidth}
+          />
+        </div>
+      )}
+
       {/* Audio Tracks Row — integrated inside the unified scrollable ScenesBar */}
       <AudioBar
         ref={audioBarRef}
         totalProjectWidth={calculatePlayheadPosition(totalTime)}
         totalDuration={totalTime}
+        sceneBoundaries={useMemo(() => {
+          const boundaries = []
+          if (cumulativeOffsets && cumulativeOffsets.scenes) {
+            cumulativeOffsets.scenes.forEach(s => {
+              boundaries.push(s.startTime)
+              boundaries.push(s.startTime + s.duration)
+            })
+          }
+          return Array.from(new Set(boundaries))
+        }, [cumulativeOffsets])}
         selectedAudioBlockId={selectedAudioBlockId}
         onSelectAudioBlock={onSelectAudioBlock}
         calculateTimePosition={calculateTimePosition}
         calculateWidthFromDuration={calculateWidthFromDuration}
         onMotionPause={onMotionPause}
         onDragStart={() => dispatch(setTimelineDragging(true))}
+        playheadTime={currentTime}
         onDragEnd={(type, blockState) => {
           dispatch(setTimelineDragging(false))
         }}
+        leftOffset={activeLeftOffset}
+        onSeek={onSeek}
+        onSeekInstant={updatePlayheadDOMInstant}
+        isMotionCaptureActive={isMotionCaptureActive}
+        onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
       />
 
       {/* Playhead time tooltip */}
@@ -3500,10 +3998,10 @@ const ScenesBar = React.memo(React.forwardRef(({
             }}
           >
             <div
-              className={`${isLight ? 'text-gray-900' : 'text-white'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
+              className={`${isLight ? 'text-white' : 'text-gray-900'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
               style={{
-                backgroundColor: isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)',
-                border: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid rgba(255,255,255,0.1)',
+                backgroundColor: isLight ? 'rgba(15,16,21,0.95)' : 'rgba(255,255,255,0.95)',
+                border: isLight ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
                 fontFamily: 'Inter, system-ui, sans-serif',
               }}
             >
@@ -3516,7 +4014,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                 height: '0',
                 borderLeft: '4px solid transparent',
                 borderRight: '4px solid transparent',
-                borderTop: `4px solid ${isLight ? 'rgba(255,255,255,0.95)' : 'rgba(15,16,21,0.95)'}`,
+                borderTop: `4px solid ${isLight ? 'rgba(15,16,21,0.95)' : 'rgba(255,255,255,0.95)'}`,
               }}
             />
           </div>,
@@ -3537,10 +4035,10 @@ const ScenesBar = React.memo(React.forwardRef(({
         >
           <div
             ref={ghostTooltipTextRef}
-            className={`${isLight ? 'text-gray-600' : 'text-zinc-300'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
+            className={`${isLight ? 'text-white' : 'text-gray-900'} px-2 py-1 rounded shadow-lg text-[10px] font-semibold whitespace-nowrap`}
             style={{
-              backgroundColor: isLight ? 'rgba(243,244,246,0.95)' : 'rgba(31,41,55,0.95)',
-              border: isLight ? '1px solid rgba(0,0,0,0.1)' : '1px solid rgba(255,255,255,0.1)',
+              backgroundColor: isLight ? 'rgba(15,16,21,0.95)' : 'rgba(255,255,255,0.95)',
+              border: isLight ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
               fontFamily: 'Inter, system-ui, sans-serif',
             }}
           />
@@ -3551,7 +4049,7 @@ const ScenesBar = React.memo(React.forwardRef(({
               height: '0',
               borderLeft: '4px solid transparent',
               borderRight: '4px solid transparent',
-              borderTop: `4px solid ${isLight ? 'rgba(243,244,246,0.95)' : 'rgba(31,41,55,0.95)'}`,
+              borderTop: `4px solid ${isLight ? 'rgba(15,16,21,0.95)' : 'rgba(255,255,255,0.95)'}`,
             }}
           />
         </div>,
@@ -3577,7 +4075,7 @@ const ScenesBar = React.memo(React.forwardRef(({
             style={{ width: 'calc(100% - 4px)' }}
             onClick={handleCutPage}
           >
-            <Scissors className="h-3.5 w-3.5 text-purple-400" />
+            <Scissors className="h-3.5 w-3.5 opacity-60" />
             <span>Split at Playhead</span>
           </button>
 
@@ -3585,14 +4083,14 @@ const ScenesBar = React.memo(React.forwardRef(({
           <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
 
           <button
-            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400/90 hover:bg-red-500/15 hover:text-red-300'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
+            className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors rounded-md mx-0.5 my-0.5`}
             style={{ width: 'calc(100% - 4px)' }}
             onClick={() => {
               dispatch(deleteScene(contextMenu.sceneId))
               setContextMenu(prev => ({ ...prev, visible: false }))
             }}
           >
-            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+            <Trash2 className="h-3.5 w-3.5 opacity-60" />
             <span>Delete Page</span>
           </button>
         </div>,
@@ -3622,6 +4120,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
+              <Pencil className="h-3.5 w-3.5 opacity-60" />
               <span>Update Moment</span>
             </button>
           )}
@@ -3635,7 +4134,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                 setStepContextMenu(prev => ({ ...prev, visible: false }))
               }}
             >
-              <Pencil className="h-3.5 w-3.5 text-purple-400" />
+              <Pencil className="h-3.5 w-3.5 opacity-60" />
               <span>Select Base State</span>
             </button>
           )}
@@ -3644,7 +4143,7 @@ const ScenesBar = React.memo(React.forwardRef(({
             <>
               <div className={`h-px ${isLight ? 'bg-black/5' : 'bg-white/5'} my-0.5 mx-2.5`} />
               <button
-                className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400/90 hover:bg-red-500/15 hover:text-red-300'} flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5`}
+                className={`w-full text-left px-3.5 py-2 text-[11px] ${isLight ? 'text-gray-800 hover:bg-black/5' : 'text-white/85 hover:text-white hover:bg-white/8'} flex items-center gap-2.5 transition-colors font-medium rounded-md mx-0.5 my-0.5`}
                 style={{ width: 'calc(100% - 4px)' }}
                 onClick={() => {
                   dispatch(deleteSceneMotionStep({
@@ -3654,6 +4153,7 @@ const ScenesBar = React.memo(React.forwardRef(({
                   setStepContextMenu(prev => ({ ...prev, visible: false }))
                 }}
               >
+                <Trash2 className="h-3.5 w-3.5 opacity-60" />
                 <span>Delete Moment</span>
               </button>
             </>

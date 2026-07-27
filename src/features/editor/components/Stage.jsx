@@ -40,7 +40,7 @@ import EmptyStateCanvas from './EmptyStateCanvas'
 import SampleModal from './SampleModal'
 import { isLayerCompletelyOutside, getEffectiveLayerDimensions } from '../utils/geometry'
 import { findLayerIdFromObject } from '../utils/layerUtils'
-import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas } from '../../../store/slices/selectionSlice'
+import { clearLayerSelection, setSelectedLayer, selectSelectedLayerIds, selectSelectedCanvas, setSelectedCanvas } from '../../../store/slices/selectionSlice'
 import { selectLayers, duplicateLayer, bringLayerToFront, sendLayerToBack, bringLayerForward, sendLayerBackward, updateLayer, deleteLayer, selectCurrentSceneId, selectCurrentScene, selectSceneMotionFlows, selectScenes, setBackgroundImage, removeBackgroundImage, detachBackgroundImage, selectProjectTimelineInfo, attachAssetToFrame, detachAssetFromFrame, addLayerAndSelect, toggleFrameLock, addAudioTrack, consumeEmptyState, selectIsEmptyStateConsumed, selectSceneHasContentLayers } from '../../../store/slices/projectSlice'
 import { startBatchUpload, fetchUploads, getVideoDimensions, getImageThumbnail, getAudioMetadata } from '../../../store/slices/uploadsSlice'
 import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as attachBackAssetToFramePixi, unhighlightFrameDropTarget, showFramePlaceholderFallback, highlightFrameDropTarget } from '../../engine/pixi/createLayer'
@@ -138,6 +138,7 @@ function Stage({
   showPasteboard = true,
   previewMode = false, // View-only Preview Mode: disable all canvas interaction
   onError, // Callback for fatal graphics errors
+  onSelectAudioBlock,
 }, ref) { // Add ref parameter
   // =============================================================================
   // STATE MANAGEMENT
@@ -167,6 +168,19 @@ function Stage({
   const zoomDebounceRef = useRef(null)
   const zoomAccumulatorRef = useRef(0)
   const panDebounceRef = useRef(null)
+
+  const preferredZoomRef = useRef(zoom)
+  const isAutoZoomingRef = useRef(false)
+  const lastStageSizeRef = useRef({ width: 0, height: 0 })
+
+  // Track zoom prop changes to update preferredZoomRef
+  useEffect(() => {
+    if (isAutoZoomingRef.current) {
+      isAutoZoomingRef.current = false // Reset flag
+    } else {
+      preferredZoomRef.current = zoom // User manual zoom
+    }
+  }, [zoom])
 
   // Camera control optimization refs - initialized with defaults, updated by effect
   const zoomScaleRef = useRef(1) // Default zoom scale (100%)
@@ -606,7 +620,7 @@ function Stage({
   useEffect(() => {
     const isCurrentlyActive = !!motionCaptureMode?.isActive
     const isTransitioning = !!motionCaptureMode?.isTransitioning
-    const selectionChanged = (selectedLayerIds && selectedLayerIds.length > 0) || selectedCanvas
+    const selectionChanged = selectedLayerIds && selectedLayerIds.length > 0
     const playheadJustStarted = isPlaying && !prevIsPlayingRef.current
 
     // Update ref for next run
@@ -642,9 +656,9 @@ function Stage({
     }
   }, [isPlaying, dispatch])
 
-  // Clear selection when scene changes to ensure no stale selection boxes or invisible layers are selected
+  // Select canvas when scene changes to clear layer selection and present Scene Controls
   useEffect(() => {
-    dispatch(clearLayerSelection())
+    dispatch(setSelectedCanvas(true))
   }, [currentSceneId, dispatch])
 
 
@@ -759,6 +773,10 @@ function Stage({
     overlay.rect(worldWidth, 0, margin, worldHeight)
     overlay.fill({ color: overlayColor, alpha: overlayAlpha })
 
+    // Draw outline slightly outside the canvas bounds to keep it consistently visible
+    overlay.rect(-1, -1, worldWidth + 2, worldHeight + 2)
+    overlay.stroke({ color: 0x808080, width: 1, alpha: 0.8 })
+
     // Ensure stageContainer has NO mask so interactions work outside world bounds
     if (stageContainer.mask) {
       stageContainer.mask = null
@@ -832,7 +850,6 @@ function Stage({
   // CANVAS INTERACTIONS
   // =============================================================================
 
-  // Memoize interaction parameters to reduce hook re-initialization
   const interactionParams = useMemo(() => ({
     layers,
     selectedLayerIds,
@@ -844,8 +861,9 @@ function Stage({
     sceneStartOffset: currentSceneMotionFlow?.sceneStartOffset || 0,
     currentSceneId,
     prepareEngine,
-    previewMode // View-only: gate selection/hover handlers
-  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow, prepareEngine, previewMode])
+    previewMode, // View-only: gate selection/hover handlers
+    onSelectAudioBlock
+  }), [layers, selectedLayerIds, activeTool, worldWidth, worldHeight, effectiveZoom, sceneMotionFlows, currentSceneId, currentSceneMotionFlow, prepareEngine, previewMode, onSelectAudioBlock])
 
   // Set up interactions (selection, drag)
   const interactionsAPI = useCanvasInteractions(
@@ -1104,6 +1122,7 @@ function Stage({
     contextMenu && createPortal(
       <>
         <div
+          key={`${contextMenu.x}-${contextMenu.y}`}
           className={`fixed z-[10010] backdrop-blur-2xl rounded-xl py-1.5 min-w-[180px] transition-all duration-200 animate-in fade-in zoom-in-95 ${theme === 'light'
             ? 'bg-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-gray-200/80'
             : 'bg-[#090a0d]/80 shadow-[0_8px_32px_rgba(0,0,0,0.4)] border border-white/10'
@@ -1430,11 +1449,11 @@ function Stage({
                   setContextMenu(null)
                 }}
                 className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
-                  ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
-                  : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                  ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
                   }`}
               >
-                <Trash2 className="h-3.5 w-3.5 opacity-70" />
+                <Trash2 className="h-3.5 w-3.5 opacity-60" />
                 Delete
               </button>
             </>
@@ -1467,11 +1486,11 @@ function Stage({
                       setContextMenu(null)
                     }}
                     className={`w-full px-3.5 py-2 text-left text-[13px] font-medium transition-colors flex items-center gap-2.5 ${theme === 'light'
-                      ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
-                      : 'text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                      ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
                       }`}
                   >
-                    <Trash2 className="h-3.5 w-3.5 opacity-70" />
+                    <Trash2 className="h-3.5 w-3.5 opacity-60" />
                     Remove Background Image
                   </button>
                 </>
@@ -1488,6 +1507,10 @@ function Stage({
         <div
           className="fixed inset-0 z-[10005]"
           onClick={() => { setContextMenu(null); setSubMenu(null); }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            handleContextMenu(e)
+          }}
         />
       </>,
       document.body
@@ -1537,16 +1560,19 @@ function Stage({
   useEffect(() => {
     if (viewport && isReady && !viewportInitializedRef.current && stageSize.width > 0 && stageSize.height > 0) {
       try {
-        // Set initial zoom to 18% if the artboard is vertical (portrait), 31% otherwise
+        const isMobile = window.innerWidth < 1024 || (typeof window !== 'undefined' && 'ontouchstart' in window)
         const isVertical = worldHeight > worldWidth
-        const initialZoom = isVertical ? 18 : 31
+        const initialZoom = isMobile ? fitZoom : (isVertical ? 18 : 31)
+
+        preferredZoomRef.current = initialZoom
+
         if (onZoomChange) {
           onZoomChange(initialZoom)
         }
 
         // Center the artboard in the viewport
-        const centerX = worldWidth * 0.4  // 40% from left instead of 50%
-        const centerY = worldHeight * 0.4  // 40% from top instead of 50%
+        const centerX = worldWidth / 2
+        const centerY = worldHeight / 2
         viewport.moveCenter(centerX, centerY)
 
         viewportInitializedRef.current = true
@@ -1554,7 +1580,7 @@ function Stage({
         // Viewport initialization failed, continue silently
       }
     }
-  }, [viewport, isReady, stageSize.width, stageSize.height, worldWidth, worldHeight, onZoomChange])
+  }, [viewport, isReady, stageSize.width, stageSize.height, worldWidth, worldHeight, onZoomChange, fitZoom])
 
   // Auto-fit zoom effect - handles aspect ratio changes
   useEffect(() => {
@@ -1577,6 +1603,7 @@ function Stage({
 
     viewport.on('moved', handleViewportChange)
     viewport.on('zoomed', handleViewportChange)
+    viewport.on('resized', handleViewportChange)
 
     // Initial sync
     handleViewportChange()
@@ -1584,15 +1611,34 @@ function Stage({
     return () => {
       viewport.off('moved', handleViewportChange)
       viewport.off('zoomed', handleViewportChange)
+      viewport.off('resized', handleViewportChange)
     }
   }, [viewport, onViewportChange, getViewportData])
 
-  // Sync on Resize: Ensure scrollbars update when container size changes
+  // Sync on Resize: Ensure scrollbars and viewport zoom/position update when container size changes
   useEffect(() => {
     if (isReady && viewport) {
+      const sizeChanged = lastStageSizeRef.current.width !== stageSize.width || lastStageSizeRef.current.height !== stageSize.height
+      lastStageSizeRef.current = { width: stageSize.width, height: stageSize.height }
+
+      if (sizeChanged) {
+        // Recenter the viewport center to the middle of the artboard ONLY on container resize
+        viewport.moveCenter(worldWidth / 2, worldHeight / 2)
+
+        const isMobile = window.innerWidth < 1024 || (typeof window !== 'undefined' && 'ontouchstart' in window)
+        // Calculate the target zoom: we want to restore to preferred zoom,
+        // but cap it at fitZoom during container resize. On mobile, we always fit to zoom!
+        const targetZoom = isMobile ? fitZoom : Math.min(preferredZoomRef.current, fitZoom)
+
+        if (zoom !== targetZoom && onZoomChange) {
+          isAutoZoomingRef.current = true
+          onZoomChange(targetZoom)
+        }
+      }
+
       triggerViewportChange()
     }
-  }, [stageSize.width, stageSize.height, isReady, viewport, triggerViewportChange])
+  }, [stageSize.width, stageSize.height, isReady, viewport, triggerViewportChange, worldWidth, worldHeight, zoom, fitZoom, onZoomChange])
 
   // Zoom handling effect - handles zoom changes from slider/keyboard and fit-to-viewport requests
   useEffect(() => {
@@ -1647,11 +1693,11 @@ function Stage({
           }
         } else {
           // Clicked background or empty space on stage
-          dispatch(clearLayerSelection())
+          dispatch(setSelectedCanvas(true))
         }
       } else {
         // Did not hit any Pixi object
-        dispatch(clearLayerSelection())
+        dispatch(setSelectedCanvas(true))
       }
     }
 
@@ -2248,7 +2294,7 @@ function Stage({
     try {
       const response = await fetch(sampleUrl)
       const blob = await response.blob()
-      
+
       const ext = getExtensionFromMimeType(blob.type) || '.png'
       const filename = `${sample.name || 'Sample Image'}${ext}`
       const file = new File([blob], filename, { type: blob.type || 'image/png' })

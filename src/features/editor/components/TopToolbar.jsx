@@ -12,11 +12,16 @@ import {
   Layers,
   Menu,
   LayoutDashboard,
+  Scaling,
   MoreVertical,
   Undo2,
   Redo2,
   Home,
   Play,
+  User,
+  Cloud,
+  Sun,
+  Moon,
 } from 'lucide-react'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { DropdownMenu, DropdownMenuItem } from './DropdownMenu'
@@ -60,11 +65,20 @@ function TopToolbar({
   showPasteboard = true,
   onTogglePasteboard,
 }) {
-  const { isAuthenticated } = useSelector((state) => state.auth)
+  const { isAuthenticated, user } = useSelector((state) => state.auth)
   const dispatch = useDispatch()
   const canUndo = useSelector(selectCanUndo)
   const canRedo = useSelector(selectCanRedo)
-  const { theme } = useContext(ThemeContext)
+  const { theme, setTheme } = useContext(ThemeContext)
+
+  const handleThemeChange = (newTheme) => {
+    if (newTheme === theme) return
+    setTheme(newTheme)
+    if (isAuthenticated) {
+      dispatch(setLocalTheme(newTheme))
+      dispatch(updateUserTheme(newTheme))
+    }
+  }
   const [isEditingName, setIsEditingName] = useState(false)
   const [editedName, setEditedName] = useState(projectName)
   const [isResizeModalOpen, setIsResizeModalOpen] = useState(false)
@@ -173,7 +187,7 @@ function TopToolbar({
               title={isDirty ? "Unsaved Changes" : "Project Saved"}
             >
               <div className="relative flex items-center justify-center">
-                <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+                <Cloud className="h-3.5 w-3.5" strokeWidth={2} />
                 {!isSaving && (
                   <div
                     className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-[#7c4af0] shadow-sm transition-colors duration-300 ${isDirty ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}
@@ -194,7 +208,6 @@ function TopToolbar({
               }}
               trigger={
                 <button className="text-[#F5F5F5] hover:text-white hover:bg-white/10 active:bg-white/20 h-9 px-3 rounded-[10px] transition-all flex items-center gap-1.5 touch-manipulation whitespace-nowrap text-sm font-semibold">
-                  <Maximize2 className="h-3.5 w-3.5" strokeWidth={2} />
                   <span className="hidden sm:inline">Resize</span>
                   <ChevronDown className="h-3 w-3 opacity-50" strokeWidth={2} />
                 </button>
@@ -371,10 +384,101 @@ function TopToolbar({
 
         {/* Right Section: User (Circle), Export, Sidebar Toggle (Mobile) */}
         <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
+
+
+
+
+          {/* Account Profile Button with Dropdown */}
+          <div className="relative hidden lg:block">
+            <DropdownMenu
+              style={{
+                backgroundColor: isLight ? '#ffffff' : '#090A0D',
+                borderColor: isLight ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.1)',
+                color: isLight ? '#1f2937' : '#F5F5F5',
+                width: '240px',
+                padding: '12px'
+              }}
+              trigger={
+                isAuthenticated ? (
+                  <button className="w-8 h-8 rounded-[10px] bg-gradient-to-tr from-[#7c4af0] to-[#a88beb] flex items-center justify-center text-white font-bold text-xs shadow-sm flex-shrink-0 transition-transform active:scale-95">
+                    {user?.email ? user.email.substring(0, 2).toUpperCase() : 'U'}
+                  </button>
+                ) : (
+                  <button className="w-8 h-8 rounded-[10px] bg-white/10 hover:bg-white/20 flex items-center justify-center text-white flex-shrink-0 transition-transform active:scale-95">
+                    <User className="h-4 w-4 text-zinc-300" />
+                  </button>
+                )
+              }
+            >
+              {(close) => (
+                <div className="flex flex-col gap-3">
+                  {isAuthenticated ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-xs font-semibold truncate opacity-60 px-1 py-0.5">
+                        {user?.email}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        close()
+                        if (onNavigate) {
+                          onNavigate('/login')
+                        } else {
+                          window.location.href = '/login'
+                        }
+                      }}
+                      className="w-full py-2 bg-[#7c4af0] hover:bg-[#6940c9] text-white rounded-lg text-xs font-semibold text-center transition-all shadow-sm"
+                    >
+                      Log in
+                    </button>
+                  )}
+
+                  {/* Theme Switcher */}
+                  <div className="flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 w-full">
+                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Theme</span>
+                    <div className={`flex rounded-lg p-0.5 ${isLight ? 'bg-gray-200/60' : 'bg-white/[0.06]'}`}>
+                      <button
+                        onClick={() => handleThemeChange('light')}
+                        className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${theme === 'light'
+                          ? isLight
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'bg-white/10 text-white shadow-sm'
+                          : isLight
+                            ? 'text-slate-500 hover:text-slate-900'
+                            : 'text-white/40 hover:text-white/80'
+                          }`}
+                      >
+                        <Sun className={`h-3 w-3 transition-colors ${theme === 'light' ? 'text-amber-500' : ''}`} />
+                        <span>Light</span>
+                      </button>
+                      <button
+                        onClick={() => handleThemeChange('dark')}
+                        className={`flex items-center justify-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${theme === 'dark'
+                          ? isLight
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'bg-white/10 text-white shadow-sm'
+                          : isLight
+                            ? 'text-slate-500 hover:text-slate-900'
+                            : 'text-white/40 hover:text-white/80'
+                          }`}
+                      >
+                        <Moon className={`h-3 w-3 transition-colors ${theme === 'dark' ? 'text-indigo-400' : ''}`} />
+                        <span>Dark</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DropdownMenu>
+          </div>
+
+
+
           {/* Pasteboard Toggle Button (Always Visible) */}
           <button
             onClick={() => onTogglePasteboard?.()}
-            className="text-[#F5F5F5] hover:text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
+            className="text-[#F5F5F5] hover:text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap "
             title={showPasteboard ? "Switch to Canvas View" : "Switch to Workspace View"}
           >
             {showPasteboard ? (
@@ -382,9 +486,9 @@ function TopToolbar({
             ) : (
               <EyeOff className="h-4 w-4" strokeWidth={2} />
             )}
-            <span className="hidden md:inline">
+            {/* <span className="hidden md:inline">
               {showPasteboard ? "Workspace View" : "Canvas View"}
-            </span>
+            </span> */}
           </button>
 
           {/* Preview Button */}
@@ -394,7 +498,11 @@ function TopToolbar({
               className="text-[#F5F5F5] hover:text-white hover:bg-white/10 active:bg-white/20 font-semibold gap-1.5 h-9 px-2 md:px-3 text-sm rounded-[10px] transition-all flex items-center touch-manipulation whitespace-nowrap"
               title="Preview"
             >
-              <Play className="h-3.5 w-3.5" strokeWidth={2} fill="currentColor" />
+              <Maximize2
+                className="h-3.5 w-3.5 md:hidden"
+                strokeWidth={2}
+                fill="currentColor"
+              />
               <span className="hidden md:inline">Preview</span>
             </button>
           )}
@@ -431,7 +539,7 @@ function TopToolbar({
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setIsResizeModalOpen(true)} className={isLight ? 'hover:bg-black/5 text-gray-900' : 'hover:bg-white/5 text-white'}>
                 <div className="flex items-center gap-2">
-                  <Maximize2 className="h-3.5 w-3.5" />
+                  <Scaling className="h-3.5 w-3.5" />
                   <span>Resize</span>
                 </div>
               </DropdownMenuItem>
@@ -634,6 +742,7 @@ function TopToolbar({
           >
             <Menu className="h-4 w-4" strokeWidth={1.5} />
           </button>
+
 
         </div>
       </div>

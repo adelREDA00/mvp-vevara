@@ -20,8 +20,14 @@ function DropdownMenu({ trigger, children, className = "", style = {} }) {
     }
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
+      document.addEventListener('pointerdown', handleClickOutside, true)
+      document.addEventListener('mousedown', handleClickOutside, true)
+      document.addEventListener('touchstart', handleClickOutside, true)
+      return () => {
+        document.removeEventListener('pointerdown', handleClickOutside, true)
+        document.removeEventListener('mousedown', handleClickOutside, true)
+        document.removeEventListener('touchstart', handleClickOutside, true)
+      }
     }
   }, [isOpen])
 

@@ -34,6 +34,18 @@ export function calculateAdaptedScale(zoomScale) {
 }
 
 /**
+ * Calculates a dampened scale factor for visual outlines based on zoom level.
+ * Prevents outlines from becoming excessively thick at low zoom levels (zoomed out).
+ */
+export function calculateAdaptedOutlineScale(zoomScale) {
+  if (zoomScale < 5.0) {
+    return zoomScale
+  }
+  const scale = 5.0 + (zoomScale - 5.0) * 0.2
+  return Math.min(8.0, scale)
+}
+
+/**
  * Creates a resize handle (corner or side).
  *
  * @param {Object} options - Handle options
