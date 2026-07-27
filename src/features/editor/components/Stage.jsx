@@ -47,6 +47,7 @@ import { attachAssetToFrame as attachAssetToFramePixi, attachBackAssetToFrame as
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { loadTextureRobust } from '../../engine/pixi/textureUtils'
 import { storeAsset, getAssetUrl } from '../../../services/localAssetService'
+import { uid } from '../../../utils/ids'
 
 // =============================================================================
 // MEMOIZED SELECTORS
