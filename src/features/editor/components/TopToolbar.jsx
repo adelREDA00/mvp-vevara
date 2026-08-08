@@ -400,11 +400,11 @@ function TopToolbar({
               }}
               trigger={
                 isAuthenticated ? (
-                  <button className="w-8 h-8 rounded-[10px] bg-gradient-to-tr from-[#7c4af0] to-[#a88beb] flex items-center justify-center text-white font-bold text-xs shadow-sm flex-shrink-0 transition-transform active:scale-95">
+                  <button className="w-8 h-8  bg-gradient-to-tr from-[#7c4af0] to-[#a88beb] flex items-center justify-center text-white font-bold text-xs shadow-sm flex-shrink-0 transition-transform active:scale-95">
                     {user?.email ? user.email.substring(0, 2).toUpperCase() : 'U'}
                   </button>
                 ) : (
-                  <button className="w-8 h-8 rounded-[10px] bg-white/10 hover:bg-white/20 flex items-center justify-center text-white flex-shrink-0 transition-transform active:scale-95">
+                  <button className="w-8 h-8  bg-white/10 hover:bg-white/20 flex items-center justify-center text-white flex-shrink-0 transition-transform active:scale-95">
                     <User className="h-4 w-4 text-zinc-300" />
                   </button>
                 )

@@ -200,10 +200,10 @@ const ACTION_AVAILABILITY = {
 function getLayerDisplayName(layer) {
   if (!layer) return 'Unknown'
   switch (layer.type) {
-    case LAYER_TYPES.IMAGE: return 'Image layer'
-    case LAYER_TYPES.VIDEO: return 'Video layer'
-    case LAYER_TYPES.SHAPE: return 'Shape layer'
-    case LAYER_TYPES.TEXT: return 'Text layer'
+    case LAYER_TYPES.IMAGE: return 'Image'
+    case LAYER_TYPES.VIDEO: return 'Video'
+    case LAYER_TYPES.SHAPE: return 'Shape'
+    case LAYER_TYPES.TEXT: return 'Text'
     case LAYER_TYPES.GROUP: return 'Group'
     case LAYER_TYPES.BACKGROUND: return 'Background'
     case LAYER_TYPES.FRAME: return layer.data?.isCardFrame ? 'Card Frame' : 'Frame'
@@ -933,7 +933,7 @@ function MotionPanel({
       const url = layer.data?.url || layer.data?.src
       return (
         <div className={`w-full h-full relative overflow-hidden rounded ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`}>
-          {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : (url ? <video src={url} className="w-full h-full object-cover" preload="metadata" muted playsInline /> : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />)}
+          {thumb ? <img src={thumb} alt="" className="w-full h-full object-contain" /> : (url ? <video src={url} className="w-full h-full object-contain" preload="metadata" muted playsInline /> : <div className={`w-full h-full ${isLight ? 'bg-slate-100' : 'bg-zinc-900'}`} />)}
           <div className={`absolute inset-0 flex items-center justify-center ${isLight ? 'bg-black/10' : 'bg-black/30'}`}><Film className={`h-3 w-3 ${isLight ? 'text-slate-600' : 'text-white/70'}`} /></div>
         </div>
       )
@@ -1024,18 +1024,35 @@ function MotionPanel({
   // HEADER
   // ============================================================================
   const renderHeader = () => {
-    let title = '', subtitle = '', showBack = false, onBackClick = null
+    let title = '', showBack = false, onBackClick = null
+    const stepIndex = motionFlow.findIndex(s => s.id === (editingStepId || activeStepId))
+    const momentLabel = stepIndex !== -1 ? `Moment ${stepIndex + 1}` : 'Design'
+
     if (!isMotionCaptureActive) {
       title = 'Moments'
-      subtitle = motionFlow.length === 0 ? 'No moments yet' : `${motionFlow.length} moment${motionFlow.length !== 1 ? 's' : ''}`
     } else if (motionModeState === 'list') {
-      title = 'Select element'
-      subtitle = 'Choose what to animate'
+      title = momentLabel
     } else {
       const layer = sceneLayers.find(l => l.id === selectedLayerId)
-      title = getLayerDisplayName(layer)
-      subtitle = 'Animating'
-      showBack = true
+      const layerName = getLayerDisplayName(layer)
+      title = (
+        <span className="flex items-center gap-1.5 flex-wrap text-inherit">
+          <button
+            onClick={() => {
+              setMotionModeState('list')
+              setSelectedLayerId(null)
+              setExpandedFamilyKey(null)
+              dispatch(setSelectedLayer(null))
+            }}
+            className="hover:underline text-[#7c4af0] dark:text-[#a78bfa] font-semibold text-inherit"
+          >
+            {momentLabel}
+          </button>
+          <span style={{ fontSize: '1.25em', fontWeight: 700, opacity: 0.8, paddingLeft: '1px', paddingRight: '1px' }} className="text-inherit shrink-0">→</span>
+          <span className={`${isLight ? 'text-gray-900' : 'text-white'} font-semibold text-inherit`}>{layerName}</span>
+        </span>
+      )
+      showBack = false
       onBackClick = () => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }
     }
     return (
@@ -1047,8 +1064,11 @@ function MotionPanel({
             </button>
           )}
           <div className="min-w-0">
-            <h2 className={`font-semibold tracking-tight leading-tight truncate ${isMobile ? 'text-[14px]' : 'text-base'} ${isLight ? 'text-gray-900' : 'text-white'}`}>{title}</h2>
-            {subtitle && <p className={`mt-0.5 truncate ${isMobile ? 'text-[11px]' : 'text-xs'} ${isLight ? 'text-slate-400' : 'text-zinc-500'}`}>{subtitle}</p>}
+            {typeof title === 'string' ? (
+              <h2 className={`font-semibold tracking-tight leading-tight truncate ${isMobile ? 'text-[14px]' : 'text-base'} ${isLight ? 'text-gray-900' : 'text-white'}`}>{title}</h2>
+            ) : (
+              <h2 className={`font-semibold tracking-tight leading-tight flex items-center ${isMobile ? 'text-[14px]' : 'text-base'} ${isLight ? 'text-gray-900' : 'text-white'}`}>{title}</h2>
+            )}
           </div>
         </div>
         {/* Mobile: minimize during capture, close otherwise. Desktop: collapse */}
@@ -1091,22 +1111,28 @@ function MotionPanel({
             e.stopPropagation();
             onSelectStepEnd?.('base');
           }}
-          className={`overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${activeStepId === 'base'
-            ? isLight
-              ? 'border-transparent bg-[#d7d7db] shadow-sm'
-              : 'border-transparent bg-[#3a3b48] shadow-sm'
-            : isLight
-              ? 'border-transparent bg-[#ffffff] hover:bg-[#d7d7db]'
-              : 'border-transparent bg-[#121319] hover:bg-[#3a3b48]'
+          className={`overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${isMotionCaptureActive && editingStepId === 'base'
+            ? (isLight ? 'border-transparent bg-[#7a40ed] text-white shadow-md z-10' : 'border-transparent bg-[#633cc4] text-white shadow-md z-10')
+            : activeStepId === 'base'
+              ? (isLight ? 'border-transparent bg-[#b8b8ba] text-slate-900' : 'border-transparent bg-[#303038] text-zinc-100')
+              : (isLight ? 'border-transparent bg-[#d7d7db] text-slate-700 hover:bg-[#c8c8cc]' : 'border-transparent bg-[#1c1d22] text-zinc-500 hover:bg-[#25262c]')
             }`}
         >
           <div className={`w-full flex items-center justify-between gap-2 ${isMobile ? 'px-3 py-2.5' : 'px-3.5 py-3'}`} style={{ minHeight: 52 }}>
             <div className="min-w-0 flex-1 text-left">
-              <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isLight ? 'text-[#111827]' : 'text-[#F2F2F2]'
+              <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isMotionCaptureActive && editingStepId === 'base'
+                ? 'text-white'
+                : activeStepId === 'base'
+                  ? (isLight ? 'text-[#111827]' : 'text-[#ffffff]')
+                  : (isLight ? 'text-slate-800' : 'text-zinc-400')
                 }`}>
                 Design
               </h4>
-              <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isLight ? 'text-[#27303A]' : 'text-[#AEB5C0]'
+              <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isMotionCaptureActive && editingStepId === 'base'
+                ? 'text-purple-100'
+                : activeStepId === 'base'
+                  ? (isLight ? 'text-[#27303A]' : 'text-[#AEB5C0]')
+                  : (isLight ? 'text-slate-500' : 'text-zinc-500')
                 }`}>
                 Starting point
               </p>
@@ -1120,6 +1146,7 @@ function MotionPanel({
           const layerCount = allLayerIds.size
           const isPlayheadActive = activeStepId === step.id
           const isConfirmingDelete = confirmDeleteStepId === step.id
+          const isEditing = isMotionCaptureActive && editingStepId === step.id
 
           return (
             <div key={step.id} ref={el => { if (el) cardRefs.current[step.id] = el }}
@@ -1132,13 +1159,11 @@ function MotionPanel({
 
                 onSelectStepEnd?.(step.id);
               }}
-              className={`group overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${isPlayheadActive
-                ? isLight
-                  ? 'border-transparent bg-[#cab3f8] shadow-sm'
-                  : 'border-transparent bg-[#4c3b70] shadow-sm'
-                : isLight
-                  ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8]'
-                  : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847]'
+              className={`group overflow-hidden border-2 rounded-[6px] transition-all duration-150 cursor-pointer ${isEditing
+                ? (isLight ? 'border-transparent bg-[#7a40ed] text-white shadow-md z-10' : 'border-transparent bg-[#633cc4] text-white shadow-md z-10')
+                : isPlayheadActive
+                  ? (isLight ? 'border-transparent bg-[#b8b8ba] text-slate-900' : 'border-transparent bg-[#303038] text-zinc-100')
+                  : (isLight ? 'border-transparent bg-[#d7d7db] text-slate-700 hover:bg-[#c8c8cc]' : 'border-transparent bg-[#1c1d22] text-zinc-500 hover:bg-[#25262c]')
                 }`}>
               {/* Delete confirmation — consistent min-height, no layout shift */}
               {isConfirmingDelete ? (
@@ -1164,13 +1189,17 @@ function MotionPanel({
                     className="flex items-center gap-3 min-w-0 flex-1 text-left"
                   >
                     <div className="min-w-0 flex-1">
-                      <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isPlayheadActive
-                        ? isLight ? 'text-[#1E293B]' : 'text-purple-100'
-                        : isLight ? 'text-slate-800 group-hover:text-[#1E293B]' : 'text-zinc-400 group-hover:text-purple-100'
+                      <h4 className={`font-semibold truncate whitespace-nowrap ${isMobile ? 'text-[12px]' : 'text-sm'} ${isEditing
+                        ? 'text-white'
+                        : isPlayheadActive
+                          ? (isLight ? 'text-slate-900' : 'text-zinc-100')
+                          : (isLight ? 'text-slate-800 group-hover:text-slate-900' : 'text-zinc-400 group-hover:text-zinc-100')
                         }`}>Moment {stepIndex + 1}</h4>
-                      <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isPlayheadActive
-                        ? isLight ? 'text-[#3b1e70]/80' : 'text-purple-300'
-                        : isLight ? 'text-slate-500 group-hover:text-[#3b1e70]/80' : 'text-zinc-500 group-hover:text-purple-300'
+                      <p className={`truncate whitespace-nowrap ${isMobile ? 'text-[10px]' : 'text-xs mt-0.5'} ${isEditing
+                        ? 'text-purple-100'
+                        : isPlayheadActive
+                          ? (isLight ? 'text-slate-700' : 'text-zinc-300')
+                          : (isLight ? 'text-slate-500 group-hover:text-slate-700' : 'text-zinc-500 group-hover:text-zinc-300')
                         }`}>
                         {layerCount > 0 ? `${layerCount} animated element${layerCount !== 1 ? 's' : ''}` : 'No effects'}
                       </p>
@@ -1181,9 +1210,11 @@ function MotionPanel({
                     <button
                       onClick={(e) => { e.stopPropagation(); onStepEdit?.(step.id) }}
                       title="Edit moment"
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
-                        ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
-                        : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
+                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isEditing
+                        ? 'text-white hover:bg-white/15'
+                        : isPlayheadActive
+                          ? isLight ? 'text-slate-900 hover:bg-black/5' : 'text-zinc-100 hover:bg-white/10'
+                          : isLight ? 'text-slate-400 hover:bg-black/5' : 'text-zinc-500 hover:bg-white/10'
                         }`}
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -1191,9 +1222,11 @@ function MotionPanel({
                     <button
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteStepId(step.id) }}
                       title="Delete moment"
-                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isPlayheadActive
-                        ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
-                        : isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80'
+                      className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isEditing
+                        ? 'text-white hover:bg-white/15'
+                        : isPlayheadActive
+                          ? isLight ? 'text-slate-900 hover:bg-black/5' : 'text-zinc-100 hover:bg-white/10'
+                          : isLight ? 'text-slate-400 hover:bg-black/5' : 'text-zinc-500 hover:bg-white/10'
                         }`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1211,12 +1244,16 @@ function MotionPanel({
                         }
                       }}
                       className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${isExpanded
-                        ? isPlayheadActive
-                          ? isLight ? 'text-[#2d1b4e] hover:bg-black/5' : 'text-purple-200 bg-white/10'
-                          : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
-                        : isPlayheadActive
-                          ? isLight ? 'text-[#3b1e70]/85 hover:bg-black/5' : 'text-purple-200/85 hover:bg-white/10'
-                          : (isLight ? 'text-slate-400 hover:bg-black/5 group-hover:text-[#3b1e70]/85' : 'text-zinc-500 hover:bg-white/10 group-hover:text-purple-200/80')
+                        ? isEditing
+                          ? 'text-white bg-white/15'
+                          : isPlayheadActive
+                            ? isLight ? 'text-slate-900 hover:bg-black/5' : 'text-zinc-100 bg-white/10'
+                            : (isLight ? 'text-[#7c4af0] bg-[#7c4af0]/10' : 'text-[#8e7ebd] bg-white/10')
+                        : isEditing
+                          ? 'text-white hover:bg-white/15'
+                          : isPlayheadActive
+                            ? isLight ? 'text-slate-900 hover:bg-black/5' : 'text-zinc-100 hover:bg-white/10'
+                            : (isLight ? 'text-slate-400 hover:bg-black/5' : 'text-zinc-500 hover:bg-white/10')
                         }`}
                     >
                       <ChevronDown className={`transition-transform duration-200 ${isMobile ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isExpanded ? 'rotate-180' : 'rotate-0'}`} />
@@ -1229,7 +1266,7 @@ function MotionPanel({
                 <div className={`border-t px-3 py-2.5 space-y-1.5 ${isLight ? 'border-slate-150 bg-slate-50/70' : 'border-white/[0.05] bg-black/25'
                   }`}>
                   {allLayerIds.size === 0 ? (
-                    <p className={`text-[10px] italic py-1 text-center ${isLight ? 'text-slate-400' : 'text-zinc-600'}`}>No effects in this moment</p>
+                    <p className={`text-[10px] italic py-1 text-center ${isLight ? 'text-slate-400' : 'text-zinc-600'}`}>No motion actions in this moment</p>
                   ) : [...allLayerIds].map((layerId) => {
                     const layer = sceneLayers.find(l => l.id === layerId) || layers[layerId]
                     const actions = step.layerActions?.[layerId] || []
@@ -1752,7 +1789,9 @@ function MotionPanel({
           // action on first change) so no separate "add" click is required.
           setExpandedActionType(isExpanded ? null : actionType)
         } else if (!isAct) {
-          // Transform actions are captured via canvas interaction (existing behavior).
+          // Transform actions: handleAddAnimation is the ONLY animation —
+          // it mutates the tracked layer and persists via onPositionUpdate /
+          // onInteractionEnd, so Move / Scale / Rotate / Crop apply instantly.
           onAddAnimation?.(layerId, actionType)
         }
       }
@@ -1779,7 +1818,7 @@ function MotionPanel({
               {isAct && (
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDeleteAction(step.id, layerId, action.id, actionType) }}
-                  className={`p-0.5 transition-colors ${isLight ? 'text-slate-300 hover:text-red-500' : 'text-zinc-655 hover:text-red-400'}`}
+                  className={`p-0.5 transition-colors ${isLight ? 'text-slate-400 hover:text-red-500' : 'text-zinc-500 hover:text-red-400'}`}
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -1809,6 +1848,7 @@ function MotionPanel({
                   if (hasSettings) {
                     setExpandedActionType(expandedActionType === actionType ? null : actionType)
                   } else if (!isAct) {
+                    // Same as desktop: handleAddAnimation is the ONLY animation.
                     onAddAnimation?.(layerId, actionType)
                   }
                 }
@@ -1917,20 +1957,8 @@ function MotionPanel({
               </button>
             )
           })}
-          {/* Collapse arrow — always visible regardless of active tab */}
-          <button
-            onClick={isMobile ? handleMobileMinimize : handleCollapseWithAnimation}
-            className={`px-3 border-l rounded-none flex items-center justify-center transition-colors ${isLight ? 'border-slate-100 hover:bg-slate-200/30' : 'border-white/[0.05] hover:bg-white/[0.02]'
-              }`}
-            aria-label="Collapse"
-          >
-            {isMobile ? (
-              <ChevronDown className="h-5 w-5 text-zinc-500 dark:text-zinc-400" strokeWidth={2.5} />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-zinc-500 dark:text-zinc-400 " strokeWidth={2} />
-            )}
-          </button>
         </div>
+
 
         {/* Tab content */}
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-3 min-h-0">
@@ -1938,29 +1966,22 @@ function MotionPanel({
           {effectiveTab === 'custom' && renderCustomTab()}
         </div>
 
-        {/* Exit element footer */}
-        <div className={`flex-shrink-0 border-t flex flex-col items-center ${isMobile ? 'p-1.5 gap-1' : 'p-3 gap-2'
-          } ${isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/[0.05] bg-[#0d0e12]/50'
-          }`}>
-          {/* Animated layers badge/chip */}
-          <div className={`rounded-full font-bold tracking-wide transition-all ${isMobile ? 'px-2 py-0.5 text-[9px]' : 'px-2.5 py-1 text-[10px]'
-            } ${isLight ? 'bg-slate-200/60 text-slate-500' : 'bg-zinc-800/60 text-zinc-400'
-            }`}>
-            Animating {sceneLayers.filter(l => step?.layerPresets?.[l.id] || (step?.layerActions?.[l.id] || []).length > 0).length} of {sceneLayers.length} elements
+        {/* Exit element footer (desktop only) */}
+        {!isMobile && (
+          <div className={`flex-shrink-0 border-t flex flex-col items-center p-3 gap-2 ${isLight ? 'border-slate-200 bg-slate-50/50' : 'border-white/[0.05] bg-[#0d0e12]/50'}`}>
+            <button
+              onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
+              className="w-full font-bold flex items-center justify-center gap-2 border-2 border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 py-2.5 rounded-lg text-[12px]"
+              style={{
+                backgroundColor: 'rgb(228, 217, 249)',
+                color: '#7c4af0',
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Animate Another Element
+            </button>
           </div>
-          <button
-            onClick={() => { setMotionModeState('list'); setSelectedLayerId(null); setExpandedFamilyKey(null); dispatch(setSelectedLayer(null)) }}
-            className={`w-full font-bold flex items-center justify-center gap-2 border-2  border-[#7c4af0]/50 hover:border-[#7c4af0] transition-all duration-150 ${isMobile ? 'py-1.5 rounded-md text-[11px]' : 'py-2.5 rounded-lg text-[12px]'
-              }`}
-            style={{
-              backgroundColor: 'rgb(228, 217, 249)',
-              color: '#7c4af0',
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-            Add Element
-          </button>
-        </div>
+        )}
       </div>
     )
   }
@@ -1986,7 +2007,7 @@ function MotionPanel({
         <button
           onClick={handleExpandFromCollapsed}
           title="Expand moments panel"
-          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0 mt-3 mb-1 ${isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200' : 'text-zinc-400 hover:text-white hover:bg-white/10'
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0 mt-4 mb-2 ${isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200' : 'text-zinc-400 hover:text-white hover:bg-white/10'
             }`}
         >
           <ChevronLeft className="h-5 w-5 text-zinc-500 dark:text-zinc-400" strokeWidth={2} />
@@ -2030,9 +2051,9 @@ function MotionPanel({
                   style={(isShape || (!isText && !isVideo)) && fill ? { backgroundColor: fill } : undefined}
                 >
                   {thumb ? (
-                    <img src={thumb} alt="" className="w-full h-full object-cover" />
+                    <img src={thumb} alt="" className="w-full h-full object-contain" />
                   ) : url && !isVideo ? (
-                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <img src={url} alt="" className="w-full h-full object-contain" />
                   ) : isText ? (
                     <span style={{ fontSize: 9, color: textColor || (isLight ? '#374151' : '#d4d4d8'), fontWeight: 700, lineHeight: 1 }}>
                       {textContent ? textContent.slice(0, 2) : 'T'}
@@ -2050,13 +2071,11 @@ function MotionPanel({
               <button
                 onClick={() => onSelectStepEnd?.('base')}
                 title="Design / Starting Point"
-                className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${activeStepId === 'base'
-                  ? isLight
-                    ? 'border-transparent bg-[#d7d7db] text-slate-900 shadow-sm'
-                    : 'border-transparent bg-[#3a3b48] text-zinc-200 shadow-sm'
-                  : isLight
-                    ? 'border-transparent bg-white text-slate-800 hover:bg-[#d7d7db] hover:text-purple-900'
-                    : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
+                className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${isMotionCaptureActive && editingStepId === 'base'
+                  ? (isLight ? 'border-transparent bg-[#7a40ed] text-white shadow-md' : 'border-transparent bg-[#633cc4] text-white shadow-md')
+                  : activeStepId === 'base'
+                    ? (isLight ? 'border-transparent bg-[#b8b8ba] text-slate-900 shadow-sm' : 'border-transparent bg-[#303038] text-zinc-100 shadow-sm')
+                    : (isLight ? 'border-transparent bg-[#d7d7db] text-slate-700 hover:bg-[#c8c8cc]' : 'border-transparent bg-[#1c1d22] text-zinc-500 hover:bg-[#25262c]')
                   }`}
               >
                 D
@@ -2066,13 +2085,11 @@ function MotionPanel({
                   key={step.id}
                   onClick={() => onSelectStepEnd?.(step.id)}
                   title={`Select Moment ${idx + 1}`}
-                  className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${activeStepId === step.id
-                    ? isLight
-                      ? 'border-transparent bg-[#cab3f8] text-purple-900 shadow-sm'
-                      : 'border-transparent bg-[#4c3b70] text-purple-200 shadow-sm'
-                    : isLight
-                      ? 'border-transparent bg-white text-slate-800 hover:bg-[#cab3f8] hover:text-purple-900'
-                      : 'border-transparent bg-[#121319] text-zinc-400 hover:bg-[#3b3847] hover:text-zinc-200'
+                  className={`w-9 h-9 rounded-lg border-2 flex items-center justify-center text-[10px] font-bold transition-all shrink-0 ${isMotionCaptureActive && editingStepId === step.id
+                    ? (isLight ? 'border-transparent bg-[#7a40ed] text-white shadow-md' : 'border-transparent bg-[#633cc4] text-white shadow-md')
+                    : activeStepId === step.id
+                      ? (isLight ? 'border-transparent bg-[#b8b8ba] text-slate-900 shadow-sm' : 'border-transparent bg-[#303038] text-zinc-100 shadow-sm')
+                      : (isLight ? 'border-transparent bg-[#d7d7db] text-slate-700 hover:bg-[#c8c8cc]' : 'border-transparent bg-[#1c1d22] text-zinc-500 hover:bg-[#25262c]')
                     }`}
                 >
                   M{idx + 1}
@@ -2132,9 +2149,7 @@ function MotionPanel({
             <div className={`h-1 w-9 rounded-full ${isLight ? 'bg-slate-300' : 'bg-zinc-600'}`} />
           </div>
         )}
-        {/* Both desktop and mobile hide the header in the layer (element)
-            view so content begins at the Preset/Custom tabs. */}
-        {!(isMotionCaptureActive && motionModeState === 'element') && renderHeader()}
+        {renderHeader()}
         <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
           {!isMotionCaptureActive && renderNormalMode()}
           {isMotionCaptureActive && motionModeState === 'list' && renderMotionModeList()}

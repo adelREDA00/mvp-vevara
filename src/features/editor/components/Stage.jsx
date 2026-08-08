@@ -591,27 +591,54 @@ function Stage({
 
 
   // Pass motion controls up to parent
-  // [PERFORMANCE FIX] Memoize the motion state object to prevent unnecessary 
-  // re-renders in EditorPage when Stage re-renders due to internal layer updates.
-  const motionState = useMemo(() => ({
+  // [INFINITE LOOP FIX] Split motionState into stable API (functions) and volatile
+  // state (isPlaying, isBuffering). Only the stable part triggers setMotionControls
+  // via useEffect — the volatile part is kept in a ref that EditorPage reads directly
+  // without causing a re-render cascade.
+  //
+  // Previously, a single motionState object included both, so any isPlaying/isBuffering
+  // change created a new object reference → fired setMotionControls → re-rendered
+  // EditorPage → re-rendered Stage → potentially new function refs → new motionState
+  // → setMotionControls again → infinite loop crash.
+  const motionVolatileRef = useRef({ isPlaying, isBuffering })
+  motionVolatileRef.current = { isPlaying, isBuffering }
+
+  const motionStateStable = useMemo(() => ({
     playAll,
     pauseAll,
     stopAndSeekToSceneStart,
     stopAll,
     seek,
     tweenTo,
-    isPlaying,
-    isBuffering,
     getLayerCurrentTransforms,
     getViewportData,
-    layerObjects
-  }), [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, isPlaying, isBuffering, getLayerCurrentTransforms, getViewportData, layerObjects, viewport])
+    layerObjects,
+    // Expose a getter for volatile state so EditorPage can read current values
+    // without holding a stale closure. Uses Object.defineProperty so the
+    // properties are always live but don't affect useMemo identity.
+    get isPlaying() { return motionVolatileRef.current.isPlaying },
+    get isBuffering() { return motionVolatileRef.current.isBuffering },
+  }), [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, getLayerCurrentTransforms, getViewportData, layerObjects])
+
+  // Trace-log which dependency of motionStateStable is changing to cause invalidation
+  const prevDepsRef = useRef([])
+  useEffect(() => {
+    const deps = [playAll, pauseAll, stopAndSeekToSceneStart, stopAll, seek, tweenTo, getLayerCurrentTransforms, getViewportData, layerObjects]
+    const depNames = ['playAll', 'pauseAll', 'stopAndSeekToSceneStart', 'stopAll', 'seek', 'tweenTo', 'getLayerCurrentTransforms', 'getViewportData', 'layerObjects']
+    const changes = []
+    deps.forEach((dep, idx) => {
+      if (prevDepsRef.current[idx] !== dep) {
+        changes.push(`${depNames[idx]} changed`)
+      }
+    })
+    prevDepsRef.current = deps
+  })
 
   useEffect(() => {
     if (onMotionStateChange) {
-      onMotionStateChange(motionState)
+      onMotionStateChange(motionStateStable)
     }
-  }, [onMotionStateChange, motionState])
+  }, [onMotionStateChange, motionStateStable])
 
   // [PREVIEW FIX] Track motion capture state transitions to avoid auto-pausing during apply/cancel previews
   const wasMotionCaptureActiveRef = useRef(false)
@@ -659,8 +686,15 @@ function Stage({
 
   // Select canvas when scene changes to clear layer selection and present Scene Controls
   useEffect(() => {
-    dispatch(setSelectedCanvas(true))
-  }, [currentSceneId, dispatch])
+    // [INFINITE LOOP FIX] Skip selecting canvas on scene switch if we are transitioning/entering
+    // motion capture mode or if it is already active. If we force select canvas during transition, it fights the incoming
+    // motion capture step configuration, causing a recursive update loop.
+    const isTransitioning = motionCaptureMode?.isTransitioning
+    const isActive = motionCaptureMode?.isActive
+    if (!isTransitioning && !isActive) {
+      dispatch(setSelectedCanvas(true))
+    }
+  }, [currentSceneId, dispatch, motionCaptureMode?.isTransitioning, motionCaptureMode?.isActive])
 
 
   // =============================================================================

@@ -228,6 +228,15 @@ const DashboardPage = () => {
         loadLocalProjects()
     }
 
+    const handleThemeToggle = () => {
+        const newTheme = theme === 'light' ? 'dark' : 'light'
+        setTheme(newTheme)
+        if (isAuthenticated) {
+            dispatch(setLocalTheme(newTheme))
+            dispatch(updateUserTheme(newTheme))
+        }
+    }
+
     const handleCreateProject = async () => {
         if (!isAuthenticated) {
             handleCreateBlankProjectLocal()
@@ -563,7 +572,7 @@ const DashboardPage = () => {
     return (
         <div className="min-h-screen bg-[var(--dashboard-bg)] text-[var(--dashboard-text)] font-medium selection:bg-[var(--dashboard-accent)]/10 flex overflow-x-hidden">
             {toast && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000] animate-in fade-in slide-in-from-top-4 duration-300 select-none">
+                <div className="fixed bottom-6 right-6 z-[99999] animate-in fade-in slide-in-from-bottom-4 duration-300 select-none">
                     <div className={`text-white px-4 py-2 rounded-[8px] flex items-center justify-center gap-2 text-[13px] font-semibold tracking-wide shadow-lg border border-white/10 ${toast.type === 'error' ? 'bg-rose-600 dark:bg-rose-500' : 'bg-emerald-600 dark:bg-emerald-500'}`}>
                         {toast.type === 'error' ? (
                             <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -585,80 +594,133 @@ const DashboardPage = () => {
                 className="flex-1 h-screen overflow-y-auto transition-all custom-scrollbar pb-2 md:pb-3 px-4 md:px-8 pt-1 md:pt-2"
             >
                 <div className="min-h-full bg-[var(--dashboard-bg)] rounded-none border-none shadow-none flex flex-col relative">
-                    {/* Updates Banner */}
-                    <div className="w-full bg-yellow-300 py-2.5 px-4 md:px-10 border-b border-yellow-400 flex items-center justify-center z-20 rounded-t-none text-yellow-950">
-                        <div className="text-[11px] font-extrabold text-center tracking-wider uppercase flex items-center gap-2 justify-center">
-                            <span className="bg-yellow-950 text-yellow-300 text-[9px] font-black px-1.5 py-0.5 rounded-[4px] tracking-wide">
-                                Beta Access
-                            </span>
-                            <span className="opacity-95 flex items-center gap-1.5">
-                                <span>Try Vevara and share your feedback </span>
-                            </span>
+
+                    {/* Storage / Account Status Bar */}
+                    {/* Storage / Account Status Bar */}
+                    <div
+                        className={`w-full h-12 px-4 md:px-10 border-b flex items-center justify-between z-20 ${isLight
+                            ? 'bg-[#f5f5f3] border-[#e4e4e0] text-[#555]'
+                            : 'bg-[#0d0e11] border-white/[0.07] text-zinc-400'
+                            }`}
+                    >
+                        {/* Left: Storage status */}
+                        <div className="flex items-center gap-2 min-w-0">
+                            {isAuthenticated ? (
+                                <>
+                                    <span
+                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-[4px] tracking-wider uppercase ${isLight
+                                            ? 'bg-[var(--dashboard-accent)] text-white'
+                                            : 'bg-[var(--dashboard-accent)] text-white'
+                                            }`}
+                                    >
+                                        Cloud
+                                    </span>
+
+                                    <span
+                                        className={`hidden md:block w-1 h-1 rounded-full shrink-0 ${isLight ? 'bg-[#999]' : 'bg-zinc-600'
+                                            }`}
+                                    />
+
+                                    <span className="hidden md:inline text-[10px] md:text-[11px] font-medium tracking-wide truncate">
+                                        Your projects are synced
+                                    </span>
+                                </>
+                            ) : (
+                                <>
+                                    <span
+                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-[4px] tracking-wider uppercase ${isLight
+                                            ? 'bg-[#deded9] text-[#4f4f4b]'
+                                            : 'bg-[#292a2e] text-zinc-200'
+                                            }`}
+                                    >
+                                        Local
+                                    </span>
+
+                                    <span
+                                        className={` hidden md:block w-1 h-1 rounded-full shrink-0 ${isLight ? 'bg-[#999]' : 'bg-zinc-600'
+                                            }`}
+                                    />
+
+                                    <span className="hidden md:inline text-[10px] md:text-[11px] font-medium tracking-wide truncate">
+                                        Projects are stored on this device
+                                    </span>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Right: Account + Theme */}
+                        <div className="flex items-center gap-2 shrink-0">
+                            {isAuthenticated ? (
+                                <DropdownMenu
+                                    trigger={
+                                        <button
+                                            className="relative w-8 h-8 outline-none group "
+                                            aria-label="Account menu"
+                                        >
+                                            {/* Avatar */}
+                                            <div
+                                                className={`w-8 h-8 rounded-[10px] flex items-center justify-center font-bold text-[10px] transition-transform group-hover:scale-[1.03] ${isLight
+                                                    ? 'bg-[#e4e4e1] text-[#333]'
+                                                    : 'bg-[#242528] text-zinc-200'
+                                                    }`}
+                                            >
+                                                {user?.email?.substring(0, 2).toUpperCase()}
+                                            </div>
+
+                                            {/* Bottom-right dropdown indicator */}
+                                            <span
+                                                className={`absolute -right-0.5 -bottom-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border-2 ${isLight
+                                                    ? 'bg-white border-[#f5f5f3] text-[#555]'
+                                                    : 'bg-[#18191c] border-[#0d0e11] text-zinc-400'
+                                                    }`}
+                                            >
+                                                <ChevronDown size={8} strokeWidth={2.5} />
+                                            </span>
+                                        </button>
+                                    }
+                                    className="bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] shadow-none rounded-[12px]"
+                                >
+                                    <div className="px-4 py-3 border-b border-[var(--dropdown-border)] mb-1">
+                                        <p className="text-[12px] font-medium text-[var(--dashboard-text-muted)] truncate">
+                                            {user?.email}
+                                        </p>
+                                    </div>
+
+                                    <DropdownMenuItem
+                                        onClick={handleLogout}
+                                        className="hover:bg-rose-500/10 rounded-[8px]"
+                                    >
+                                        <div className="flex items-center gap-3 text-rose-500">
+                                            <LogOut size={16} strokeWidth={2} />
+                                            <span className="text-[14px] font-semibold">
+                                                Logout
+                                            </span>
+                                        </div>
+                                    </DropdownMenuItem>
+                                </DropdownMenu>
+                            ) : (
+                                <Link
+                                    to="/login"
+                                    className={`h-8 px-3.5 text-[10px] font-bold rounded-[6px] flex items-center transition-all ${isLight
+                                        ? 'bg-[#171717] text-white hover:bg-[#2a2a2a]'
+                                        : 'bg-white text-[#111] hover:bg-zinc-200'
+                                        }`}
+                                >
+                                    Sign in to sync
+                                </Link>
+                            )}
+
+                            <button
+                                onClick={handleThemeToggle}
+                                className="w-8 h-8 flex items-center justify-center rounded-[6px] transition-all hover:bg-black/5 dark:hover:bg-white/5"
+                            >
+                                {isLight ? <Moon size={14} /> : <Sun size={14} />}
+                            </button>
                         </div>
                     </div>
 
                     <div className="px-4 md:px-10 pb-4 md:pb-10 max-w-[1600px] mx-auto w-full flex-1 relative z-10">
-                        {/* Header */}
-                        <header className="flex items-center justify-between mb-8 md:mb-6 pt-4 md:pt-10 select-none">
-                            {/* Left Side: Theme Toggle (Branding removed) */}
-                            <div className="flex items-center gap-3">
-                                <button
-                                    onClick={() => {
-                                        const newTheme = theme === 'light' ? 'dark' : 'light'
-                                        setTheme(newTheme)
-                                        if (isAuthenticated) {
-                                            dispatch(setLocalTheme(newTheme))
-                                            dispatch(updateUserTheme(newTheme))
-                                        }
-                                    }}
-                                    className="w-9 h-9 flex items-center justify-center text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-text)] transition-all rounded-[8px]"
-                                >
-                                    {isLight ? <Moon size={18} /> : <Sun size={18} />}
-                                </button>
-                            </div>
 
-                            {/* Right Side: Auth controls */}
-                            <div className="flex items-center gap-4">
-                                {isAuthenticated ? (
-                                    <DropdownMenu
-                                        trigger={
-                                            <button className="flex items-center gap-2 outline-none group rounded-[8px]">
-                                                <div className="w-8 h-8 rounded-[8px] bg-slate-600 flex items-center justify-center text-white font-bold text-[11px] shadow-sm group-hover:scale-105 transition-transform">
-                                                    {user?.email?.substring(0, 2).toUpperCase()}
-                                                </div>
-                                                <ChevronDown size={12} className="text-[var(--dashboard-text-muted)] mt-0.5" />
-                                            </button>
-                                        }
-                                        className="bg-[var(--dropdown-bg)] border border-[var(--dropdown-border)] shadow-none rounded-[12px]"
-                                    >
-                                        <div className="px-4 py-3 border-b border-[var(--dropdown-border)] mb-1">
-                                            <p className="text-[12px] font-medium text-[var(--dashboard-text-muted)] truncate">{user?.email}</p>
-                                        </div>
-                                        <DropdownMenuItem onClick={handleLogout} className="hover:bg-rose-500/10 rounded-[8px]">
-                                            <div className="flex items-center gap-3 text-rose-500">
-                                                <LogOut size={16} strokeWidth={2} />
-                                                <span className="text-[14px] font-semibold">Logout</span>
-                                            </div>
-                                        </DropdownMenuItem>
-                                    </DropdownMenu>
-                                ) : (
-                                    <div className="flex items-center gap-2">
-                                        <Link
-                                            to="/login"
-                                            className="h-9 px-4 text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-accent)] text-[12px] font-bold rounded-[8px] border border-[var(--dashboard-border)] flex items-center transition-all bg-transparent hover:bg-[var(--dashboard-card-hover)]"
-                                        >
-                                            Log in
-                                        </Link>
-                                        <Link
-                                            to="/register"
-                                            className={`h-9 px-4 bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent-hover)] ${isLight ? 'text-white' : 'text-[#06121A]'} text-[12px] font-bold rounded-[8px] flex items-center gap-2 transition-all`}
-                                        >
-                                            Sign up
-                                        </Link>
-                                    </div>
-                                )}
-                            </div>
-                        </header>
 
                         <DashboardHero title={heroTitle} subtitle={heroSubtitle} />
 
@@ -672,11 +734,11 @@ const DashboardPage = () => {
                             </button>
                             {!isAuthenticated && (
                                 <div className="text-[11px] md:text-[12px] text-[var(--dashboard-text-muted)] opacity-85 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 font-semibold tracking-wide select-none">
-                                    <span>No account needed</span>
-                                    <span className="opacity-40">•</span>
-                                    <span>Your projects are saved automatically in your browser</span>
-                                    <span className="opacity-40">•</span>
-                                    <span>Create an account anytime to keep your work across devices</span>
+                                    {/* <span className="opacity-40">•</span>  <span>No account needed</span> */}
+
+                                    {/* <span>Your projects are saved automatically in your browser</span> */}
+                                    {/* <span className="opacity-40">•</span>
+                                    <span>Create an account anytime to keep your work across devices</span> */}
                                 </div>
                             )}
                         </section>

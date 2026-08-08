@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import { ThemeContext } from '../../../app/context/ThemeContext'
 import { useDispatch, useSelector } from 'react-redux'
@@ -6,7 +6,7 @@ import { Link, useParams, useLocation } from 'react-router-dom'
 import { Layers, FileText } from 'lucide-react'
 import api from '../../../api/client'
 import Stage from '../components/Stage'
-import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack, addAudioTrack, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
+import { addScene, selectScenes, selectCurrentSceneId, selectCurrentScene, updateScene, deleteScene, splitScene, deleteLayer, selectLayers, updateLayer, copyLayers, pasteLayers, copyScene, pasteScene, selectLastPastedLayerIds, addSceneMotionStep, deleteSceneMotionStep, selectSceneMotionFlow, initializeSceneMotionFlow, selectProjectTimelineInfo, addSceneMotionAction, updateSceneMotionAction, deleteSceneMotionAction, selectSceneMotionFlows, reorderLayer, fetchProjectById, saveProject, selectProjectName, setProjectName, selectProjectId, resetProject, selectAspectRatio, setAspectRatio, setCurrentScene, updateSceneMotionFlow, initializeProject, selectLoadingMode, setLoadingMode, startMotionEditing, stopMotionEditing, flipCardFrame, selectIsDirty, selectProjectVersion, selectIsSaving as selectIsSavingRedux, selectEditingStepActionCount, selectAudioTracks, deleteAudioTrack, pasteAudioTrack, addAudioTrack, selectIsTimelineDragging, pruneEmptyStepsFromFlows } from '../../../store/slices/projectSlice'
 import { LAYER_TYPES } from '../../../store/models'
 import { store } from '../../../store'
 import { gsap } from 'gsap'
@@ -51,6 +51,7 @@ import { resetGlobalMotionEngine, getGlobalMotionEngine } from '../../engine/mot
 import { PRESET_REGISTRY } from '../../engine/motion/presets.js'
 import { BLUR_MAX } from '../../engine/motion/blurConstants.js'
 import { CORNER_RADIUS_MAX } from '../../engine/motion/cornerRadiusConstants.js'
+import { CropAction } from '../../engine/motion/actions/CropAction.js'
 import { startTutorial, endTutorial, selectTutorialState, nextStep } from '../../../store/slices/tutorialSlice'
 import { updateUserTheme, setLocalTheme, completeOnboarding, completeExampleIntro } from '../../../store/slices/authSlice'
 import { saveProjectFromEditor, getProject as getLocalProject, saveProject as saveLocalProject, duplicateProject } from '../../../services/localProjectService'
@@ -137,11 +138,25 @@ function EditorPage() {
   const isSavingRedux = useSelector(selectIsSavingRedux)
   const [isSaving, setIsSaving] = useState(false)
   const timelineControlRef = useRef(null)
+  const exitMotionModeWithAutoSaveRef = useRef(null)
   const [selectedAudioBlockId, setSelectedAudioBlockId] = useState(null)
   const selectedAudioBlock = useMemo(() =>
     audioTracks.find(t => t.id === selectedAudioBlockId) || null,
     [audioTracks, selectedAudioBlockId]
   )
+
+  const handleSelectAudioBlock = useCallback((id) => {
+    setSelectedAudioBlockId(id)
+    if (id) {
+      if (exitMotionModeWithAutoSaveRef.current) {
+        exitMotionModeWithAutoSaveRef.current()
+      }
+      if (document.activeElement && document.activeElement.tagName !== 'BODY') {
+        document.activeElement.blur()
+      }
+      dispatch(clearLayerSelection())
+    }
+  }, [dispatch])
 
   useEffect(() => {
     if (selectedLayerIds.length > 0 || selectedCanvas) {
@@ -469,7 +484,7 @@ function EditorPage() {
     handleDeleteSegment,
     handleDuplicateSegment,
     handleToggleSegmentBypass,
-  } = useEditorPlayback(scenes)
+  } = useEditorPlayback(scenes, motionCaptureMode)
 
   const [globalVolume, setGlobalVolume] = useState(1)
   const [globalMuted, setGlobalMuted] = useState(false)
@@ -508,6 +523,41 @@ function EditorPage() {
     return () => { cancelAnimationFrame(raf); clearTimeout(t) }
   }, [previewMode, isPlaying, motionControls, setIsPlaying])
 
+  const animatePlayhead = useCallback((targetTime, duration = null, onComplete = null) => {
+    const currentVal = playheadTimeRef.current || 0;
+    if (!motionControls) {
+      if (onComplete) onComplete()
+      return
+    }
+    if (Math.abs(currentVal - targetTime) < 0.01) {
+      motionControls.seek(targetTime)
+      if (onComplete) onComplete()
+      return
+    }
+
+    // Dynamic duration: proportional to distance, clamped to [0.15s, 1.0s]
+    // Short moves feel nearly instant, long moves stay smooth without exceeding 1s
+    const distance = Math.abs(targetTime - currentVal)
+    const effectiveDuration = duration ??
+      Math.min(0.45, Math.max(0.08, Math.sqrt(distance) * 0.18));
+
+    gsap.killTweensOf(playheadTimeRef)
+    const obj = { val: currentVal }
+    gsap.to(obj, {
+      val: targetTime,
+      duration: effectiveDuration,
+      ease: "power2.out",
+      onUpdate: () => {
+        motionControls.seek(obj.val)
+      },
+      onComplete: () => {
+        motionControls.seek(targetTime)
+        if (onComplete) onComplete()
+      }
+    })
+  }, [motionControls])
+
+
   const {
     topToolbarRef,
     topControlsRef,
@@ -530,6 +580,19 @@ function EditorPage() {
   const [pixiApp, setPixiApp] = useState(null)
   const [isStageReady, setIsStageReady] = useState(false) // Track PIXI object population
   const [pixiError, setPixiError] = useState(null) // NEW: Track fatal graphics errors
+
+  // [INFINITE LOOP FIX] Stable callback for Stage's onReady prop.
+  // The inline arrow function created a new reference on every render, causing Stage's
+  // useEffect([isReady, onReady]) to re-fire on every re-render (e.g. when
+  // setMotionCaptureMode was called during cross-scene capture entry), resulting in
+  // setIsPixiReady(true) being called repeatedly → infinite update loop.
+  // All dependencies (setIsPixiReady, setPixiError, setPixiApp, stageRef) are stable.
+  const handleStageReady = useCallback(() => {
+    setIsPixiReady(true)
+    setPixiError(null) // Clear error on successful re-init
+    const app = stageRef.current?.getApp?.()
+    if (app) setPixiApp(app)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // [FIX] Minimum display time prevents the loading overlay from "flashing" on fast connections
   const [minTimeElapsed, setMinTimeElapsed] = useState(false)
@@ -738,7 +801,7 @@ function EditorPage() {
       const totalRangeY = wh + 2 * padding
       const screenWorldH = sh / scale
       const thumbH = Math.max(40, Math.min(vTrackH, (screenWorldH / totalRangeY) * vTrackH))
-      
+
       const minT = -padding
       const maxT = wh + padding - screenWorldH
       const ratio = (maxT - minT) <= 1 ? 0 : Math.max(0, Math.min(1, (t - minT) / (maxT - minT)))
@@ -893,7 +956,7 @@ function EditorPage() {
       name: projectName,
       scenes,
       layers,
-      sceneMotionFlows,
+      sceneMotionFlows: pruneEmptyStepsFromFlows(sceneMotionFlows),
       aspectRatio
     }
 
@@ -931,7 +994,7 @@ function EditorPage() {
           projectName,
           scenes,
           layers,
-          sceneMotionFlows,
+          sceneMotionFlows: pruneEmptyStepsFromFlows(sceneMotionFlows),
           audioTracks,
           aspectRatio,
           thumbnail,
@@ -1055,7 +1118,7 @@ function EditorPage() {
       projectName,
       scenes,
       layers,
-      sceneMotionFlows,
+      sceneMotionFlows: pruneEmptyStepsFromFlows(sceneMotionFlows),
       audioTracks,
       aspectRatio: aspectRatio || '16:9'
     }
@@ -1176,6 +1239,7 @@ function EditorPage() {
       }
     }
   }, [selectedLayerIds, selectedCanvas, editingTextLayerId, handleFinishEditing])
+
   // =============================================================================
   // AUTO-SAVE LOGIC — Works identically for guest and authenticated users.
   // The only difference is where the save goes (localStorage vs backend).
@@ -1204,6 +1268,9 @@ function EditorPage() {
 
   const [activeTransitionSceneId, setActiveTransitionSceneId] = useState(null)
   const handleOpenTransitionsPanel = useCallback((sceneId) => {
+    if (exitMotionModeWithAutoSaveRef.current) {
+      exitMotionModeWithAutoSaveRef.current()
+    }
     setActiveTransitionSceneId(sceneId)
     setActiveSidebarItem('Transitions')
   }, [setActiveSidebarItem])
@@ -1836,11 +1903,7 @@ function EditorPage() {
 
   // Label shown in canvas controls during motion editing: "Editing Moment N"
   // Only shown when editing an existing moment — hidden during new-moment creation
-  const editingMomentLabel = useMemo(() => {
-    if (!isMotionCaptureActive || !editingStepId || !isEditingExistingStep) return ''
-    const idx = currentSceneMotionFlow?.steps?.findIndex(s => s.id === editingStepId)
-    return idx >= 0 ? `Editing Moment ${idx + 1}` : 'Editing Moment'
-  }, [isMotionCaptureActive, editingStepId, isEditingExistingStep, currentSceneMotionFlow])
+  const editingMomentLabel = ''
 
   // [PRESET CHANGE FIX] Compare current preset identities against the baseline snapshot.
   // This detects when a user changes a preset from one ID to another (count unchanged).
@@ -1886,7 +1949,7 @@ function EditorPage() {
   }, [isEditingExistingStep, editingStepId, currentSceneMotionFlow, captureVersion])
 
   // [PRESET CHANGE FIX] isDoneEnabled also checks hasPresetChanges so changing a preset (same count, different ID) activates the button.
-  const isDoneEnabled = !isStepUnchanged && (editingStepActionCount !== captureBaselineActionCount || hasLiveCanvasChanges || hasPresetChanges)
+  const isDoneEnabled = true
 
 
   // Get timeline info for seeking
@@ -2061,70 +2124,108 @@ function EditorPage() {
         cornerRadius: tracked.cornerRadius !== undefined ? Math.max(0, Math.min(CORNER_RADIUS_MAX, tracked.cornerRadius)) : (base.data?.cornerRadius ?? 0)
       }
     }
-    console.log('[DEBUG] capturedLayer update:', {
-      layerId,
-      trackedRadius: tracked.cornerRadius,
-      baseRadius: base.data?.cornerRadius,
-      finalRadius: result.data.cornerRadius
-    })
-    return result
+
   }, [isMotionCaptureActive, selectedLayerIds, layers, currentSceneMotionFlow, motionCaptureMode, captureVersion])
+
+  // [TIMELINE EDIT SYNC] When timeline dragging ends during capture mode,
+  // sync the tracked layers' initial and current transforms from the newly
+  // evaluated PIXI positions. This prevents layers from snapping back
+  // to their pre-drag positions because their baseline coordinates shifted.
+  const wasTimelineDraggingRef = useRef(false)
+  useEffect(() => {
+    const wasDragging = wasTimelineDraggingRef.current
+    wasTimelineDraggingRef.current = isTimelineDragging
+
+    if (wasDragging && !isTimelineDragging && isMotionCaptureActive && motionControls?.getLayerCurrentTransforms) {
+      // Re-sync logical capture state with newly evaluated PIXI coordinates
+      const currentTransforms = motionControls.getLayerCurrentTransforms()
+      const capture = motionCaptureRef.current
+      if (capture && capture.trackedLayers) {
+        currentTransforms.forEach((transform, layerId) => {
+          const entry = capture.trackedLayers.get(layerId)
+          if (entry) {
+            entry.initialTransform.x = transform.x
+            entry.initialTransform.y = transform.y
+            entry.initialTransform.rotation = transform.rotation
+            entry.initialTransform.scaleX = transform.scaleX
+            entry.initialTransform.scaleY = transform.scaleY
+            const cleanAlpha = transform.alpha !== undefined && Math.abs(transform.alpha - 0.000001) < 1e-7 ? 1.0 : transform.alpha
+            entry.initialTransform.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.initialTransform.opacity
+
+            entry.currentPosition.x = transform.x
+            entry.currentPosition.y = transform.y
+            entry.rotation = transform.rotation
+            entry.scaleX = transform.scaleX
+            entry.scaleY = transform.scaleY
+            entry.opacity = cleanAlpha !== undefined ? cleanAlpha : entry.opacity
+            const cleanBlur = transform.blur !== undefined ? transform.blur : entry.blur
+            entry.blur = cleanBlur
+            entry.initialTransform.blur = cleanBlur
+
+            if (transform.tiltX !== undefined) {
+              entry.tiltX = transform.tiltX
+              entry.initialTransform.tiltX = transform.tiltX
+            }
+            if (transform.tiltY !== undefined) {
+              entry.tiltY = transform.tiltY
+              entry.initialTransform.tiltY = transform.tiltY
+            }
+            if (transform.color !== undefined && transform.color !== null) {
+              entry.color = transform.color
+              entry.initialTransform.color = transform.color
+            }
+          }
+        })
+        setCaptureVersion(v => v + 1)
+      }
+    }
+  }, [isTimelineDragging, isMotionCaptureActive, motionControls])
 
   // Effect: Exit motion capture mode when switching scenes
   // We use a ref to track the previous scene ID to detect changes
   const prevSceneIdRef = useRef(currentSceneId)
+  const switchingSceneForStepRef = useRef(null)
+  const pendingEditStepRef = useRef(null)
+  const motionCaptureModeRef = useRef(motionCaptureMode)
 
-  useEffect(() => {
-    // If scene changed and we are in motion capture mode, cancel it
+  useLayoutEffect(() => {
+    motionCaptureModeRef.current = motionCaptureMode
+  }, [motionCaptureMode])
+
+  useLayoutEffect(() => {
+    // If scene changed and we are in motion capture mode, auto-save first
     if (prevSceneIdRef.current !== currentSceneId) {
+      if (switchingSceneForStepRef.current === currentSceneId) {
+        // Safe bypass: This scene switch was intentionally triggered by cross-scene navigation to a step.
+        // The old step's edits are already saved/discarded synchronously in handleEditStep,
+        // so we just clear the ref and allow the switch without tearing down the new capture mode.
+        switchingSceneForStepRef.current = null
+        prevSceneIdRef.current = currentSceneId
+        return
+      }
+
       // [BUG 2 FIX] Skip cleanup if we're in the Add Step transitioning state.
       // During the fast-play preview, the playhead might briefly trigger a scene switch
       // (e.g., due to floating-point precision at scene boundaries).
       // Deleting the step in this case is incorrect — the user didn't navigate away.
-      if (motionCaptureMode?.isTransitioning) {
+      if (motionCaptureModeRef.current?.isTransitioning) {
         // Revert the scene switch — stay on the original scene
         dispatch(setCurrentScene(prevSceneIdRef.current))
         return
       }
 
       if (motionCaptureRef.current) { // Check if we were capturing
-
-        // 1. Remove the tentative step — restore saved timings if available
-        if (isNewStepRef.current && savedStepTimingsRef.current) {
-          dispatch(updateSceneMotionFlow({
-            sceneId: prevSceneIdRef.current,
-            steps: savedStepTimingsRef.current
-          }))
-          savedStepTimingsRef.current = null
-        } else if (motionCaptureRef.current.stepId) {
-          dispatch(deleteSceneMotionStep({
-            sceneId: prevSceneIdRef.current,
-            stepId: motionCaptureRef.current.stepId
-          }))
-        }
-
-        // [CROP FIX] Reset all PIXI objects to their base Redux state when scene switches
-        if (motionControls && motionControls.layerObjects && layers) {
-          const layerObjects = motionControls.layerObjects
-          layerObjects.forEach((pixiObject, layerId) => {
-            const baseLayerData = layers[layerId]
-            if (baseLayerData && pixiObject && !pixiObject.destroyed) {
-              applyTransformInline(pixiObject, baseLayerData, null, layerId, null, true, null, null, startTimeOffset)
-            }
-          })
-        }
-
-        // 2. Reset local state
-        setMotionCaptureMode({ isActive: false, trackedLayers: new Map(), onPositionUpdate: null, layerActions: {} })
-        setEditingStepId(null)
-        setIsEditingExistingStep(false)
-        motionCaptureRef.current = null
+        // Auto-save the motion on the previous scene before switching
+        exitMotionModeWithAutoSaveRef.current?.({ sceneId: prevSceneIdRef.current })
       }
+
+      prevSceneIdRef.current = currentSceneId
     }
 
     // Update ref
-    prevSceneIdRef.current = currentSceneId
-  }, [currentSceneId, dispatch, motionControls, layers, motionCaptureMode])
+  }, [currentSceneId, dispatch])
+
+
 
   /**
    * Start motion capture: auto-add a new step and enter capture mode
@@ -2488,9 +2589,15 @@ function EditorPage() {
       }
 
       // Update ref with synchronized data
+      // [_SUPPRESS PLAYHEAD EXIT] Flag this capture session so the playhead-move
+      // watcher ignores the playhead seek that is PART of entering capture mode
+      // (same-scene fast-path and cross-scene pending-edit seek land in the same
+      // render batch as isActive:true). The flag is consumed once on the next
+      // watcher run, then real user playhead moves still exit + save.
       motionCaptureRef.current = {
         stepId: newStepId,
-        trackedLayers: initialTrackedLayers
+        trackedLayers: initialTrackedLayers,
+        _suppressPlayheadExit: true
       }
 
       // 8. Set motion capture mode (this will be picked up by MotionPanel via onMotionEditingChange)
@@ -3007,19 +3114,15 @@ function EditorPage() {
       const newStepEndSeconds = Math.min(startTimeOffset + (newStartTimeMs + newDurationMs) / 1000, sceneEndTime - 0.05)
 
       try {
-        motionControls.tweenTo(newStepEndSeconds, {
-          duration: Math.min(stepIndex * 0.3, 1.5),
-          startTime: startTimeOffset,
-          onComplete: () => {
-            enableCaptureMode()
-          }
+        animatePlayhead(newStepEndSeconds, null, () => {
+          enableCaptureMode()
         })
       } catch (e) {
-        console.error('Fast-play error:', e)
+        console.error('Playhead animation error:', e)
         enableCaptureMode()
       }
     } else if (motionControls) {
-      // No previous steps, seek to the newly created step's start time (which matches the playhead position)
+      // No previous steps (first step), animate playhead to the end of the newly created step
       const pageDuration = currentSceneMotionFlow?.pageDuration || 5000
       const currentPlayTime = playheadTimeRef.current || 0
       const timeInSceneMs = Math.max(0, Math.round((currentPlayTime - (currentSceneTimelineInfo?.startTime || 0)) * 1000))
@@ -3029,9 +3132,18 @@ function EditorPage() {
         newStartTimeMs = Math.max(0, pageDuration - 200)
       }
 
-      let stepStartTimeSeconds = startTimeOffset + newStartTimeMs / 1000
-      motionControls.seek(stepStartTimeSeconds)
-      enableCaptureMode()
+      const newDurationMs = Math.max(200, Math.min(2000, pageDuration - newStartTimeMs))
+      const sceneEndTime = currentSceneTimelineInfo?.endTime || (startTimeOffset + 5)
+      const newStepEndSeconds = Math.min(startTimeOffset + (newStartTimeMs + newDurationMs) / 1000, sceneEndTime - 0.05)
+
+      try {
+        animatePlayhead(newStepEndSeconds, null, () => {
+          enableCaptureMode()
+        })
+      } catch (e) {
+        console.error('Playhead animation error:', e)
+        enableCaptureMode()
+      }
     } else {
       enableCaptureMode()
     }
@@ -3042,6 +3154,7 @@ function EditorPage() {
    */
   const handleApplyMotion = useCallback((options = {}) => {
     isApplyingRef.current = true;
+    const sceneId = options.sceneId || currentSceneId;
     // [ONBOARDING] Immediately end tutorial when user clicks Save Moment in Step 3.
     // This removes the hint/highlight instantly. The fast-preview and auto-play
     // still run, but the onboarding UI is gone.
@@ -3060,7 +3173,7 @@ function EditorPage() {
     // When a user selects a preset then immediately clicks Save, React hasn't
     // re-rendered yet so currentSceneMotionFlow misses the just-dispatched preset.
     const freshState = store.getState()
-    const freshFlow = freshState.project.sceneMotionFlows?.[currentSceneId]
+    const freshFlow = freshState.project.sceneMotionFlows?.[sceneId]
     const freshStep = freshFlow?.steps?.find(s => s.id === stepId)
     const hasAnyActionsInRedux = freshStep?.layerActions && Object.keys(freshStep.layerActions).length > 0
     const hasAnyPresetsInRedux = freshStep?.layerPresets && Object.keys(freshStep.layerPresets).length > 0
@@ -3073,15 +3186,15 @@ function EditorPage() {
 
     if (!isMeaningfulSession) {
       // Nothing was changed and no previous actions exist — restore original flow or delete new step
-      if (stepId && currentSceneId && isNewStepRef.current && savedStepTimingsRef.current) {
+      if (stepId && sceneId && isNewStepRef.current && savedStepTimingsRef.current) {
         dispatch(updateSceneMotionFlow({
-          sceneId: currentSceneId,
+          sceneId: sceneId,
           steps: savedStepTimingsRef.current
         }))
         savedStepTimingsRef.current = null
-      } else if (stepId && currentSceneId) {
+      } else if (stepId && sceneId) {
         dispatch(deleteSceneMotionStep({
-          sceneId: currentSceneId,
+          sceneId: sceneId,
           stepId: stepId
         }))
       }
@@ -3093,7 +3206,7 @@ function EditorPage() {
       return
     }
 
-    if (!stepId || !currentSceneId) {
+    if (!stepId || !sceneId) {
       setMotionCaptureMode(null)
       setEditingStepId(null)
       setIsEditingExistingStep(false)
@@ -3400,40 +3513,26 @@ function EditorPage() {
       const optimisticFlow = { ...currentFlow, steps: updatedSteps }
 
 
-      motionControls.tweenTo(stepEndTimeSeconds, {
-        duration: 1,
-        startTime: stepStartTimeSeconds,
-        flow: optimisticFlow,
-        onComplete: () => {
-          // The tween has scrubbed to stepEndTimeSeconds with correct action durations.
-          // The overridden flow matches what was dispatched to Redux, so the visual state
-          // is already correct. Just seek to hold position — the natural engine rebuild
-          // (triggered by the React re-render when isPlaying changes to false) will
-          // sync the engine with the latest Redux state without any visible jump.
-          motionControls.seek(stepEndTimeSeconds)
+      if (motionControls && !skipPreview) {
+        const motionFlow = currentFlow.steps || []
+        const stepIndex = motionFlow.findIndex(s => s.id === stepId)
+        const pageDuration = currentFlow.pageDuration || 5000
+        const stepCount = motionFlow.length
+        const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+        const timingStep = motionFlow[stepIndex]
+        const stepStartMs = timingStep?.startTime != null ? timingStep.startTime : (stepIndex * stepDuration)
+        const effectiveDuration = timingStep?.duration || stepDuration
+        const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+        const calculatedEndTime = stepStartTimeSeconds + effectiveDuration / 1000
+        const sceneEndTime = currentSceneTimelineInfo?.endTime || calculatedEndTime
+        const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
 
-          if (tutorialActive && tutorialStep === 3) {
-            dispatch(nextStep())
-          }
+        motionControls.seek(stepEndTimeSeconds)
+      }
 
-          // [FIX] Clear capture mode ONLY AFTER the preview is done.
-          // This ensures that the Tutorial Step 6 (which prompts the user to play)
-          // only appears once the engine is idle and isPlaying is false.
-          // This prevents the "two clicks to play" issue where the first click
-          // would accidentally pause the still-running fast preview.
-
-          setMotionCaptureMode(null)
-          setEditingStepId(null)
-          setIsEditingExistingStep(false)
-          motionCaptureRef.current = null
-          savedStepTimingsRef.current = null // Step applied successfully, discard snapshot
-
-          // [SYNC FIX] Inform Redux that we are done editing
-          dispatch(stopMotionEditing())
-        }
-      })
-    } else {
-      // No motionControls available, just clear capture mode
+      if (tutorialActive && tutorialStep === 3) {
+        dispatch(nextStep())
+      }
 
       setMotionCaptureMode(null)
       setEditingStepId(null)
@@ -3441,10 +3540,16 @@ function EditorPage() {
       motionCaptureRef.current = null
       savedStepTimingsRef.current = null
 
-      // [SYNC FIX] Inform Redux that we are done editing
+      dispatch(stopMotionEditing())
+    } else {
+      setMotionCaptureMode(null)
+      setEditingStepId(null)
+      setIsEditingExistingStep(false)
+      motionCaptureRef.current = null
+      savedStepTimingsRef.current = null
+
       dispatch(stopMotionEditing())
 
-      // [ONBOARDING FIX] Ensure tutorial finalizes even without motion controls.
       if (tutorialActive && tutorialStep === 3) {
         dispatch(nextStep())
       }
@@ -3505,6 +3610,17 @@ function EditorPage() {
       dispatch(startTutorial())
     }
   }, [editingStepId, currentSceneId, dispatch, motionControls, layers, startTimeOffset, tutorialActive, tutorialStep])
+
+  const exitMotionModeWithAutoSave = useCallback((options = {}) => {
+
+    if (isMotionCaptureActive) {
+      handleApplyMotion({ skipPreview: true, ...options })
+    }
+  }, [isMotionCaptureActive, handleApplyMotion])
+
+  useEffect(() => {
+    exitMotionModeWithAutoSaveRef.current = exitMotionModeWithAutoSave
+  }, [exitMotionModeWithAutoSave])
 
   // =========================================================================
   // Sync trackedLayers from Redux after undo/redo during active capture mode.
@@ -3723,37 +3839,88 @@ function EditorPage() {
     const epsilon = 0.002
     if (Math.abs(playheadTimeRef.current - stepEndTimeSeconds) > epsilon) {
       seek(stepEndTimeSeconds)
+      setPlayheadTime(stepEndTimeSeconds)
+      playheadTimeRef.current = stepEndTimeSeconds
     }
-  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, startTimeOffset, currentSceneMotionFlow, playheadTimeRef, dispatch])
+  }, [currentSceneId, isMotionCaptureActive, handleCancelMotion, handleApplyMotion, seek, setPlayheadTime, startTimeOffset, currentSceneMotionFlow, playheadTimeRef, dispatch])
 
   /**
    * Edit an existing motion step (Centralized logic for both Panel and Timeline)
    */
   const handleEditStep = useCallback((stepId) => {
-    // 1. EXIT/TOGGLE CASE: If we're already editing this exact step, apply and exit
+
+
+    // 1. If we're already editing this exact step, stay in motion mode (no-op)
     if (isMotionCaptureActive && editingStepId === stepId) {
-      handleApplyMotion()
       return
     }
 
-    // [STABILITY] If clicking on an already active step but not in capture mode, just ensure we're there
-    if (!isMotionCaptureActive && editingStepId === stepId && stepId !== 'base') {
-      // Re-trigger capture for this step if it lost focus but is still active
-    }
+
 
     // 2. SAVE OR DISCARD PREVIOUS EDITS: 
     // If we're moving from one capture session to another target (different step or base)
     if (isMotionCaptureActive) {
       if (stepId === 'base') {
-        // Discard changes instead of saving
         handleCancelMotion()
       } else {
-        // Apply and save changes before moving to next step
         handleApplyMotion()
       }
     }
 
-    if (!currentSceneId) return
+    if (!currentSceneId) {
+      console.warn(`[DEBUG] currentSceneId is not set, returning`);
+      return
+    }
+
+    // Grab fresh values from store to avoid stale closure state from the React render cycle
+    const freshState = store.getState()
+    const freshLayers = freshState.project.layers || layers
+    const freshSceneMotionFlows = freshState.project.sceneMotionFlows || sceneMotionFlows
+    const freshFlow = freshSceneMotionFlows?.[currentSceneId] || currentSceneMotionFlow
+
+    // ── CROSS-SCENE CHECK AT THE VERY TOP ──
+    let targetSceneId = currentSceneId
+    let targetFlow = freshFlow
+
+    if (freshSceneMotionFlows) {
+      for (const [sId, flow] of Object.entries(freshSceneMotionFlows)) {
+        if (flow?.steps?.some(s => s.id === stepId)) {
+          targetSceneId = sId
+          targetFlow = flow
+          break
+        }
+      }
+    }
+
+    if (targetSceneId !== currentSceneId) {
+      const targetSceneTimelineInfo = timelineInfo?.find(s => s.id === targetSceneId)
+      const targetStartTimeOffset = targetSceneTimelineInfo?.startTime || 0
+      const targetFlowSteps = targetFlow?.steps || []
+      const targetStepIndex = targetFlowSteps.findIndex(s => s.id === stepId)
+      const targetStep = targetFlowSteps[targetStepIndex]
+
+      if (targetStep) {
+        const pageDuration = targetFlow.pageDuration || 5000
+        const stepCount = targetFlowSteps.length
+        const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
+        const stepStartMs = targetStep.startTime != null ? targetStep.startTime : (targetStepIndex * stepDuration)
+        const effectiveDuration = targetStep.duration || stepDuration
+        const stepStartTimeSeconds = targetStartTimeOffset + stepStartMs / 1000
+        const calculatedEndTime = stepStartTimeSeconds + effectiveDuration / 1000
+        const sceneEndTime = targetSceneTimelineInfo?.endTime || calculatedEndTime
+        const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
+
+        const hasActions = (targetStep.layerActions && Object.values(targetStep.layerActions).some(actions => actions.length > 0)) || (targetStep.layerPresets && Object.keys(targetStep.layerPresets).length > 0)
+        const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
+
+
+        switchingSceneForStepRef.current = targetSceneId
+        pendingEditStepRef.current = { stepId, targetSceneId, targetTime }
+        setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId })
+        dispatch(setCurrentScene(targetSceneId))
+      }
+      return // Return immediately to let the new scene mount first
+    }
 
     // Close any open sidebar panels when entering motion capture mode
     if (stepId !== 'base') {
@@ -3807,11 +3974,11 @@ function EditorPage() {
     // revert live edits. In-capture edits (add/update/delete action, preset
     // apply/clear) dispatch live to Redux, so restoring this snapshot on Cancel
     // undoes every modification made during this edit session.
-    savedStepTimingsRef.current = currentSceneMotionFlow?.steps
-      ? JSON.parse(JSON.stringify(currentSceneMotionFlow.steps))
+    savedStepTimingsRef.current = freshFlow?.steps
+      ? JSON.parse(JSON.stringify(freshFlow.steps))
       : []
 
-    const motionFlow = currentSceneMotionFlow?.steps || []
+    const motionFlow = freshFlow?.steps || []
     const stepIndex = motionFlow.findIndex(s => s.id === stepId)
     if (stepIndex === -1) return
 
@@ -3824,8 +3991,8 @@ function EditorPage() {
     const initialTrackedLayers = new Map()
 
     // 1. Calculate cumulative transformation for all layers
-    Object.keys(layers).forEach((layerId) => {
-      const layer = layers[layerId]
+    Object.keys(freshLayers).forEach((layerId) => {
+      const layer = freshLayers[layerId]
       if (!layer) return
 
       let currentX = layer.x || 0
@@ -3877,7 +4044,7 @@ function EditorPage() {
         showingFront: currentShowingFront
       }
 
-      const pageDuration = currentSceneMotionFlow.pageDuration || 5000
+      const pageDuration = freshFlow.pageDuration || 5000
       const stepCount = motionFlow.length
       const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
 
@@ -4072,6 +4239,7 @@ function EditorPage() {
 
     // 2. Prepare capture session
     const enableEditCapture = () => {
+
       // Clear _isFlipping on all layer objects — tweenTo may have left it true
       if (motionControls?.layerObjects) {
         motionControls.layerObjects.forEach((obj) => {
@@ -4121,7 +4289,8 @@ function EditorPage() {
 
       motionCaptureRef.current = {
         stepId,
-        trackedLayers: initialTrackedLayers
+        trackedLayers: initialTrackedLayers,
+        _suppressPlayheadExit: true
       }
       // Pre-populate captureActionIdsRef with existing actions for this step
       captureActionIdsRef.current.clear()
@@ -4554,35 +4723,67 @@ function EditorPage() {
       })
     }
 
-    // 3. Sequential Playback / Fast-Preview
-    // Clear selection and set transitioning state to prevent auto-pause and scene-switch during tween
+    // 3. Sequential Playback / Fast-Preview -> replaced by Timeline Navigation
+    // Clear selection and set transitioning state to prevent auto-pause and scene-switch during transition
     dispatch(clearLayerSelection())
-    setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId })
 
-    if (motionControls) {
-      const pageDuration = currentSceneMotionFlow.pageDuration || 5000
-      const stepCount = motionFlow.length
+    // Determine target scene and flow (already resolved at top of handleEditStep)
+
+    const targetSceneTimelineInfo = timelineInfo?.find(s => s.id === targetSceneId)
+    const targetStartTimeOffset = targetSceneTimelineInfo?.startTime || 0
+
+    const targetFlowSteps = targetFlow?.steps || []
+    const targetStepIndex = targetFlowSteps.findIndex(s => s.id === stepId)
+    const targetStep = targetFlowSteps[targetStepIndex]
+
+    if (targetStep && motionControls) {
+      const pageDuration = targetFlow.pageDuration || 5000
+      const stepCount = targetFlowSteps.length
       const stepDuration = stepCount > 0 ? pageDuration / stepCount : pageDuration
-      const stepStartMs = step.startTime != null ? step.startTime : (stepIndex * stepDuration)
-      const effectiveDuration = step.duration || stepDuration
-      const stepStartTimeSeconds = startTimeOffset + stepStartMs / 1000
+      const stepStartMs = targetStep.startTime != null ? targetStep.startTime : (targetStepIndex * stepDuration)
+      const effectiveDuration = targetStep.duration || stepDuration
+      const stepStartTimeSeconds = targetStartTimeOffset + stepStartMs / 1000
       const calculatedEndTime = stepStartTimeSeconds + effectiveDuration / 1000
-      // Clamp to scene boundary with safe buffer to prevent overshoot into next scene
-      const sceneEndTime = currentSceneTimelineInfo?.endTime || calculatedEndTime
+      const sceneEndTime = targetSceneTimelineInfo?.endTime || calculatedEndTime
       const stepEndTimeSeconds = Math.min(calculatedEndTime, sceneEndTime - 0.05)
 
-      const hasActions = (step.layerActions && Object.values(step.layerActions).some(actions => actions.length > 0)) || (step.layerPresets && Object.keys(step.layerPresets).length > 0)
+      const hasActions = (targetStep.layerActions && Object.values(targetStep.layerActions).some(actions => actions.length > 0)) || (targetStep.layerPresets && Object.keys(targetStep.layerPresets).length > 0)
       const targetTime = hasActions ? stepEndTimeSeconds : stepStartTimeSeconds
 
-      motionControls.tweenTo(targetTime, {
-        duration: 0.3,
-        startTime: startTimeOffset,
-        onComplete: enableEditCapture
-      })
+      if (targetSceneId !== currentSceneId) {
+        switchingSceneForStepRef.current = targetSceneId
+        pendingEditStepRef.current = { stepId, targetSceneId, targetTime }
+        setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId })
+        dispatch(setCurrentScene(targetSceneId))
+      } else {
+        setMotionCaptureMode({ isActive: false, isTransitioning: true, stepId })
+        animatePlayhead(targetTime, null, enableEditCapture)
+      }
     } else {
       enableEditCapture()
     }
-  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek, handleCancelMotion, dispatch])
+  }, [isMotionCaptureActive, editingStepId, handleApplyMotion, currentSceneId, currentSceneMotionFlow, layers, motionControls, startTimeOffset, currentSceneTimelineInfo, seek, handleCancelMotion, dispatch, sceneMotionFlows, timelineInfo, animatePlayhead])
+
+  const handleEditStepRef = useRef(handleEditStep)
+  useEffect(() => {
+    handleEditStepRef.current = handleEditStep
+  }, [handleEditStep])
+
+  // Effect: Handle deferred cross-scene step capture once the stage is fully ready/loaded
+  useEffect(() => {
+    if (isStageReady && pendingEditStepRef.current) {
+      const { stepId, targetSceneId, targetTime } = pendingEditStepRef.current
+      if (currentSceneId === targetSceneId) {
+        pendingEditStepRef.current = null
+        if (seek) {
+          seek(targetTime)
+        }
+        setPlayheadTime(targetTime)
+        playheadTimeRef.current = targetTime
+        handleEditStepRef.current(stepId)
+      }
+    }
+  }, [isStageReady, currentSceneId, seek])
 
 
 
@@ -4946,7 +5147,7 @@ function EditorPage() {
     // [BUG 1 FIX] During Add Step transition (fast-play preview), pass through the
     // transitioning flag so Stage.jsx's auto-pause effect can check it.
     if (motionCaptureMode.isTransitioning) {
-      return { isActive: false, isTransitioning: true }
+      return { ...motionCaptureMode, isActive: false, isTransitioning: true }
     }
 
     if (!motionCaptureMode.isActive) return null
@@ -5092,41 +5293,85 @@ function EditorPage() {
     const pixiObj = motionControls?.layerObjects?.get?.(layerId)
     const tracked = motionCaptureRef.current?.trackedLayers?.get(layerId)
 
+    // [MINIMAL] Custom transform actions update the capture state directly through
+    // the same path canvas drags use: mutate tracked → onPositionUpdate (repaints via
+    // the capture sync) → onInteractionEnd (persists the action to Redux). No GSAP
+    // tween, no nudge flag, no render driver — deterministic and light.
+    const renderOnce = () => {
+      const app = stageRef.current?.getApp?.()
+      if (app?.renderer && app.stage) app.renderer.render(app.stage)
+    }
+
+    // [LIGHTWEIGHT ANIMATED NUDGE] The four transform actions below now glide to
+    // their existing nudge target instead of snapping. Each interpolated frame is
+    // written into `tracked` via onPositionUpdate — the same path canvas drags use —
+    // so the existing capture sync repaints the PIXI object smoothly with no other
+    // system touched (no selection-box flag, no nudge flag, no render driver).
+    const finishNudge = () => {
+      if (effectiveMotionCaptureMode?.onInteractionEnd) effectiveMotionCaptureMode.onInteractionEnd(layerId)
+      renderOnce()
+    }
+
     switch (actionType) {
       case 'move': {
         if (!pixiObj || !tracked) break
-        const nudge = 255
-        pixiObj.x += nudge
-        tracked.deltaX = (tracked.deltaX || 0) + nudge
-        tracked.currentPosition = { x: pixiObj.x, y: pixiObj.y }
+        const init = tracked.initialTransform
+        const fromX = tracked.currentPosition?.x ?? pixiObj.x
+        const fromY = tracked.currentPosition?.y ?? pixiObj.y
+        const toX = (init.x ?? fromX) + 400
+        const toY = init.y ?? fromY
         tracked.didMove = true
-        if (effectiveMotionCaptureMode?.onInteractionEnd) {
-          effectiveMotionCaptureMode.onInteractionEnd(layerId)
-        }
+        const proxy = { x: fromX, y: fromY }
+        gsap.killTweensOf(proxy)
+        gsap.to(proxy, {
+          x: toX, y: toY, duration: 0.28, ease: 'power2.out',
+          onUpdate: () => {
+            tracked.currentPosition = { x: proxy.x, y: proxy.y }
+            tracked.deltaX = proxy.x - (init.x ?? fromX)
+            tracked.deltaY = proxy.y - (init.y ?? fromY)
+            if (effectiveMotionCaptureMode?.onPositionUpdate) effectiveMotionCaptureMode.onPositionUpdate({ layerId, x: proxy.x, y: proxy.y, interactionType: 'move' })
+          },
+          onComplete: () => finishNudge()
+        })
         break
       }
       case 'rotate': {
         if (!pixiObj || !tracked) break
-        const angleDeg = 30
-        pixiObj.rotation += angleDeg * (Math.PI / 180)
-        tracked.rotation = (tracked.rotation ?? tracked.initialTransform?.rotation ?? 0) + angleDeg
+        const init = tracked.initialTransform
+        const fromDeg = tracked.rotation ?? (init.rotation ?? 0)
+        const targetDeg = (init.rotation ?? 0) + 30
         tracked.didRotate = true
-        if (effectiveMotionCaptureMode?.onInteractionEnd) {
-          effectiveMotionCaptureMode.onInteractionEnd(layerId)
-        }
+        const proxy = { rotation: fromDeg }
+        gsap.killTweensOf(proxy)
+        gsap.to(proxy, {
+          rotation: targetDeg, duration: 0.28, ease: 'power2.out',
+          onUpdate: () => {
+            tracked.rotation = proxy.rotation
+            if (effectiveMotionCaptureMode?.onPositionUpdate) effectiveMotionCaptureMode.onPositionUpdate({ layerId, rotation: proxy.rotation, interactionType: 'rotate' })
+          },
+          onComplete: () => finishNudge()
+        })
         break
       }
       case 'scale': {
         if (!pixiObj || !tracked) break
-        const factor = 1.25
-        pixiObj.scale.x *= factor
-        pixiObj.scale.y *= factor
-        tracked.scaleX = pixiObj.scale.x
-        tracked.scaleY = pixiObj.scale.y
+        const init = tracked.initialTransform
+        const fromSX = tracked.scaleX ?? (init.scaleX ?? 1)
+        const fromSY = tracked.scaleY ?? (init.scaleY ?? 1)
+        const targetSX = (init.scaleX ?? 1) * 1.25
+        const targetSY = (init.scaleY ?? 1) * 1.25
         tracked.didScale = true
-        if (effectiveMotionCaptureMode?.onInteractionEnd) {
-          effectiveMotionCaptureMode.onInteractionEnd(layerId)
-        }
+        const proxy = { sx: fromSX, sy: fromSY }
+        gsap.killTweensOf(proxy)
+        gsap.to(proxy, {
+          sx: targetSX, sy: targetSY, duration: 0.28, ease: 'power2.out',
+          onUpdate: () => {
+            tracked.scaleX = proxy.sx
+            tracked.scaleY = proxy.sy
+            if (effectiveMotionCaptureMode?.onPositionUpdate) effectiveMotionCaptureMode.onPositionUpdate({ layerId, scaleX: proxy.sx, scaleY: proxy.sy, interactionType: 'scale' })
+          },
+          onComplete: () => finishNudge()
+        })
         break
       }
       case 'flip': {
@@ -5161,28 +5406,31 @@ function EditorPage() {
         break
       case 'crop': {
         if (!pixiObj || !tracked) break
-        const layer = layers[layerId]
-        if (!layer) break
-        if (![LAYER_TYPES.IMAGE, LAYER_TYPES.VIDEO, LAYER_TYPES.FRAME].includes(layer.type)) break
-
-        const mw = tracked.mediaWidth || tracked.initialTransform.mediaWidth || layer.mediaWidth || layer.width || 100
-        const mh = tracked.mediaHeight || tracked.initialTransform.mediaHeight || layer.mediaHeight || layer.height || 100
-        const insetX = mw * 0.10
-        const insetY = mh * 0.10
-
-        tracked.cropX = (tracked.cropX ?? tracked.initialTransform.cropX ?? 0) + insetX
-        tracked.cropY = (tracked.cropY ?? tracked.initialTransform.cropY ?? 0) + insetY
-        tracked.cropWidth = (tracked.cropWidth ?? tracked.initialTransform.cropWidth ?? mw) - insetX * 2
-        tracked.cropHeight = (tracked.cropHeight ?? tracked.initialTransform.cropHeight ?? mh) - insetY * 2
+        const init = tracked.initialTransform
+        const mw = tracked.mediaWidth || init.mediaWidth || 100
+        const mh = tracked.mediaHeight || init.mediaHeight || 100
+        const insetX = mw * 0.50
+        const fromCropX = tracked.cropX ?? init.cropX ?? 0
+        const fromCropWidth = tracked.cropWidth ?? init.cropWidth ?? mw
+        const targetCropX = fromCropX + insetX
+        const targetCropWidth = Math.max(10, fromCropWidth - insetX)
+        if (targetCropWidth <= 0) break
+        tracked.cropY = tracked.cropY ?? init.cropY ?? 0
+        tracked.cropHeight = tracked.cropHeight ?? init.cropHeight ?? mh
         tracked.mediaWidth = mw
         tracked.mediaHeight = mh
-
-        if (tracked.cropWidth <= 0 || tracked.cropHeight <= 0) break
         tracked.didCrop = true
-
-        if (effectiveMotionCaptureMode?.onInteractionEnd) {
-          effectiveMotionCaptureMode.onInteractionEnd(layerId)
-        }
+        const proxy = { cropX: fromCropX, cropWidth: fromCropWidth }
+        gsap.killTweensOf(proxy)
+        gsap.to(proxy, {
+          cropX: targetCropX, cropWidth: targetCropWidth, duration: 0.28, ease: 'power2.out',
+          onUpdate: () => {
+            tracked.cropX = proxy.cropX
+            tracked.cropWidth = proxy.cropWidth
+            if (effectiveMotionCaptureMode?.onPositionUpdate) effectiveMotionCaptureMode.onPositionUpdate({ layerId, cropX: proxy.cropX, cropWidth: proxy.cropWidth, cropY: tracked.cropY, cropHeight: tracked.cropHeight, mediaWidth: mw, mediaHeight: mh, interactionType: 'crop' })
+          },
+          onComplete: () => finishNudge()
+        })
         break
       }
       case 'typewriter': {
@@ -5291,6 +5539,10 @@ function EditorPage() {
   const handlePlayheadInteractionDuringCapture = useCallback(() => {
     // Guard: not in capture mode
     if (!isMotionCaptureActive) return
+    // [IDEMPOTENCY] If a previous exit has already torn down the capture session
+    // (e.g. a cross-scene navigation or step selection in the same synchronous tick),
+    // skip the exit/save flow entirely — no duplicate handling.
+    if (!motionCaptureRef.current) return
 
     const stepId = editingStepId
     const stepIndex = currentSceneMotionFlow?.steps?.findIndex(s => s.id === stepId) ?? -1
@@ -5327,28 +5579,42 @@ function EditorPage() {
 
       // Apply motion changes silently (skipPreview = true forces save without fast-play)
       handleApplyMotion({ skipPreview: true })
-
-      // Show toast notification with undo
-      if (momentNumber > 0) {
-        setToast({
-          message: `Moment ${momentNumber} saved`,
-          undo: () => {
-            // Restore the pre-edit steps using the ref-based snapshot
-            if (preEditSteps && currentSceneId) {
-              dispatch(updateSceneMotionFlow({
-                sceneId: currentSceneId,
-                steps: preEditSteps
-              }))
-            }
-            setToast(null)
-          }
-        })
-      }
     } else {
       // CASE 2: No changes detected → Silent exit (same as Cancel)
       handleCancelMotion()
     }
   }, [isMotionCaptureActive, editingStepId, editingStepActionCount, captureBaselineActionCount, currentSceneMotionFlow, currentSceneId, dispatch, handleApplyMotion, handleCancelMotion, isEditingExistingStep, captureVersion])
+
+  // [PLAYHEAD MOVE EXIT] While Motion Capture is active, ANY real playhead
+  // position change (timeline click, playhead drag, motion-block trim/move,
+  // action-row drag — regardless of which moment/scene the block belongs to)
+  // triggers the existing exit + save flow. This replaces the many handler-specific
+  // call sites with one deterministic rule: playhead moved → exit + save.
+  const prevPlayheadTimeRef = useRef(playheadTime)
+  useEffect(() => {
+    const prevTime = prevPlayheadTimeRef.current
+    prevPlayheadTimeRef.current = playheadTime
+    // Only meaningful while capture is active.
+    if (!isMotionCaptureActive) return
+    // [ENTRY SUPPRESSION] Ignore the playhead move that is part of ENTERING
+    // capture mode. Same-scene entry and cross-scene entry both seek the
+    // playhead and set isActive:true in the same render batch, so this effect
+    // can't distinguish that move from a real user timeline interaction by the
+    // diff alone. The entry callbacks stamp motionCaptureRef with
+    // _suppressPlayheadExit; consume it once here so the watcher resumes normal
+    // exit-on-playhead-move behavior immediately afterward.
+    if (motionCaptureRef.current?._suppressPlayheadExit) {
+      motionCaptureRef.current._suppressPlayheadExit = false
+      return
+    }
+    // Ignore sub-millisecond noise.
+    if (Math.abs(playheadTime - prevTime) < 0.001) return
+    // [IDEMPOTENCY] A non-null capture ref guarantees an active session that
+    // hasn't already been exited by handleApplyMotion / handleCancelMotion in
+    // the same synchronous tick (e.g. cross-scene navigation or step selection).
+    if (!motionCaptureRef.current) return
+    handlePlayheadInteractionDuringCapture()
+  }, [playheadTime, isMotionCaptureActive, handlePlayheadInteractionDuringCapture])
 
   // [TOAST AUTO-DISMISS] Auto-dismiss after 3 seconds
   useEffect(() => {
@@ -6368,12 +6634,7 @@ function EditorPage() {
                 onError={setPixiError} // Propagate error from Stage to EditorPage
                 topToolbarHeight={topToolbarHeight}
                 isResizingBottom={isResizingBottom}
-                onReady={() => {
-                  setIsPixiReady(true)
-                  setPixiError(null) // Clear error on successful re-init
-                  const app = stageRef.current?.getApp?.()
-                  if (app) setPixiApp(app)
-                }}
+                onReady={handleStageReady}
                 setStageReady={setIsStageReady} // Pass the setter
                 motionCaptureMode={effectiveMotionCaptureMode}
                 captureVersion={captureVersion}
@@ -6385,7 +6646,7 @@ function EditorPage() {
                 onStartTextEditing={startTextEditing}
                 showPasteboard={showPasteboard}
                 previewMode={previewMode}
-                onSelectAudioBlock={setSelectedAudioBlockId}
+                onSelectAudioBlock={handleSelectAudioBlock}
               />
 
               {/* Asset Preloading Overlay — gates on preloading, stage readiness, project data, and min display time */}
@@ -6695,24 +6956,15 @@ function EditorPage() {
                     currentTimeStepId={activeStepIdToUse}
                     isMotionCaptureActive={isMotionCaptureActive}
                     editingStepId={editingStepId}
-                    onStepClick={handleSelectStep}
+                    onStepClick={handleEditStep}
                     onStepEdit={handleEditStep}
                     bottomSectionHeight={customBottomHeight}
                     onSeek={seek}
                     onMotionStop={handleMotionStop}
                     onMotionPause={handleMotionPause}
                     onOpenTransitionsPanel={handleOpenTransitionsPanel}
-                    onPlayheadInteractionDuringCapture={handlePlayheadInteractionDuringCapture}
                     selectedAudioBlockId={selectedAudioBlockId}
-                    onSelectAudioBlock={(id) => {
-                      setSelectedAudioBlockId(id)
-                      if (id) {
-                        if (document.activeElement && document.activeElement.tagName !== 'BODY') {
-                          document.activeElement.blur()
-                        }
-                        dispatch(clearLayerSelection())
-                      }
-                    }}
+                    onSelectAudioBlock={handleSelectAudioBlock}
                     leftOffset={timelineLeftOffset}
                     isPlaying={isPlaying}
                     isBuffering={motionControls?.isBuffering || false}

@@ -1147,6 +1147,23 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
 
     arrow.clear()
 
+    // Shared arrowhead (curved-line style) used by BOTH straight and curved move lines.
+    // Stroke-based "two-wing" head, slightly reduced from the enlarged version.
+    const drawArrowhead = (graphics, tipX, tipY, angle, color, strokeWidth) => {
+      const headLength = 40
+      graphics.moveTo(tipX, tipY)
+      graphics.lineTo(
+        tipX - headLength * Math.cos(angle - Math.PI / 6),
+        tipY - headLength * Math.sin(angle - Math.PI / 6)
+      )
+      graphics.moveTo(tipX, tipY)
+      graphics.lineTo(
+        tipX - headLength * Math.cos(angle + Math.PI / 6),
+        tipY - headLength * Math.sin(angle + Math.PI / 6)
+      )
+      graphics.stroke({ width: strokeWidth, color })
+    }
+
     segments.forEach(seg => {
       const { start, end, controlPoints = [], isSolid = false, isLast = false } = seg
       if (!start || !end) return
@@ -1186,18 +1203,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
           const prevPoint = path[path.length - 2] || start
           const angle = Math.atan2(lastPoint.y - prevPoint.y, lastPoint.x - prevPoint.x)
 
-          const headLength = 18
-          arrow.moveTo(lastPoint.x, lastPoint.y)
-          arrow.lineTo(
-            lastPoint.x - headLength * Math.cos(angle - Math.PI / 6),
-            lastPoint.y - headLength * Math.sin(angle - Math.PI / 6)
-          )
-          arrow.moveTo(lastPoint.x, lastPoint.y)
-          arrow.lineTo(
-            lastPoint.x - headLength * Math.cos(angle + Math.PI / 6),
-            lastPoint.y - headLength * Math.sin(angle + Math.PI / 6)
-          )
-          arrow.stroke({ width: strokeWidth, color })
+          drawArrowhead(arrow, lastPoint.x, lastPoint.y, angle, color, strokeWidth)
         }
       } else {
         // Straight line logic
@@ -1222,22 +1228,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         }
 
         if (isSolid) {
-          // Arrow head
-          const tipX = end.x
-          const tipY = end.y
-          const headLength = 18
-          const headWidth = 14
-
-          const leftX = tipX - headLength * Math.cos(angle) + (headWidth / 2) * Math.sin(angle)
-          const leftY = tipY - headLength * Math.sin(angle) - (headWidth / 2) * Math.cos(angle)
-          const rightX = tipX - headLength * Math.cos(angle) - (headWidth / 2) * Math.sin(angle)
-          const rightY = tipY - headLength * Math.sin(angle) + (headWidth / 2) * Math.cos(angle)
-
-          arrow.moveTo(tipX, tipY)
-          arrow.lineTo(leftX, leftY)
-          arrow.lineTo(rightX, rightY)
-          arrow.closePath()
-          arrow.fill(color)
+          // Reuse the same shared arrowhead as curved move lines
+          drawArrowhead(arrow, end.x, end.y, angle, color, strokeWidth)
         }
       }
     })
@@ -2605,6 +2597,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
         if (isCurrentlyDragged) {
           const targetObj = layerObject._cachedSprite || layerObject
           endCenter = getLayerCenter(layer, layerObject, targetObj.x, targetObj.y, targetObj.scale.x, targetObj.scale.y)
+          endX = targetObj.x
+          endY = targetObj.y
         } else if (isActiveStep && trackedLayer?.currentPosition) {
           endCenter = getLayerCenter(layer, layerObject, trackedLayer.currentPosition.x, trackedLayer.currentPosition.y)
           endX = trackedLayer.currentPosition.x
@@ -3007,9 +3001,11 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       }
 
       if (!target || target === stageContainer || target === viewport || target === viewport.plugins.get('clamp')) {
-        // Clicked on empty canvas - select the canvas
-        dispatch(setSelectedCanvas(true))
-        onSelectAudioBlock?.(null)
+        // Clicked on empty canvas - defer canvas selection to pointerup to distinguish from dragging
+        pointerIsDownRef.current = true
+        const screenPos = { x: event.data.global.x, y: event.data.global.y }
+        dragStartRef.current = { x: screenPos.x, y: screenPos.y, isEmptyCanvas: true }
+        pauseViewportDragPlugin(viewport)
         return
       }
 
@@ -4413,12 +4409,43 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // GLOBAL POINTER UP HANDLER - Handles drag completion and cleanup
     // =========================================================================
 
-    const handleGlobalPointerUp = () => {
+    const handleGlobalPointerUp = (event) => {
       // Check if there was an active drag before processing
       const wasDragging = dragStateAPI.isDragging()
 
       if (wasDragging) {
         dispatch(setCanvasInteracting(false))
+      }
+
+      // Check if we started from an empty canvas and check movement distance to distinguish click vs drag
+      if (dragStartRef.current?.isEmptyCanvas) {
+        let globalX, globalY
+        if (event?.global) {
+          globalX = event.global.x
+          globalY = event.global.y
+        } else if (event?.data?.global) {
+          globalX = event.data.global.x
+          globalY = event.data.global.y
+        }
+
+        let isClick = false
+        if (globalX !== undefined && globalY !== undefined) {
+          const distance = Math.sqrt(
+            Math.pow(globalX - dragStartRef.current.x, 2) +
+            Math.pow(globalY - dragStartRef.current.y, 2)
+          )
+          if (distance < 5) {
+            isClick = true
+          }
+        } else {
+          // Fallback if coordinates are somehow unavailable
+          isClick = true
+        }
+
+        if (isClick) {
+          dispatch(setSelectedCanvas(true))
+          onSelectAudioBlock?.(null)
+        }
       }
 
       // [SHIFT-DRAG FIX] Resolve a deferred shift+click selection toggle. If the

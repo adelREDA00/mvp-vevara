@@ -9,7 +9,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { getGlobalMotionEngine } from '../../engine/motion'
 import { selectProjectTimelineInfo, setCurrentScene, selectCurrentSceneId, selectTotalProjectDuration, selectIsTimelineDragging } from '../../../store/slices/projectSlice'
 
-export function useEditorPlayback(scenes) {
+export function useEditorPlayback(scenes, motionCaptureMode = null) {
   const dispatch = useDispatch()
   const motionEngine = getGlobalMotionEngine()
   const timelineInfo = useSelector(selectProjectTimelineInfo)
@@ -99,6 +99,10 @@ export function useEditorPlayback(scenes) {
   useEffect(() => {
     if (!timelineInfo || timelineInfo.length === 0) return
     if (isTimelineDragging) return
+    
+    // [INFINITE LOOP FIX] Skip auto-switching scene if we are actively transitioning
+    // to a different step/scene.
+    if (motionCaptureMode?.isTransitioning) return
 
     // Find which scene should be active at the current playhead time
     // using a small epsilon to handle floating point precision at exact boundaries
@@ -130,7 +134,7 @@ export function useEditorPlayback(scenes) {
         dispatch(setCurrentScene(null))
       }
     }
-  }, [playheadTime, timelineInfo, currentSceneId, dispatch, isTimelineDragging])
+  }, [playheadTime, timelineInfo, currentSceneId, dispatch, isTimelineDragging, motionCaptureMode?.isTransitioning])
 
   // Monitor engine's playing state
   useEffect(() => {

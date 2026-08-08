@@ -621,41 +621,21 @@ function CanvasControls({
               <Redo2 className="h-4 w-4" strokeWidth={2} />
             </button>
           </div>
-          {editingMomentLabel && (
-            <span className={`text-xs font-medium px-1 whitespace-nowrap ${theme === 'light' ? 'text-gray-500' : 'text-zinc-400'
-              }`}>
-              {editingMomentLabel}
-            </span>
-          )}
         </div>
-
-        {/* Cancel — compact secondary action, immediately left of Done */}
-        <button
-          onClick={() => { onCancelMotion?.(); setShowAddStepHint(false) }}
-          className={`flex items-center justify-center px-4 border-l transition-all duration-200 touch-manipulation whitespace-nowrap font-semibold text-xs ${theme === 'light'
-            ? 'text-gray-600 hover:bg-gray-100 active:bg-gray-200 border-black/10'
-            : 'text-zinc-300 hover:bg-white/10 active:bg-white/20 border-white/10'
-            }`}
-        >
-          Cancel
-        </button>
 
         {/* Done — wider primary action on the far right */}
         <div ref={animateButtonRef} className="flex">
           <button
             data-tutorial="add-step-button"
-            onClick={() => { if (isDoneEnabled) { onApplyMotion?.(); setShowAddStepHint(false) } }}
-            className={`flex items-center justify-center px-6 border-l transition-all duration-300 touch-manipulation whitespace-nowrap font-semibold text-xs rounded-r-[11px] ${isDoneEnabled
-              ? (isTutorialStep3
-                ? 'bg-[#7c4af0] text-white border-[#7c4af0] animate-onboarding-pulse hover:bg-[#8b5cf6]'
-                : 'bg-[#7c4af0] text-white border-[#7c4af0] shadow-[0_0_20px_rgba(124,74,240,0.6)] animate-pulse-glow hover:bg-[#8b5cf6]')
-              : (theme === 'light'
-                ? 'text-gray-400 border-black/10 cursor-default'
-                : 'text-zinc-500 border-white/10 cursor-default')
-              }`}
+            onClick={() => { onApplyMotion?.(); setShowAddStepHint(false) }}
+            className={`flex items-center justify-center px-6 border-l transition-all duration-300 touch-manipulation whitespace-nowrap font-semibold text-xs rounded-r-[11px] bg-[#7c4af0] text-white border-[#7c4af0] hover:bg-[#8b5cf6] ${
+              isTutorialStep3
+                ? 'animate-onboarding-pulse'
+                : 'shadow-[0_0_20px_rgba(124,74,240,0.6)] animate-pulse-glow'
+            }`}
             title="Done"
           >
-            Save moment
+            Done
           </button>
         </div>
       </>

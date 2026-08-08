@@ -137,60 +137,60 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
 
         layersRef.current = layersRef.current || layers
 
-    // [TILT/PERF] During motion capture, every slider tick fires a Redux
-    // dispatch which would otherwise unload+rebuild every scene's timeline
-    // here — that's the slider lag the user sees ("layer jumps to final
-    // value instead of updating smoothly").  Visual feedback during capture
-    // is already provided by trackedLayers → applyTransformInline.  We
-    // defer engine rebuilds until capture exits (handled by a dedicated
-    // effect below).  Force=true callers (capture exit, options.flow) still
-    // run through.
-    const captureNow = motionCaptureModeRef.current
-    if (!force && (captureNow?.isActive || captureNow?.isTransitioning)) {
-      return
-    }
+        // [TILT/PERF] During motion capture, every slider tick fires a Redux
+        // dispatch which would otherwise unload+rebuild every scene's timeline
+        // here — that's the slider lag the user sees ("layer jumps to final
+        // value instead of updating smoothly").  Visual feedback during capture
+        // is already provided by trackedLayers → applyTransformInline.  We
+        // defer engine rebuilds until capture exits (handled by a dedicated
+        // effect below).  Force=true callers (capture exit, options.flow) still
+        // run through.
+        const captureNow = motionCaptureModeRef.current
+        if (!force && (captureNow?.isActive || captureNow?.isTransitioning)) {
+            return
+        }
 
-    // Create a signature of the project-wide data
-    const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
-      const l = layersRef.current[layerId]
-      return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront},${l.data?.url},${l.data?.src},${l.data?.assetUrl},${l.data?.backAssetUrl},${l.data?.assetIsVideo},${l.data?.backAssetIsVideo},${l.data?.fill},${l.data?.color}` : ''
-    }).join('|')
+        // Create a signature of the project-wide data
+        const layerPositionsHash = timeline?.flatMap(s => s.layers || []).map(layerId => {
+            const l = layersRef.current[layerId]
+            return l ? `${l.x},${l.y},${l.rotation},${l.scaleX},${l.scaleY},${l.opacity},${l.blur},${l.tiltX},${l.tiltY},${l.cornerRadius},${l.cropX},${l.cropY},${l.cropWidth},${l.cropHeight},${l.data?.showingFront},${l.data?.url},${l.data?.src},${l.data?.assetUrl},${l.data?.backAssetUrl},${l.data?.assetIsVideo},${l.data?.backAssetIsVideo},${l.data?.fill},${l.data?.color}` : ''
+        }).join('|')
 
-    const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
-    const transitionsSignature = timeline?.map(s => {
-      const colorsStr = s.transitionColors ? s.transitionColors.join(',') : ''
-      return `${s.id}:${s.transition || 'None'}:${colorsStr}:${s.transitionDirection || ''}`
-    }).join('|')
+        const sceneTimingsHash = timeline?.map(s => `${s.id}:${s.startTime}-${s.endTime}`).join('|')
+        const transitionsSignature = timeline?.map(s => {
+            const colorsStr = s.transitionColors ? s.transitionColors.join(',') : ''
+            return `${s.id}:${s.transition || 'None'}:${colorsStr}:${s.transitionDirection || ''}`
+        }).join('|')
 
-    const currentDataSignature = JSON.stringify({
-      sceneCount: timeline.length,
-      layerCount: objects.size,
-      totalDuration: totalProjectDuration,
-      aspectRatio,
-      layerPositionsHash,
-      sceneTimingsHash,
-      transitionsSignature,
-      flowsHash: JSON.stringify(flowsMap)
-    })
+        const currentDataSignature = JSON.stringify({
+            sceneCount: timeline.length,
+            layerCount: objects.size,
+            totalDuration: totalProjectDuration,
+            aspectRatio,
+            layerPositionsHash,
+            sceneTimingsHash,
+            transitionsSignature,
+            flowsHash: JSON.stringify(flowsMap)
+        })
 
-    if (!force && lastPreparedDataRef.current === currentDataSignature) {
-      // [PRESET BASE FIX] Even on a signature match (no rebuild needed), re-seek to
-      // restore GSAP-managed state (e.g., preset alpha=0 baseline). Without this,
-      // any external force-reset of PIXI properties (from applyTransformInline force=true
-      // triggered by layer edits) permanently clobbers the preset's initial visual state
-      // because GSAP is never told to reapply its .set() baseline tweens.
-      const currentTime = motionEngine.masterTimeline?.time() || 0
-      // force=true: re-seeking to the current time is a GSAP no-op, so without
-      // forcing a render the baseline .set() (e.g. preset alpha=0) is never
-      // re-applied after a direct layer edit clobbered it.
-      motionEngine.seek(currentTime, { force: true })
-      return
-    }
+        if (!force && lastPreparedDataRef.current === currentDataSignature) {
+            // [PRESET BASE FIX] Even on a signature match (no rebuild needed), re-seek to
+            // restore GSAP-managed state (e.g., preset alpha=0 baseline). Without this,
+            // any external force-reset of PIXI properties (from applyTransformInline force=true
+            // triggered by layer edits) permanently clobbers the preset's initial visual state
+            // because GSAP is never told to reapply its .set() baseline tweens.
+            const currentTime = motionEngine.masterTimeline?.time() || 0
+            // force=true: re-seeking to the current time is a GSAP no-op, so without
+            // forcing a render the baseline .set() (e.g. preset alpha=0) is never
+            // re-applied after a direct layer edit clobbered it.
+            motionEngine.seek(currentTime, { force: true })
+            return
+        }
 
         motionEngine.setProjectConfig({ width: worldWidth, height: worldHeight })
         const currentPlayheadTime = motionEngine.masterTimeline?.time() || 0
         motionEngine.unloadAllMotions()
- 
+
         const capture = motionCaptureModeRef.current
         const skipResetForCapture = capture?.isActive || capture?.isTransitioning
 
@@ -277,72 +277,74 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
         prepareEngine(false)
     }, [prepareEngine, flowsJson, timelineInfo.length, totalProjectDuration, isPlayingInternal, layersBaseStateHash, layers, transitionsHash, stageContainer, isTimelineDragging, isCanvasInteracting])
 
-  // [TILT/PERF] When motion capture exits, run the deferred engine rebuild
-  // so the freshly captured tilt/blur/etc. actions get loaded into GSAP
-  // before the user previews or scrubs.  We track previous state in a ref
-  // so this only fires on the active→inactive transition, not on every
-  // unrelated motionCaptureMode prop change.
-  const wasInCaptureRef = useRef(false)
-  useEffect(() => {
-    const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
-    if (wasInCaptureRef.current && !isInCapture) {
-      // Force a full rebuild — signature compare can't see the deferred
-      // dispatches, and the Redux flow may have advanced multiple times
-      // since the last prepare.
-      layersRef.current = layers
-      prepareEngine(true)
-    }
-    wasInCaptureRef.current = isInCapture
-  }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, prepareEngine, layers])
-
-  // Rebuild engine and re-seek when text editing finishes to cleanly re-create/sync perspective tilt meshes
-  const prevEditingTextLayerIdRef = useRef(editingTextLayerId)
-  useEffect(() => {
-    if (prevEditingTextLayerIdRef.current && !editingTextLayerId) {
-      layersRef.current = layers
-      prepareEngine(true)
-    }
-    prevEditingTextLayerIdRef.current = editingTextLayerId
-  }, [editingTextLayerId, prepareEngine, layers])
-
-  // [FIX] Pause all video layers immediately when entering or during motion capture mode
-  useEffect(() => {
-    const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
-    if (isInCapture) {
-      // Force pause in the engine
-      motionEngine.isPlaying = false
-      motionEngine.pauseAll()
-
-      const pauseVideo = (videoElement) => {
-        if (videoElement && !videoElement.paused) {
-          try {
-            videoElement.pause()
-            videoElement._isPlayPending = false
-          } catch (e) {
-            console.warn('[useSimpleMotion] Failed to pause video in capture mode:', e)
-          }
+    // [TILT/PERF] When motion capture exits or stepId changes, run the deferred engine rebuild
+    // so the freshly captured tilt/blur/etc. actions get loaded into GSAP
+    // before the user previews or scrubs.  We track previous state in a ref
+    // so this only fires on the active→inactive transition, or when switching stepIds.
+    const wasInCaptureRef = useRef(false)
+    const prevStepIdRef = useRef(motionCaptureMode?.stepId)
+    useEffect(() => {
+        const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
+        const stepIdChanged = motionCaptureMode?.stepId && prevStepIdRef.current && motionCaptureMode.stepId !== prevStepIdRef.current
+        if (wasInCaptureRef.current && (!isInCapture || stepIdChanged)) {
+            // Force a full rebuild — signature compare can't see the deferred
+            // dispatches, and the Redux flow may have advanced multiple times
+            // since the last prepare.
+            layersRef.current = layers
+            prepareEngine(true)
         }
-      }
+        wasInCaptureRef.current = isInCapture
+        prevStepIdRef.current = motionCaptureMode?.stepId
+    }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, motionCaptureMode?.stepId, prepareEngine, layers])
 
-      if (motionEngine.registeredObjects) {
-        motionEngine.registeredObjects.forEach((obj) => {
-          const videoElement = obj._videoElement
-          if (videoElement) {
-            pauseVideo(videoElement)
-          }
-        })
-      }
+    // Rebuild engine and re-seek when text editing finishes to cleanly re-create/sync perspective tilt meshes
+    const prevEditingTextLayerIdRef = useRef(editingTextLayerId)
+    useEffect(() => {
+        if (prevEditingTextLayerIdRef.current && !editingTextLayerId) {
+            layersRef.current = layers
+            prepareEngine(true)
+        }
+        prevEditingTextLayerIdRef.current = editingTextLayerId
+    }, [editingTextLayerId, prepareEngine, layers])
 
-      if (motionEngine.backgroundMedia) {
-        motionEngine.backgroundMedia.forEach((data) => {
-          const videoElement = data._videoElement
-          if (videoElement) {
-            pauseVideo(videoElement)
-          }
-        })
-      }
-    }
-  }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, motionEngine])
+    // [FIX] Pause all video layers immediately when entering or during motion capture mode
+    useEffect(() => {
+        const isInCapture = !!(motionCaptureMode?.isActive || motionCaptureMode?.isTransitioning)
+        if (isInCapture) {
+            // Force pause in the engine
+            motionEngine.isPlaying = false
+            motionEngine.pauseAll()
+
+            const pauseVideo = (videoElement) => {
+                if (videoElement && !videoElement.paused) {
+                    try {
+                        videoElement.pause()
+                        videoElement._isPlayPending = false
+                    } catch (e) {
+                        console.warn('[useSimpleMotion] Failed to pause video in capture mode:', e)
+                    }
+                }
+            }
+
+            if (motionEngine.registeredObjects) {
+                motionEngine.registeredObjects.forEach((obj) => {
+                    const videoElement = obj._videoElement
+                    if (videoElement) {
+                        pauseVideo(videoElement)
+                    }
+                })
+            }
+
+            if (motionEngine.backgroundMedia) {
+                motionEngine.backgroundMedia.forEach((data) => {
+                    const videoElement = data._videoElement
+                    if (videoElement) {
+                        pauseVideo(videoElement)
+                    }
+                })
+            }
+        }
+    }, [motionCaptureMode?.isActive, motionCaptureMode?.isTransitioning, motionEngine])
 
     // ... (Listen for engine events and sync isPlaying state - no changes needed)
     useEffect(() => {
@@ -536,7 +538,7 @@ export function useSimpleMotion(layerObjects, currentSceneId, totalTimeInSeconds
             objects.forEach((pixiObject) => {
                 if (pixiObject && !pixiObject.destroyed) {
                     if (pixiObject._previewTimeline) {
-                        try { pixiObject._previewTimeline.kill() } catch {}
+                        try { pixiObject._previewTimeline.kill() } catch { }
                         pixiObject._previewTimeline = null
                     }
                     if (pixiObject._isPlayingPresetPreview) {

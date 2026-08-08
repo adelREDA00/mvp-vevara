@@ -6,6 +6,42 @@ import { PRESET_REGISTRY } from '../../features/engine/motion/presets.js'
 
 const generateId = uid
 
+// A Motion Step must never be persisted if it contains zero motion actions.
+// A step "has content" when it owns at least one valid custom action (a
+// non-empty layerActions array) OR at least one layer preset.
+export function stepHasContent(step) {
+  if (!step) return false
+  const layerActions = step.layerActions || {}
+  const layerPresets = step.layerPresets || {}
+  const hasAction = Object.values(layerActions).some(actions => Array.isArray(actions) && actions.length > 0)
+  const hasPreset = Object.keys(layerPresets).length > 0
+  return hasAction || hasPreset
+}
+
+// Returns a copy of the given sceneMotionFlows with every empty step removed.
+// Empty steps (zero valid actions AND zero presets) are stripped so they can
+// never be written to storage or loaded back into the editor.
+export function pruneEmptyStepsFromFlows(flows) {
+  if (!flows || typeof flows !== 'object') return flows || {}
+  const pruned = {}
+  for (const [sceneId, flow] of Object.entries(flows)) {
+    if (!flow) {
+      pruned[sceneId] = flow
+      continue
+    }
+    const steps = Array.isArray(flow.steps) ? flow.steps : []
+    if (steps.length === 0) {
+      pruned[sceneId] = flow
+      continue
+    }
+    pruned[sceneId] = {
+      ...flow,
+      steps: steps.filter(stepHasContent)
+    }
+  }
+  return pruned
+}
+
 export const saveProject = createAsyncThunk(
   'project/save',
   async (args, { getState, rejectWithValue }) => {
@@ -18,7 +54,7 @@ export const saveProject = createAsyncThunk(
         data: {
           scenes: state.scenes,
           layers: state.layers,
-          sceneMotionFlows: state.sceneMotionFlows,
+          sceneMotionFlows: pruneEmptyStepsFromFlows(state.sceneMotionFlows),
           audioTracks: state.audioTracks,
           aspectRatio: state.aspectRatio || '16:9'
         },
@@ -1781,7 +1817,7 @@ const projectSlice = createSlice({
       state.projectId = project._id || project.projectId || null
       state.scenes = project.scenes || []
       state.layers = project.layers || {}
-      state.sceneMotionFlows = project.sceneMotionFlows || {}
+      state.sceneMotionFlows = pruneEmptyStepsFromFlows(project.sceneMotionFlows || {})
       state.projectName = project.name || 'Untitled Project'
       state.aspectRatio = project.aspectRatio || '16:9'
       state.currentSceneId = project.currentSceneId || project.currentProjectId || (state.scenes[0]?.id || null)
@@ -1805,7 +1841,7 @@ const projectSlice = createSlice({
         state.layers = JSON.parse(JSON.stringify(layers))
       }
       if (sceneMotionFlows) {
-        state.sceneMotionFlows = JSON.parse(JSON.stringify(sceneMotionFlows))
+        state.sceneMotionFlows = JSON.parse(JSON.stringify(pruneEmptyStepsFromFlows(sceneMotionFlows)))
       }
       if (audioTracks) {
         state.audioTracks = JSON.parse(JSON.stringify(audioTracks))
@@ -2741,7 +2777,7 @@ const projectSlice = createSlice({
         state.projectName = name
         state.scenes = data.scenes || []
         state.layers = data.layers || {}
-        state.sceneMotionFlows = data.sceneMotionFlows || {}
+        state.sceneMotionFlows = pruneEmptyStepsFromFlows(data.sceneMotionFlows || {})
         state.audioTracks = (data.audioTracks || [])
           .filter(t => !t.isUploading || t.assetUrl)
           .map(t => t.isUploading ? { ...t, isUploading: false } : t)

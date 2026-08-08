@@ -716,7 +716,7 @@ export function applyTransformInline(displayObject, layer, dragStateAPI, layerId
     // visibility metadata, no redundant CPU syncTiltMesh call.
     displayObject._tiltOwnerVisible = displayObject.visible !== false
   }
-  
+
   if (!displayObject._tiltMesh && allowOpacityUpdate && !displayObject._tiltHidden && displayObject.alpha === 0 && (((capturedLayer && capturedLayer.didFade) ? capturedLayer.opacity : layer.opacity) ?? 1) > 0) {
     // Guard for the frame after tilt is removed: step 6 may have been gated by
     // _tiltHidden earlier, so the alpha=0 left over from the hide mechanism would
@@ -823,8 +823,8 @@ function _createPlaceholder(layer, layerId) {
     g.stroke({ color: 0x7c4af0, width: 1.5, alpha: 0.40 })
     container.addChild(g)
 
-    const thumbnailUrl = layer.data?.thumbnail || 
-      layer.data?.metadata?.thumbnail || 
+    const thumbnailUrl = layer.data?.thumbnail ||
+      layer.data?.metadata?.thumbnail ||
       (layer.type === 'image' ? (layer.data?.url || layer.data?.src) : null)
     if (thumbnailUrl) {
       try {
@@ -832,7 +832,7 @@ function _createPlaceholder(layer, layerId) {
         if (thumbnailUrl && !thumbnailUrl.startsWith('data:') && !thumbnailUrl.startsWith('blob:')) {
           img.crossOrigin = 'anonymous'
         }
-        
+
         const texture = PIXI.Texture.from(img)
         img.onload = () => {
           if (texture.source) {
@@ -846,7 +846,7 @@ function _createPlaceholder(layer, layerId) {
         sprite.height = h
         sprite.anchor.set(ax, ay)
         sprite.alpha = 0.55
-        
+
         // Rounded crop mask to match the placeholder border
         const mask = new PIXI.Graphics()
         mask.roundRect(-w * ax, -h * ay, w, h, 10)
@@ -1601,158 +1601,158 @@ export function useCanvasLayers(stageContainer, isReady, pixiApp = null, worldWi
             // We always want to sync text if the timeline is paused so Redux truth is visible.
             // Only update text content if it actually changed
             if (pixiObject.text !== layer.data.content) {
-            // console.log(`[useCanvasLayers] Text content changed for ${layerId}: "${pixiObject.text}" -> "${layer.data.content}"`)
-            pixiObject.text = layer.data.content || ''
+              // console.log(`[useCanvasLayers] Text content changed for ${layerId}: "${pixiObject.text}" -> "${layer.data.content}"`)
+              pixiObject.text = layer.data.content || ''
 
-            // In PIXI v8, changing .text doesn't always immediately update bounds until the next render
-            // forcing it helps for immediate height sync back to Redux
-            if (pixiObject.updateText) pixiObject.updateText(true);
-            markTiltTextureDirty(pixiObject)
+              // In PIXI v8, changing .text doesn't always immediately update bounds until the next render
+              // forcing it helps for immediate height sync back to Redux
+              if (pixiObject.updateText) pixiObject.updateText(true);
+              markTiltTextureDirty(pixiObject)
 
-            // Re-calculate height if text changed
-            const currentFontSize = layer.data.fontSize || 16
+              // Re-calculate height if text changed
+              const currentFontSize = layer.data.fontSize || 16
+              const wordWrapWidth = layer.width || 200
+              calculateTextHeight(
+                layerId,
+                pixiObject.text,
+                currentFontSize,
+                wordWrapWidth,
+                layer.data.fontFamily,
+                layer.data.fontWeight,
+                layer.data.fontStyle,
+                dispatch,
+                layerId === editingTextLayerId
+              )
+            }
+
+            // Sync wordWrapWidth whenever layer.width changes
+            const style = pixiObject.style
             const wordWrapWidth = layer.width || 200
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              currentFontSize,
-              wordWrapWidth,
-              layer.data.fontFamily,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            )
-          }
+            if (style.wordWrapWidth !== wordWrapWidth) {
+              style.wordWrapWidth = wordWrapWidth
+              // Force re-measure immediately
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              markTiltTextureDirty(pixiObject)
 
-          // Sync wordWrapWidth whenever layer.width changes
-          const style = pixiObject.style
-          const wordWrapWidth = layer.width || 200
-          if (style.wordWrapWidth !== wordWrapWidth) {
-            style.wordWrapWidth = wordWrapWidth
-            // Force re-measure immediately
-            if (pixiObject.updateText) pixiObject.updateText(true)
-            markTiltTextureDirty(pixiObject)
+              // Recalculate height whenever width/wrap changes
+              calculateTextHeight(
+                layerId,
+                pixiObject.text,
+                style.fontSize || 16,
+                wordWrapWidth,
+                layer.data.fontFamily,
+                layer.data.fontWeight,
+                layer.data.fontStyle,
+                dispatch,
+                layerId === editingTextLayerId
+              )
+            }
 
-            // Recalculate height whenever width/wrap changes
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              style.fontSize || 16,
-              wordWrapWidth,
-              layer.data.fontFamily,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            )
-          }
+            if (style.fontSize !== (layer.data.fontSize || 16)) {
+              style.fontSize = layer.data.fontSize || 16
+              style.lineHeight = style.fontSize * 1.2
+              if (pixiObject.updateText) pixiObject.updateText(true)
+              // Recalculate height on font size change
+              calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
+              markTiltTextureDirty(pixiObject)
+            }
+            const prevFill = style.fill
+            const prevFontFamily = style.fontFamily
+            const prevFontWeight = style.fontWeight
+            const prevFontStyle = style.fontStyle
+            // [TILT/CAPTURE] Prefer the live captured color when MotionCapture
+            // is editing this layer so the user sees the colour change instantly
+            // (and the tilt mesh re-captures via markTiltTextureDirty below).
+            const reduxBaseTextColor = layer.data.color || '#000000'
+            const isColorCaptured = !!(capturedLayer && capturedLayer.didColor)
+            const liveTextColor = (isColorCaptured && capturedLayer.color !== undefined && capturedLayer.color !== null)
+              ? capturedLayer.color
+              : reduxBaseTextColor
+            // [PREVIEW-PRESERVE] After a fast preview ends, the ColorChangeAction
+            // has stamped the animated colour onto style.fill.  A re-render here
+            // (caused by selection / panel toggles / etc.) would otherwise revert
+            // it back to the Redux base colour because style.fill !== liveTextColor.
+            // Only re-apply Redux colour when:
+            //   (a) the playhead is at the scene start (Redux is authoritative),
+            //   (b) the layer is being captured (capture wins),
+            //   (c) the Redux colour itself genuinely changed (user picked a new
+            //       colour from the picker).
+            // CRITICAL: Track ONLY the Redux base value in the sentinel — never
+            // the captured value.  If we polluted the sentinel with the live
+            // captured colour during capture, then after capture exits the
+            // sentinel ("blue") would differ from Redux ("red"), reduxFillChanged
+            // would flip true, and we'd snap back to the Redux base — exactly
+            // the "color resets after preview / select" bug.
+            //
+            // [DELETE-STEP FIX] If the layer no longer has an engine-owned colour
+            // animation (_applyAnimatedColor is stamped by ColorChangeAction and
+            // cleared by unloadAllMotions), Redux is the single source of truth
+            // again.  Without this, deleting the only colour step would leave the
+            // stale animated colour locked on the layer until something else
+            // forced a re-sync.
+            const hasEngineColorAnim = typeof pixiObject._applyAnimatedColor === 'function'
+            const reduxFillChanged = pixiObject._lastReduxFillApplied !== reduxBaseTextColor
+            const allowFillUpdate = isAtSceneStart || isColorCaptured || reduxFillChanged || !hasEngineColorAnim
+            if (style.fill !== liveTextColor && allowFillUpdate) style.fill = liveTextColor
+            pixiObject._lastReduxFillApplied = reduxBaseTextColor
+            if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
+            if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
+            if (style.fontStyle !== (layer.data.fontStyle || 'normal')) style.fontStyle = layer.data.fontStyle || 'normal'
+            if (style.letterSpacing !== 0) style.letterSpacing = 0
+            if (prevFill !== style.fill || prevFontFamily !== style.fontFamily ||
+              prevFontWeight !== style.fontWeight || prevFontStyle !== style.fontStyle) {
+              markTiltTextureDirty(pixiObject)
+            }
 
-          if (style.fontSize !== (layer.data.fontSize || 16)) {
-            style.fontSize = layer.data.fontSize || 16
-            style.lineHeight = style.fontSize * 1.2
-            if (pixiObject.updateText) pixiObject.updateText(true)
-            // Recalculate height on font size change
-            calculateTextHeight(layerId, pixiObject.text, style.fontSize, wordWrapWidth, layer.data.fontFamily, layer.data.fontWeight, layer.data.fontStyle, dispatch, layerId === editingTextLayerId)
-            markTiltTextureDirty(pixiObject)
-          }
-          const prevFill = style.fill
-          const prevFontFamily = style.fontFamily
-          const prevFontWeight = style.fontWeight
-          const prevFontStyle = style.fontStyle
-          // [TILT/CAPTURE] Prefer the live captured color when MotionCapture
-          // is editing this layer so the user sees the colour change instantly
-          // (and the tilt mesh re-captures via markTiltTextureDirty below).
-           const reduxBaseTextColor = layer.data.color || '#000000'
-           const isColorCaptured = !!(capturedLayer && capturedLayer.didColor)
-           const liveTextColor = (isColorCaptured && capturedLayer.color !== undefined && capturedLayer.color !== null)
-             ? capturedLayer.color
-             : reduxBaseTextColor
-           // [PREVIEW-PRESERVE] After a fast preview ends, the ColorChangeAction
-           // has stamped the animated colour onto style.fill.  A re-render here
-           // (caused by selection / panel toggles / etc.) would otherwise revert
-           // it back to the Redux base colour because style.fill !== liveTextColor.
-           // Only re-apply Redux colour when:
-           //   (a) the playhead is at the scene start (Redux is authoritative),
-           //   (b) the layer is being captured (capture wins),
-           //   (c) the Redux colour itself genuinely changed (user picked a new
-           //       colour from the picker).
-           // CRITICAL: Track ONLY the Redux base value in the sentinel — never
-           // the captured value.  If we polluted the sentinel with the live
-           // captured colour during capture, then after capture exits the
-           // sentinel ("blue") would differ from Redux ("red"), reduxFillChanged
-           // would flip true, and we'd snap back to the Redux base — exactly
-           // the "color resets after preview / select" bug.
-           //
-           // [DELETE-STEP FIX] If the layer no longer has an engine-owned colour
-           // animation (_applyAnimatedColor is stamped by ColorChangeAction and
-           // cleared by unloadAllMotions), Redux is the single source of truth
-           // again.  Without this, deleting the only colour step would leave the
-           // stale animated colour locked on the layer until something else
-           // forced a re-sync.
-           const hasEngineColorAnim = typeof pixiObject._applyAnimatedColor === 'function'
-           const reduxFillChanged = pixiObject._lastReduxFillApplied !== reduxBaseTextColor
-           const allowFillUpdate = isAtSceneStart || isColorCaptured || reduxFillChanged || !hasEngineColorAnim
-           if (style.fill !== liveTextColor && allowFillUpdate) style.fill = liveTextColor
-          pixiObject._lastReduxFillApplied = reduxBaseTextColor
-          if (style.fontFamily !== (layer.data.fontFamily || 'Arial')) style.fontFamily = layer.data.fontFamily || 'Arial'
-          if (style.fontWeight !== (layer.data.fontWeight || 'normal')) style.fontWeight = layer.data.fontWeight || 'normal'
-          if (style.fontStyle !== (layer.data.fontStyle || 'normal')) style.fontStyle = layer.data.fontStyle || 'normal'
-          if (style.letterSpacing !== 0) style.letterSpacing = 0
-          if (prevFill !== style.fill || prevFontFamily !== style.fontFamily ||
-            prevFontWeight !== style.fontWeight || prevFontStyle !== style.fontStyle) {
-            markTiltTextureDirty(pixiObject)
-          }
+            // If the fonts loaded version changes, we MUST force a re-render of this text object
+            if (pixiObject._fontsLoadedVersion !== fontsLoadedVersion) {
+              pixiObject._fontsLoadedVersion = fontsLoadedVersion;
 
-          // If the fonts loaded version changes, we MUST force a re-render of this text object
-          if (pixiObject._fontsLoadedVersion !== fontsLoadedVersion) {
-            pixiObject._fontsLoadedVersion = fontsLoadedVersion;
+              // [NUCLEAR REFRESH] Toggling font family forces PIXI to re-query the browser's metrics/rasterizer
+              const targetFont = layer.data?.fontFamily || 'Arial';
 
-            // [NUCLEAR REFRESH] Toggling font family forces PIXI to re-query the browser's metrics/rasterizer
-            const targetFont = layer.data?.fontFamily || 'Arial';
+              // Temporal switch to invalid/generic font and back triggers deep dirty flag in PIXI v8
+              style.fontFamily = 'monospace';
+              if (pixiObject.updateText) pixiObject.updateText(true);
 
-            // Temporal switch to invalid/generic font and back triggers deep dirty flag in PIXI v8
-            style.fontFamily = 'monospace';
-            if (pixiObject.updateText) pixiObject.updateText(true);
+              style.fontFamily = targetFont;
+              if (pixiObject.updateText) pixiObject.updateText(true);
 
-            style.fontFamily = targetFont;
-            if (pixiObject.updateText) pixiObject.updateText(true);
+              // Force re-measure and re-pivot immediately
+              const align = layer.data?.textAlign || 'left'
+              const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
+              const currentWidth = layer.width || 200
+              const bounds = pixiObject.getLocalBounds()
 
-            // Force re-measure and re-pivot immediately
-            const align = layer.data?.textAlign || 'left'
-            const anchorX = align === 'center' ? 0.5 : (align === 'right' ? 1 : 0)
-            const currentWidth = layer.width || 200
-            const bounds = pixiObject.getLocalBounds()
+              pixiObject.anchor.set(anchorX, 0)
+              pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2)
 
-            pixiObject.anchor.set(anchorX, 0)
-            pixiObject.pivot.set((0.5 - anchorX) * currentWidth, bounds.height / 2)
+              // Re-calculate the Redux height so selection boxes fit
+              calculateTextHeight(
+                layerId,
+                pixiObject.text,
+                layer.data.fontSize || 16,
+                currentWidth,
+                targetFont,
+                layer.data.fontWeight,
+                layer.data.fontStyle,
+                dispatch,
+                layerId === editingTextLayerId
+              );
+            }
 
-            // Re-calculate the Redux height so selection boxes fit
-            calculateTextHeight(
-              layerId,
-              pixiObject.text,
-              layer.data.fontSize || 16,
-              currentWidth,
-              targetFont,
-              layer.data.fontWeight,
-              layer.data.fontStyle,
-              dispatch,
-              layerId === editingTextLayerId
-            );
-          }
+            if (style.align !== (layer.data.textAlign || 'left')) {
+              style.align = layer.data.textAlign || 'left'
+              const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
+              if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
 
-          if (style.align !== (layer.data.textAlign || 'left')) {
-            style.align = layer.data.textAlign || 'left'
-            const anchorX = style.align === 'center' ? 0.5 : (style.align === 'right' ? 1 : 0)
-            if (pixiObject.anchor.x !== anchorX) pixiObject.anchor.x = anchorX
-
-            // Update pivot to keep centered rotation
-            // CRITICAL FIX: Use actual text height instead of layer.height
-            const width = layer.width || 200
-            pixiObject.updateText?.(true)
-            const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
-            pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
-          }
+              // Update pivot to keep centered rotation
+              // CRITICAL FIX: Use actual text height instead of layer.height
+              const width = layer.width || 200
+              pixiObject.updateText?.(true)
+              const actualHeight = pixiObject.getLocalBounds().height || layer.height || 40
+              pixiObject.pivot.set((0.5 - anchorX) * width, actualHeight / 2)
+            }
           } // end else — standard PIXI.Text branch
         }
 

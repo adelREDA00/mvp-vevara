@@ -69,10 +69,10 @@ const MotionActionBlock = React.memo(({
   sceneStartTime = 0,
   onSeekInstant,
   isMotionCaptureActive = false,
-  onPlayheadInteractionDuringCapture = null,
   editingStepId = null,
   isSelected = false,
   liveSteps = [],
+  onStepClick = null,
 }) => {
   const dispatch = useDispatch()
   const dragRef = useRef(null)
@@ -112,11 +112,6 @@ const MotionActionBlock = React.memo(({
 
     dispatch(setSelectedAction({ layerId, actionType: action.type, stepId: step.id }))
 
-    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
-    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
-      onPlayheadInteractionDuringCapture()
-    }
-
     if (typeof onMotionPause === 'function') onMotionPause()
 
     dispatch(setTimelineDragging(true))
@@ -132,23 +127,30 @@ const MotionActionBlock = React.memo(({
     // rAF-throttled seek for canvas sync during operation
     const seekRafRef = { current: null }
 
-    // Snap playhead immediately
-    let finalSeekTime = sceneStartTime + (origAbsoluteEndTime - 5) / 1000
-    if (dragType === 'resize-left') {
-      finalSeekTime = sceneStartTime + (origAbsoluteStartTime + 5) / 1000
-    }
+    let finalSeekTime = 0
 
-    if (onSeekInstant) {
-      onSeekInstant(finalSeekTime)
-    }
-    if (onSeek) {
-      onSeek(finalSeekTime)
+    // Snap playhead immediately ONLY for resize operations (move snaps on actual movement start)
+    const isResize = dragType === 'resize-left' || dragType === 'resize-right'
+    if (isResize) {
+      finalSeekTime = sceneStartTime + (origAbsoluteEndTime - 5) / 1000
+      if (dragType === 'resize-left') {
+        finalSeekTime = sceneStartTime + (origAbsoluteStartTime + 5) / 1000
+      }
+
+      if (onSeekInstant) {
+        onSeekInstant(finalSeekTime)
+      }
+      if (onSeek) {
+        onSeek(finalSeekTime)
+      }
     }
 
     const handleMove = (moveE) => {
       if (!dragRef.current) return
       const dx = getClientX(moveE) - dragRef.current.startX
-      if (Math.abs(dx) > 3) didMoveFar = true
+      if (Math.abs(dx) > 3) {
+        didMoveFar = true
+      }
       const msDelta = Math.round(dx * pxToMs)
 
       let proposedStart = dragRef.current.origAbsoluteStartTime
@@ -251,35 +253,22 @@ const MotionActionBlock = React.memo(({
       document.removeEventListener('pointermove', handleMove)
       document.removeEventListener('pointerup', handleUp)
 
-      // On simple click (no movement): snap playhead based on handle clicked
+      // On simple click (no movement): let onStepClick handle playhead snapping to parent end
       if (!didMoveFar) {
-        const targetSeekTime = currentDragType === 'resize-left'
-          ? sceneStartTime + (origAbsoluteStartTime + 5) / 1000
-          : sceneStartTime + (origAbsoluteEndTime - 5) / 1000
-        if (onSeekInstant) onSeekInstant(targetSeekTime)
-        if (onSeek) onSeek(targetSeekTime)
+        onStepClick?.(step.id)
       } else {
         if (onSeek) onSeek(finalSeekTime)
-        // Trigger auto-save during motion capture mode on drag/trim end
-        if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
-          onPlayheadInteractionDuringCapture()
-        }
       }
     }
 
     document.addEventListener('pointermove', handleMove)
     document.addEventListener('pointerup', handleUp)
-  }, [action.id, actionStartOffset, actionDuration, step.id, step.startTime, stepDuration, layerId, sceneId, pxToMs, dispatch, onMotionPause, getClientX, onSeek, onSeekInstant, sceneStartTime, isMotionCaptureActive, onPlayheadInteractionDuringCapture, prevEnd, nextStart])
+  }, [action.id, actionStartOffset, actionDuration, step.id, step.startTime, stepDuration, layerId, sceneId, pxToMs, dispatch, onMotionPause, getClientX, onSeek, onSeekInstant, sceneStartTime, isMotionCaptureActive, prevEnd, nextStart, editingStepId])
 
   const handleTouchStart = useCallback((e, dragType) => {
     e.stopPropagation()
 
     dispatch(setSelectedAction({ layerId, actionType: action.type, stepId: step.id }))
-
-    // [MOTION INTERACTION DURING CAPTURE] Exit capture mode if active
-    if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
-      onPlayheadInteractionDuringCapture()
-    }
 
     const touch = e.touches[0]
     const startX = touch.clientX
@@ -289,16 +278,20 @@ const MotionActionBlock = React.memo(({
     const origAbsoluteStartTime = stepStart + actionStartOffset
     const origAbsoluteEndTime = origAbsoluteStartTime + actionDuration
 
-    let finalSeekTime = sceneStartTime + (origAbsoluteEndTime - 5) / 1000
-    if (dragType === 'resize-left') {
-      finalSeekTime = sceneStartTime + (origAbsoluteStartTime + 5) / 1000
-    }
+    let finalSeekTime = 0
+    const isResize = dragType === 'resize-left' || dragType === 'resize-right'
+    if (isResize) {
+      finalSeekTime = sceneStartTime + (origAbsoluteEndTime - 5) / 1000
+      if (dragType === 'resize-left') {
+        finalSeekTime = sceneStartTime + (origAbsoluteStartTime + 5) / 1000
+      }
 
-    if (onSeekInstant) {
-      onSeekInstant(finalSeekTime)
-    }
-    if (onSeek) {
-      onSeek(finalSeekTime)
+      if (onSeekInstant) {
+        onSeekInstant(finalSeekTime)
+      }
+      if (onSeek) {
+        onSeek(finalSeekTime)
+      }
     }
 
     const onTouchMove = (moveE) => {
@@ -414,15 +407,8 @@ const MotionActionBlock = React.memo(({
     const onTouchEnd = () => {
       if (hasMoved) {
         dispatch(setTimelineDragging(false))
-        if (isMotionCaptureActive && onPlayheadInteractionDuringCapture) {
-          onPlayheadInteractionDuringCapture()
-        }
       } else {
-        const targetSeekTime = dragType === 'resize-left'
-          ? sceneStartTime + (origAbsoluteStartTime + 5) / 1000
-          : sceneStartTime + (origAbsoluteEndTime - 5) / 1000
-        if (onSeekInstant) onSeekInstant(targetSeekTime)
-        if (onSeek) onSeek(targetSeekTime)
+        onStepClick?.(step.id)
       }
       document.removeEventListener('touchmove', onTouchMove)
       document.removeEventListener('touchend', onTouchEnd)
@@ -436,7 +422,7 @@ const MotionActionBlock = React.memo(({
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     document.addEventListener('touchend', onTouchEnd, { once: true })
     document.addEventListener('touchcancel', onTouchEnd, { once: true })
-  }, [action.id, actionStartOffset, actionDuration, step.id, step.startTime, stepDuration, layerId, sceneId, pxToMs, dispatch, onMotionPause, onSeek, onSeekInstant, sceneStartTime, isMotionCaptureActive, onPlayheadInteractionDuringCapture, prevEnd, nextStart])
+  }, [action.id, actionStartOffset, actionDuration, step.id, step.startTime, stepDuration, layerId, sceneId, pxToMs, dispatch, onMotionPause, onSeek, onSeekInstant, sceneStartTime, isMotionCaptureActive, prevEnd, nextStart, editingStepId])
 
   const handleWidth = isTouchDevice()
     ? Math.max(20, Math.min(blockWidth * 0.4, 32))
@@ -490,11 +476,17 @@ const MotionActionBlock = React.memo(({
           touchAction: 'none',
           backgroundColor: isEditing
             ? (isLight ? '#7a40ed' : '#633cc4')
-            : isActive
-              ? (isLight ? '#cab3f8' : '#4c3b70')
-              : (isLight ? '#d7d7db' : '#25232d'),
+            : isSelected
+              ? (isLight ? '#c9b2f7' : '#4b3b6f')
+              : isActive
+                ? (isLight ? '#b8b8ba' : '#303038')
+                : (isLight ? '#d7d7db' : '#1c1d22'),
+
+
           outline: isSelected
-            ? (isLight ? '2px solid #7c4af0' : '2px solid #a78bfa')
+            ? (isMotionCaptureActive
+              ? (isLight ? '2px solid #c4b5fd' : '2px solid #a78bfa')
+              : (isLight ? '2px solid #c9b2f7' : '2px solid #4b3b6f'))
             : 'none',
           outlineOffset: '1.5px',
         }}
@@ -548,11 +540,11 @@ const MotionDetailsRow = React.memo(({
   onSeekInstant,
   leftOffset = 16,
   isMotionCaptureActive = false,
-  onPlayheadInteractionDuringCapture = null,
   editingStepId = null,
   isSelected = false,
   liveSteps = [],
   selectedActionStepId = null,
+  onStepClick = null,
 }) => {
   const dispatch = useDispatch()
   const layerType = row?.layerType || layerTypeProp
@@ -575,16 +567,21 @@ const MotionDetailsRow = React.memo(({
       {!isMobile && (
         <div
           className="absolute flex items-center px-3 pointer-events-auto cursor-pointer"
-          onClick={() => dispatch(setSelectedAction({ layerId: row.layerId, actionType: row.actionType }))}
+          onClick={() => {
+            const activeEntry = row.entries?.find(e => e.step?.id === activeStepId)
+            const stepId = activeEntry ? activeEntry.step.id : (row.entries?.[0]?.step?.id || null)
+            dispatch(setSelectedAction({ layerId: row.layerId, actionType: row.actionType, stepId }))
+          }}
           style={{
             width: `${labelWidth}px`,
             position: 'sticky',
             left: 0,
             zIndex: 100,
             backgroundColor: isSelected
-              ? (isLight ? '#ede8f9' : 'rgba(237, 232, 249, 0.1)')
+              ? (isMotionCaptureActive
+                ? (isLight ? '#7a40ed' : '#633cc4')
+                : (isLight ? '#ede8f9' : 'rgba(237, 232, 249, 0.1)'))
               : (isLight ? '#f3f4f7' : '#090a0d'),
-            borderRight: `1px solid ${isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)'}`,
             top: '-2px',
             height: `${ROW_TOTAL}px`,
           }}
@@ -594,8 +591,10 @@ const MotionDetailsRow = React.memo(({
             style={{
               fontSize: '13px',
               color: isSelected
-                ? (isLight ? '#7c4af0' : '#a78bfa')
-                : (isLight ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.75)'),
+                ? (isMotionCaptureActive
+                  ? '#ffffff'
+                  : (isLight ? '#7c4af0' : '#a78bfa'))
+                : (isLight ? 'rgba(0,0,0,0.56)' : 'rgba(255,255,255,0.56)'),
               fontFamily: 'Inter, system-ui, sans-serif',
               letterSpacing: '0.04em',
             }}
@@ -633,7 +632,9 @@ const MotionDetailsRow = React.memo(({
               style={{
                 fontSize: '10px',
                 color: isSelected
-                  ? (isLight ? '#7c4af0' : '#a78bfa')
+                  ? (isMotionCaptureActive
+                    ? (isLight ? '#7c4af0' : '#a78bfa')
+                    : (isLight ? '#4b5563' : '#d1d5db'))
                   : (isLight ? 'rgba(0,0,0,0.48)' : 'rgba(255,255,255,0.48)'),
                 fontFamily: 'Inter, system-ui, sans-serif',
                 letterSpacing: '0.02em',
@@ -683,10 +684,10 @@ const MotionDetailsRow = React.memo(({
               sceneStartTime={sceneStartTime}
               onSeekInstant={onSeekInstant}
               isMotionCaptureActive={isMotionCaptureActive}
-              onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
               editingStepId={editingStepId}
-              isSelected={isSelected && (selectedActionStepId ? selectedActionStepId === step.id : activeStepId === step.id)}
+              isSelected={isSelected && activeStepId === step.id}
               liveSteps={liveSteps}
+              onStepClick={onStepClick}
             />
           )
         })}
@@ -715,9 +716,9 @@ const MotionDetailsPanel = React.memo(({
   sceneLeftOffset = 0,  // px — horizontal offset of current scene card
   onSeekInstant,
   isMotionCaptureActive = false,
-  onPlayheadInteractionDuringCapture = null,
   calculateDurationFromWidth = null,
   editingStepId = null,
+  onStepClick = null,
 }) => {
   const { theme } = useContext(ThemeContext)
   const isLight = theme === 'light'
@@ -929,16 +930,31 @@ const MotionDetailsPanel = React.memo(({
         })()
 
         return rows.map((row, i) => {
-          const isSelected = selectedLayerIds && selectedLayerIds.includes(row.layerId) &&
-            (selectedActionType === null || selectedActionType === row.actionType)
+          // Manual row click sets selectedActionStepId → highlight only when the selected step
+          // is ALSO the currently active step (prevents bleed into other moments as playhead moves).
+          // Auto-selection (canvas / position panel, no stepId) → restrict to the active step only.
+          const layerMatch = selectedLayerIds && selectedLayerIds.includes(row.layerId)
+          const actionMatch = selectedActionType === null || selectedActionType === row.actionType
+          const isManualSelect = !!selectedActionStepId
+          const belongsToActiveStep = row.entries.some(entry => entry.step?.id === activeStepId)
+
+          // For manual selection: the lane bg is only colored when the selected step IS the active step.
+          // This keeps the bg scoped to its own moment and prevents it from appearing in adjacent moments.
+          const isSelected = layerMatch && actionMatch &&
+            (isManualSelect
+              ? (selectedActionType !== null ? row.entries.some(e => e.step?.id === selectedActionStepId) : true)
+              : belongsToActiveStep)
 
           if (!activeMomentBounds) return null
+
+          const activeEntry = row.entries?.find(e => e.step?.id === activeStepId)
+          const bestStepId = activeEntry ? activeEntry.step.id : (row.entries?.[0]?.step?.id || null)
 
           return (
             <div
               key={`bg-${row.layerId}::${row.actionType}`}
               className="absolute pointer-events-auto cursor-pointer transition-all duration-150"
-              onClick={() => dispatch(setSelectedAction({ layerId: row.layerId, actionType: row.actionType }))}
+              onClick={() => dispatch(setSelectedAction({ layerId: row.layerId, actionType: row.actionType, stepId: bestStepId }))}
               style={{
                 top: `${4 + i * ROW_TOTAL}px`,
                 left: `${activeMomentBounds.left}px`,
@@ -947,7 +963,9 @@ const MotionDetailsPanel = React.memo(({
                 borderRadius: '4px',
                 boxSizing: 'border-box',
                 backgroundColor: isSelected
-                  ? (isLight ? '#ede8f9' : 'rgba(237, 232, 249, 0.1)')
+                  ? (isMotionCaptureActive
+                    ? (isLight ? '#ede8f9' : 'rgba(237, 232, 249, 0.1)')
+                    : (isLight ? '#ece7f8' : 'rgba(255,255,255,0.05)'))
                   : (isLight ? 'rgba(0,0,0,0.025)' : 'rgba(255,255,255,0.025)'),
                 border: 'none',
               }}
@@ -957,8 +975,16 @@ const MotionDetailsPanel = React.memo(({
       })()}
 
       {rows.map((row, i) => {
-        const isSelectedLeft = selectedLayerIds && selectedLayerIds.includes(row.layerId) &&
-          (selectedActionType === null || selectedActionType === row.actionType)
+        // Same logic as lane bg: manual selection (stepId set) always highlights;
+        // auto-selection only highlights if the row belongs to the current active step.
+        const layerMatch = selectedLayerIds && selectedLayerIds.includes(row.layerId)
+        const actionMatch = selectedActionType === null || selectedActionType === row.actionType
+        const isManualSelect = !!selectedActionStepId
+        const belongsToActiveStep = row.entries.some(entry => entry.step?.id === activeStepId)
+        const isSelectedLeft = layerMatch && actionMatch &&
+          (isManualSelect
+            ? (selectedActionType !== null ? row.entries.some(e => e.step?.id === selectedActionStepId) : true)
+            : belongsToActiveStep)
 
         return (
           <div
@@ -991,8 +1017,8 @@ const MotionDetailsPanel = React.memo(({
               onSeekInstant={onSeekInstant}
               leftOffset={leftOffset}
               isMotionCaptureActive={isMotionCaptureActive}
-              onPlayheadInteractionDuringCapture={onPlayheadInteractionDuringCapture}
               liveSteps={liveSteps}
+              onStepClick={onStepClick}
             />
           </div>
         )

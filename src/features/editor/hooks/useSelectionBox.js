@@ -179,7 +179,7 @@ function updateSelectionBoxVisibility(selectionBox, isMoving, isResizing, layers
     for (let i = 0; i < selectionBox.children.length; i++) {
       const child = selectionBox.children[i]
       const isOutline = child.label === 'selection-outline'
-      const isRotation = child.label === 'rotation-handle'
+      const isRotation = child.label === 'rotation-handle' && firstActionTime === Infinity
       const isMove = child.label === 'move-handle'
       const isTextLeftRightHandle = isText && (
         child.label === 'selection-handle-w' ||
@@ -1740,21 +1740,34 @@ export function useSelectionBox(stageContainer, layer, layerObject, viewport, on
           const isSmall = screenWidth < 80 || screenHeight < 80
 
           let hx, hy = handleY
+          // Deterministic handle visibility (avoids flicker from stale child.visible state):
+          // - Motion Capture mode: rotation icon is ALWAYS visible (no animated-layer logic).
+          // - Normal/design mode: rotation hidden only when the layer is animated
+          //   (firstActionTime !== Infinity), matching updateSelectionBoxVisibility.
+          // - Move icon visibility follows the existing zoom/layer-size rule (_showMoveHandle).
+          const firstActionTime = getLayerFirstActionTime(currentLayer.id, latestSceneMotionFlowRef.current)
+          const rotationVisible = latestMotionCaptureModeRef.current?.isActive || firstActionTime === Infinity
+          const moveVisible = !!box._showMoveHandle
+
           if (child.label === 'rotation-handle') {
-            if (isSmall) {
+            // Keep the two-icon layout when the move handle is also visible;
+            // center the rotation handle when it is the only visible icon.
+            if (moveVisible) {
               const offset = radius + 6 * baseScale
-              hx = centerX - offset
+              hx = isSmall ? centerX - offset : centerX
             } else {
               hx = centerX
             }
           } else if (child.label === 'move-handle') {
-            if (isSmall) {
+            // Keep the two-icon layout when the rotation handle is also visible;
+            // center the move handle when rotation is hidden (e.g. animated layer).
+            box._showMoveHandle = isSmall
+            if (rotationVisible) {
               const offset = radius + 6 * baseScale
-              hx = centerX + offset
+              hx = isSmall ? centerX + offset : centerX
             } else {
               hx = centerX
             }
-            box._showMoveHandle = isSmall
           }
 
           if (isTilted) {

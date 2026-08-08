@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link, useNavigate } from 'react-router-dom'
 import { register, clearError } from '../../../store/slices/authSlice'
-import { UserPlus, User, Lock, AlertCircle, Mail, ExternalLink, Globe } from 'lucide-react'
+import { UserPlus, User, Lock, AlertCircle, Mail, ExternalLink, Globe, ArrowLeft } from 'lucide-react'
 import { isInAppBrowser } from '../../../utils/inAppBrowser'
 import InAppBrowserModal from '../components/InAppBrowserModal'
 import { useTheme } from '../../../app/context/ThemeContext'
@@ -61,6 +61,15 @@ const RegisterPage = () => {
             <div className={`w-full max-w-[440px] bg-[var(--dashboard-card-bg)] rounded-[16px] border border-[var(--dashboard-border)] relative z-10 flex flex-col shadow-none my-auto overflow-hidden shrink-0`}>
                 <div className="p-8 md:p-10 relative">
                     <div className="w-full">
+                        <div className="mb-8 flex items-start">
+                            <Link
+                                to="/dashboard"
+                                className="inline-flex items-center gap-1.5 text-[12px] font-bold text-[var(--dashboard-text-muted)] hover:text-[var(--dashboard-accent)] transition-all"
+                            >
+                                <ArrowLeft size={14} strokeWidth={2.5} />
+                                <span>Back</span>
+                            </Link>
+                        </div>
                         <div className="mb-8 text-center">
                             <h2 className="text-2xl font-bold text-[var(--dashboard-text)] tracking-tight">Create account</h2>
                             <p className="text-[var(--dashboard-text-muted)] mt-1.5 text-[14px]">Start your creative journey</p>
