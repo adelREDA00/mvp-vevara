@@ -8,7 +8,7 @@ import {
     Plus, Folder, Layout, LogOut, Settings, User as UserIcon,
     ExternalLink, Trash2, ChevronDown, Layers, Loader2, X,
     Music, Presentation, Sparkles, Box, Wand2, Play, Share2,
-    Search, Menu, Sun, Moon, Rocket, Video, ArrowRight, MoreHorizontal, Copy
+    Search, Menu, Sun, Moon, Rocket, Video, ArrowRight, MoreHorizontal, Copy, Cloud, CloudOff
 } from 'lucide-react'
 import { DropdownMenu, DropdownMenuItem } from '../../editor/components/DropdownMenu'
 import Modal from '../../editor/components/Modal'
@@ -598,9 +598,9 @@ const DashboardPage = () => {
                     {/* Storage / Account Status Bar */}
                     {/* Storage / Account Status Bar */}
                     <div
-                        className={`w-full h-12 px-4 md:px-10 border-b flex items-center justify-between z-20 ${isLight
-                            ? 'bg-[#f5f5f3] border-[#e4e4e0] text-[#555]'
-                            : 'bg-[#0d0e11] border-white/[0.07] text-zinc-400'
+                        className={`w-full h-12 px-4 md:px-10  flex items-center justify-between z-20 ${isLight
+                            ? 'bg-[#f5f5f3]  text-[#555]'
+                            : 'bg-[#0d0e11]  text-zinc-400'
                             }`}
                     >
                         {/* Left: Storage status */}
@@ -608,11 +608,12 @@ const DashboardPage = () => {
                             {isAuthenticated ? (
                                 <>
                                     <span
-                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-[4px] tracking-wider uppercase ${isLight
+                                        className={`text-[9px] flex items-center gap-2 font-bold px-2.5 py-1 tracking-wider uppercase ${isLight
                                             ? 'bg-[var(--dashboard-accent)] text-white'
                                             : 'bg-[var(--dashboard-accent)] text-white'
                                             }`}
                                     >
+                                        <Cloud size={15} />
                                         Cloud
                                     </span>
 
@@ -628,11 +629,12 @@ const DashboardPage = () => {
                             ) : (
                                 <>
                                     <span
-                                        className={`text-[9px] font-bold px-2.5 py-1 rounded-[4px] tracking-wider uppercase ${isLight
+                                        className={`text-[9px] flex items-center gap-2 font-bold px-2.5 py-1 tracking-wider uppercase ${isLight
                                             ? 'bg-[#deded9] text-[#4f4f4b]'
                                             : 'bg-[#292a2e] text-zinc-200'
                                             }`}
                                     >
+                                        <CloudOff size={15} />
                                         Local
                                     </span>
 
@@ -659,7 +661,7 @@ const DashboardPage = () => {
                                         >
                                             {/* Avatar */}
                                             <div
-                                                className={`w-8 h-8 rounded-[10px] flex items-center justify-center font-bold text-[10px] transition-transform group-hover:scale-[1.03] ${isLight
+                                                className={`w-8 h-8 flex items-center justify-center font-bold text-[10px] transition-transform group-hover:scale-[1.03] ${isLight
                                                     ? 'bg-[#e4e4e1] text-[#333]'
                                                     : 'bg-[#242528] text-zinc-200'
                                                     }`}
@@ -669,12 +671,12 @@ const DashboardPage = () => {
 
                                             {/* Bottom-right dropdown indicator */}
                                             <span
-                                                className={`absolute -right-0.5 -bottom-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border-2 ${isLight
+                                                className={`absolute -right-0.5 -bottom-0.5 w-3.5 h-3.5 rounded-[10px] flex items-center justify-center border-2 ${isLight
                                                     ? 'bg-white border-[#f5f5f3] text-[#555]'
                                                     : 'bg-[#18191c] border-[#0d0e11] text-zinc-400'
                                                     }`}
                                             >
-                                                <ChevronDown size={8} strokeWidth={2.5} />
+                                                <ChevronDown size={12} strokeWidth={2.5} />
                                             </span>
                                         </button>
                                     }
