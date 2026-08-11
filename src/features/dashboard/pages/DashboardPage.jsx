@@ -894,7 +894,24 @@ const DashboardPage = () => {
                                     ))}
                                 </div>
                             )}
-                        </section>                        {/* Explore Examples Section */}
+                        </section>
+
+                        {/* How It Works Video Section */}
+                        <section id="how-it-works" className="scroll-mt-24 mb-16 rounded-none">
+                            <div className="flex flex-col mb-8">
+                                <h2 className="text-[20px] font-bold tracking-tight text-[var(--dashboard-text)]">How It Works</h2>
+                            </div>
+                            <div className="max-w-4xl mx-auto w-full overflow-hidden rounded-[12px] border border-[var(--dashboard-border)] bg-[var(--dashboard-card-bg)]">
+                                <video
+                                    src="/videos/vev.mp4"
+                                    controls
+                                    className="w-full h-auto block rounded-[12px]"
+                                    playsInline
+                                />
+                            </div>
+                        </section>
+
+                        {/* Explore Examples Section */}
                         {displayTemplates.length > 0 && (
                             <section id="templates" className="scroll-mt-24 mb-16 pt-8 border-none rounded-none">
                                 <div className="flex flex-col mb-8">
