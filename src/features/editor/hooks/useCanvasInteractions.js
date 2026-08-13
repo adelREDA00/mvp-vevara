@@ -1126,8 +1126,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       layerObject.updateText?.(true)
       height = layerObject.getLocalBounds().height
     } else if (layerObject instanceof PIXI.Text && isInteracting) {
-       // Use live height during interaction
-       height = layerObject.getLocalBounds().height
+      // Use live height during interaction
+      height = layerObject.getLocalBounds().height
     }
 
     // Prioritize captured state during motion capture
@@ -2525,7 +2525,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     // [DRAG-SYNC FIX] Exception: when actively interacting (dragging, resizing, rotating), use the PIXI
     // object's live properties minus animOffset so the path origin follows the interaction smoothly.
     const isInteractingNow = !currentMotionCaptureMode?.isActive && dragStateAPI.isLayerDragging(layerId)
-    
+
     let currentState = {
       x: layer.x || 0,
       y: layer.y || 0,
@@ -2533,7 +2533,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       scaleX: layer.scaleX || 1,
       scaleY: layer.scaleY || 1
     }
-    
+
     if (isInteractingNow && layerObject && !layerObject.destroyed) {
       const initPos = initialPositionsRef.current.get(layerId)
       const animOffsetX = initPos?.animOffsetX ?? 0
@@ -2541,7 +2541,7 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       const animOffsetScaleX = initPos?.animOffsetScaleX ?? 0
       const animOffsetScaleY = initPos?.animOffsetScaleY ?? 0
       const animOffsetRotation = initPos?.animOffsetRotation ?? 0
-      
+
       const liveObj = layerObject._cachedSprite || layerObject
       currentState.x = (liveObj._selectionBoxX ?? liveObj.x) - animOffsetX
       currentState.y = (liveObj._selectionBoxY ?? liveObj.y) - animOffsetY
@@ -3020,6 +3020,15 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
       // CRITICAL: Verify the clicked layer belongs to the current scene
       if (layerId && latestLayersRef.current[layerId]?.sceneId !== currentSceneId) {
         layerId = null
+      }
+
+      // If clicked on empty canvas or background layer, treat it as empty canvas click/drag
+      if (!layerId) {
+        pointerIsDownRef.current = true
+        const screenPos = { x: event.data.global.x, y: event.data.global.y }
+        dragStartRef.current = { x: screenPos.x, y: screenPos.y, isEmptyCanvas: true }
+        pauseViewportDragPlugin(viewport)
+        return
       }
 
       // If we clicked on a selection box but have multi-select, we should still allow multi-drag
@@ -4696,8 +4705,8 @@ export function useCanvasInteractions(stageContainer, layersContainer, layerObje
     }
 
     // Local pointer up handler
-    const handlePointerUp = () => {
-      handleGlobalPointerUp()
+    const handlePointerUp = (event) => {
+      handleGlobalPointerUp(event)
     }
 
     // Get renderer for global events (tracks movement outside viewport)

@@ -132,7 +132,7 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
       if (event.data?.button === 2 || event.button === 2 || event.data?.originalEvent?.button === 2) {
         return
       }
-      
+
       // Don't work if playing
       if (isPlaying) {
         return
@@ -179,7 +179,13 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
 
       // Get world position
       const worldPos = viewport.toWorld(event.data.global.x, event.data.global.y)
-      const layerId = findLayerIdForObject(target)
+      let layerId = findLayerIdForObject(target)
+
+
+      // Ignore background layers (treat as empty canvas)
+      if (layerId && latestLayersRef.current?.[layerId]?.type === 'background') {
+        layerId = null
+      }
 
       // CRITICAL: Only start drag selection if clicking on empty canvas (no layer found)
       // If a layer was found, let useCanvasInteractions handle element dragging instead
@@ -304,6 +310,7 @@ export function useDragSelectionBox(stageContainer, layerObjectsMap, layers, vie
           }
         }
       }
+
 
       // Update selection (but don't dispatch on every move to avoid performance issues)
       // We'll dispatch on pointer up instead
