@@ -1,9 +1,10 @@
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { cloudflare } from '@cloudflare/vite-plugin'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cloudflare()],
   server: {
     port: 5173,
     proxy: {
@@ -16,11 +17,6 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-    // Required for SharedArrayBuffer (used by @ffmpeg/core-mt for ~2-3x faster
-    // H.264 encode on desktop). The same headers MUST be sent by the production
-    // host (nginx / Vercel / Cloudflare) or `crossOriginIsolated` will be false
-    // and the export pipeline will automatically fall back to single-threaded
-    // @ffmpeg/core (identical output, just slower).
     headers: {
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Opener-Policy': 'same-origin',
@@ -33,4 +29,3 @@ export default defineConfig({
     format: 'es',
   },
 })
-
