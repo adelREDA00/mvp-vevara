@@ -108,9 +108,27 @@ export const completeExampleIntro = createAsyncThunk(
     }
 )
 
+const getStoredUser = () => {
+    try {
+        const raw = localStorage.getItem('vevara_user')
+        if (!raw || raw === 'undefined' || raw === 'null') {
+            return null
+        }
+        return JSON.parse(raw)
+    } catch (e) {
+        console.error('[authSlice] Corrupted vevara_user in localStorage, clearing:', e)
+        try {
+            localStorage.removeItem('vevara_user')
+        } catch (_) {}
+        return null
+    }
+}
+
+const initialUser = getStoredUser()
+
 const initialState = {
-    user: JSON.parse(localStorage.getItem('vevara_user') || 'null'),
-    isAuthenticated: !!localStorage.getItem('vevara_user'),
+    user: initialUser,
+    isAuthenticated: !!initialUser,
     status: 'idle',
     error: null,
     migration: {

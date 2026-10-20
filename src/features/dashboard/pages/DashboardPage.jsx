@@ -180,11 +180,23 @@ const DashboardPage = () => {
         const fetchProjects = async () => {
             try {
                 if (projects.length === 0) setLoading(true)
+                console.log('[DashboardPage] Fetching projects from API...')
                 const data = await api.get('/projects')
-                setProjects(data)
+                console.log('[DashboardPage] Projects API response received:', data)
+                const safeProjectsList = Array.isArray(data)
+                    ? data
+                    : (Array.isArray(data?.projects) ? data.projects : null)
+
+                if (safeProjectsList) {
+                    setProjects(safeProjectsList)
+                } else {
+                    console.warn('[DashboardPage] API returned non-array for projects, fallback to empty array:', data)
+                    setProjects([])
+                }
                 setTemplateProjects(TEMPLATE_PROJECTS)
             } catch (error) {
-                console.error('Failed to fetch projects:', error)
+                console.error('[DashboardPage] Failed to fetch projects:', error)
+                setProjects([])
             } finally {
                 setTimeout(() => setLoading(false), 200)
             }
@@ -548,7 +560,8 @@ const DashboardPage = () => {
         'Landing page demo'
     ].filter(example => !currentSelectedExamples.includes(example.toLowerCase()));
 
-    const sortedProjects = [...projects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    const safeProjects = Array.isArray(projects) ? projects : []
+    const sortedProjects = [...safeProjects].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
 
     const isGuestEmpty = !isAuthenticated && projects.length === 0;
     const heroTitle = isGuestEmpty ? "Create beautiful motion videos" : "Create your next motion video";

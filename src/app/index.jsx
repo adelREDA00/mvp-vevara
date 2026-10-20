@@ -25,8 +25,13 @@ function AppContent() {
   useEffect(() => {
     if (!isAuthenticated && !migrationTriggeredRef.current) {
       const hasLocalProjects = hasProjectsToMigrate();
-      const localAssetsStr = localStorage.getItem('vevara_guest_assets') || '[]';
-      const hasLocalAssets = JSON.parse(localAssetsStr).length > 0;
+      let hasLocalAssets = false;
+      try {
+        const localAssetsStr = localStorage.getItem('vevara_guest_assets') || '[]';
+        hasLocalAssets = JSON.parse(localAssetsStr).length > 0;
+      } catch (err) {
+        console.warn('[AppContent] Invalid vevara_guest_assets in localStorage:', err);
+      }
       const localOnboardingCompleted = localStorage.getItem('vevara_onboarding_completed') === 'true';
       const localExampleIntroSeen = localStorage.getItem('vevara_seen_example_project_intro') === 'true';
 
